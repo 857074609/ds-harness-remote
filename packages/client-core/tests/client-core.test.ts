@@ -435,6 +435,28 @@ describe('RemoteTypertGateway', () => {
     await expect(call).resolves.toEqual({ items: [] })
   })
 
+  it('restores binary workspace preview fields for the native Client API codec', async () => {
+    const rpc = vi.fn(async () => ({
+      ok: true,
+      value: {
+        absolutePath: '/tmp/image.png',
+        version: 'v1',
+        bytes: 3,
+        offset: 0,
+        data: 'AP8Q',
+        eof: true,
+      },
+    }))
+    const client = { rpc } as unknown as RemoteClientCore
+
+    const result = await new RemoteTypertGateway(client).dispatch(
+      'workspaceFiles/readBytes',
+      { args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } } },
+    )
+    expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
+    expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual([0, 255, 16])
+  })
+
   it('keeps a per-call deadline across the bounded transfer retry and bounds the cleanup close', async () => {
     const calls: Array<{ method: string; options?: unknown }> = []
     const rpc = vi.fn(async (method: string, _params: unknown, _signal?: unknown, options?: unknown) => {

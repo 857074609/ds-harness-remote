@@ -551,14 +551,28 @@ function decodeCanonicalBase64(value: string): Uint8Array {
 
 function normalizeWorkspaceBinaryResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
   if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render')) return result
-  if (!isJsonRecord(result.value) || !isBinary(result.value.data)) return result
+  if (!isJsonRecord(result.value)) return result
+  const directBytes = isBinary(result.value.data) ? result.value.data : undefined
+  const attachmentBytes = directBytes === undefined ? attachmentAt(result, ['data']) : undefined
+  if (directBytes === undefined && attachmentBytes === undefined) return result
+  const bytes = directBytes ?? attachmentBytes!
   return {
-    ...result,
+    ok: true,
     value: {
       ...result.value,
-      data: Buffer.from(result.value.data).toString('base64'),
+      data: Buffer.from(bytes).toString('base64'),
     },
   }
+}
+
+function attachmentAt(result: TypertRpcResult, path: readonly string[]): Uint8Array | undefined {
+  const attachments = (result as TypertRpcResult & { attachments?: unknown }).attachments
+  if (!Array.isArray(attachments)) return undefined
+  const attachment = attachments.find(item => {
+    if (!isJsonRecord(item) || !Array.isArray(item.path) || item.path.length !== path.length) return false
+    return item.path.every((part, index) => part === path[index])
+  })
+  return isJsonRecord(attachment) && isBinary(attachment.bytes) ? attachment.bytes : undefined
 }
 
 function isBinary(value: unknown): value is Uint8Array {

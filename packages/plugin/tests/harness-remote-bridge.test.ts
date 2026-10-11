@@ -320,6 +320,20 @@ describe('HarnessRemoteBridge', () => {
       .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
   })
 
+  it('materializes official Gateway binary attachments before crossing the JSON carrier', async () => {
+    const dispatch = vi.fn(async () => ({
+      ok: true as const,
+      value: { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: null, eof: true },
+      attachments: [{ path: ['data'], bytes: new Uint8Array([0, 255, 16]) }],
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
+
+    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
+    const result = await bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } })
+    expect(result).not.toHaveProperty('attachments')
+  })
+
   it('normalizes alpha stream failures without exposing the original error', async () => {
     const publish = vi.fn(async () => undefined)
     const bridge = new HarnessRemoteBridge(gateway({

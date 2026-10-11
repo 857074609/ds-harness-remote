@@ -15647,7 +15647,7 @@ var RemoteTypertGateway2 = class {
     if (settingsResult !== void 0) return settingsResult;
     if (result.ok) {
       const value = this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, result.value) : normalizeAssistantMessageStreamValue(endpoint, result.value);
-      return { ...result, value };
+      return { ...result, value: normalizeWorkspaceBinaryResult(endpoint, value) };
     }
     return result;
   }
@@ -15866,6 +15866,11 @@ function base64ToBytes3(value) {
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   if (bytesToBase643(bytes) !== value) throw new Error("The remote Host returned non-canonical Harness Remote transfer data.");
   return bytes;
+}
+function normalizeWorkspaceBinaryResult(endpoint, value) {
+  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
+  if (!isRecord5(value) || typeof value.data !== "string") return value;
+  return { ...value, data: base64ToBytes3(value.data) };
 }
 function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -31623,7 +31628,7 @@ var HarnessRemoteBridge = class {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt)
       });
-      const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result);
+      const wireResult = normalizeWorkspaceBinaryResult2(params.endpoint, result);
       return reservation === void 0 ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation);
     } catch (error) {
       if (reservation !== void 0) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: "FAILED", message: "", details: {} } }, reservation);
@@ -31887,16 +31892,29 @@ function decodeCanonicalBase644(value) {
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
 }
-function normalizeWorkspaceBinaryResult(endpoint, result) {
+function normalizeWorkspaceBinaryResult2(endpoint, result) {
   if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
-  if (!isJsonRecord(result.value) || !isBinary(result.value.data)) return result;
+  if (!isJsonRecord(result.value)) return result;
+  const directBytes = isBinary(result.value.data) ? result.value.data : void 0;
+  const attachmentBytes = directBytes === void 0 ? attachmentAt(result, ["data"]) : void 0;
+  if (directBytes === void 0 && attachmentBytes === void 0) return result;
+  const bytes = directBytes ?? attachmentBytes;
   return {
-    ...result,
+    ok: true,
     value: {
       ...result.value,
-      data: Buffer.from(result.value.data).toString("base64")
+      data: Buffer.from(bytes).toString("base64")
     }
   };
+}
+function attachmentAt(result, path) {
+  const attachments = result.attachments;
+  if (!Array.isArray(attachments)) return void 0;
+  const attachment = attachments.find((item) => {
+    if (!isJsonRecord(item) || !Array.isArray(item.path) || item.path.length !== path.length) return false;
+    return item.path.every((part, index) => part === path[index]);
+  });
+  return isJsonRecord(attachment) && isBinary(attachment.bytes) ? attachment.bytes : void 0;
 }
 function isBinary(value) {
   return value instanceof Uint8Array;

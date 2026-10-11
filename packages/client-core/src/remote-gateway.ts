@@ -182,7 +182,12 @@ export class RemoteTypertGateway {
         response = await this.callTransferred(encoded, activeSignal, options)
       }
     }
-    return parseRpcResult<T>(response)
+    const result = parseRpcResult<T>(response)
+    if (!result.ok) return result
+    return {
+      ...result,
+      value: normalizeWorkspaceBinaryResult(endpoint, result.value),
+    }
   }
 
   async open(endpoint: string, payload: unknown, signal?: AbortSignal): Promise<RemoteGatewayStream> {
@@ -434,6 +439,13 @@ function parseRpcResult<T>(value: unknown): RemoteGatewayResult<T> {
     ok: false,
     error: { code: value.error.code, message: value.error.message, details: value.error.details },
   }
+}
+
+/** Restore bounded native workspace binary fields after the JSON-only Remote carrier. */
+function normalizeWorkspaceBinaryResult<T>(endpoint: string, value: T | undefined): T | undefined {
+  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (!isRecord(value) || typeof value.data !== 'string') return value
+  return { ...value, data: base64ToBytes(value.data) } as T
 }
 
 function remoteFailure(failure: RemoteGatewayFailure): RemoteGatewayError {

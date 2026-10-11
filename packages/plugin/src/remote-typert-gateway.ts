@@ -71,7 +71,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       const value = this.compatibility === 'legacy-to-v3'
         ? normalizeLegacySessionGatewayValue(endpoint, result.value)
         : normalizeAssistantMessageStreamValue(endpoint, result.value)
-      return { ...result, value }
+      return { ...result, value: normalizeWorkspaceBinaryResult(endpoint, value) }
     }
     return result
   }
@@ -323,6 +323,13 @@ function base64ToBytes(value: string): Uint8Array {
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
   if (bytesToBase64(bytes) !== value) throw new Error('The remote Host returned non-canonical Harness Remote transfer data.')
   return bytes
+}
+
+/** Restore binary fields after the JSON-only Remote carrier. */
+function normalizeWorkspaceBinaryResult(endpoint: string, value: unknown): unknown {
+  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return value
+  if (!isRecord(value) || typeof value.data !== 'string') return value
+  return { ...value, data: base64ToBytes(value.data) }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

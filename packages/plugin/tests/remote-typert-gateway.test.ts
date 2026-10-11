@@ -111,6 +111,29 @@ describe('RemoteTypertGateway', () => {
     ])
   })
 
+  it('restores binary workspace preview fields for the native Client API codec', async () => {
+    const rpc = vi.fn(async () => ({
+      ok: true,
+      value: {
+        absolutePath: '/tmp/image.png',
+        version: 'v1',
+        bytes: 3,
+        offset: 0,
+        data: 'AP8Q',
+        eof: true,
+      },
+    }))
+    const client = { rpc } as unknown as RemoteClientCore
+
+    const result = await new RemoteTypertGateway(client).dispatch(
+      'workspaceFiles/readBytes',
+      { args: { path: '/tmp/image.png', range: { offset: 0, length: 3 } } },
+      new AbortController().signal,
+    )
+    expect(result).toMatchObject({ ok: true, value: { data: expect.any(Uint8Array) } })
+    expect(Array.from((result as { ok: true; value: { data: Uint8Array } }).value.data)).toEqual([0, 255, 16])
+  })
+
   it('keeps welcome acknowledgements local on legacy Hosts', async () => {
     await runScenarios([
       {

@@ -27,6 +27,7 @@
       "predictiveBackGestureEnabled": false
     },
     "plugins": [
+      "./plugins/with-remote-foreground-service",
       "expo-file-system",
       [
         "expo-splash-screen",

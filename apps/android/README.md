@@ -89,10 +89,18 @@ cd android
 src/
   lib/       URL validation and user-facing errors
   screens/   server sign-in, devices, sessions, chat, settings
-  services/  REST, secure storage, secure transport, ApiProxy and CodeX clients
+  services/  REST, secure storage, secure transport, Remote Runtime, ApiProxy and CodeX clients
   state/     Zustand store plus Harness mux and CodeX frame reducers
   ui/        tokens and reusable mobile components
 ```
+
+An active remote connection is owned by `services/remote-runtime.ts`, rather than by a
+screen. On Android, the runtime starts a low-importance Foreground Service through the
+Expo config plugin in `plugins/with-remote-foreground-service.js`; the service keeps the
+React Native process eligible while the app is backgrounded or the screen is briefly off.
+Returning to the app observes the existing connection and only reconnects when it is offline.
+The service is stopped when the user disconnects or the connection setup fails. This does not
+make a force-stopped process reconnect by itself; that remains an explicit recovery path.
 
 Harness conversations expose **Files** and **Terminal** from `+` → **Tool access** through the Host's fixed official Typert allowlist, requiring the native APIs in DSH 0.1.6-alpha.2 or later. Files lists workspace directories and previews UTF-8 text in 200-line pages without mutations; its title-bar Back returns from a file to its directory and closes the panel only at the workspace root, and refresh stays in the title bar. PNG/JPEG/GIF/WebP images and PDFs use bounded `workspaceFiles/stat` / `readBytes` reads, with size, offset, version, and content validation. DOC/DOCX/XLS/XLSX/PPT/PPTX use the Host's existing `officeToPdf` service, when available, and the same PDF viewer. The app allows up to 8 MiB per binary preview and 50 MiB per Office source. Unsupported binary formats are not opened as text; HTML and SVG are never executed.
 

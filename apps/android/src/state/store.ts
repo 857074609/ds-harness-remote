@@ -56,7 +56,7 @@ import {
   cursorNativeId,
   foldAcpHistory,
 } from '../services/cursor'
-import { AndroidRemoteConnection } from '../services/connection'
+import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { reconcileTrustedDevices } from '../services/device-directory'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import { serverSession } from '../services/server-session'
@@ -236,7 +236,7 @@ const disconnected: ConnectionSnapshot = {
   stats: { mode: 'Disconnected', connected: false },
 }
 
-const connection = new AndroidRemoteConnection()
+const connection = new AndroidRemoteRuntime()
 
 /** Only exposes the authenticated native carrier of the current connection. */
 export const requireSessionTools = () => connection.requireSessionTools()

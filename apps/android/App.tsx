@@ -257,9 +257,13 @@ function AppNavigator() {
       if (current.selectedDevice === undefined
         || current.connection.phase === 'connecting'
         || current.connection.phase === 'reconnecting') return
-      void (async () => {
-        await reconnect()
-      })()
+      if (current.connection.phase === 'offline') {
+        void reconnect()
+        return
+      }
+      // The foreground service keeps a healthy carrier alive while the
+      // Activity is backgrounded. Inspect it on return instead of replacing it.
+      void current.refreshConnectionNetworkDetails()
     })
     return () => subscription.remove()
   }, [reconnect])

@@ -1113,7 +1113,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                 </View>
               </Pressable>
             )}
-            {session.backend !== 'codex' && session.backend !== 'cursor' && session.backend !== 'antigravity' && connected && (
+            {connected && (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.toolAccess}

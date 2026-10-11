@@ -61,6 +61,10 @@ const schemas = {
     throughSeq: z.number().int().min(-1).optional(),
     maxMessages: z.number().int().min(1).max(200).optional(),
   }).strict(),
+  'dsh/sessionAttachment': z.object({
+    threadId: id,
+    attachmentId: id,
+  }).strict(),
   'dsh/directoryList': z.object({
     path: z.string().min(1).max(4096),
   }).strict(),

@@ -23852,6 +23852,10 @@ var schemas = {
     throughSeq: external_exports.number().int().min(-1).optional(),
     maxMessages: external_exports.number().int().min(1).max(200).optional()
   }).strict(),
+  "dsh/sessionAttachment": external_exports.object({
+    threadId: id2,
+    attachmentId: id2
+  }).strict(),
   "dsh/directoryList": external_exports.object({
     path: external_exports.string().min(1).max(4096)
   }).strict(),
@@ -24320,6 +24324,16 @@ var CodexRemoteDomain = class {
         ...activeTurnId2 === void 0 ? {} : { activeTurnId: activeTurnId2 },
         permissionPreset: this.permissionPresets.get(threadId) ?? null
       };
+    }
+    if (call.method === "dsh/sessionAttachment") {
+      const attachmentId = call.params.attachmentId;
+      const thread = await this.readThreadForHistory(connectionId, threadId);
+      const history = projectCodexNativeHistory(thread, `codex:${threadId}`);
+      const found = findProjectedImageAttachment(history.entries, attachmentId);
+      if (found === void 0) {
+        throw new RpcError("CODEX_ATTACHMENT_NOT_FOUND", "The CodeX image is not available in this Session.");
+      }
+      return found;
     }
     if (call.method === "dsh/directoryList") {
       return this.listCodexDirectory(call.params.path);
@@ -25026,6 +25040,31 @@ var CodexRemoteDomain = class {
     return paths;
   }
 };
+function findProjectedImageAttachment(entries, attachmentId) {
+  for (const entry of entries) {
+    const found = findImageBlock(entry.event.data, attachmentId);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
+function findImageBlock(value, attachmentId) {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findImageBlock(child, attachmentId);
+      if (found !== void 0) return found;
+    }
+    return void 0;
+  }
+  if (!isRecord13(value)) return void 0;
+  if (value.type === "image" && isRecord13(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
+    return { attachment: value.attachment, data: value.data };
+  }
+  for (const child of Object.values(value)) {
+    const found = findImageBlock(child, attachmentId);
+    if (found !== void 0) return found;
+  }
+  return void 0;
+}
 function codexBinaryCandidates(configured, hostPlatform = process.platform, userHome = homedir2()) {
   if (configured !== "codex" || hostPlatform !== "darwin") return [configured];
   const bundledCandidates = [

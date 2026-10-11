@@ -224,6 +224,16 @@ export class CodexRemoteDomain {
         permissionPreset: this.permissionPresets.get(threadId!) ?? null,
       }
     }
+    if (call.method === 'dsh/sessionAttachment') {
+      const attachmentId = call.params.attachmentId as string
+      const thread = await this.readThreadForHistory(connectionId, threadId!)
+      const history = projectCodexNativeHistory(thread, `codex:${threadId}`)
+      const found = findProjectedImageAttachment(history.entries, attachmentId)
+      if (found === undefined) {
+        throw new RpcError('CODEX_ATTACHMENT_NOT_FOUND', 'The CodeX image is not available in this Session.')
+      }
+      return found
+    }
     if (call.method === 'dsh/directoryList') {
       return this.listCodexDirectory(call.params.path as string)
     }
@@ -1021,6 +1031,40 @@ export class CodexRemoteDomain {
     for (const root of authority.roots) paths.set(normalizeCodexPathForCompare(root), root)
     return paths
   }
+}
+
+function findProjectedImageAttachment(
+  entries: Array<{ event: { data: unknown } }>,
+  attachmentId: string,
+): { attachment: Record<string, unknown>; data: string } | undefined {
+  for (const entry of entries) {
+    const found = findImageBlock(entry.event.data, attachmentId)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+function findImageBlock(
+  value: unknown,
+  attachmentId: string,
+): { attachment: Record<string, unknown>; data: string } | undefined {
+  if (Array.isArray(value)) {
+    for (const child of value) {
+      const found = findImageBlock(child, attachmentId)
+      if (found !== undefined) return found
+    }
+    return undefined
+  }
+  if (!isRecord(value)) return undefined
+  if (value.type === 'image' && isRecord(value.attachment)
+    && value.attachment.attachmentId === attachmentId && typeof value.data === 'string') {
+    return { attachment: value.attachment, data: value.data }
+  }
+  for (const child of Object.values(value)) {
+    const found = findImageBlock(child, attachmentId)
+    if (found !== undefined) return found
+  }
+  return undefined
 }
 
 export type CodexDomainFrame = CodexAppFrameData | CodexAppStreamClosedData

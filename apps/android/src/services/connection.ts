@@ -4,7 +4,7 @@ import { websocketUrl } from '../lib/server-url'
 import { strings } from '../locales/i18n'
 import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { RemoteApiProxy } from './api-proxy'
-import { HarnessSessionTools } from './session-tools'
+import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
@@ -203,7 +203,9 @@ export class AndroidRemoteConnection {
     return this.codex
   }
 
-  requireSessionTools(): HarnessSessionTools {
+  requireSessionTools(sessionId?: string): SessionTools {
+    if (sessionId?.startsWith('cursor:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'cursor')
+    if (sessionId?.startsWith('antigravity:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'antigravity')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
   }

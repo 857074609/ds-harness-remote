@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react'
+import { createContext, useContext, useMemo, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import MarkdownIt, { type Token } from 'markdown-it'
 import { radius, spacing, type } from './theme'
@@ -10,6 +10,31 @@ import { useThemedStyles } from './use-themed-styles'
 // external navigation, or remote image requests.
 const parser = new MarkdownIt({ html: false, linkify: false, breaks: true })
 
+type MarkdownLinkHandler = (href: string) => void
+const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
+
+export function MarkdownLinkProvider({ onLinkPress, children }: { onLinkPress?: MarkdownLinkHandler; children: ReactNode }) {
+  return <markdownLinkContext.Provider value={onLinkPress}>{children}</markdownLinkContext.Provider>
+}
+
+/** Convert an agent-produced Markdown link into a workspace path. Network links stay inert. */
+export function markdownFilePath(href: string): string | undefined {
+  const value = href.trim()
+  if (value.length === 0 || value.startsWith('#') || /^(?:https?|mailto|data|javascript):/iu.test(value)) return undefined
+  if (value.startsWith('file://')) {
+    try {
+      const url = new URL(value)
+      if (url.protocol !== 'file:') return undefined
+      const path = decodeURIComponent(url.pathname)
+      return path.length > 0 ? ( /^\/[A-Za-z]:\//u.test(path) ? path.slice(1) : path ) : undefined
+    } catch { return undefined }
+  }
+  try {
+    const path = decodeURIComponent(value.split(/[?#]/u, 1)[0] ?? '')
+    return path.length > 0 && !path.startsWith('//') ? path : undefined
+  } catch { return undefined }
+}
+
 interface MarkdownNode {
   key: number
   token: Token
@@ -17,9 +42,10 @@ interface MarkdownNode {
 }
 
 export function NativeMarkdown({ text }: { text: string }) {
+  const onLinkPress = useContext(markdownLinkContext)
   const styles = useThemedStyles(createStyles)
   const nodes = useMemo(() => markdownTree(parser.parse(text, {})), [text])
-  return <View style={styles.container}>{nodes.map(node => renderBlock(node, styles))}</View>
+  return <View style={styles.container}>{nodes.map(node => renderBlock(node, styles, onLinkPress))}</View>
 }
 
 function markdownTree(tokens: Token[]): MarkdownNode[] {
@@ -40,63 +66,63 @@ function markdownTree(tokens: Token[]): MarkdownNode[] {
 
 type MarkdownStyles = ReturnType<typeof createStyles>
 
-function renderBlock(node: MarkdownNode, styles: MarkdownStyles): ReactNode {
+function renderBlock(node: MarkdownNode, styles: MarkdownStyles, onLinkPress?: MarkdownLinkHandler): ReactNode {
   const { token, key, children } = node
   if (token.type === 'paragraph_open') {
-    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles)}</Text>
+    return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
   }
   if (token.type === 'heading_open') {
-    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles)}</Text>
+    return <Text key={key} selectable style={[styles.heading, headingStyle(token.tag, styles)]}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
   }
   if (token.type === 'fence' || token.type === 'code_block') {
     return <View key={key} style={styles.codeBlock}><Text selectable style={styles.code}>{token.content.replace(/\n$/, '')}</Text></View>
   }
   if (token.type === 'blockquote_open') {
-    return <View key={key} style={styles.blockquote}>{children.map(child => renderBlock(child, styles))}</View>
+    return <View key={key} style={styles.blockquote}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
   }
   if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') {
     const ordered = token.type === 'ordered_list_open'
     const start = Number(token.attrGet('start') ?? '1')
     return (
       <View key={key} style={styles.list}>
-        {children.map((child, index) => renderListItem(child, styles, ordered ? start + index : undefined))}
+        {children.map((child, index) => renderListItem(child, styles, ordered ? start + index : undefined, onLinkPress))}
       </View>
     )
   }
   if (token.type === 'hr') return <View key={key} style={styles.rule} />
-  if (token.type === 'table_open') return <View key={key} style={styles.table}>{children.map(child => renderBlock(child, styles))}</View>
-  if (token.type === 'thead_open' || token.type === 'tbody_open') return <View key={key}>{children.map(child => renderBlock(child, styles))}</View>
-  if (token.type === 'tr_open') return <View key={key} style={styles.tableRow}>{children.map(child => renderBlock(child, styles))}</View>
+  if (token.type === 'table_open') return <View key={key} style={styles.table}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+  if (token.type === 'thead_open' || token.type === 'tbody_open') return <View key={key}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
+  if (token.type === 'tr_open') return <View key={key} style={styles.tableRow}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
   if (token.type === 'th_open' || token.type === 'td_open') {
     return (
       <View key={key} style={[styles.tableCell, token.type === 'th_open' && styles.tableHeader]}>
-        <Text selectable style={token.type === 'th_open' ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(children, styles)}</Text>
+        <Text selectable style={token.type === 'th_open' ? styles.tableHeaderText : styles.tableText}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
       </View>
     )
   }
-  if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`)}</Text>
-  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles))}</View>
+  if (token.type === 'inline') return <Text key={key} selectable style={styles.paragraph}>{renderInline(token.children ?? [], styles, `block:${key}`, onLinkPress)}</Text>
+  if (children.length > 0) return <View key={key}>{children.map(child => renderBlock(child, styles, onLinkPress))}</View>
   if (token.content.length > 0) return <Text key={key} selectable style={styles.paragraph}>{token.content}</Text>
   return null
 }
 
-function renderListItem(node: MarkdownNode, styles: MarkdownStyles, number?: number): ReactNode {
-  if (node.token.type !== 'list_item_open') return renderBlock(node, styles)
+function renderListItem(node: MarkdownNode, styles: MarkdownStyles, number?: number, onLinkPress?: MarkdownLinkHandler): ReactNode {
+  if (node.token.type !== 'list_item_open') return renderBlock(node, styles, onLinkPress)
   return (
     <View key={node.key} style={styles.listItem}>
       <Text style={styles.listMarker}>{number === undefined ? '•' : `${number}.`}</Text>
-      <View style={styles.listContent}>{node.children.map(child => renderBlock(child, styles))}</View>
+      <View style={styles.listContent}>{node.children.map(child => renderBlock(child, styles, onLinkPress))}</View>
     </View>
   )
 }
 
-function renderInlineChildren(nodes: MarkdownNode[], styles: MarkdownStyles): ReactNode[] {
+function renderInlineChildren(nodes: MarkdownNode[], styles: MarkdownStyles, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
   return nodes.flatMap(node => node.token.type === 'inline'
-    ? renderInline(node.token.children ?? [], styles, `inline:${node.key}`)
-    : [renderBlock(node, styles)])
+    ? renderInline(node.token.children ?? [], styles, `inline:${node.key}`, onLinkPress)
+    : [renderBlock(node, styles, onLinkPress)])
 }
 
-function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string): ReactNode[] {
+function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, onLinkPress?: MarkdownLinkHandler): ReactNode[] {
   const output: ReactNode[] = []
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!
@@ -113,11 +139,14 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string): 
     } else if (token.nesting === 1) {
       const closing = findClosingToken(tokens, index)
       if (closing < 0) continue
-      const content = renderInline(tokens.slice(index + 1, closing), styles, key)
+      const content = renderInline(tokens.slice(index + 1, closing), styles, key, onLinkPress)
       if (token.type === 'strong_open') output.push(<Text key={key} style={styles.strong}>{content}</Text>)
       else if (token.type === 'em_open') output.push(<Text key={key} style={styles.emphasis}>{content}</Text>)
       else if (token.type === 's_open') output.push(<Text key={key} style={styles.strike}>{content}</Text>)
-      else if (token.type === 'link_open') output.push(<Text key={key} style={styles.link}>{content}</Text>)
+      else if (token.type === 'link_open') {
+        const href = token.attrGet('href')
+        output.push(<Text key={key} style={styles.link} onPress={href !== null && onLinkPress !== undefined ? () => onLinkPress(href) : undefined}>{content}</Text>)
+      }
       else output.push(...content)
       index = closing
     } else if (token.content.length > 0) output.push(token.content)

@@ -11,10 +11,10 @@ import { spacing, type } from '../ui/theme'
 import { sessionToolsError } from './session-tools-error'
 import { PdfPreview } from './pdf-preview'
 
-export function WorkspaceFilesPanel({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
+export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessionId: string; initialFile?: string; onClose: () => void }) {
   const { colors } = useTheme()
   const [path, setPath] = useState('')
-  const [file, setFile] = useState<string>()
+  const [file, setFile] = useState<string | undefined>(initialFile)
   const [offset, setOffset] = useState(1)
   const [listing, setListing] = useState<WorkspaceDirectory>()
   const [page, setPage] = useState<WorkspaceText>()
@@ -33,7 +33,7 @@ export function WorkspaceFilesPanel({ sessionId, onClose }: { sessionId: string;
     setBinary(undefined)
     setListing(undefined)
     const run = async () => {
-      const tools = requireSessionTools()
+      const tools = requireSessionTools(sessionId)
       if (file === undefined) {
         const result = await tools.listFiles(sessionId, path, controller.signal)
         if (!controller.signal.aborted) setListing(result)

@@ -1,6 +1,6 @@
 import type { RemoteGatewayStream } from '@dsh-remote/client-core'
 import { createNativeRpcId } from './api-proxy'
-import type { HarnessSessionTools, TerminalFrame, TerminalInfo } from './session-tools'
+import type { SessionTools, TerminalFrame, TerminalInfo } from './session-tools'
 
 /** One physical attachment. Never reused on reconnect; uncertain input is never replayed. */
 export class TerminalAttachment {
@@ -13,7 +13,7 @@ export class TerminalAttachment {
   private queuedBytes = 0
   private writes: Promise<void> = Promise.resolve()
 
-  constructor(private readonly tools: HarnessSessionTools, private readonly sessionId: string,
+  constructor(private readonly tools: SessionTools, private readonly sessionId: string,
     private readonly terminalId: string, private readonly maxInputBytes: number,
     private readonly render: (data: string, reset: boolean) => Promise<void>,
     private readonly state: (info: TerminalInfo, writable: boolean) => void) {}

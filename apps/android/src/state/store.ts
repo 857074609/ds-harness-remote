@@ -239,7 +239,7 @@ const disconnected: ConnectionSnapshot = {
 const connection = new AndroidRemoteRuntime()
 
 /** Only exposes the authenticated native carrier of the current connection. */
-export const requireSessionTools = () => connection.requireSessionTools()
+export const requireSessionTools = (sessionId?: string) => connection.requireSessionTools(sessionId)
 let activeCodexStream: CodexStream | undefined
 let activeCodexTimeline: CodexTimelineState | undefined
 let activeCursorStream: AcpStream | undefined

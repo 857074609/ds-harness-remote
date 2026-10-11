@@ -47,7 +47,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
   useEffect(() => {
     let cancelled = false
     setBusy(true); setError(undefined)
-    void Promise.resolve().then(() => requireSessionTools().listTerminals(sessionId))
+    void Promise.resolve().then(() => requireSessionTools(sessionId).listTerminals(sessionId))
       .then(async result => {
         if (cancelled) return
         setItems(result)
@@ -66,7 +66,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     let cancelled = false
     setError(undefined)
     const run = async () => {
-      const tools = requireSessionTools()
+      const tools = requireSessionTools(sessionId)
       const environment = await tools.terminalEnvironment(sessionId)
       if (cancelled) return
       limits.current = environment
@@ -112,7 +112,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     creating.current = true
     setBusy(true); setPending(true); setError(undefined)
     try {
-      const tools = requireSessionTools()
+      const tools = requireSessionTools(sessionId)
       const env = await tools.terminalEnvironment(sessionId)
       const result = await tools.createTerminal(sessionId, createNativeRpcId(), Math.min(dimensions.current.cols, env.maxCols), Math.min(dimensions.current.rows, env.maxRows))
       // Drop the previous terminal's state so the overlay reports the new
@@ -133,7 +133,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     setItems(remaining)
     setActive(remaining[0]?.id)
     setInfo(undefined)
-    void requireSessionTools().closeTerminal(sessionId, id).catch(e => { if (mounted.current) setError(sessionToolsError(e)) })
+    void requireSessionTools(sessionId).closeTerminal(sessionId, id).catch(e => { if (mounted.current) setError(sessionToolsError(e)) })
     // Nothing left to attach to, so leave the panel instead of showing a dead one.
     if (remaining.length === 0) { setWritable(false); onClose(); return }
     // Another terminal takes over with the previous writability on purpose: its

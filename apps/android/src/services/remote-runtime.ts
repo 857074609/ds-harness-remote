@@ -34,7 +34,7 @@ export class AndroidRemoteRuntime {
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }
   requireProxy() { return this.client.requireProxy() }
   requireCodex() { return this.client.requireCodex() }
-  requireSessionTools() { return this.client.requireSessionTools() }
+  requireSessionTools(sessionId?: string) { return this.client.requireSessionTools(sessionId) }
   hasCodex() { return this.client.hasCodex() }
   requireCursor() { return this.client.requireCursor() }
   hasCursor() { return this.client.hasCursor() }

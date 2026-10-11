@@ -305,6 +305,21 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenCalledWith('workspaceFiles/readBytes', payload, expect.any(AbortSignal))
   })
 
+  it('encodes native binary workspace responses for the JSON remote carrier', async () => {
+    const dispatch = vi.fn(async (endpoint: string) => ({
+      ok: true as const,
+      value: endpoint === 'workspaceFiles/readBytes'
+        ? { absolutePath: '/tmp/a.png', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([0, 255, 16]), eof: true }
+        : { absolutePath: '/tmp/a.docx', version: 'v1', bytes: 3, offset: 0, data: new Uint8Array([37, 80, 68]), eof: true, generation: 'g1', missingFonts: [] },
+    }))
+    const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined), undefined, '0.2.1-alpha.1')
+
+    await expect(bridge.call({ endpoint: 'workspaceFiles/readBytes', payload: { args: { path: '/tmp/a.png', range: { offset: 0, length: 3 } } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'AP8Q' } })
+    await expect(bridge.call({ endpoint: 'officeToPdf/render', payload: { args: { path: '/tmp/a.docx' } } }))
+      .resolves.toMatchObject({ ok: true, value: { data: 'JVBE' } })
+  })
+
   it('normalizes alpha stream failures without exposing the original error', async () => {
     const publish = vi.fn(async () => undefined)
     const bridge = new HarnessRemoteBridge(gateway({

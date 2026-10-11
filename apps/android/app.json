@@ -8,14 +8,19 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "io.github.liguobao.dshremote",
+      "buildNumber": "42"
     },
     "android": {
       "package": "io.github.liguobao.dshremote",
       "versionCode": 42,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
-        "android.permission.REQUEST_INSTALL_PACKAGES"
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
       ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW"
@@ -57,7 +62,10 @@
         "expo-localization",
         {
           "supportedLocales": {
-            "android": ["en-US", "zh-CN"]
+            "android": [
+              "en-US",
+              "zh-CN"
+            ]
           }
         }
       ]

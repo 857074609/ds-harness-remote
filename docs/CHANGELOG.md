@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.3 - 2026-10-11
+
+- Keeps the Android remote connection alive in the background through a dedicated foreground service; returning to the app restores the ongoing session without reconnecting.
+- Refines Android remote session tools: the Files/Terminal tool access now appears once a session is connected, with session tool, terminal, and workspace file panel fixes.
+- Fixes the Plugin Host to encode remote workspace binary responses correctly.
+- Advances the Plugin and Android app to `0.5.3` (Android `versionCode 42`).
+
+### 中文
+
+- Android 新增前台服务，切后台后保持远程连接；回到应用即可继续当前会话，无需重连。
+- 优化 Android 远程会话工具入口：会话连接后即显示 Files/Terminal 工具访问，并修复会话工具、终端与工作区文件面板相关问题。
+- 修复 Plugin Host 远程工作区二进制响应的编码问题。
+- Plugin 与 Android App 升级到 `0.5.3`（Android `versionCode 42`）。
+
 ## 0.5.2 - 2026-10-10
 
 - Adds account-owned Host removal from the Android device list, with swipe-to-remove confirmation and local credential cleanup.

@@ -182,6 +182,7 @@ interrupt 与单次审批，不恢复旧 Android RPC。剩余工作：
 - [x] WebRTC P2P/TURN 路径真机验证（react-native-webrtc 与 Host werift 互操作）
 - [x] 共享 Protocol 包统一执行协议 conformance fixtures；Android 保留自身授权、加密连接与恢复测试
 - [ ] 在 Android 原生 runtime 执行跨端 conformance（Node 中共享协议测试不作为原生验收）
+- [ ] Android 会话界面可选「屏幕常亮」开关（issue #101）：放在设置中、默认关闭，仅影响会话前台展示，不改变后台保活行为
 
 `apps/android` 与 Mock Host 曾作为旧 Remote RPC 原型冻结；现在 Android 直接实现/消费官方
 ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.send`、

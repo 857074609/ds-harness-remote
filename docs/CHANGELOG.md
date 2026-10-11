@@ -1,3 +1,8 @@
+## 0.5.4 - 2026-10-12
+
+- Fixes Remote Web workspace image and Office preview responses by materializing Harness Gateway binary attachments on the Host and restoring them to `Uint8Array` in the client gateway.
+- Rebuilds the Plugin bundle and synchronizes the Android/Plugin release version.
+
 # Changelog
 
 ## 0.5.3 - 2026-10-11

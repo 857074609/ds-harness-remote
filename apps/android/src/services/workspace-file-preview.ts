@@ -1,5 +1,5 @@
 import { imagePreviewMetadata, MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS } from './image-preview-metadata'
-import type { HarnessSessionTools, WorkspaceFileStat } from './session-tools'
+import type { SessionTools, WorkspaceFileStat } from './session-tools'
 
 export type PreviewKind = 'text' | 'image' | 'pdf' | 'office' | 'unsupported'
 
@@ -62,7 +62,7 @@ export function classifyWorkspaceFile(path: string): PreviewKind {
 }
 
 export async function loadWorkspacePreview(
-  tools: HarnessSessionTools,
+  tools: SessionTools,
   sessionId: string,
   path: string,
   kind: 'image' | 'pdf' | 'office',
@@ -77,7 +77,7 @@ export async function loadWorkspacePreview(
 }
 
 async function loadOfficePreview(
-  tools: HarnessSessionTools,
+  tools: SessionTools,
   sessionId: string,
   path: string,
   signal?: AbortSignal,
@@ -105,7 +105,7 @@ async function loadOfficePreview(
 }
 
 async function readBoundedBytes(
-  tools: HarnessSessionTools,
+  tools: SessionTools,
   sessionId: string,
   path: string,
   limit: number,

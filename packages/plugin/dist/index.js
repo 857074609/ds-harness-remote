@@ -20238,7 +20238,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.2";
+var PLUGIN_VERSION = "0.5.3";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -31584,7 +31584,8 @@ var HarnessRemoteBridge = class {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt)
       });
-      return reservation === void 0 ? result : this.terminal.result(params.endpoint, params.payload, result, reservation);
+      const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result);
+      return reservation === void 0 ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation);
     } catch (error) {
       if (reservation !== void 0) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: "FAILED", message: "", details: {} } }, reservation);
       if (params.endpoint === "directoryPicker/list") {
@@ -31846,6 +31847,23 @@ function decodeCanonicalBase644(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
+}
+function normalizeWorkspaceBinaryResult(endpoint, result) {
+  if (result.ok !== true || endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (!isJsonRecord(result.value) || !isBinary(result.value.data)) return result;
+  return {
+    ...result,
+    value: {
+      ...result.value,
+      data: Buffer.from(result.value.data).toString("base64")
+    }
+  };
+}
+function isBinary(value) {
+  return value instanceof Uint8Array;
+}
+function isJsonRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function concatChunks4(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);

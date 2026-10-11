@@ -1,8 +1,22 @@
 # Changelog
 
-## Unreleased
+## 0.5.3 - 2026-10-11
 
-- Adds Android Host renaming from the device list and details, synced through the account-device API to device lists and saved workspace shortcuts.
+- Keeps the Android remote connection alive in the background through a dedicated foreground service; returning to the app restores the ongoing session without reconnecting.
+- Refines Android remote session tools: the Files/Terminal tool access now appears once a session is connected, with session tool, terminal, and workspace file panel fixes.
+- Redesigns the Android device unbind interaction with new swipe gestures and animations (#99), contributed by @dreamfarer-space.
+- Rotates a revoked Host identity when the account logs in again, so a revoked device can recover its credentials.
+- Restores the `harness.api.v1` capability in the committed Plugin bundle and encodes remote workspace binary responses correctly.
+- Advances the Plugin and Android app to `0.5.3` (Android `versionCode 42`).
+
+### 中文
+
+- Android 新增前台服务，切后台后保持远程连接；回到应用即可继续当前会话，无需重连。
+- 优化 Android 远程会话工具入口：会话连接后即显示 Files/Terminal 工具访问，并修复会话工具、终端与工作区文件面板相关问题。
+- 重做 Android 设备解除绑定的滑动交互与动效（#99），由 @dreamfarer-space 贡献。
+- 账号重新登录时轮换已被撤销的 Host 身份，被撤销设备可恢复凭据。
+- 恢复提交 bundle 中的 `harness.api.v1` capability，并修复远程工作区二进制响应的编码问题。
+- Plugin 与 Android App 升级到 `0.5.3`（Android `versionCode 42`）。
 
 ## 0.5.2 - 2026-10-10
 

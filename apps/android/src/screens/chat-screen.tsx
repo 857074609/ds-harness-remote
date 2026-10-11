@@ -29,7 +29,7 @@ import { hasVisibleMessageText } from '../state/event-reducer'
 import { chatSections, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { Button, IconButton, TopBar } from '../ui/components'
-import { NativeMarkdown } from '../ui/markdown'
+import { MarkdownLinkProvider, markdownFilePath, NativeMarkdown } from '../ui/markdown'
 import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
 import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
@@ -91,6 +91,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false)
   const [toolPickerOpen, setToolPickerOpen] = useState(false)
   const [toolsMode, setToolsMode] = useState<'files' | 'terminal'>()
+  const [fileLinkPath, setFileLinkPath] = useState<string>()
   const [promptsPickerOpen, setPromptsPickerOpen] = useState(false)
   const [customPrompts, setCustomPrompts] = useState<readonly CustomPrompt[]>()
   const [promptEditing, setPromptEditing] = useState<CustomPrompt | 'new' | null>(null)
@@ -386,6 +387,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       }
       if (toolsMode !== undefined) {
         setToolsMode(undefined)
+        setFileLinkPath(undefined)
         return true
       }
       if (trajectory) { setTrajectory(false); return true }
@@ -621,8 +623,16 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
 
   const pickToolMode = (mode: 'files' | 'terminal') => {
     setToolPickerOpen(false)
+    setFileLinkPath(undefined)
     setToolsMode(mode)
   }
+
+  const openFileLink = useCallback((href: string) => {
+    const path = markdownFilePath(href)
+    if (path === undefined) return
+    setFileLinkPath(path)
+    setToolsMode('files')
+  }, [])
 
   const startNewSession = async () => {
     if (newSessionPending || busy !== undefined) return
@@ -839,7 +849,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         ]
       : []
   return (
-    <KeyboardInset>
+    <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
       <TopBar
         title={sessionTitle(session)}
         titleLines={2}
@@ -1103,7 +1113,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                 </View>
               </Pressable>
             )}
-            {session.backend !== 'codex' && session.backend !== 'cursor' && session.backend !== 'antigravity' && connected && (
+            {connected && (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.toolAccess}
@@ -1145,10 +1155,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       />
       {toolsMode !== undefined && connected && (
         <SessionToolsPanel
-          key={`${session.sessionId}:${toolsMode}`}
+          key={`${session.sessionId}:${toolsMode}:${fileLinkPath ?? ''}`}
           mode={toolsMode}
           sessionId={session.sessionId}
-          onClose={() => setToolsMode(undefined)}
+          initialFile={toolsMode === 'files' ? fileLinkPath : undefined}
+          onClose={() => { setToolsMode(undefined); setFileLinkPath(undefined) }}
         />
       )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
@@ -1185,7 +1196,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         onClose={() => setPromptEditing(null)}
         onSave={(title, text) => void savePromptEdit(title, text)}
       />
-    </KeyboardInset>
+    </KeyboardInset></MarkdownLinkProvider>
   )
 }
 

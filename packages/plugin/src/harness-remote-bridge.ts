@@ -239,7 +239,13 @@ export class HarnessRemoteBridge {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
       })
-      return reservation === undefined ? result : this.terminal.result(params.endpoint, params.payload, result, reservation)
+      // The native 0.2.x workspace APIs return binary payloads as Uint8Array.
+      // Remote calls cross a JSON-only encrypted frame, so keep the wire
+      // contract stable by converting only the two bounded preview responses
+      // to canonical base64. (Codex/ACP workspace bridges already return the
+      // wire shape and are left unchanged.)
+      const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result)
+      return reservation === undefined ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation)
     } catch (error) {
       if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
       if (params.endpoint === 'directoryPicker/list') {
@@ -541,6 +547,26 @@ function decodeCanonicalBase64(value: string): Uint8Array {
   const bytes = Buffer.from(value, 'base64')
   if (bytes.toString('base64') !== value) throw new RpcError('INVALID_MESSAGE', 'The Harness Remote transfer chunk is invalid.')
   return bytes
+}
+
+function normalizeWorkspaceBinaryResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
+  if (result.ok !== true || (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render')) return result
+  if (!isJsonRecord(result.value) || !isBinary(result.value.data)) return result
+  return {
+    ...result,
+    value: {
+      ...result.value,
+      data: Buffer.from(result.value.data).toString('base64'),
+    },
+  }
+}
+
+function isBinary(value: unknown): value is Uint8Array {
+  return value instanceof Uint8Array
+}
+
+function isJsonRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function concatChunks(chunks: readonly Uint8Array[], totalBytes: number): Uint8Array {

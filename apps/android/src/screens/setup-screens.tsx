@@ -4,7 +4,7 @@ import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
+import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, MessagesSquare, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
@@ -245,12 +245,13 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onSessions }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
   onAbout: () => void
   onDevices?: () => void
+  onSessions?: () => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -270,6 +271,9 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
       <View accessibilityRole="menu" style={styles.homeMenuCard} pointerEvents="box-none">
         {onDevices !== undefined && (
           <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
+        )}
+        {onSessions !== undefined && (
+          <HomeMenuRow icon={MessagesSquare} label={zhCN.sessions.title} onPress={onSessions} />
         )}
         <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
         <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />

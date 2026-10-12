@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MessageSquareText, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
+import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -10,6 +10,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
+import { SwipeableSessionRow } from './device-screens'
 import { resolveSessionDisplayTitle } from './session-title'
 
 const FAVORITE_HIGHLIGHT_MS = 2400
@@ -39,6 +40,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const createSession = useAppStore(state => state.createSession)
   const openSession = useAppStore(state => state.openSession)
+  const archiveSession = useAppStore(state => state.archiveSession)
   const [refreshing, setRefreshing] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [activeBackend, setActiveBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity'>(() => initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable))
@@ -48,6 +50,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   const [collapsedWorkspaceIds, setCollapsedWorkspaceIds] = useState<ReadonlySet<string>>(() => new Set())
   const [allSessionsWorkspaceKeys, setAllSessionsWorkspaceKeys] = useState<ReadonlySet<string>>(() => new Set())
   const [focusedWorkspaceKey, setFocusedWorkspaceKey] = useState<string | undefined>(undefined)
+  const [openSessionId, setOpenSessionId] = useState<string>()
   const scrollRef = useRef<ScrollView>(null)
   const workspaceOffsets = useRef(new Map<string, number>())
   const pendingScrollKey = useRef<string | undefined>(undefined)
@@ -415,28 +418,19 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                     ? <Pressable onPress={() => void createInWorkspace(workspace.workspaceId)} style={styles.noSessions}><Text style={styles.noSessionsText}>{zhCN.workspaces.noSessions}</Text></Pressable>
                     : <>
                         {visibleWorkspaceSessions.map(session => {
-                          const opening = busy === `session:${session.sessionId}`
-                          return <Pressable
+                          return <SwipeableSessionRow
                             key={session.sessionId}
-                            accessibilityRole="button"
-                            accessibilityState={{ busy: opening, disabled: busy !== undefined && !opening }}
-                            disabled={busy !== undefined}
-                            onPress={() => void open(session)}
-                            style={({ pressed }) => [styles.sessionRow, pressed && styles.workspaceRowPressed, busy !== undefined && !opening && styles.disabled]}
-                          >
-                            {opening
-                              ? <ActivityIndicator size="small" color={colors.primary} />
-                              : session.backend === 'codex'
-                                ? <Code2 size={17} color={colors.muted} />
-                                : session.backend === 'cursor' || session.backend === 'antigravity'
-                                  ? <Sparkles size={17} color={colors.muted} />
-                                  : <MessageSquareText size={17} color={colors.muted} />}
-                            <View style={styles.sessionCopy}>
-                              <Text style={styles.sessionTitle} numberOfLines={1}>{resolveSessionTitle(session)}</Text>
-                              <Text style={styles.sessionMeta}>{session.running ? zhCN.status.running : relativeTime(session.updatedAt)}</Text>
-                            </View>
-                            <ChevronRight size={17} color={colors.subtle} />
-                          </Pressable>
+                            session={session}
+                            compact
+                            title={resolveSessionTitle(session)}
+                            meta={relativeTime(session.updatedAt)}
+                            open={openSessionId === session.sessionId}
+                            locked={busy !== undefined}
+                            busy={busy === `archive:${session.sessionId}`}
+                            onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
+                            onArchive={() => archiveSession(session.sessionId)}
+                            onPress={() => { setOpenSessionId(undefined); void open(session) }}
+                          />
                         })}
                         {!showAllSessions && workspaceSessions.length > visibleWorkspaceSessions.length && (
                           <Pressable
@@ -933,10 +927,6 @@ function createStyles(colors: ThemeColors) {
   workspaceMeta: { ...type.caption, color: colors.muted },
   workspaceGroup: { marginBottom: spacing.lg, backgroundColor: colors.surface, borderRadius: radius.lg, paddingHorizontal: spacing.sm },
   workspaceGroupFocused: { borderWidth: 1, borderColor: colors.primary },
-  sessionRow: { minHeight: 58, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
-  sessionCopy: { flex: 1 },
-  sessionTitle: { ...type.smallStrong, color: colors.ink },
-  sessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
   noSessions: { minHeight: 48, marginLeft: 50, justifyContent: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   noSessionsText: { ...type.small, color: colors.primary },
   loadAllSessions: { minHeight: 48, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },

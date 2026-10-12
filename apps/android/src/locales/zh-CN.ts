@@ -103,7 +103,7 @@ const zhCN = {
     networkDetails: '网络详情', phoneEndpoint: '手机端点', computerEndpoint: '电脑端点', relayEndpointUnavailable: '服务器转发未公开', connectionServer: '连接服务器', networkProtocol: '网络协议', candidatePath: '候选路径', roundTripTime: '往返延迟', availableBitrate: '可用上行带宽', traffic: '本次流量', connectedAt: '连接时间', sent: '发送', received: '接收',
     forgetTitle: (name: string) => `解除“${name}”的绑定？`, forgetBody: '这会从账号中移除这台设备并断开远程连接。再次使用前，需要在电脑端重新绑定。', forget: '解除绑定',
   },
-  sessions: { title: '对话', new: '新建对话', deviceTitle: '这台设备上的对话', lead: '从上次停下的地方继续', creating: '正在新建对话…', emptyTitle: '还没有对话', emptyBody: '新建对话，或先在电脑上的 DeepSeek Harness 中开始工作。', archived: (count: number) => `已归档 ${count}`, continue: '继续对话', untitled: '新对话', child: '子任务对话' },
+  sessions: { title: '对话', new: '新建对话', deviceTitle: '这台设备上的对话', lead: '从上次停下的地方继续', creating: '正在新建对话…', emptyTitle: '还没有对话', emptyBody: '新建对话，或先在电脑上的 DeepSeek Harness 中开始工作。', archived: (count: number) => `已归档 ${count}`, archive: '归档对话', archiveTitle: '归档这段对话？', archiveBody: '归档后会从活跃工作区隐藏，可在“对话 > 已归档”中再次找到。', continue: '继续对话', untitled: '新对话', child: '子任务对话' },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
   transport: { auto: '自动（推荐）', autoDescription: '优先尝试 P2P 直连，必要时自动改用 TURN 或服务器转发', turn: 'TURN 优先', turnDescription: '网络受限时，优先使用 TURN 转发以提高稳定性', relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
   workspaces: {

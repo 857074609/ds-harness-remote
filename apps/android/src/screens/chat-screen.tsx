@@ -21,7 +21,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { Archive, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
@@ -79,6 +79,14 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const [draft, setDraft] = useState('')
   const [trajectory, setTrajectory] = useState(false)
+
+  const archiveCurrentSession = () => {
+    if (session === undefined || busy !== undefined) return
+    Alert.alert(zhCN.sessions.archiveTitle, zhCN.sessions.archiveBody, [
+      { text: zhCN.common.cancel, style: 'cancel' },
+      { text: zhCN.sessions.archive, style: 'destructive', onPress: () => { onBack(); void archiveSession(session.sessionId) } },
+    ])
+  }
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
@@ -435,6 +443,13 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
   }), [workspaceFileRefs])
 
+  const openFileLink = useCallback((href: string) => {
+    const path = markdownFilePath(href)
+    if (path === undefined) return
+    setFileLinkPath(path)
+    setToolsMode('files')
+  }, [])
+
   if (session === undefined) return null
 
   const submit = async () => {
@@ -626,13 +641,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     setFileLinkPath(undefined)
     setToolsMode(mode)
   }
-
-  const openFileLink = useCallback((href: string) => {
-    const path = markdownFilePath(href)
-    if (path === undefined) return
-    setFileLinkPath(path)
-    setToolsMode('files')
-  }, [])
 
   const startNewSession = async () => {
     if (newSessionPending || busy !== undefined) return
@@ -858,6 +866,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
+          <IconButton label={zhCN.sessions.archive} icon={Archive} dense onPress={archiveCurrentSession} disabled={busy !== undefined} />
           <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}

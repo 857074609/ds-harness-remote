@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Code2, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -211,6 +211,21 @@ function confirmDeviceUnbind(device: RemoteDevice): Promise<boolean> {
     Alert.alert(zhCN.devices.forgetTitle(device.name), zhCN.devices.forgetBody, [
       { text: zhCN.common.cancel, style: 'cancel', onPress: () => finish(false) },
       { text: zhCN.devices.forget, style: 'destructive', onPress: () => finish(true) },
+    ], { cancelable: true, onDismiss: () => finish(false) })
+  })
+}
+
+function confirmSessionArchive(): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (confirmed: boolean) => {
+      if (settled) return
+      settled = true
+      resolve(confirmed)
+    }
+    Alert.alert(zhCN.sessions.archiveTitle, zhCN.sessions.archiveBody, [
+      { text: zhCN.common.cancel, style: 'cancel', onPress: () => finish(false) },
+      { text: zhCN.sessions.archive, style: 'destructive', onPress: () => finish(true) },
     ], { cancelable: true, onDismiss: () => finish(false) })
   })
 }
@@ -443,6 +458,179 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
         </Animated.View>
       </Animated.View>
     </Animated.View>
+  )
+}
+
+export function SwipeableSessionRow({ session, open, locked, busy, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
+  session: RemoteSession
+  open: boolean
+  locked: boolean
+  busy: boolean
+  compact?: boolean
+  title?: string
+  meta?: string
+  onOpenChange: (open: boolean) => void
+  onPress: () => void
+  onArchive: () => Promise<boolean>
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const reduceMotion = useReduceMotion()
+  const offset = useRef(new Animated.Value(0)).current
+  const armed = useRef(new Animated.Value(0)).current
+  const [rowWidth, setRowWidth] = useState(360)
+  const isOpen = useRef(false)
+  const isArmed = useRef(false)
+  const confirming = useRef(false)
+  const latest = useRef({ rowWidth, reduceMotion, locked, busy, onOpenChange, requestArchive: async () => {} })
+
+  const animate = (animation: Animated.CompositeAnimation, apply: () => void) => {
+    if (latest.current.reduceMotion) { apply(); return }
+    animation.start(({ finished }) => { if (finished) apply() })
+  }
+  const settle = (toValue: number) => animate(
+    Animated.spring(offset, { ...SWIPE_SPRING, toValue }),
+    () => offset.setValue(toValue),
+  )
+  const setArmed = (next: boolean) => {
+    if (isArmed.current === next) return
+    isArmed.current = next
+    if (next) void Haptics.selectionAsync().catch(() => undefined)
+    animate(Animated.spring(armed, { ...SWIPE_SPRING, toValue: next ? 1 : 0 }), () => armed.setValue(next ? 1 : 0))
+  }
+  const setOpen = (next: boolean) => {
+    isOpen.current = next
+    settle(next ? -SWIPE_ACTION_WIDTH : 0)
+    latest.current.onOpenChange(next)
+  }
+  const requestArchive = async () => {
+    const state = latest.current
+    if (confirming.current || state.locked || state.busy) return
+    confirming.current = true
+    setArmed(false)
+    setOpen(true)
+    try {
+      if (!await confirmSessionArchive()) {
+        setOpen(false)
+        return
+      }
+      if (await onArchive()) return
+      setOpen(false)
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error).catch(() => undefined)
+    } finally {
+      confirming.current = false
+    }
+  }
+  latest.current = { rowWidth, reduceMotion, locked, busy, onOpenChange, requestArchive }
+
+  const dragPosition = (dx: number) => {
+    const raw = (isOpen.current ? -SWIPE_ACTION_WIDTH : 0) + dx
+    if (raw > 0) return Math.min(12, raw * 0.15)
+    if (raw >= -SWIPE_ACTION_WIDTH) return raw
+    return Math.max(-latest.current.rowWidth * 0.8, -SWIPE_ACTION_WIDTH + (raw + SWIPE_ACTION_WIDTH) * 0.6)
+  }
+  const responder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => false,
+    onMoveShouldSetPanResponder: (_, gesture) => {
+      const state = latest.current
+      if (state.locked || state.busy || confirming.current) return false
+      return Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.2
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant: () => {
+      offset.stopAnimation()
+      latest.current.onOpenChange(true)
+    },
+    onPanResponderMove: (_, gesture) => {
+      const next = dragPosition(gesture.dx)
+      offset.setValue(next)
+      setArmed(next <= -latest.current.rowWidth * 0.55)
+    },
+    onPanResponderRelease: (_, gesture) => {
+      if (isArmed.current) { void latest.current.requestArchive(); return }
+      const next = dragPosition(gesture.dx)
+      setOpen(gesture.vx < -0.5 || (gesture.vx <= 0.5 && next < -SWIPE_ACTION_WIDTH / 2))
+    },
+    onPanResponderTerminate: () => {
+      setArmed(false)
+      setOpen(false)
+    },
+  })).current
+
+  useEffect(() => {
+    if (!open && isOpen.current && !confirming.current) setOpen(false)
+  }, [open])
+
+  const iconOpacity = offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH * 0.7, -16, 0], outputRange: [1, 0, 0], extrapolate: 'clamp' })
+  const iconScale = Animated.multiply(
+    offset.interpolate({ inputRange: [-SWIPE_ACTION_WIDTH, -16, 0], outputRange: [1, 0.6, 0.6], extrapolate: 'clamp' }),
+    armed.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] }),
+  )
+  const actionShift = offset.interpolate({
+    inputRange: [-rowWidth * 0.8, -SWIPE_ACTION_WIDTH, 0],
+    outputRange: [-(rowWidth * 0.8 - SWIPE_ACTION_WIDTH) / 2, 0, 0],
+    extrapolate: 'clamp',
+  })
+  const disabled = locked || busy
+
+  const displayTitle = title ?? sessionTitle(session)
+  const displayMeta = meta ?? updatedText(session.updatedAt)
+  const SessionIcon = session.backend === 'codex'
+    ? Code2
+    : session.backend === 'cursor' || session.backend === 'antigravity'
+      ? Sparkles
+      : MessageSquareText
+
+  return (
+    <View
+      style={styles.swipeRow}
+      onLayout={event => setRowWidth(event.nativeEvent.layout.width)}
+    >
+      <View style={styles.swipeDeleteAction}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={zhCN.sessions.archive}
+          disabled={disabled}
+          onPress={() => void requestArchive()}
+          style={styles.swipeDeleteButton}
+        >
+          <Animated.View style={[styles.swipeDeleteInner, { opacity: iconOpacity, transform: [{ translateX: actionShift }, { scale: iconScale }] }]}>
+            {busy ? <ActivityIndicator size="small" color={colors.white} /> : <Archive size={20} color={colors.white} />}
+            <Text style={styles.swipeDeleteText} numberOfLines={1}>{zhCN.sessions.archive}</Text>
+          </Animated.View>
+        </Pressable>
+      </View>
+      <Animated.View style={[styles.swipeContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
+        <View style={compact ? styles.compactSessionRow : styles.listRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={displayTitle}
+            accessibilityActions={[{ name: 'archive', label: zhCN.sessions.archive }]}
+            onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'archive') void requestArchive() }}
+            disabled={disabled}
+            onPress={onPress}
+            style={({ pressed }) => [styles.swipeContentInner, pressed && styles.listRowPressed, disabled && styles.swipeContentBusy]}
+          >
+            {compact
+              ? <SessionIcon size={17} color={colors.muted} />
+              : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>}
+            <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
+              <View style={styles.rowTitleLine}>
+                <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
+                {!compact && session.running && <StatusBadge status="running" />}
+              </View>
+              {compact
+                ? <Text style={styles.compactSessionMeta}>{session.running ? zhCN.status.running : displayMeta}</Text>
+                : <View style={styles.rowDetailLine}>
+                    <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
+                    <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
+                  </View>}
+            </View>
+            <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />
+          </Pressable>
+        </View>
+      </Animated.View>
+    </View>
   )
 }
 
@@ -750,6 +938,7 @@ export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSe
   const openSession = useAppStore(state => state.openSession)
   const createSession = useAppStore(state => state.createSession)
   const [showArchived, setShowArchived] = useState(false)
+  const [openSessionId, setOpenSessionId] = useState<string>()
 
   const open = async (session: RemoteSession) => {
     if (await openSession(session)) onSession(session)
@@ -783,14 +972,15 @@ export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSe
             />
           : <View>
               {active.map(session => (
-                <ListRow
+                <SwipeableSessionRow
                   key={session.sessionId}
-                  title={sessionTitle(session)}
-                  subtitle={session.cwd}
-                  meta={updatedText(session.updatedAt)}
-                  icon={MessageSquareText}
-                  status={session.running ? <StatusBadge status="running" /> : undefined}
-                  onPress={() => void open(session)}
+                  session={session}
+                  open={openSessionId === session.sessionId}
+                  locked={busy !== undefined}
+                  busy={busy === `archive:${session.sessionId}`}
+                  onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
+                  onArchive={() => useAppStore.getState().archiveSession(session.sessionId)}
+                  onPress={() => { setOpenSessionId(undefined); void open(session) }}
                 />
               ))}
               {archived.length > 0 && (
@@ -967,6 +1157,10 @@ function createStyles(colors: ThemeColors) {
   rowSubtitle: { ...type.small, color: colors.muted },
   rowInlineSubtitle: { flex: 1 },
   rowMeta: { ...type.caption, color: colors.subtle },
+  compactSessionRow: { minHeight: 58, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  compactSessionCopy: { flex: 1 },
+  compactSessionTitle: { ...type.smallStrong, color: colors.ink },
+  compactSessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
   connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
   connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
   connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },

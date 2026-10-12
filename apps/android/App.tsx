@@ -332,6 +332,12 @@ function AppNavigator() {
               push({ name: 'devices' })
             }
           : undefined}
+        onSessions={selectedDevice !== undefined && useAppStore.getState().connection.phase === 'connected'
+          ? () => {
+              setHomeMenuOpen(false)
+              push({ name: 'sessions' })
+            }
+          : undefined}
         onSettings={() => {
           setHomeMenuOpen(false)
           push({ name: 'settings' })

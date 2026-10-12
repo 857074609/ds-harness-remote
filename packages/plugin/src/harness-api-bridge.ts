@@ -20,10 +20,12 @@ import type {
 } from '@dsh-remote/protocol'
 import {
   createRpcResponse,
+  createEvent,
   encodeMessage,
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  MAX_SECURE_MESSAGE_BYTES,
   TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
@@ -603,7 +605,11 @@ export class HarnessApiBridge {
           continue
         }
         this.trackRespondable(frame)
-        await this.publish('harness.api.frame', { streamId, frame } satisfies HarnessApiFrameData)
+        const data: HarnessApiFrameData = { streamId, frame }
+        if (encodeMessage(createEvent('harness.api.frame', data)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+          throw new Error('Oversized Harness API frame')
+        }
+        await this.publish('harness.api.frame', data)
       }
       if (signal.aborted) reason = 'cancelled'
     } catch {

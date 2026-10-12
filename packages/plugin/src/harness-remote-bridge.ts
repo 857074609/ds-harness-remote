@@ -10,10 +10,13 @@ import type {
   HarnessRemoteStreamOpenParams,
 } from '@dsh-remote/protocol'
 import {
+  createEvent,
+  encodeMessage,
   HARNESS_API_TRANSFER_CHUNK_BYTES,
   MAX_ACTIVE_TRANSFERS_PER_DIRECTION,
   MAX_ALPHA_STREAMS_PER_CONNECTION,
   MAX_HARNESS_API_TRANSFER_BYTES,
+  MAX_SECURE_MESSAGE_BYTES,
   TRANSFER_IDLE_MS,
 } from '@dsh-remote/protocol'
 import { z } from 'zod'
@@ -438,11 +441,15 @@ export class HarnessRemoteBridge {
     try {
       for await (const value of source) {
         if (signal.aborted) break
-        await this.publish('harness.remote.frame', {
+        const frame: HarnessRemoteFrameData = {
           streamId,
           hasValue: true,
           ...(value === undefined ? {} : { value }),
-        })
+        }
+        if (encodeMessage(createEvent('harness.remote.frame', frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+          throw new Error('Oversized Harness Remote frame')
+        }
+        await this.publish('harness.remote.frame', frame)
       }
       if (signal.aborted) reason = 'cancelled'
     } catch (error) {

@@ -31120,7 +31120,11 @@ var HarnessApiBridge = class {
           continue;
         }
         this.trackRespondable(frame);
-        await this.publish("harness.api.frame", { streamId, frame });
+        const data2 = { streamId, frame };
+        if (encodeMessage(createEvent("harness.api.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+          throw new Error("Oversized Harness API frame");
+        }
+        await this.publish("harness.api.frame", data2);
       }
       if (signal.aborted) reason = "cancelled";
     } catch {
@@ -31810,11 +31814,15 @@ var HarnessRemoteBridge = class {
     try {
       for await (const value of source) {
         if (signal.aborted) break;
-        await this.publish("harness.remote.frame", {
+        const frame = {
           streamId,
           hasValue: true,
           ...value === void 0 ? {} : { value }
-        });
+        };
+        if (encodeMessage(createEvent("harness.remote.frame", frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
+          throw new Error("Oversized Harness Remote frame");
+        }
+        await this.publish("harness.remote.frame", frame);
       }
       if (signal.aborted) reason = "cancelled";
     } catch (error) {

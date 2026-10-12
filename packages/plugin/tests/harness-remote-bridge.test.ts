@@ -8,6 +8,7 @@ import { CodexWorkspaceBridge, type RemoteTerminalProcess, type RemoteTerminalSp
 import { TerminalPolicy } from '../src/terminal-policy.js'
 import { RpcError } from '../src/rpc-router.js'
 import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
+import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 
 describe('HarnessRemoteBridge', () => {
   it('forwards only the fixed alpha Gateway endpoint allowlist', async () => {
@@ -179,6 +180,27 @@ describe('HarnessRemoteBridge', () => {
       'harness.remote.stream.closed',
       { streamId: 'workspace-stream-1', reason: 'completed' },
     ])
+  })
+
+  it('closes an oversized stream frame without dropping the peer connection', async () => {
+    const publish = vi.fn(async () => undefined)
+    const open = vi.fn(async () => (async function* () {
+      yield { type: 'event', value: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES) }
+    })())
+    const bridge = new HarnessRemoteBridge(gateway({ open }), publish)
+
+    await expect(bridge.openStream({
+      streamId: 'oversized-stream-1',
+      endpoint: '$events',
+      payload: { args: {} },
+    })).resolves.toEqual({ opened: true, streamId: 'oversized-stream-1' })
+
+    await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('harness.remote.stream.closed', {
+      streamId: 'oversized-stream-1',
+      reason: 'failed',
+      failure: { code: 'internal', message: 'Request failed.', details: {} },
+    }))
+    expect(publish).not.toHaveBeenCalledWith('harness.remote.frame', expect.anything())
   })
 
   it('adds the workspace root to legacy file-change subscriptions on compatible Hosts', async () => {

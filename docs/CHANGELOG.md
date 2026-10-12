@@ -1,3 +1,17 @@
+## 0.5.5 - 2026-10-13
+
+- Adds Android conversation archiving: archive from the chat header or with a swipe gesture, then find archived conversations from the Conversations screen.
+- Aligns the Plugin settings page with the native DSH detail layout and keeps its injected locale dictionaries in a shared module.
+- Closes oversized Harness Remote stream frames as failed without dropping the encrypted peer connection.
+- Advances the Plugin and Android app to `0.5.5` (Android `versionCode 43`).
+
+### 中文
+
+- Android 新增对话归档：可在会话标题栏归档，也可在列表中滑动归档，并在“对话”页面查看已归档内容。
+- Plugin 设置页适配 DSH 原生详情页布局，并将注入客户端的语言字典整理为共享模块。
+- 超过安全消息大小的 Harness Remote 流帧会以失败结束，同时保持加密对端连接可用。
+- Plugin 与 Android App 升级到 `0.5.5`（Android `versionCode 43`）。
+
 ## 0.5.4 - 2026-10-12
 
 - Fixes Remote Web workspace image and Office preview responses by materializing Harness Gateway binary attachments on the Host and restoring them to `Uint8Array` in the client gateway.

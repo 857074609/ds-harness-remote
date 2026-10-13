@@ -36,6 +36,7 @@ export function isSessionAuthError(error: unknown): boolean {
 
 export function friendlyError(error: unknown): string {
   const friendlyByCode: Record<string, string> = zhCN.errors
+  if (isSessionWriterHeldError(error)) return friendlyByCode['session/writer-held']!
   if (error instanceof AccountRequiredError) return friendlyByCode.AUTH_REQUIRED ?? error.message
   if (error instanceof RemoteApiError) return friendlyByCode[error.code] ?? error.message
   if (error instanceof Error) {
@@ -48,6 +49,15 @@ export function friendlyError(error: unknown): string {
     return error.message
   }
   return zhCN.errors.unknown
+}
+
+/** Newer Harness exposes a code; older carriers retain only the native message. */
+function isSessionWriterHeldError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const code = (error as Error & { code?: unknown }).code
+  return code === 'session/writer-held'
+    || error.name === 'SessionAlreadyOwnedError'
+    || /^session "[^"\r\n]+" is already owned by an active write handle$/.test(error.message)
 }
 
 export function isRpcTimeoutError(error: unknown): boolean {

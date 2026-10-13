@@ -1,3 +1,11 @@
+## Unreleased
+
+- Makes the Remote sidebar footer entry a fixed-width icon button so it can share the row with other plugins; tooltips retain the target name and the connected button returns to local workspaces.
+
+### 中文
+
+- Remote 侧栏底部入口改为固定宽度图标按钮，避免与其他插件并排时挤占空间；悬停保留目标名称，连接后点击可返回本地工作区。
+
 ## 0.5.6 - 2026-10-13
 
 - Preserves image and Office preview bytes through the local Harness Connection HTTP hop by emitting official binary attachments from the Remote gateway switch.

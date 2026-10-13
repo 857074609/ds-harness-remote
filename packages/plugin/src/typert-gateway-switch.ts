@@ -116,7 +116,7 @@ export class TypertGatewaySwitch {
     if (this.originalDispatch !== undefined) {
       this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)
         ? this.localDispatch!(endpoint, payload, signal)
-        : this.remoteTarget.dispatch(endpoint, payload, signal)
+        : this.remoteTarget.dispatch(endpoint, payload, signal).then(result => workspaceConnectionResult(endpoint, result))
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen
@@ -198,6 +198,20 @@ export class TypertGatewaySwitch {
     const code = 'code' in source && typeof source.code === 'string' ? source.code : 'internal'
     const details = 'details' in source && isRecord(source.details) ? source.details : {}
     return { code, message: source.message, details }
+  }
+}
+
+/** The local Connection HTTP hop needs the same binary envelope as the native Gateway. */
+function workspaceConnectionResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
+  if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return result
+  if (!result.ok || !isRecord(result.value) || !(result.value.data instanceof Uint8Array)) return result
+  return {
+    ...result,
+    value: { ...result.value, data: null },
+    attachments: [
+      ...(result.attachments ?? []).filter(attachment => attachment.path.length !== 1 || attachment.path[0] !== 'data'),
+      { path: ['data'], bytes: result.value.data },
+    ],
   }
 }
 

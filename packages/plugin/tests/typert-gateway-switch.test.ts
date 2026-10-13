@@ -1,8 +1,60 @@
 import { describe, expect, it, vi } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { HostConnectionService } from '@deepseek-ai/dsh-client-connection'
+import type { RemoteClientCore } from '@dsh-remote/client-core'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
 import type { TypertGatewayLike } from '../src/harness-api-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 
 describe('TypertGatewaySwitch', () => {
+  it('preserves preview bytes through the native Connection HTTP hop', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      const connection = ctx.get('connection') as HostConnectionService
+      const gateway = {
+        invoke: vi.fn(async (_request: Parameters<TypertGatewayLike['invoke']>[0]) => 'local'),
+        dispatchRpc: vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'local' })),
+      }
+      const target = new TypertGatewaySwitch(gateway)
+      target.install()
+      connection.rpc.intercept('/api', () => true, (endpoint, payload, signal) => gateway.dispatchRpc(endpoint, payload, signal))
+      const handler = connection.createSharedFetchHandler('/api')
+      await runScenarios(['workspaceFiles/readBytes', 'officeToPdf/render'].flatMap(endpoint =>
+        [new Uint8Array([0, 255, 16]), new Uint8Array()].map(data => ({
+          name: `${endpoint}: ${data.length === 0 ? 'empty' : 'binary'} payload`,
+          run: async () => {
+            const value = { data: Buffer.from(data).toString('base64'), version: 'v1', offset: 0, eof: true }
+            const remote = new RemoteTypertGateway({ rpc: vi.fn(async () => ({ ok: true, value })) } as unknown as RemoteClientCore)
+            target.selectRemote(remote)
+            // In-process consumers still get bytes without Connection placeholders.
+            await expect(gateway.invoke({ namespace: endpoint.split('/')[0]!, method: endpoint.split('/')[1]!, args: {} }))
+              .resolves.toEqual({ ...value, data })
+            const response = await handler.fetch(new Request(`http://localhost/api/${endpoint}`, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ type: 'client-request', rpcId: 'preview', method: endpoint, payload: { args: {} } }),
+            }))
+            expect(response.status).toBe(200)
+            expect(response.headers.get('content-type')).toContain('multipart/form-data')
+            const parts = await response.formData()
+            const metadata = JSON.parse(parts.get('metadata') as string)
+            expect(metadata.result).toEqual({ ok: true, value: { ...value, data: null } })
+            expect(metadata.attachments).toEqual([{ path: ['data'], codec: 'bytes', part: 'bytes-0' }])
+            const blob = parts.get('bytes-0') as Blob
+            expect(new Uint8Array(await blob.arrayBuffer())).toEqual(data)
+          },
+        })),
+      ))
+      target.selectLocal()
+      await expect(gateway.dispatchRpc('workspaceFiles/readBytes', {}, new AbortController().signal))
+        .resolves.toEqual({ ok: true, value: 'local' })
+      target.restore()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
   it('fails remote session calls after disconnect until reconnect or explicit exit', async () => {
     const localInvoke = vi.fn(async (_request: Parameters<TypertGatewayLike['invoke']>[0]) => 'local')
     const localDispatch = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'local' }))

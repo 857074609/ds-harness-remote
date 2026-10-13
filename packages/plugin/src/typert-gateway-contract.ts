@@ -7,7 +7,7 @@ export interface TypertGatewayRequest {
 }
 
 export type TypertRpcResult =
-  | { ok: true; value?: unknown }
+  | { ok: true; value?: unknown; attachments?: readonly { path: readonly (string | number)[]; bytes: Uint8Array }[] }
   | { ok: false; error: { code: string; message: string; details: Record<string, unknown> } }
 
 /** Legacy carrier open (≤0.1.6): the third argument is the cancellation signal. */

@@ -20253,7 +20253,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.5";
+var PLUGIN_VERSION = "0.5.6";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -20760,7 +20760,7 @@ var TypertGatewaySwitch = class {
       this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal);
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal).then((result) => workspaceConnectionResult(endpoint, result));
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -20836,6 +20836,18 @@ var TypertGatewaySwitch = class {
     return { code, message: source.message, details };
   }
 };
+function workspaceConnectionResult(endpoint, result) {
+  if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
+  if (!result.ok || !isRecord9(result.value) || !(result.value.data instanceof Uint8Array)) return result;
+  return {
+    ...result,
+    value: { ...result.value, data: null },
+    attachments: [
+      ...(result.attachments ?? []).filter((attachment) => attachment.path.length !== 1 || attachment.path[0] !== "data"),
+      { path: ["data"], bytes: result.value.data }
+    ]
+  };
+}
 function usesRc1Arity(open) {
   return open.length >= 5;
 }

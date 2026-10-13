@@ -1,3 +1,13 @@
+## 0.5.6 - 2026-10-13
+
+- Preserves image and Office preview bytes through the local Harness Connection HTTP hop by emitting official binary attachments from the Remote gateway switch.
+- Advances the Plugin and Android app to `0.5.6` (Android `versionCode 44`).
+
+### 中文
+
+- 修复远程图片和 Office 预览经过本机 Harness Connection HTTP RPC 时丢失字节类型的问题：Remote gateway switch 使用官方二进制附件封装。
+- Plugin 与 Android App 升级到 `0.5.6`（Android `versionCode 44`）。
+
 ## 0.5.5 - 2026-10-13
 
 - Adds Android conversation archiving: archive from the chat header or with a swipe gesture, then find archived conversations from the Conversations screen.

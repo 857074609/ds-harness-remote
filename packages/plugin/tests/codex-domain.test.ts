@@ -529,6 +529,61 @@ describe('CodexRemoteDomain', () => {
             await domain.close()
           },
         },
+        {
+          name: 'keeps new-session permission changes working before the App Server persists the thread',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            app.rejectSettings = true
+            app.resumeRolloutMissing = true
+            const domain = new CodexRemoteDomain(
+              { enabled: true, binary: '/custom/codex' },
+              logger(),
+              () => app,
+            )
+            await domain.start()
+
+            // Regression: ChatGPT.app codex 0.162 rejects thread/resume with
+            // "no rollout found" for threads created in this process, which
+            // surfaced as "Codex App Server rejected the request." on the
+            // Remote client during new-session permission changes.
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              }),
+            ).resolves.toMatchObject({
+              thread: { id: 'allowed-thread', cwd: root },
+              approvalPolicy: 'never',
+              sandbox: { type: 'dangerFullAccess' },
+            })
+            expect(app.calls.some((call) => call.method === 'thread/settings/updated')).toBe(false)
+            await domain.close()
+          },
+        },
+        {
+          name: 'keeps generic permission-update rejections failing closed',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            app.rejectSettings = true
+            app.rejectResume = true
+            const domain = new CodexRemoteDomain(
+              { enabled: true, binary: '/custom/codex' },
+              logger(),
+              () => app,
+            )
+            await domain.start()
+
+            await expect(
+              domain.call('connection-1', {
+                method: 'thread/resume',
+                params: { threadId: 'allowed-thread', permissionPreset: 'danger-full-access' },
+              }),
+            ).rejects.toMatchObject({ code: 'CODEX_UPSTREAM_ERROR' })
+            await domain.close()
+          },
+        },
       ],
       async () => {
         await cleanupScenario1()
@@ -831,6 +886,7 @@ class FakeAppServer implements CodexAppServerLike {
   readonly responses: Array<{ id: string | number; result?: unknown; error?: unknown }> = []
   readonly calls: Array<{ method: string; params: unknown }> = []
   rejectResume = false
+  resumeRolloutMissing = false
   rejectTurnPagination = false
   rejectTurnStartBusy = false
   rejectSettings = false
@@ -939,6 +995,9 @@ class FakeAppServer implements CodexAppServerLike {
     }
     if (method === 'thread/items/list') return { data: [], nextCursor: null, backwardsCursor: null }
     if (method === 'thread/start') return { thread: { id: 'new-thread', cwd: isRecord(params) ? params.cwd : undefined } }
+    if (method === 'thread/resume' && this.resumeRolloutMissing) {
+      throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex thread state is not persisted yet.')
+    }
     if (method === 'thread/resume' && this.rejectResume) {
       throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex App Server rejected the request.')
     }

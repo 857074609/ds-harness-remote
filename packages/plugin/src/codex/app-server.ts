@@ -293,6 +293,7 @@ function safeUpstreamError(value: unknown): string {
   // short generic category for the Remote boundary.
   const message = value.message.toLowerCase()
   if (message.includes('active writer')) return 'Codex thread already has an active writer.'
+  if (message.includes('no rollout found')) return 'Codex thread state is not persisted yet.'
   return message.includes('not initialized')
     ? 'Codex App Server is not initialized.'
     : 'Codex App Server rejected the request.'

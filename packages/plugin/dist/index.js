@@ -23804,6 +23804,7 @@ function safeUpstreamError(value) {
   if (!isRecord11(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("active writer")) return "Codex thread already has an active writer.";
+  if (message.includes("no rollout found")) return "Codex thread state is not persisted yet.";
   return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
 }
 function isRecord11(value) {
@@ -24644,13 +24645,23 @@ var CodexRemoteDomain = class {
     try {
       await this.callUpstream("thread/settings/update", { threadId, ...settings });
       result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
-    } catch {
-      result = await this.callUpstream("thread/resume", {
-        ...permission.params,
-        ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true
-      });
+    } catch (error) {
+      if (isUnpersistedThreadError(error)) {
+        return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
+      }
+      try {
+        result = await this.callUpstream("thread/resume", {
+          ...permission.params,
+          ...allowed.cwd === void 0 ? {} : { cwd: allowed.cwd },
+          ...codexThreadPermissionParams(permission),
+          excludeTurns: true
+        });
+      } catch (resumeError) {
+        if (isUnpersistedThreadError(resumeError)) {
+          return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
+        }
+        throw resumeError;
+      }
       await this.assertResultThreadAllowed(result);
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
@@ -25333,6 +25344,9 @@ function maskId(value) {
 }
 function isActiveWriterMessage(message) {
   return message.toLowerCase().includes("active writer");
+}
+function isUnpersistedThreadError(error) {
+  return error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && error.message.toLowerCase().includes("not persisted yet");
 }
 
 // src/workspace-bridge.ts

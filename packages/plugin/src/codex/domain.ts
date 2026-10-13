@@ -565,14 +565,30 @@ export class CodexRemoteDomain {
       // Loaded threads can reject resume or ignore its configuration overrides.
       await this.callUpstream('thread/settings/update', { threadId, ...settings })
       result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy }
-    } catch {
+    } catch (error) {
+      // Threads created in this App Server process may not be persisted yet;
+      // the resume contract rejects them even though the thread is usable.
+      // Treating that as a loaded thread keeps new-session permission changes
+      // working while genuine upstream failures still fail closed.
+      if (isUnpersistedThreadError(error)) {
+        return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy }
+      }
       // Unloaded threads and older App Servers still use the resume contract.
-      result = await this.callUpstream('thread/resume', {
-        ...permission.params,
-        ...(allowed.cwd === undefined ? {} : { cwd: allowed.cwd }),
-        ...codexThreadPermissionParams(permission),
-        excludeTurns: true,
-      })
+      // The resume contract also rejects threads created in this App Server
+      // process before their rollout file exists; those threads are usable.
+      try {
+        result = await this.callUpstream('thread/resume', {
+          ...permission.params,
+          ...(allowed.cwd === undefined ? {} : { cwd: allowed.cwd }),
+          ...codexThreadPermissionParams(permission),
+          excludeTurns: true,
+        })
+      } catch (resumeError) {
+        if (isUnpersistedThreadError(resumeError)) {
+          return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy }
+        }
+        throw resumeError
+      }
       await this.assertResultThreadAllowed(result)
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream('thread/settings/update', { threadId, ...settings })
@@ -1394,4 +1410,10 @@ function maskId(value: string): string {
 
 function isActiveWriterMessage(message: string): boolean {
   return message.toLowerCase().includes('active writer')
+}
+
+function isUnpersistedThreadError(error: unknown): boolean {
+  return error instanceof RpcError
+    && error.code === 'CODEX_UPSTREAM_ERROR'
+    && error.message.toLowerCase().includes('not persisted yet')
 }

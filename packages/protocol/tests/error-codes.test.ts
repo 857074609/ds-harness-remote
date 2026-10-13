@@ -259,6 +259,7 @@ describe('capability constants', () => {
       'fileviewer.read.v1',
       'codex.appserver.v1',
       'codex.appserver.transfer.v1',
+      'plugin.route.v1',
     ])
   })
 })

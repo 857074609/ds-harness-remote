@@ -35,10 +35,13 @@ describe('HarnessRemoteBridge', () => {
     expect(dispatch).toHaveBeenCalledWith('permissionPresets/catalog', { args: {} }, expect.any(AbortSignal))
     await expect(bridge.call({ endpoint: 'permissionPresets/select', payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     expect(dispatch).toHaveBeenCalledTimes(2)
-    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession', 'userQuestions/answer', 'claudeCodeMods/pressBand']) {
+    for (const endpoint of ['session/projections', 'session/initializeDefaultModel', 'workspace/pinSession', 'workspace/unpinSession', 'userQuestions/answer', 'claudeCodeMods/pressBand', 'schedule/list', 'schedule/catalog']) {
       const payload = { args: { request: { sessionId: 'session-1' } } }
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
+    }
+    for (const endpoint of ['schedule/create', 'schedule/delete', 'schedule/arbitrary']) {
+      await expect(bridge.call({ endpoint, payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     }
   })
 

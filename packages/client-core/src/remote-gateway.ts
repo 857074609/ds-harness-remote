@@ -31,6 +31,7 @@ export interface RemoteHostFeatures {
   remoteGateway: boolean
   sessionFormat?: 3
   remoteTransfer: boolean
+  pluginRoute: boolean
   capabilities: readonly string[]
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
 }
@@ -90,6 +91,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     apiTransfer: true,
     remoteGateway: false,
     remoteTransfer: false,
+    pluginRoute: false,
     capabilities: ['harness.api.v1'],
   }
 }
@@ -132,6 +134,7 @@ export async function probeRemoteHostFeatures(
     remoteGateway,
     ...(sessionFormat === undefined ? {} : { sessionFormat }),
     remoteTransfer: capabilities.has('harness.remote.transfer.v1'),
+    pluginRoute: capabilities.has('plugin.route.v1'),
     capabilities: description.capabilities,
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
   }

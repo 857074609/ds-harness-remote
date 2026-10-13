@@ -1,10 +1,22 @@
 ## Unreleased
 
-- Makes the Remote sidebar footer entry a fixed-width icon button so it can share the row with other plugins; tooltips retain the target name and the connected button returns to local workspaces.
+- Adds a Host-side DS Bot operation allowlist: remote chat and roster management remain available; installation, upgrades, schedule mutations, credentials, capability scripts, and unknown operations are refused before local dispatch.
+- Gates DS Bot roster and newly created Session responses on membership in the official Session catalog, with at most two refreshes for a missing identity; an already-ready catalog or a silently failed refresh cannot publish unknown Sessions.
+- Restricts plugin route forwarding to the exact `api/bot` endpoint, preventing official Harness RPCs from bypassing the Remote allowlist, local settings restrictions, and terminal policy.
+- Reports DS Bot forwarding refusals with distinct safe error codes in its native error envelope, including missing Host routes, unsupported carriers, disconnected or incompatible catalogs, and catalog readiness failures.
+- Adds the native schedule UI's read-only `schedule/list` and `schedule/catalog` endpoints to the fixed Remote allowlist, keeps remote RPC failures in the official response envelope, and dispatches Host plugin routes through the official Connection Fetch carrier on Desktop without requiring a local HTTP server.
+- Keeps sidebar footer plugin entries stacked vertically. The expanded Remote entry shows its icon and label below DS Bot; the collapsed sidebar retains a compact icon button. Bot mode keeps its account and Connect plugins controls together in their original row, with Remote on a separate row below. Tooltips retain the target name; connected expanded rows restore a separate Exit action, while the collapsed icon returns to local workspaces.
+- Fixes DS Bot route forwarding to use the official control request envelope from page startup, retain proxy prefixes and cancellation, and refresh the official Session catalog before publishing remote roster changes. Disconnected, unsupported, and CodeX/ACP catalogs reject plugin route requests instead of falling back to local roster data.
 
 ### 中文
 
-- Remote 侧栏底部入口改为固定宽度图标按钮，避免与其他插件并排时挤占空间；悬停保留目标名称，连接后点击可返回本地工作区。
+- Host 对 DS Bot 子操作实行固定白名单，保留远程会话与成员/群聊管理；安装升级、日程增删、凭据、能力脚本及未知操作在本机 dispatch 前拒绝。
+- DS Bot roster 和新会话响应必须通过官方 Session 目录的 ID 校验，缺失时最多刷新两次；目录曾进入 ready 或刷新失败后正常返回，均不能放行尚不可解析的新 Session。
+- 插件路由转发仅开放精确的 `api/bot` 端点，阻止官方 Harness RPC 绕过 Remote 白名单、本地设置限制和终端策略。
+- DS Bot 转发拒绝保留原生错误封装与具体安全错误码，区分 Host 未加载路由、能力缺失、断线、后端不兼容和会话目录未就绪，避免统一显示 HTTP 502。
+- 补齐原生日程 UI 的只读 `schedule/list` 与 `schedule/catalog` 固定白名单，远程 RPC 错误保留官方响应封装；Host 插件路由优先使用官方 Connection Fetch carrier，使 Desktop 不依赖本机 HTTP 服务。
+- 侧栏底部插件入口保持上下排列；展开时 Remote 在 DS Bot 下方显示图标与文字，折叠时保留紧凑图标按钮；Bot 模式保留头像与「连接插件」原有整行布局，Remote 单独占下方一行。悬停保留目标名称；连接后展开行恢复独立「退出」按钮，折叠图标点击返回本地工作区。
+- 修复 DS Bot 路由转发：页面启动即启用，使用官方控制请求封装，保留代理前缀与取消信号；发布远程 roster 变化前刷新官方会话目录。断线、不支持及 CodeX/ACP 目录下拒绝插件路由请求，避免回落到本地 roster。
 
 ## 0.5.6 - 2026-10-13
 

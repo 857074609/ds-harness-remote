@@ -23,6 +23,7 @@ import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
+import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './plugin-route-dispatcher.js'
 import {
   installTuiRemoteCommand,
   type TuiRemoteBinding,
@@ -86,6 +87,10 @@ interface LoaderLike {
   entries(): Iterable<LoaderEntryLike>
   locate?(fiber?: unknown): string | undefined
   update(id: string, options: { disabled?: boolean | null }): unknown
+}
+
+interface DshWebServerPortLike {
+  port?: number
 }
 
 export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined = undefined): void {
@@ -215,6 +220,10 @@ async function activate(
     localTypertGateway,
     () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
     subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
+    () => createPluginRouteDispatcher(
+      () => ctx.get('connection') as PluginRouteConnectionLike | undefined,
+      () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
+    ),
   )
 
   let clientRuntime: ClientModeRuntime | undefined

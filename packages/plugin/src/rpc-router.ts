@@ -16,6 +16,7 @@ import type { SafeLogger } from './logging.js'
 import type { CodexPeerBridge } from './codex/peer-bridge.js'
 import type { AcpPeerBridge } from './acp/peer-bridge.js'
 import { RpcError, safeErrorCode } from './safe-error.js'
+import type { PluginRouteBridge } from './plugin-route-bridge.js'
 
 export { RpcError } from './safe-error.js'
 
@@ -60,6 +61,7 @@ const apiMethods = new Set([
   'agent.acp.transfer.commit',
   'agent.acp.transfer.read',
   'agent.acp.transfer.close',
+  'plugin.route.call',
 ])
 
 export const HOST_CAPABILITIES = [
@@ -88,6 +90,7 @@ export class RpcRouter {
     private readonly acp?: AcpPeerBridge,
     private readonly loopback?: LoopbackHost,
     private readonly workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
+    private readonly pluginRoute?: PluginRouteBridge,
   ) {}
 
   async closePeerStreams(): Promise<void> {
@@ -207,6 +210,7 @@ export class RpcRouter {
       case 'agent.acp.transfer.commit': return this.requireAcp().commitTransfer(params)
       case 'agent.acp.transfer.read': return this.requireAcp().readTransfer(params)
       case 'agent.acp.transfer.close': return this.requireAcp().closeTransfer(params)
+      case 'plugin.route.call': return this.requirePluginRoute().call(params)
       default: throw new RpcError('METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
   }
@@ -237,6 +241,13 @@ export class RpcRouter {
       throw new RpcError('FEATURE_NOT_SUPPORTED', 'Agent ACP is disabled or unavailable on this Host.')
     }
     return this.acp
+  }
+
+  private requirePluginRoute(): PluginRouteBridge {
+    if (this.pluginRoute === undefined) {
+      throw new RpcError('FEATURE_NOT_SUPPORTED', 'This Host cannot forward local plugin routes.')
+    }
+    return this.pluginRoute
   }
 }
 

@@ -91,7 +91,7 @@ Terminal：使用本地打包的 xterm WebView，打开面板只列出现有终�
 
 ## 7. Desktop Remote 入口与设置
 
-侧栏底部 Remote 入口使用固定 36px 图标按钮，与其他插件共享底部操作行；悬停显示 Remote 或当前 Host 名称，已连接时点击返回本地工作区。窄栏同样保留可点击入口与键盘焦点。
+侧栏底部插件入口保持纵向排列，Remote 位于 DS Bot 等已有插件入口下方、「更多」上方。展开侧栏时 Remote 使用 36px 高的整行图标与文字按钮，长 Host 名称省略；折叠侧栏时使用 36px 图标按钮。悬停显示 Remote 或当前 Host 名称与退出提示，已连接时点击返回本地工作区，两种宽度均保留键盘焦点。DS Bot 团队模式保留账户头像与「连接插件」的原有同一行布局，Remote 独立占据其下方一行，不把 Bot 的内部操作拆成多行。
 
 Remote 模态框展示账号授权、Host、后端分组、实际就绪状态和已有工作区；添加目录入口按领域 authority 限制。
 Header 显示远端 Host、传输路径、加密说明、退出和「预览服务」。本机 preview URL 不作为 Android / Remote Web 地址。

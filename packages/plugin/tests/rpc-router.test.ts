@@ -5,6 +5,7 @@ import type { HarnessApiBridge } from '../src/harness-api-bridge.js'
 import type { RemoteFileViewerBridge } from '../src/file-viewer-bridge.js'
 import type { SafeLogger } from '../src/logging.js'
 import { RpcRouter } from '../src/rpc-router.js'
+import type { PluginRouteBridge } from '../src/plugin-route-bridge.js'
 import type { CodexPeerBridge } from '../src/codex/peer-bridge.js'
 
 describe('RpcRouter', () => {
@@ -276,6 +277,21 @@ describe('RpcRouter', () => {
     ])
   }, 20000)
 
+  it('routes plugin.route.call only when the Host provides the bridge', async () => {
+    const call = vi.fn(async () => ({ status: 200, json: { ok: true } }))
+    const pluginRoute = { call } as unknown as PluginRouteBridge
+    const router = createRouter({}, undefined, undefined, () => ['plugin.route.v1'], undefined, undefined, pluginRoute)
+    const response = await router.handle(createRpcRequest('plugin.route.call', { route: 'api/bot', body: {} }))
+    expect(call).toHaveBeenCalledWith({ route: 'api/bot', body: {} })
+    expect(response).toMatchObject({
+      type: 'rpc.response',
+      payload: { result: { status: 200, json: { ok: true } } },
+    })
+
+    const disabled = createRouter()
+    const unavailable = await disabled.handle(createRpcRequest('plugin.route.call', { route: 'api/bot', body: {} }))
+    expect(unavailable).toMatchObject({ type: 'rpc.error', payload: { code: 'FEATURE_NOT_SUPPORTED' } })
+  })
 })
 
 function createRouter(
@@ -285,6 +301,7 @@ function createRouter(
   capabilities?: () => readonly string[],
   codex?: CodexPeerBridge,
   workspaceTypes?: () => readonly RemoteWorkspaceTypeDescription[],
+  pluginRoute?: PluginRouteBridge,
 ): RpcRouter {
   return new RpcRouter({
     call: vi.fn(),
@@ -298,5 +315,5 @@ function createRouter(
     closeTransfer: vi.fn(),
     closeAll: vi.fn(async () => undefined),
     ...overrides,
-  } as unknown as HarnessApiBridge, undefined, logger, fileViewer, undefined, capabilities, codex, undefined, undefined, workspaceTypes)
+  } as unknown as HarnessApiBridge, undefined, logger, fileViewer, undefined, capabilities, codex, undefined, undefined, workspaceTypes, pluginRoute)
 }

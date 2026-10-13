@@ -39,6 +39,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -49,6 +50,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -59,6 +61,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -69,6 +72,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -79,6 +83,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -89,6 +94,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -114,6 +120,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: false,
               remoteGateway: true,
               codex: true,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -129,6 +136,7 @@ describe('ClientModeRuntime Host account control', () => {
               remoteGateway: true,
               sessionFormat: 3,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -143,6 +151,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: false,
               remoteGateway: false,
               codex: true,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -159,6 +168,7 @@ describe('ClientModeRuntime Host account control', () => {
               apiProxy: true,
               remoteGateway: false,
               codex: false,
+              pluginRoute: false,
               cursor: false,
               antigravity: false,
             })
@@ -192,6 +202,7 @@ describe('ClientModeRuntime Host account control', () => {
             }
             await expect(probeRemoteHostFeatures(client as never, '0.4.19')).resolves.toMatchObject({
               codex: true,
+              pluginRoute: false,
               workspaceTypes: [
                 { id: 'codex', name: 'CodeX', capability: 'codex.appserver.v1', available: true },
               ],
@@ -622,6 +633,7 @@ describe('ClientModeRuntime Host account control', () => {
                 apiProxy: true,
                 remoteGateway: false,
                 codex: false,
+                pluginRoute: false,
               },
             }
             ;(legacyRuntime as unknown as { connected: unknown }).connected = {
@@ -634,6 +646,7 @@ describe('ClientModeRuntime Host account control', () => {
                 apiProxy: false,
                 remoteGateway: true,
                 codex: false,
+                pluginRoute: false,
               },
             }
 
@@ -698,6 +711,7 @@ describe('ClientModeRuntime Host account control', () => {
                 remoteGateway: true,
                 sessionFormat: 3,
                 codex: false,
+                pluginRoute: false,
               },
             }
 
@@ -758,6 +772,7 @@ describe('ClientModeRuntime Host account control', () => {
                 apiProxy: true,
                 remoteGateway: false,
                 codex: false,
+                pluginRoute: false,
               },
             }
 
@@ -833,6 +848,7 @@ describe('ClientModeRuntime Host account control', () => {
                 apiProxy: false,
                 remoteGateway: true,
                 codex: false,
+                pluginRoute: false,
               },
             }
 
@@ -1004,6 +1020,35 @@ describe('ClientModeRuntime Host account control', () => {
     identityKey = replacement.publicKey
     await expect(runtime.devices()).rejects.toMatchObject({ code: 'PEER_IDENTITY_MISMATCH' })
     expect(identities.trustedPeer('host-device-1')?.publicKey).toBe(first.publicKey)
+    await runtime.close()
+  })
+
+  it('fails plugin.route control calls closed when no Remote Host is connected', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-client-plugin-route-'))
+    directories.push(directory)
+    const runtime = new ClientModeRuntime(
+      config(),
+      new IdentityStore({ directory }),
+      { bindIdentity: vi.fn() } as unknown as ClientServerApi,
+      apiProxy(),
+      gateway(),
+      logger(),
+    )
+    await runtime.start()
+    const signal = new AbortController().signal
+
+    await expect(runtime.handleControl('plugin.route', { route: 'api/bot', body: {} }, signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal', details: { remoteCode: 'REMOTE_NOT_CONNECTED' } },
+    })
+    await expect(runtime.handleControl('plugin.route', { route: 'http://evil', body: {} }, signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal', details: { remoteCode: 'INVALID_MESSAGE' } },
+    })
+    await expect(runtime.handleControl('plugin.route', { route: 'api/bot', body: 'not-an-object' }, signal)).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'internal', details: { remoteCode: 'INVALID_MESSAGE' } },
+    })
     await runtime.close()
   })
 })

@@ -27,6 +27,8 @@ import { HostServerConnection } from './server-connection.js'
 import { ServerCredentialStore } from './server-credentials.js'
 import { HarnessApiBridge, type TypertGatewayLike } from './harness-api-bridge.js'
 import { HarnessRemoteBridge } from './harness-remote-bridge.js'
+import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
+import { PluginRouteBridge } from './plugin-route-bridge.js'
 import type { LocalTypertGateway } from './typert-gateway-contract.js'
 import { loadNodeRtcFactory } from './werift-rtc.js'
 import type { AuthenticatedPeerChannel } from './types.js'
@@ -87,6 +89,7 @@ export class HostPluginRuntime {
     private readonly fileViewerHost?: () => FileViewerHostServiceLike | undefined,
     /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
     private readonly terminalSpawner?: RemoteTerminalSpawner,
+    private readonly pluginRoutes?: () => PluginRouteDispatcher | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -130,6 +133,11 @@ export class HostPluginRuntime {
         context,
         (event, data) => send(createEvent(event, data)),
       )
+      // The dispatcher must resolve inside the callback: the DSH connection
+      // service (and its shared fetch handler) may become ready after this
+      // plugin is activated.
+      const dispatcher = this.pluginRoutes?.()
+      const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(dispatcher, this.logger)
       return new RpcRouter(
         harnessApi,
         undefined,
@@ -142,6 +150,7 @@ export class HostPluginRuntime {
         // Handles and their lifetime belong to this connection; only policy is shared.
         this.createLoopbackHost(),
         () => this.hostWorkspaceTypes(),
+        pluginRoute,
       )
     }, this.logger)
     if (config.serverUrl !== undefined) {
@@ -486,6 +495,7 @@ export class HostPluginRuntime {
       capabilities.push('harness.api.v1', 'harness.api.transfer.v1')
     }
     if (this.fileViewerHost?.() !== undefined) capabilities.push('fileviewer.read.v1')
+    if (this.pluginRoutes?.() !== undefined) capabilities.push('plugin.route.v1')
     if (this.codex.isAvailable()) capabilities.push('codex.appserver.v1', 'codex.appserver.transfer.v1')
     // Protocol support is stable during background warmup; workspaceTypes reports readiness.
     if (this.acp.enabledBackends().length > 0) {

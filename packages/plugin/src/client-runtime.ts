@@ -3,6 +3,7 @@ import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import {
   parseRemoteWorkspaceTypes,
   type CodexAppFrameData,
+  type PluginRouteCallResult,
   type CodexAppStreamClosedData,
   type RemoteWorkspaceTypeDescription,
 } from '@dsh-remote/protocol'
@@ -23,6 +24,7 @@ import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { uuidV7 } from './ids.js'
 import type { SafeLogger } from './logging.js'
 import { harnessSessionGeneration } from './harness-version.js'
+import { isAllowedPluginRoute } from './plugin-route-bridge.js'
 import { RemoteHarnessApiProxy } from './remote-api-proxy.js'
 import { RemoteTypertGateway } from './remote-typert-gateway.js'
 import {
@@ -70,6 +72,7 @@ export interface RemoteHostFeatures {
   antigravity: boolean
   acpModelLoadsSession?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
+  pluginRoute: boolean
 }
 
 interface CodexLoopbackStream {
@@ -722,6 +725,17 @@ export class ClientModeRuntime {
     return remote.client.rpc('fileviewer.call', { endpoint, payload }, signal)
   }
 
+  private async pluginRoute(route: string, body: unknown, signal: AbortSignal): Promise<PluginRouteCallResult> {
+    const remote = this.connected
+    if (remote === undefined || this.status().mode !== 'remote') {
+      throw new ClientModeError('REMOTE_NOT_CONNECTED', 'No Remote Host is selected.', true)
+    }
+    if (!remote.features.pluginRoute) {
+      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The connected Host cannot forward plugin routes.')
+    }
+    return remote.client.rpc('plugin.route.call', { route, body }, signal)
+  }
+
   private activeRemote(): ConnectedRemote | undefined {
     return this.connected
   }
@@ -1309,6 +1323,14 @@ export class ClientModeRuntime {
         const host = this.requireLocalCodex()
         return ok(await host.codexRespond(value, signal))
       }
+      if (endpoint === 'plugin.route') {
+        const value = record(payload)
+        if (typeof value.route !== 'string' || !isAllowedPluginRoute(value.route)) {
+          throw new ClientModeError('INVALID_MESSAGE', 'A valid plugin route is required.')
+        }
+        if (!isRecord(value.body)) throw new ClientModeError('INVALID_MESSAGE', 'A plugin route body object is required.')
+        return ok(await this.pluginRoute(value.route, value.body, signal))
+      }
       if (endpoint === 'codex.stream.open') return ok(await this.openCodexStream(payload, signal))
       if (endpoint === 'codex.stream.next') return ok(await this.nextCodexFrames(payload, signal))
       if (endpoint === 'codex.stream.close') return ok(await this.closeCodexStream(payload))
@@ -1524,6 +1546,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     codex: false,
     cursor: false,
     antigravity: false,
+    pluginRoute: false,
   }
 }
 
@@ -1573,6 +1596,7 @@ export async function probeRemoteHostFeatures(
     antigravity,
     ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
+    pluginRoute: capabilities.has('plugin.route.v1'),
   }
 }
 

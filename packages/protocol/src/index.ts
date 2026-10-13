@@ -153,6 +153,7 @@ export const rpcMethods = [
   'acp.session.respond_permission',
   'acp.session.cancel',
   'acp.session.set_mode',
+  'plugin.route.call',
 ] as const
 
 export const remoteEvents = [
@@ -430,6 +431,7 @@ export const harnessCapabilityValues = [
   'fileviewer.read.v1',
   'codex.appserver.v1',
   'codex.appserver.transfer.v1',
+  'plugin.route.v1',
 ] as const
 
 export type TransportCapability = typeof transportCapabilities[number]
@@ -524,6 +526,17 @@ export interface TransportStats {
   rttMs?: number
   bytesSent?: number
   bytesReceived?: number
+}
+
+/** Local plugin web route call tunneled inside the authenticated business channel. */
+export interface PluginRouteCallParams {
+  route: string
+  body: unknown
+}
+
+export interface PluginRouteCallResult {
+  status: number
+  json: unknown
 }
 
 /** Native Harness API request tunneled inside the authenticated business channel. */

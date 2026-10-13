@@ -4185,7 +4185,8 @@ var rpcMethods = [
   "acp.session.prompt",
   "acp.session.respond_permission",
   "acp.session.cancel",
-  "acp.session.set_mode"
+  "acp.session.set_mode",
+  "plugin.route.call"
 ];
 var errorCodes = [
   // Protocol / Version
@@ -15100,6 +15101,57 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   }
 }
 
+// src/plugin-route-bridge.ts
+var PLUGIN_ROUTE_PATTERN = /^api\/[A-Za-z0-9._/-]{1,64}$/;
+var callSchema = external_exports.object({
+  route: external_exports.string().regex(PLUGIN_ROUTE_PATTERN),
+  body: external_exports.record(external_exports.string(), external_exports.unknown())
+}).strict();
+var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
+var PluginRouteBridge = class {
+  constructor(dispatch, logger) {
+    this.dispatch = dispatch;
+    this.logger = logger;
+  }
+  async call(input2) {
+    let params;
+    try {
+      params = callSchema.parse(input2);
+    } catch (error) {
+      if (error instanceof external_exports.ZodError) {
+        throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
+      }
+      throw error;
+    }
+    if (serializedBytes(params) > MAX_SECURE_MESSAGE_BYTES) {
+      throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
+    }
+    const startedAt = performance.now();
+    let result;
+    try {
+      result = await this.dispatch(params.route, params.body, AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS));
+    } catch (error) {
+      this.logger?.warn("plugin route call failed", {
+        route: params.route,
+        durationMs: Math.round(performance.now() - startedAt)
+      });
+      throw error;
+    }
+    if (serializedBytes(result) > MAX_SECURE_MESSAGE_BYTES) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "The plugin route response exceeds the bounded remote limit.");
+    }
+    this.logger?.debug("plugin route call ok", {
+      route: params.route,
+      status: result.status,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    return { status: result.status, json: result.json };
+  }
+};
+function serializedBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
 // src/remote-api-proxy.ts
 var DIRECT_API_CALL_BYTES = 2 * 1024 * 1024;
 var AGENT_PRESET_SETTINGS_NS = "agent-presets";
@@ -22436,6 +22488,16 @@ var ClientModeRuntime = class {
     }
     return remote.client.rpc("fileviewer.call", { endpoint, payload }, signal);
   }
+  async pluginRoute(route, body, signal) {
+    const remote = this.connected;
+    if (remote === void 0 || this.status().mode !== "remote") {
+      throw new ClientModeError("REMOTE_NOT_CONNECTED", "No Remote Host is selected.", true);
+    }
+    if (!remote.features.pluginRoute) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The connected Host cannot forward plugin routes.");
+    }
+    return remote.client.rpc("plugin.route.call", { route, body }, signal);
+  }
   activeRemote() {
     return this.connected;
   }
@@ -22968,6 +23030,14 @@ var ClientModeRuntime = class {
         const host = this.requireLocalCodex();
         return ok2(await host.codexRespond(value, signal));
       }
+      if (endpoint === "plugin.route") {
+        const value = record5(payload);
+        if (typeof value.route !== "string" || !PLUGIN_ROUTE_PATTERN.test(value.route)) {
+          throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
+        }
+        if (!isRecord10(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");
+        return ok2(await this.pluginRoute(value.route, value.body, signal));
+      }
       if (endpoint === "codex.stream.open") return ok2(await this.openCodexStream(payload, signal));
       if (endpoint === "codex.stream.next") return ok2(await this.nextCodexFrames(payload, signal));
       if (endpoint === "codex.stream.close") return ok2(await this.closeCodexStream(payload));
@@ -23150,7 +23220,8 @@ function remoteHostFeatures(clientVersion) {
     remoteGateway: false,
     codex: false,
     cursor: false,
-    antigravity: false
+    antigravity: false,
+    pluginRoute: false
   };
 }
 async function probeRemoteHostFeatures(client, clientVersion) {
@@ -23194,7 +23265,8 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     cursor: cursor2,
     antigravity,
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
-    ...workspaceTypes === void 0 ? {} : { workspaceTypes }
+    ...workspaceTypes === void 0 ? {} : { workspaceTypes },
+    pluginRoute: capabilities.has("plugin.route.v1")
   };
 }
 async function waitForCodexFrames(stream, signal) {
@@ -29381,7 +29453,8 @@ var apiMethods = /* @__PURE__ */ new Set([
   "agent.acp.transfer.chunk",
   "agent.acp.transfer.commit",
   "agent.acp.transfer.read",
-  "agent.acp.transfer.close"
+  "agent.acp.transfer.close",
+  "plugin.route.call"
 ]);
 var HOST_CAPABILITIES = [
   "harness.api.v1",
@@ -29395,7 +29468,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes) {
+  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute) {
     this.harnessApi = harnessApi;
     this.maxPending = maxPending;
     this.logger = logger;
@@ -29406,6 +29479,7 @@ var RpcRouter = class {
     this.acp = acp;
     this.loopback = loopback;
     this.workspaceTypes = workspaceTypes;
+    this.pluginRoute = pluginRoute;
   }
   active = 0;
   async closePeerStreams() {
@@ -29554,6 +29628,8 @@ var RpcRouter = class {
         return this.requireAcp().readTransfer(params);
       case "agent.acp.transfer.close":
         return this.requireAcp().closeTransfer(params);
+      case "plugin.route.call":
+        return this.requirePluginRoute().call(params);
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
@@ -29582,6 +29658,12 @@ var RpcRouter = class {
     }
     return this.acp;
   }
+  requirePluginRoute() {
+    if (this.pluginRoute === void 0) {
+      throw new RpcError("FEATURE_NOT_SUPPORTED", "This Host cannot forward local plugin routes.");
+    }
+    return this.pluginRoute;
+  }
 };
 function errorResponse2(requestId, error) {
   const code = safeErrorCode(error);
@@ -29600,7 +29682,7 @@ var MAX_REMOTE_DIRECTORY_ENTRIES = 1e3;
 
 // src/file-viewer-bridge.ts
 var locatorSchema = external_exports.string().min(1).max(MAX_REMOTE_FILE_LOCATOR_CHARS);
-var callSchema = external_exports.discriminatedUnion("endpoint", [
+var callSchema2 = external_exports.discriminatedUnion("endpoint", [
   external_exports.object({
     endpoint: external_exports.literal("stat"),
     payload: external_exports.object({ path: locatorSchema }).strict()
@@ -29651,7 +29733,7 @@ var RemoteFileViewerBridge = class {
     this.logger = logger;
   }
   async call(input2) {
-    const params = callSchema.parse(input2);
+    const params = callSchema2.parse(input2);
     const service = this.service();
     if (service === void 0) {
       throw new RpcError("FILE_VIEWER_UNAVAILABLE", "The Remote Host does not have DSH File Viewer available.");
@@ -30721,7 +30803,7 @@ function historyRequestPayload(payload, maxMessages) {
 }
 
 // src/harness-api-bridge.ts
-var callSchema2 = external_exports.object({
+var callSchema3 = external_exports.object({
   method: external_exports.string().min(1).max(80),
   rpcId: external_exports.string().min(1).max(128),
   payload: external_exports.unknown()
@@ -30912,7 +30994,7 @@ var HarnessApiBridge = class {
   host;
   answer;
   async call(input2) {
-    const params = callSchema2.parse(input2);
+    const params = callSchema3.parse(input2);
     const signal = AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS);
     const method = this.methods.get(params.method);
     if (method === void 0) {
@@ -31046,7 +31128,7 @@ var HarnessApiBridge = class {
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer does not contain a valid request.");
     }
-    const nativeRequest = callSchema2.parse(request);
+    const nativeRequest = callSchema3.parse(request);
     const response = await this.call(nativeRequest);
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) {
@@ -31492,7 +31574,7 @@ function concatChunks3(chunks, totalBytes) {
 
 // src/harness-remote-bridge.ts
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
-var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
+var callSchema4 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema4 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
@@ -31633,7 +31715,7 @@ var HarnessRemoteBridge = class {
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   async call(input2) {
-    const params = callSchema3.parse(input2);
+    const params = callSchema4.parse(input2);
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
@@ -31753,7 +31835,7 @@ var HarnessRemoteBridge = class {
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
-    const response = await this.call(callSchema3.parse(request));
+    const response = await this.call(callSchema4.parse(request));
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES4) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
@@ -32015,7 +32097,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config, identities, apiProxy, logger, localGateway, fileViewerHost, terminalSpawner) {
+  constructor(config, identities, apiProxy, logger, localGateway, fileViewerHost, terminalSpawner, pluginRoutes) {
     this.config = config;
     this.identities = identities;
     this.apiProxy = apiProxy;
@@ -32023,6 +32105,7 @@ var HostPluginRuntime = class {
     this.localGateway = localGateway;
     this.fileViewerHost = fileViewerHost;
     this.terminalSpawner = terminalSpawner;
+    this.pluginRoutes = pluginRoutes;
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
     this.codex = new CodexRemoteDomain(config.codex, logger);
@@ -32061,6 +32144,8 @@ var HostPluginRuntime = class {
         context,
         (event, data2) => send(createEvent(event, data2))
       );
+      const dispatcher = this.pluginRoutes?.();
+      const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
       return new RpcRouter(
         harnessApi,
         void 0,
@@ -32072,7 +32157,8 @@ var HostPluginRuntime = class {
         cursor2,
         // Handles and their lifetime belong to this connection; only policy is shared.
         this.createLoopbackHost(),
-        () => this.hostWorkspaceTypes()
+        () => this.hostWorkspaceTypes(),
+        pluginRoute
       );
     }, this.logger);
     if (config.serverUrl !== void 0) {
@@ -32392,6 +32478,7 @@ var HostPluginRuntime = class {
       capabilities.push("harness.api.v1", "harness.api.transfer.v1");
     }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
+    if (this.pluginRoutes?.() !== void 0) capabilities.push("plugin.route.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
     if (this.acp.enabledBackends().length > 0) {
       capabilities.push("agent.acp.v1", "agent.acp.transfer.v1", "agent.acp.workspace-files.v1");
@@ -33222,6 +33309,29 @@ var pluginSettingsNamespace = "ds-harness-remote";
 var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
+function createPluginRouteDispatcher(ctx) {
+  const connection = ctx.get("connection");
+  const handler = connection?.createSharedFetchHandler?.("/api");
+  if (handler === void 0) return void 0;
+  return async (route, body, signal) => {
+    const response = await handler.fetch(new Request(`http://dsh.internal/${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body ?? {}),
+      signal
+    }));
+    const text = await response.text();
+    let json = null;
+    if (text !== "") {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = text;
+      }
+    }
+    return { status: response.status, json };
+  };
+}
 function apply(ctx, entry = void 0) {
   const readConfig = () => readEntryConfig(entry);
   const entryId = locateEntryId(ctx);
@@ -33315,7 +33425,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     logger,
     localTypertGateway,
     () => ctx.get("fileViewerHost"),
-    subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess)
+    subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
+    () => createPluginRouteDispatcher(ctx)
   );
   let clientRuntime;
   const hostControl = runtime;

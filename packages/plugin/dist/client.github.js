@@ -2282,7 +2282,66 @@ Minimum version required to store current data is: ` + bestVersion + `.
     constructor(message) {
       super(message), this.name = "ControlRouteUnavailableError";
     }
-  };
+  }, pluginRoutePatchWrapped = !1, originalWindowFetch, pluginRouteActive;
+  function isPluginRoutePost(input, init) {
+    let url = typeof input == "string" || input instanceof URL ? String(input) : input.url;
+    return (typeof input == "string" || input instanceof URL ? init?.method ?? "GET" : init?.method ?? input.method).toUpperCase() !== "POST" ? !1 : url === "api/bot" || url === "/api/bot";
+  }
+  async function pluginRouteBody(input, init) {
+    let raw = typeof input == "string" || input instanceof URL ? init?.body : input.body;
+    if (typeof raw == "string")
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return {};
+      }
+    if (raw == null) return {};
+    if (typeof input == "object" && "clone" in input)
+      try {
+        return await input.clone().json();
+      } catch {
+        return {};
+      }
+    return {};
+  }
+  function installPluginRoutePatch(isActive) {
+    if (typeof window > "u" || typeof window.fetch != "function") return () => {
+    };
+    if (!pluginRoutePatchWrapped) {
+      pluginRoutePatchWrapped = !0;
+      let original = window.fetch.bind(window);
+      originalWindowFetch = original, window.fetch = (async (input, init) => pluginRouteActive !== void 0 && pluginRouteActive() && isPluginRoutePost(input, init) ? forwardPluginRoute(original, input, init) : original(input, init));
+    }
+    return pluginRouteActive = isActive, () => {
+      pluginRouteActive === isActive && (pluginRouteActive = void 0);
+    };
+  }
+  async function forwardPluginRoute(original, input, init) {
+    try {
+      let body = await pluginRouteBody(input, init), payload = await (await original(`${CONTROL_RPC_PREFIX}/plugin.route`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ route: "api/bot", body })
+      })).json().catch(() => {
+      }), envelope = payload && typeof payload == "object" && "result" in payload ? payload.result : payload, result = envelope && typeof envelope == "object" ? envelope : void 0;
+      if (result === void 0 || result.ok !== !0 || typeof result.value != "object" || result.value === null)
+        return new Response(JSON.stringify({ ok: !1, error: { code: "gateway/bad-request", message: "plugin route tunnel failed" } }), {
+          status: 502,
+          headers: { "content-type": "application/json" }
+        });
+      let status = typeof result.value.status == "number" ? result.value.status : 200;
+      return new Response(JSON.stringify(result.value.json ?? null), {
+        status,
+        headers: { "content-type": "application/json" }
+      });
+    } catch {
+      return new Response(JSON.stringify({ ok: !1, error: { code: "gateway/bad-request", message: "plugin route tunnel failed" } }), {
+        status: 502,
+        headers: { "content-type": "application/json" }
+      });
+    }
+  }
   function controlRouteUnavailableStatus() {
     return {
       mode: "local",
@@ -2290,7 +2349,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       controlUnavailable: !0,
       connected: !1,
       transport: "Disconnected",
-      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1, cursor: !1, antigravity: !1 },
+      remoteFeatures: { commandList: !1, fileViewer: !1, terminal: !1, codex: !1, pluginRoute: !1, cursor: !1, antigravity: !1 },
       hostAuthorizationAvailable: !1
     };
   }
@@ -2935,7 +2994,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
           return document.documentElement.classList.toggle("dshRemoteTargetActive", remoteActive), () => {
             remoteActive && document.documentElement.classList.remove("dshRemoteTargetActive");
           };
-        }, [status?.mode]);
+        }, [status?.mode]), React.useEffect(() => {
+          let enabled = status?.mode === "remote" && status?.connected === !0 && status?.remoteFeatures?.pluginRoute !== !1;
+          return installPluginRoutePatch(() => enabled);
+        }, [status?.mode, status?.connected, status?.remoteFeatures?.pluginRoute]);
         let startQrLogin = async (provider) => {
           let run = ++qrFlowRun.current;
           setBusy(!0), setError(void 0), setQrExpired(!1);

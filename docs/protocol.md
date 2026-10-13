@@ -739,6 +739,22 @@ Plugin Host 的业务路由只接受 capability 对应的官方 Harness tunnel�
 原生关联语义；alpha 保持官方 Gateway 的 `{ ok, value|error }` envelope；外层 request id
 只关联隧道 response/error。
 
+### 16.4 plugin.route.call
+
+`plugin.route.call`（capability `plugin.route.v1`）把 Host 本机其他 DSH 插件的 HTTP 路由
+（首个用例：ds-bot 的 `POST api/bot`）通过认证业务通道转发给远程 Client。Host 侧只接受
+`route` 匹配白名单 `^api\/[A-Za-z0-9._\/-]{1,64}$` 的 POST 转发，`body` 必须是普通 JSON
+对象（数组与原始值拒绝）。
+
+```json
+"params": { "route": "api/bot", "body": { "message": "hi" } }
+```
+
+Result 为 `{ "status": number, "json": unknown }`，即本机路由的 HTTP 状态码与解析后的 JSON
+响应体。请求与响应序列化后都不得超过 `MAX_SECURE_MESSAGE_BYTES`；单次调用超时 30s。
+Host 未注入本机路由服务时不得宣告 `plugin.route.v1`，此时 `plugin.route.call` 返回
+`FEATURE_NOT_SUPPORTED`。
+
 ## 17. Capability
 
 Host handshake 的 capability 例子：

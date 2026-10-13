@@ -63,6 +63,7 @@ interface RemoteStatus {
     commandList: boolean
     fileViewer: boolean
     terminal?: boolean
+    pluginRoute?: boolean
     codex?: boolean
     cursor?: boolean
     antigravity?: boolean
@@ -291,6 +292,93 @@ class ControlRouteUnavailableError extends Error {
   }
 }
 
+/**
+ * Browser-side plugin route redirect: while a remote session is active, page
+ * fetches of the local plugin route `api/bot` are tunneled through the
+ * authenticated control channel (`plugin.route`) instead of hitting the
+ * host page, so ds-bot's own frontend keeps working unchanged.
+ */
+let pluginRoutePatchWrapped = false
+let originalWindowFetch: typeof window.fetch | undefined
+let pluginRouteActive: (() => boolean) | undefined
+
+function isPluginRoutePost(input: RequestInfo | URL, init?: RequestInit): boolean {
+  const url = typeof input === 'string' || input instanceof URL ? String(input) : input.url
+  const method = typeof input === 'string' || input instanceof URL
+    ? init?.method ?? 'GET'
+    : init?.method ?? input.method
+  if (method.toUpperCase() !== 'POST') return false
+  return url === 'api/bot' || url === '/api/bot'
+}
+
+async function pluginRouteBody(input: RequestInfo | URL, init?: RequestInit): Promise<unknown> {
+  const raw = typeof input === 'string' || input instanceof URL ? init?.body : input.body
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw) } catch { return {} }
+  }
+  if (raw === null || raw === undefined) return {}
+  if (typeof input === 'object' && 'clone' in input) {
+    try { return await input.clone().json() } catch { return {} }
+  }
+  return {}
+}
+
+function installPluginRoutePatch(isActive: () => boolean): () => void {
+  if (typeof window === 'undefined' || typeof window.fetch !== 'function') return () => undefined
+  if (!pluginRoutePatchWrapped) {
+    pluginRoutePatchWrapped = true
+    const original = window.fetch.bind(window)
+    originalWindowFetch = original
+    window.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (pluginRouteActive !== undefined && pluginRouteActive() && isPluginRoutePost(input, init)) {
+        return forwardPluginRoute(original, input, init)
+      }
+      return original(input as RequestInfo, init)
+    }) as typeof window.fetch
+  }
+  pluginRouteActive = isActive
+  return () => {
+    if (pluginRouteActive === isActive) pluginRouteActive = undefined
+  }
+}
+
+async function forwardPluginRoute(
+  original: typeof window.fetch,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<Response> {
+  try {
+    const body = await pluginRouteBody(input, init)
+    const response = await original(`${CONTROL_RPC_PREFIX}/plugin.route`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ route: 'api/bot', body }),
+    })
+    const payload = await response.json().catch(() => undefined)
+    const envelope = (payload && typeof payload === 'object' && 'result' in payload ? payload.result : payload) as
+      | { ok?: boolean; value?: { status?: number; json?: unknown } }
+      | undefined
+    const result = envelope && typeof envelope === 'object' ? envelope : undefined
+    if (result === undefined || result.ok !== true || typeof result.value !== 'object' || result.value === null) {
+      return new Response(JSON.stringify({ ok: false, error: { code: 'gateway/bad-request', message: 'plugin route tunnel failed' } }), {
+        status: 502,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    const status = typeof result.value.status === 'number' ? result.value.status : 200
+    return new Response(JSON.stringify(result.value.json ?? null), {
+      status,
+      headers: { 'content-type': 'application/json' },
+    })
+  } catch {
+    return new Response(JSON.stringify({ ok: false, error: { code: 'gateway/bad-request', message: 'plugin route tunnel failed' } }), {
+      status: 502,
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+}
+
 function controlRouteUnavailableStatus(): RemoteStatus {
   return {
     mode: 'local',
@@ -298,7 +386,7 @@ function controlRouteUnavailableStatus(): RemoteStatus {
     controlUnavailable: true,
     connected: false,
     transport: 'Disconnected',
-    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, cursor: false, antigravity: false },
+    remoteFeatures: { commandList: false, fileViewer: false, terminal: false, codex: false, pluginRoute: false, cursor: false, antigravity: false },
     hostAuthorizationAvailable: false,
   }
 }
@@ -1108,6 +1196,14 @@ window.__ModuleLoader__.load({
           if (remoteActive) document.documentElement.classList.remove('dshRemoteTargetActive')
         }
       }, [status?.mode])
+
+      React.useEffect(() => {
+        // Degrade to "connected implies enabled" when the Host status predates
+        // the pluginRoute feature flag; disable explicitly on false.
+        const enabled = status?.mode === 'remote' && status?.connected === true
+          && status?.remoteFeatures?.pluginRoute !== false
+        return installPluginRoutePatch(() => enabled)
+      }, [status?.mode, status?.connected, status?.remoteFeatures?.pluginRoute])
 
       const startQrLogin = async (provider: OAuthProvider): Promise<void> => {
         const run = ++qrFlowRun.current

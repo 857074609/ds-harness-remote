@@ -23,6 +23,7 @@ import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
+import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import {
   installTuiRemoteCommand,
   type TuiRemoteBinding,
@@ -86,6 +87,40 @@ interface LoaderLike {
   entries(): Iterable<LoaderEntryLike>
   locate?(fiber?: unknown): string | undefined
   update(id: string, options: { disabled?: boolean | null }): unknown
+}
+
+/**
+ * Duck-typed slice of the DSH `connection` service that exposes local plugin
+ * web routes under a shared prefix. The full type is not available to plugins,
+ * so the runtime resolves it lazily via the thunk below.
+ */
+interface DshConnectionRouteHostLike {
+  createSharedFetchHandler?(prefix: string): { fetch(request: Request): Promise<Response> }
+}
+
+/**
+ * Lazily builds a bounded dispatcher that POSTs to Host-local plugin web
+ * routes (first case: ds-bot's `api/bot`). Lazy on every call because the
+ * connection service may be injected after this plugin activates.
+ */
+function createPluginRouteDispatcher(ctx: Context): PluginRouteDispatcher | undefined {
+  const connection = ctx.get('connection') as DshConnectionRouteHostLike | undefined
+  const handler = connection?.createSharedFetchHandler?.('/api')
+  if (handler === undefined) return undefined
+  return async (route, body, signal) => {
+    const response = await handler.fetch(new Request(`http://dsh.internal/${route}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+      signal,
+    }))
+    const text = await response.text()
+    let json: unknown = null
+    if (text !== '') {
+      try { json = JSON.parse(text) } catch { json = text }
+    }
+    return { status: response.status, json }
+  }
 }
 
 export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined = undefined): void {
@@ -215,6 +250,7 @@ async function activate(
     localTypertGateway,
     () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
     subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
+    () => createPluginRouteDispatcher(ctx),
   )
 
   let clientRuntime: ClientModeRuntime | undefined

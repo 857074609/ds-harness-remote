@@ -31,6 +31,7 @@ export interface RtcSelectedPath {
 export interface RtcPathDetails {
   transport?: RtcSelectedTransport
   mode?: RtcPathMode
+  relayUrl?: string
   localCandidateType?: string
   remoteCandidateType?: string
   localAddressScope?: RtcAddressScope
@@ -76,6 +77,7 @@ export interface RtcCandidatePairTelemetry {
 export interface RtcSelectedPathTelemetry {
   transport?: RtcSelectedTransport
   mode?: RtcPathMode
+  relayUrl?: string
   localCandidateType?: string
   remoteCandidateType?: string
   localAddressScope?: RtcAddressScope
@@ -178,6 +180,7 @@ export class RtcDataChannelTransport {
   private bytesReceived = 0
   private selected?: RtcSelectedTransport
   private selectedMode?: RtcPathMode
+  private selectedRelayUrlValue?: string
   private selectedPathTelemetry?: RtcSelectedPathTelemetry
   private readonly localCandidateTelemetry = emptyCandidateTelemetry()
   private readonly remoteCandidateTelemetry = emptyCandidateTelemetry()
@@ -276,6 +279,10 @@ export class RtcDataChannelTransport {
 
   selectedTransport(): RtcSelectedTransport | undefined {
     return this.selected
+  }
+
+  selectedRelayUrl(): string | undefined {
+    return this.selectedRelayUrlValue
   }
 
   selectedPathMode(): RtcPathMode | undefined {
@@ -490,6 +497,7 @@ export class RtcDataChannelTransport {
       }
       this.selected = selected?.transport
       this.selectedMode = selected?.mode
+      this.selectedRelayUrlValue = selected?.relayUrl
       this.selectedPathTelemetry = selectedPathTelemetry(selected)
       this.emitDiagnostic({
         type: 'selected-path',
@@ -667,12 +675,14 @@ export function inspectSelectedPath(stats: RtcStats): RtcPathDetails {
     const remoteAddressScope = summarizeAddress(candidateAddressValue(remote)).addressScope
     let selected: RtcSelectedPath | undefined
     if (localType === 'relay' || remoteType === 'relay') selected = { transport: 'turn', mode: 'TURN' }
+    const relayUrl = localType === 'relay' ? stringStat(local, 'url') : undefined
     if (local === undefined && remote === undefined) continue
     const lan = isLanCandidatePair(localType, remoteType, localAddressScope, remoteAddressScope)
     selected ??= { transport: lan ? 'lan' : 'p2p', mode: lan ? 'LAN' : 'P2P' }
     const currentRoundTripTime = numberStat(pair, 'currentRoundTripTime')
     return {
       ...selected,
+      ...(relayUrl === undefined ? {} : { relayUrl }),
       localCandidateType: stringStat(local, 'candidateType'),
       remoteCandidateType: stringStat(remote, 'candidateType'),
       localAddressScope,
@@ -856,6 +866,7 @@ function selectedPathTelemetry(details: RtcPathDetails): RtcSelectedPathTelemetr
   return {
     ...(details.transport === undefined ? {} : { transport: details.transport }),
     ...(details.mode === undefined ? {} : { mode: details.mode }),
+    ...(details.relayUrl === undefined ? {} : { relayUrl: details.relayUrl }),
     ...(details.localCandidateType === undefined ? {} : { localCandidateType: details.localCandidateType }),
     ...(details.remoteCandidateType === undefined ? {} : { remoteCandidateType: details.remoteCandidateType }),
     ...(details.localAddressScope === undefined ? {} : { localAddressScope: details.localAddressScope }),

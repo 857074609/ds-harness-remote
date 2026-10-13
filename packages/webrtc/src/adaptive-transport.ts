@@ -328,7 +328,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.lastRtcDiagnostics = undefined
     if (wantWebRtc) {
       try {
-        const rtcSelected = await this.tryWebRtc()
+        const rtcSelected = (await this.tryWebRtc()).transport
         const wireSelected = rtcSelected === 'lan' && !preferred.includes('lan') && preferred.includes('p2p')
           ? 'p2p'
           : rtcSelected
@@ -359,10 +359,12 @@ export class AdaptiveTransport extends BaseTransport {
       selected = 'relay'
     }
     this.selected = selected
+    const turnNode = selected === 'turn' ? this.rtc?.selectedRelayUrl() : undefined
     this.sendControl('transport.selected', {
       connectionId: this.connectionId,
       targetDeviceId: this.options.targetDeviceId,
       transport: selected,
+      ...(turnNode === undefined ? {} : { turnNode }),
     } satisfies TransportSelectedPayload)
     this.finishConnection()
   }
@@ -378,7 +380,7 @@ export class AdaptiveTransport extends BaseTransport {
     })
   }
 
-  private async tryWebRtc(): Promise<RtcSelectedTransport> {
+  private async tryWebRtc(): Promise<{ transport: RtcSelectedTransport, relayUrl?: string }> {
     const connectionId = this.connectionId
     if (connectionId === undefined) throw new RtcConnectError('RTC_UNAVAILABLE', 'No connection id for WebRTC negotiation.')
     const factory = this.options.rtcFactory
@@ -425,7 +427,7 @@ export class AdaptiveTransport extends BaseTransport {
       throw error
     }
     this.lastRtcDiagnostics = rtc.diagnostics()
-    return rtc.selectedTransport() ?? 'p2p'
+    return { transport: rtc.selectedTransport() ?? 'p2p', relayUrl: rtc.selectedRelayUrl() }
   }
 
   private sendRtcSignal(signal: RtcSignal): void {

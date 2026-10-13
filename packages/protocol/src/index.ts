@@ -400,6 +400,9 @@ export interface TransportSelectedPayload {
   connectionId: string
   targetDeviceId: string
   transport: SelectedTransport
+  /** Relay hostname the client actually used when transport is "turn"
+   *  (best-effort, from ICE stats; absent for other transports). */
+  turnNode?: string
 }
 
 /** Capabilities both ends announce in ``hello`` to negotiate the data plane. */

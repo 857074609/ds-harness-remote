@@ -6549,6 +6549,7 @@ var RtcDataChannelTransport = class {
   bytesReceived = 0;
   selected;
   selectedMode;
+  selectedRelayUrlValue;
   selectedPathTelemetry;
   localCandidateTelemetry = emptyCandidateTelemetry();
   remoteCandidateTelemetry = emptyCandidateTelemetry();
@@ -6645,6 +6646,9 @@ var RtcDataChannelTransport = class {
   }
   selectedTransport() {
     return this.selected;
+  }
+  selectedRelayUrl() {
+    return this.selectedRelayUrlValue;
   }
   selectedPathMode() {
     return this.selectedMode;
@@ -6856,6 +6860,7 @@ var RtcDataChannelTransport = class {
       }
       this.selected = selected?.transport;
       this.selectedMode = selected?.mode;
+      this.selectedRelayUrlValue = selected?.relayUrl;
       this.selectedPathTelemetry = selectedPathTelemetry(selected);
       this.emitDiagnostic({
         type: "selected-path",
@@ -7022,6 +7027,7 @@ function inspectSelectedPath(stats) {
     let selected;
     if (localType === "relay" || remoteType === "relay")
       selected = { transport: "turn", mode: "TURN" };
+    const relayUrl = localType === "relay" ? stringStat(local, "url") : void 0;
     if (local === void 0 && remote === void 0)
       continue;
     const lan = isLanCandidatePair(localType, remoteType, localAddressScope, remoteAddressScope);
@@ -7029,6 +7035,7 @@ function inspectSelectedPath(stats) {
     const currentRoundTripTime = numberStat(pair, "currentRoundTripTime");
     return {
       ...selected,
+      ...relayUrl === void 0 ? {} : { relayUrl },
       localCandidateType: stringStat(local, "candidateType"),
       remoteCandidateType: stringStat(remote, "candidateType"),
       localAddressScope,
@@ -7181,6 +7188,7 @@ function selectedPathTelemetry(details) {
   return {
     ...details.transport === void 0 ? {} : { transport: details.transport },
     ...details.mode === void 0 ? {} : { mode: details.mode },
+    ...details.relayUrl === void 0 ? {} : { relayUrl: details.relayUrl },
     ...details.localCandidateType === void 0 ? {} : { localCandidateType: details.localCandidateType },
     ...details.remoteCandidateType === void 0 ? {} : { remoteCandidateType: details.remoteCandidateType },
     ...details.localAddressScope === void 0 ? {} : { localAddressScope: details.localAddressScope },
@@ -7460,7 +7468,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.lastRtcDiagnostics = void 0;
     if (wantWebRtc) {
       try {
-        const rtcSelected = await this.tryWebRtc();
+        const rtcSelected = (await this.tryWebRtc()).transport;
         const wireSelected = rtcSelected === "lan" && !preferred.includes("lan") && preferred.includes("p2p") ? "p2p" : rtcSelected;
         if (!preferred.includes(wireSelected)) {
           await this.rtc?.close();
@@ -7494,10 +7502,12 @@ var AdaptiveTransport = class extends BaseTransport {
       selected = "relay";
     }
     this.selected = selected;
+    const turnNode = selected === "turn" ? this.rtc?.selectedRelayUrl() : void 0;
     this.sendControl("transport.selected", {
       connectionId: this.connectionId,
       targetDeviceId: this.options.targetDeviceId,
-      transport: selected
+      transport: selected,
+      ...turnNode === void 0 ? {} : { turnNode }
     });
     this.finishConnection();
   }
@@ -7558,7 +7568,7 @@ var AdaptiveTransport = class extends BaseTransport {
       throw error;
     }
     this.lastRtcDiagnostics = rtc.diagnostics();
-    return rtc.selectedTransport() ?? "p2p";
+    return { transport: rtc.selectedTransport() ?? "p2p", relayUrl: rtc.selectedRelayUrl() };
   }
   sendRtcSignal(signal) {
     if (this.connectionId === void 0)

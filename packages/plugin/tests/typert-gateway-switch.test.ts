@@ -8,6 +8,40 @@ import type { TypertGatewayLike } from '../src/harness-api-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 
 describe('TypertGatewaySwitch', () => {
+  it('returns remote RPC refusals in the official HTTP envelope without calling local services', async () => {
+    const ctx = new Context()
+    try {
+      await ctx.plugin(owner => { new HostConnectionService(owner, [], {} as never) }).await()
+      const connection = ctx.get('connection') as HostConnectionService
+      const localDispatch = vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'local' }))
+      const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localDispatch }
+      const target = new TypertGatewaySwitch(gateway)
+      target.install()
+      connection.rpc.intercept('/api', () => true, (endpoint, payload, signal) => gateway.dispatchRpc(endpoint, payload, signal))
+      const handler = connection.createSharedFetchHandler('/api')
+      await runScenarios(['METHOD_NOT_ALLOWED', 'TRANSPORT_CLOSED'].map(code => ({
+        name: code,
+        run: async () => {
+          target.selectRemote(new RemoteTypertGateway({ rpc: vi.fn(async () => {
+            throw Object.assign(new Error('Remote request rejected'), { code })
+          }) } as unknown as RemoteClientCore))
+          const response = await handler.fetch(new Request('http://localhost/api/schedule/list', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ type: 'client-request', rpcId: 'schedule-read', method: 'schedule/list', payload: { args: { request: { sessionId: 's1' } } } }),
+          }))
+          expect(response.status).toBe(200)
+          expect(await response.json()).toMatchObject({
+            type: 'server-response', rpcId: 'schedule-read', result: { ok: false, error: { code } },
+          })
+        },
+      })))
+      expect(localDispatch).not.toHaveBeenCalled()
+      target.restore()
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
   it('preserves preview bytes through the native Connection HTTP hop', async () => {
     const ctx = new Context()
     try {

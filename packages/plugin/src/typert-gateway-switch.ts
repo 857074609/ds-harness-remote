@@ -116,7 +116,10 @@ export class TypertGatewaySwitch {
     if (this.originalDispatch !== undefined) {
       this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)
         ? this.localDispatch!(endpoint, payload, signal)
-        : this.remoteTarget.dispatch(endpoint, payload, signal).then(result => workspaceConnectionResult(endpoint, result))
+        : this.remoteTarget.dispatch(endpoint, payload, signal).then(
+          result => workspaceConnectionResult(endpoint, result),
+          error => ({ ok: false, error: this.failure(error) }),
+        )
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen

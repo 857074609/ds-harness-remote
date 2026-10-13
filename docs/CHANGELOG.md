@@ -1,10 +1,16 @@
 ## Unreleased
 
-- Makes the Remote sidebar footer entry a fixed-width icon button so it can share the row with other plugins; tooltips retain the target name and the connected button returns to local workspaces.
+- Reports DS Bot forwarding refusals with distinct safe error codes in its native error envelope, including missing Host routes, unsupported carriers, disconnected or incompatible catalogs, and catalog readiness failures.
+- Adds the native schedule UI's read-only `schedule/list` and `schedule/catalog` endpoints to the fixed Remote allowlist, keeps remote RPC failures in the official response envelope, and dispatches Host plugin routes through the official Connection Fetch carrier on Desktop without requiring a local HTTP server.
+- Keeps sidebar footer plugin entries stacked vertically. The expanded Remote entry shows its icon and label below DS Bot; the collapsed sidebar retains a compact icon button. Bot mode keeps its account and Connect plugins controls together in their original row, with Remote on a separate row below. Tooltips retain the target name; connected expanded rows restore a separate Exit action, while the collapsed icon returns to local workspaces.
+- Fixes DS Bot route forwarding to use the official control request envelope from page startup, retain proxy prefixes and cancellation, and refresh the official Session catalog before publishing remote roster changes. Disconnected, unsupported, and CodeX/ACP catalogs reject plugin route requests instead of falling back to local roster data.
 
 ### 中文
 
-- Remote 侧栏底部入口改为固定宽度图标按钮，避免与其他插件并排时挤占空间；悬停保留目标名称，连接后点击可返回本地工作区。
+- DS Bot 转发拒绝保留原生错误封装与具体安全错误码，区分 Host 未加载路由、能力缺失、断线、后端不兼容和会话目录未就绪，避免统一显示 HTTP 502。
+- 补齐原生日程 UI 的只读 `schedule/list` 与 `schedule/catalog` 固定白名单，远程 RPC 错误保留官方响应封装；Host 插件路由优先使用官方 Connection Fetch carrier，使 Desktop 不依赖本机 HTTP 服务。
+- 侧栏底部插件入口保持上下排列；展开时 Remote 在 DS Bot 下方显示图标与文字，折叠时保留紧凑图标按钮；Bot 模式保留头像与「连接插件」原有整行布局，Remote 单独占下方一行。悬停保留目标名称；连接后展开行恢复独立「退出」按钮，折叠图标点击返回本地工作区。
+- 修复 DS Bot 路由转发：页面启动即启用，使用官方控制请求封装，保留代理前缀与取消信号；发布远程 roster 变化前刷新官方会话目录。断线、不支持及 CodeX/ACP 目录下拒绝插件路由请求，避免回落到本地 roster。
 
 ## 0.5.6 - 2026-10-13
 

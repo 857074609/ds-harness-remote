@@ -131,6 +131,8 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'messageFeedback/put',
   'pluginInventory/list',
   'permissionPresets/catalog',
+  'schedule/list',
+  'schedule/catalog',
   'session/attachment',
   'session/cancel',
   'session/canOpenWorkspacePath',

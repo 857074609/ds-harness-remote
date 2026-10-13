@@ -1696,6 +1696,85 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // src/control-route.ts
   var CONTROL_RPC_PREFIX = "/ds-harness-remote", STATUS_STREAM_ENDPOINT = "status.events", STATUS_STREAM_PATH = `${CONTROL_RPC_PREFIX}/${STATUS_STREAM_ENDPOINT}`;
 
+  // src/plugin-route-client.ts
+  var PluginRouteFailure = class extends Error {
+    constructor(code, message) {
+      super(message);
+      this.code = code;
+    }
+  };
+  function createPluginRouteFetch(original, baseUrl, options = {}) {
+    let routeUrl = new URL("api/bot", baseUrl), nextRpcId = 0, control = async (method, payload, signal) => {
+      let rpcId = `plugin-route-${++nextRpcId}`, response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "client-request", rpcId, method, payload }),
+        signal
+      });
+      if (!response.ok) throw new PluginRouteFailure("remote-plugin/control-unavailable", `The local Remote control request failed (HTTP ${response.status}). Reload the Remote plugin.`);
+      let envelope = await response.json();
+      if (!isRecord(envelope) || envelope.type !== "server-response" || envelope.rpcId !== rpcId || !isRecord(envelope.result))
+        throw new PluginRouteFailure("remote-plugin/control-invalid", "The local Remote control response is invalid. Reload the Remote plugin.");
+      if (envelope.result.ok !== !0) {
+        let error = isRecord(envelope.result.error) ? envelope.result.error : void 0, code = (isRecord(error?.details) ? error.details : void 0)?.remoteCode ?? error?.code;
+        throw code === "FEATURE_NOT_SUPPORTED" || code === "METHOD_NOT_FOUND" ? new PluginRouteFailure("remote-plugin/host-unsupported", "The selected Host does not support plugin route forwarding. Update and reload Remote on the Host, then reconnect.") : code === "REMOTE_NOT_CONNECTED" || code === "TRANSPORT_CLOSED" ? new PluginRouteFailure("remote-plugin/disconnected", "The Remote Host is disconnected. Reconnect to load DS Bot.") : new PluginRouteFailure("remote-plugin/control-rejected", "The Remote plugin route request was rejected by the control channel.");
+      }
+      return envelope.result.value;
+    };
+    return async (input, init) => {
+      let requestUrl = new URL(input instanceof Request ? input.url : String(input), baseUrl);
+      if ((init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase() !== "POST" || requestUrl.href !== routeUrl.href) return original(input, init);
+      let lifetime = (init?.signal !== void 0 ? init.signal ?? void 0 : input instanceof Request ? input.signal : void 0) ?? AbortSignal.timeout(45e3);
+      try {
+        lifetime.throwIfAborted();
+        let status = await control("status", {}, AbortSignal.any([lifetime, AbortSignal.timeout(1e4)]));
+        if (lifetime.throwIfAborted(), !isRecord(status)) throw new PluginRouteFailure("remote-plugin/authority-unavailable", "The Remote plugin route authority is unavailable.");
+        if (status.mode === "local") return original(input, init);
+        if (status.mode !== "remote") throw new PluginRouteFailure("remote-plugin/authority-unavailable", "The Remote plugin route authority is unavailable.");
+        if (status.connected !== !0) throw new PluginRouteFailure("remote-plugin/disconnected", "The Remote Host is disconnected. Reconnect to load DS Bot.");
+        if (!isRecord(status.remoteFeatures) || status.remoteFeatures.pluginRoute !== !0) throw new PluginRouteFailure("remote-plugin/host-unsupported", "The selected Host does not support plugin route forwarding. Update and reload Remote on the Host, then reconnect.");
+        if (status.backend !== void 0 && status.backend !== "harness") throw new PluginRouteFailure("remote-plugin/backend-unsupported", "DS Bot requires the Remote Harness catalog. Select a Harness workspace on this Host.");
+        let body = await (input instanceof Request ? new Request(input, init) : new Request(requestUrl, init)).clone().json();
+        if (!isRecord(body)) throw new Error("The plugin route body must be a JSON object.");
+        let result = await control("plugin.route", { route: "api/bot", body }, lifetime);
+        if (!isRecord(result) || !Number.isInteger(result.status) || result.status < 200 || result.status > 599)
+          throw new Error("The plugin route response is invalid.");
+        let statusCode = result.status;
+        if (statusCode === 404) throw new PluginRouteFailure("remote-plugin/bot-not-loaded", "The Host has no DS Bot route. Enable ds-bot in the same DSH instance/profile as the connected Host.");
+        if (statusCode === 503) throw new PluginRouteFailure("remote-plugin/host-carrier-unavailable", "The Host plugin route carrier is unavailable. Update and reload Remote on the Host.");
+        if (statusCode >= 200 && statusCode < 300 && options.beforeResponse !== void 0)
+          try {
+            await waitWithSignal(options.beforeResponse(status, body), lifetime);
+          } catch {
+            throw lifetime.throwIfAborted(), new PluginRouteFailure("remote-plugin/catalog-unavailable", "The Remote Harness Session catalog is not ready. Reconnect before loading DS Bot.");
+          }
+        return lifetime.throwIfAborted(), new Response([204, 205, 304].includes(statusCode) ? null : JSON.stringify(result.json ?? null), {
+          status: statusCode,
+          headers: { "content-type": "application/json" }
+        });
+      } catch (error) {
+        return lifetime.throwIfAborted(), new Response(JSON.stringify({
+          ok: !1,
+          error: {
+            code: error instanceof PluginRouteFailure ? error.code : "remote-plugin/unavailable",
+            message: error instanceof PluginRouteFailure ? error.message : "The Remote plugin route is unavailable.",
+            details: {}
+          }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    };
+  }
+  function waitWithSignal(pending, signal) {
+    return new Promise((resolve, reject) => {
+      let onAbort = () => reject(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: !0 }), signal.aborted && onAbort(), pending.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    });
+  }
+  function isRecord(value) {
+    return typeof value == "object" && value !== null && !Array.isArray(value);
+  }
+
   // src/status-stream.ts
   function parseStatus(data) {
     if (typeof data == "string")
@@ -2282,66 +2361,19 @@ Minimum version required to store current data is: ` + bestVersion + `.
     constructor(message) {
       super(message), this.name = "ControlRouteUnavailableError";
     }
-  }, pluginRoutePatchWrapped = !1, originalWindowFetch, pluginRouteActive;
-  function isPluginRoutePost(input, init) {
-    let url = typeof input == "string" || input instanceof URL ? String(input) : input.url;
-    return (typeof input == "string" || input instanceof URL ? init?.method ?? "GET" : init?.method ?? input.method).toUpperCase() !== "POST" ? !1 : url === "api/bot" || url === "/api/bot";
-  }
-  async function pluginRouteBody(input, init) {
-    let raw = typeof input == "string" || input instanceof URL ? init?.body : input.body;
-    if (typeof raw == "string")
-      try {
-        return JSON.parse(raw);
-      } catch {
-        return {};
+  }, originalPluginFetch = window.fetch, readyPluginSessions, pluginSessions = new Promise((resolve) => {
+    readyPluginSessions = resolve;
+  }), pluginCatalogTarget, pluginRouteFetch = typeof originalPluginFetch == "function" && typeof document < "u" ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
+    beforeResponse: async (status, body) => {
+      let target = typeof status.connectedTargetDeviceId == "string" ? status.connectedTargetDeviceId : "remote", sessions = await pluginSessions;
+      if (!(body.endpoint === "state" && pluginCatalogTarget === target && sessions.list.getSnapshot().phase === "ready")) {
+        if (await sessions.refresh?.(), sessions.list.getSnapshot().phase !== "ready")
+          throw new Error("The Remote Session catalog is not ready.");
+        pluginCatalogTarget = target;
       }
-    if (raw == null) return {};
-    if (typeof input == "object" && "clone" in input)
-      try {
-        return await input.clone().json();
-      } catch {
-        return {};
-      }
-    return {};
-  }
-  function installPluginRoutePatch(isActive) {
-    if (typeof window > "u" || typeof window.fetch != "function") return () => {
-    };
-    if (!pluginRoutePatchWrapped) {
-      pluginRoutePatchWrapped = !0;
-      let original = window.fetch.bind(window);
-      originalWindowFetch = original, window.fetch = (async (input, init) => pluginRouteActive !== void 0 && pluginRouteActive() && isPluginRoutePost(input, init) ? forwardPluginRoute(original, input, init) : original(input, init));
     }
-    return pluginRouteActive = isActive, () => {
-      pluginRouteActive === isActive && (pluginRouteActive = void 0);
-    };
-  }
-  async function forwardPluginRoute(original, input, init) {
-    try {
-      let body = await pluginRouteBody(input, init), payload = await (await original(`${CONTROL_RPC_PREFIX}/plugin.route`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ route: "api/bot", body })
-      })).json().catch(() => {
-      }), envelope = payload && typeof payload == "object" && "result" in payload ? payload.result : payload, result = envelope && typeof envelope == "object" ? envelope : void 0;
-      if (result === void 0 || result.ok !== !0 || typeof result.value != "object" || result.value === null)
-        return new Response(JSON.stringify({ ok: !1, error: { code: "gateway/bad-request", message: "plugin route tunnel failed" } }), {
-          status: 502,
-          headers: { "content-type": "application/json" }
-        });
-      let status = typeof result.value.status == "number" ? result.value.status : 200;
-      return new Response(JSON.stringify(result.value.json ?? null), {
-        status,
-        headers: { "content-type": "application/json" }
-      });
-    } catch {
-      return new Response(JSON.stringify({ ok: !1, error: { code: "gateway/bad-request", message: "plugin route tunnel failed" } }), {
-        status: 502,
-        headers: { "content-type": "application/json" }
-      });
-    }
-  }
+  }) : void 0;
+  pluginRouteFetch !== void 0 && (window.fetch = pluginRouteFetch);
   function controlRouteUnavailableStatus() {
     return {
       mode: "local",
@@ -2994,10 +3026,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
           return document.documentElement.classList.toggle("dshRemoteTargetActive", remoteActive), () => {
             remoteActive && document.documentElement.classList.remove("dshRemoteTargetActive");
           };
-        }, [status?.mode]), React.useEffect(() => {
-          let enabled = status?.mode === "remote" && status?.connected === !0 && status?.remoteFeatures?.pluginRoute !== !1;
-          return installPluginRoutePatch(() => enabled);
-        }, [status?.mode, status?.connected, status?.remoteFeatures?.pluginRoute]);
+        }, [status?.mode]);
         let startQrLogin = async (provider) => {
           let run = ++qrFlowRun.current;
           setBusy(!0), setError(void 0), setQrExpired(!1);
@@ -3282,13 +3311,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
           React.createElement(
             "div",
             { className: `dshRemoteSidebarEntry${status?.mode === "remote" ? " isActive" : ""}${props.wide ? " isWide" : " isRail"}` },
-            React.createElement("button", {
-              type: "button",
-              disabled: status?.mode === "remote" && busy,
-              onClick: () => void (status?.mode === "remote" ? openLocalWorkspaces() : show()),
+            React.createElement(status?.mode === "remote" && props.wide ? "div" : "button", {
+              ...status?.mode === "remote" && props.wide ? {} : {
+                type: "button",
+                disabled: status?.mode === "remote" && busy,
+                onClick: () => void (status?.mode === "remote" ? openLocalWorkspaces() : show())
+              },
               className: "dshRemoteModeButton",
-              title: remoteActionLabel,
-              "aria-label": remoteActionLabel
+              title: props.wide ? remoteLabel : remoteActionLabel,
+              "aria-label": props.wide ? remoteLabel : remoteActionLabel
             }, React.createElement(
               "svg",
               {
@@ -3303,7 +3334,13 @@ Minimum version required to store current data is: ` + bestVersion + `.
               },
               React.createElement("rect", { x: 3, y: 4, width: 18, height: 13, rx: 2 }),
               React.createElement("path", { d: "M8 21h8M12 17v4" })
-            ))
+            ), props.wide ? React.createElement("span", { className: "dshRemoteSidebarLabel" }, remoteLabel) : null),
+            status?.mode === "remote" && props.wide ? React.createElement("button", {
+              type: "button",
+              className: "dshRemoteExitLink",
+              disabled: busy,
+              onClick: () => void openLocalWorkspaces()
+            }, t("exitRemote")) : null
           ),
           open ? React.createElement("div", {
             className: "dshRemoteBackdrop",
@@ -4186,9 +4223,17 @@ Minimum version required to store current data is: ` + bestVersion + `.
           ".dshRemoteTerminalUnavailable{box-sizing:border-box;margin:12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-2);font-size:13px;line-height:1.5}",
           ".dshRemoteModeButton{min-height:36px;border:0;background:transparent;color:var(--dsw-alias-label-primary);display:flex;align-items:center;gap:8px;padding:0 10px;border-radius:8px}.dshRemoteModeButton:is(button){cursor:pointer}",
           ".dshRemoteModeButton:is(button):hover{background:var(--dsw-alias-interactive-bg-hover)}",
-          // Footer actions share a flex row with other plugins; reserve only an icon seat.
-          ".dshRemoteSidebarEntry{box-sizing:border-box;flex:0 0 36px;width:36px;min-width:36px;display:block}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isWide{height:36px;margin:4px 0}.dshRemoteSidebarEntry.isRail{height:54px}.dshRemoteSidebarEntry.isRail .dshRemoteModeButton{margin:8px 0 10px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
+          // Keep additive footer actions in reading order above the Settings seat.
+          '[class*="_footArea"]:has(.dshRemoteSidebarEntry){flex-direction:column!important;align-items:stretch;gap:0}[class*="_footerActions"]:has(.dshRemoteSidebarEntry){display:flex!important;flex-direction:column;align-items:stretch}[class*="_footerActions"]:has(.dshRemoteSidebarEntry.isRail){align-items:center}',
+          '[class*="_footerActions"]:has(.dshRemoteSidebarEntry.isWide) .bt-return{justify-content:flex-start}',
+          // Bot mode seats its account beside Connect plugins. Keep that row intact
+          // and let Remote span a separate row underneath it.
+          '[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide){display:grid!important;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:8px 9px}[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide)>[class*="_footerActions"]{display:contents!important}[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide)>[class*="_footerActions"]>div:not(.dshRemoteSidebarEntry){display:contents!important}',
+          '[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide) .bt-connect-wrap{grid-column:2;grid-row:1}[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide)>[class*="_settingsArea"]{grid-column:1;grid-row:1;width:36px!important}[class*="_footArea"]:has(.bt-connect-wrap):has(.dshRemoteSidebarEntry.isWide) .dshRemoteSidebarEntry.isWide{display:block!important;grid-column:1/-1;grid-row:2;margin:0}',
+          '[class*="_footArea"]:has(.bt-connect-wrap):has(.bt-foot-account):has(.dshRemoteSidebarEntry.isWide){grid-template-columns:36px minmax(0,1fr) 36px}[class*="_footArea"]:has(.bt-connect-wrap):has(.bt-foot-account):has(.dshRemoteSidebarEntry.isWide) .bt-foot-account{grid-column:1;grid-row:1}[class*="_footArea"]:has(.bt-connect-wrap):has(.bt-foot-account):has(.dshRemoteSidebarEntry.isWide)>[class*="_settingsArea"]{grid-column:3}',
+          ".dshRemoteSidebarEntry{box-sizing:border-box;flex:none;width:36px;min-width:36px;display:block}.dshRemoteSidebarEntry .dshRemoteModeButton{box-sizing:border-box;width:36px;height:36px;min-height:36px;justify-content:center;gap:0;padding:0;border-radius:50%}.dshRemoteSidebarEntry.isWide{width:100%;min-width:0;height:36px;margin:4px 0}.dshRemoteSidebarEntry.isWide .dshRemoteModeButton{width:100%;min-width:0;justify-content:flex-start;gap:8px;padding:0 14px;border-radius:8px;font:inherit;font-size:14px;line-height:20px;text-align:start}.dshRemoteSidebarLabel{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteSidebarEntry.isRail{height:54px}.dshRemoteSidebarEntry.isRail .dshRemoteModeButton{margin:8px 0 10px}.dshRemoteSidebarEntry.isActive .dshRemoteComputerIcon{color:var(--dsw-alias-brand-primary)}.dshRemoteSidebarEntry .dshRemoteModeButton:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteSidebarEntry .dshRemoteModeButton:disabled{opacity:.45;cursor:default}",
           ".dshRemoteComputerIcon{box-sizing:border-box;width:18px;height:18px;flex:0 0 18px;color:var(--dsw-alias-label-secondary)}",
+          ".dshRemoteSidebarEntry.isWide{position:relative}.dshRemoteSidebarEntry.isWide.isActive .dshRemoteModeButton{padding-inline-end:64px}.dshRemoteExitLink{position:absolute;inset-block-start:0;inset-inline-end:8px;min-width:44px;height:36px;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);padding:0 6px;font:inherit;font-size:12px;line-height:20px;white-space:nowrap;cursor:pointer}.dshRemoteExitLink:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteExitLink:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}.dshRemoteExitLink:disabled{opacity:.45;cursor:default}",
           '.dshRemoteSessionHeader{position:fixed;z-index:25;top:12px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 360px);height:28px;display:inline-flex;align-items:center;gap:7px;color:var(--dsw-alias-label-secondary);font-size:12px;white-space:nowrap}.dshRemoteSessionHeader>svg{width:15px;height:15px;flex:0 0 auto}.dshRemoteSessionTarget{min-width:0;max-width:260px;overflow:hidden;text-overflow:ellipsis}.dshRemoteNetwork{flex:0 0 auto;border:0;background:transparent;color:inherit;font:inherit;padding:3px 2px;display:inline-flex;align-items:center;gap:5px;cursor:pointer}.dshRemoteNetwork:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteNetwork:disabled{cursor:default}.dshRemoteNetwork>i{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}.dshRemoteNetwork.isOnline>i{background:var(--dsw-alias-state-success-primary)}.dshRemoteNetwork.isOffline{color:var(--dsw-alias-state-error-primary)}.dshRemoteNetwork.isOffline>i{background:currentColor}.dshRemoteEncrypted{flex:0 0 auto;color:var(--dsw-alias-label-tertiary)}.dshRemoteHeaderExitLink{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:3px 2px;font:inherit;text-decoration:none;cursor:pointer}.dshRemoteHeaderExitLink:hover{text-decoration:underline;color:var(--dsw-alias-label-primary)}.dshRemoteHeaderExitLink:disabled{opacity:.45;cursor:default;text-decoration:none}.dshRemoteNetwork:focus-visible,.dshRemoteHeaderExitLink:focus-visible,.dshRemoteRoutePanel>header button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteRouteBackdrop{position:fixed;inset:0;z-index:26}.dshRemoteRoutePanel{box-sizing:border-box;position:absolute;top:48px;right:28px;width:min(680px,calc(100vw - 32px));max-height:calc(100vh - 72px);overflow:auto;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:16px;white-space:normal}.dshRemoteRoutePanel>header{position:sticky;top:-16px;z-index:1;display:flex;align-items:center;justify-content:space-between;margin:-16px -16px 0;padding:16px;background:var(--dsw-alias-bg-layer-1)}.dshRemoteRoutePanel>header strong{font-size:14px}.dshRemoteRoutePanel>header button{width:28px;height:28px;border:0;border-radius:7px;background:transparent;color:inherit;font-size:20px;cursor:pointer}.dshRemoteRoutePanel>header button:hover{background:var(--dsw-alias-interactive-bg-hover)}.dshRemoteRoutePanel ol{display:flex;align-items:stretch;margin:12px 0 0;padding:0 0 16px;border-bottom:1px solid var(--dsw-alias-border-l2);list-style:none}.dshRemoteRoutePanel li{position:relative;min-width:0;flex:1;display:flex;flex-direction:column;gap:4px;padding-right:20px}.dshRemoteRoutePanel li:not(:last-child)::after{content:"\u2192";position:absolute;right:7px;top:21px;color:var(--dsw-alias-label-tertiary)}.dshRemoteRoutePanel li small{color:var(--dsw-alias-label-tertiary)}.dshRemoteRoutePanel li strong,.dshRemoteRoutePanel li span{overflow:hidden;text-overflow:ellipsis}.dshRemoteRoutePanel li strong{font-size:13px}.dshRemoteRoutePanel li span{color:var(--dsw-alias-label-secondary);font-size:11px}.dshRemoteRouteSection{padding-top:16px}.dshRemoteRouteSection h3{margin:0 0 10px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary)}.dshRemoteRouteSection dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px;margin:0}.dshRemoteRouteSection dl>div{min-width:0;display:grid;grid-template-columns:minmax(104px,auto) minmax(0,1fr);gap:10px;padding:7px 0;border-bottom:1px solid var(--dsw-alias-border-l2);font-size:12px;line-height:1.45}.dshRemoteRouteSection dt{color:var(--dsw-alias-label-tertiary)}.dshRemoteRouteSection dd{min-width:0;margin:0;text-align:right;overflow-wrap:anywhere}.dshRemoteRouteSection dd.isMono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}.dshRemoteRoutePanel>p{margin:16px 0 0;padding-top:12px;border-top:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}@media(max-width:620px){.dshRemoteSessionHeader{top:8px;max-width:calc(100vw - 112px)}.dshRemoteSessionHeader>svg{display:none}.dshRemoteSessionTarget{max-width:130px}.dshRemoteEncrypted{display:none}.dshRemoteRoutePanel{top:42px;right:12px;max-height:calc(100vh - 56px)}.dshRemoteRoutePanel ol{flex-direction:column;gap:18px}.dshRemoteRoutePanel li:not(:last-child)::after{content:"\u2193";top:auto;right:auto;bottom:-16px;left:3px}.dshRemoteRouteSection dl{grid-template-columns:1fr}.dshRemoteRouteSection dl>div{grid-template-columns:1fr;gap:2px}.dshRemoteRouteSection dd{text-align:left}}',
           ".dshRemoteSessionHeader{left:auto;right:148px;transform:none;max-width:calc(100vw - 420px)}@media(max-width:760px){.dshRemoteSessionHeader{left:auto;right:104px;transform:none;max-width:calc(100vw - 124px)}}",
           ".dshRemoteModeButton:focus-visible,.dshRemotePage button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}",
@@ -4256,9 +4301,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }
       function apply(ctx) {
         if (window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__) return;
-        window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !0, ctx.effect(() => () => {
+        window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !0, readyPluginSessions(ctx.sessions), ctx.effect(() => () => {
           window.__DS_HARNESS_REMOTE_CLIENT_ACTIVE__ = !1;
-        }, "ds-harness-remote: client singleton");
+        }, "ds-harness-remote: client singleton"), ctx.effect(() => () => {
+          pluginRouteFetch !== void 0 && window.fetch === pluginRouteFetch && (window.fetch = originalPluginFetch);
+        }, "ds-harness-remote: plugin route fetch");
         let t = ctx.locale.bind(localeNamespace), controlRouteRetryAfter = 0, controlRouteBackoffIndex = 0, control = async (endpoint, payload = {}) => {
           if (endpoint === "status" && Date.now() < controlRouteRetryAfter)
             return controlRouteUnavailableStatus();

@@ -755,6 +755,26 @@ Result 为 `{ "status": number, "json": unknown }`，即本机路由的 HTTP 状
 Host 未注入本机路由服务时不得宣告 `plugin.route.v1`，此时 `plugin.route.call` 返回
 `FEATURE_NOT_SUPPORTED`。
 
+Host 优先通过官方 Connection 的 `createSharedFetchHandler('/api')` 调用已注册的本机
+Fetch 路由；进入此处的 peer 已通过 Remote channel 的账号、信任与加密校验。此路径无需
+HTTP listener 或浏览器 Cookie，适用于 Desktop。仅旧版缺少该 carrier 时使用认证后的
+loopback HTTP；不存在可用 carrier 时返回 503，未注册路由保留官方 404。
+
+浏览器兼容入口在 Client bundle 注册时安装，仅拦截同源 `POST api/bot`（含文档代理前缀）。
+每次请求先通过本机控制接口读取当前 authority；控制 HTTP 请求必须使用官方
+`{ type: "client-request", rpcId, method, payload }`，响应按 `rpcId` 关联。只有明确的本地模式
+才调用原始本地路由；远程模式断线、缺少 capability 或当前使用 CodeX/ACP 会话目录时拒绝，
+不得回落到本地数据。首次远程 roster 和后续非 `state` 操作响应发布前，Client 刷新官方
+Session 目录，避免插件在该目录可解析 Session ID 之前调用 `sessions.retain`。不创建另一套
+Session 实例或写入持久化。以上属于 DS Bot 的兼容入口，不代表任意插件前端已完成适配。
+
+该兼容入口的拒绝使用 DS Bot 原生的 HTTP 200 + `{ ok: false, error: { code, message,
+details } }`；这不是调用成功，Client 必须读取 `ok`。断线、Host 缺少路由能力、CodeX/ACP
+catalog、Host 未注册 `api/bot`（404）、Host carrier 不可用（503）及 Session catalog
+未就绪分别返回固定错误码与安全说明，不以统一 HTTP 502 隐藏原因。取消仍拒绝 fetch。
+Host 的 Bot/Agent 界面模式仅为页面本地偏好，不影响 `api/bot` 的注册；Host 需在连接的
+同一 DSH 实例/profile 中启用 `ds-bot`。
+
 ## 17. Capability
 
 Host handshake 的 capability 例子：
@@ -1002,6 +1022,11 @@ picker 时，可以退回 Plugin Host 本地只读目录枚举；`session/canOpe
 受限枚举返回 `true`，且仍只允许单层目录元数据。Client 的 Gateway target switch 必须让
 `dynamicCordisRunner/*` 固定调用本地 Gateway，不得因选中远端 Host 而把本机 UI/runtime
 装载请求转发到 Host。
+
+原生日程 UI 的只读 `schedule/list` 与 `schedule/catalog` 使用相同官方 carrier；不开放
+`schedule/create`、`schedule/delete` 或按 namespace 放开其他方法。Client 的本机 HTTP
+dispatcher 将远程 RPC 拒绝与传输错误封装为官方 `{ ok: false, error }`，保留 request 的
+`rpcId`，不得回落到本地服务或把预期拒绝变成裸 HTTP 500。
 
 Harness `0.2.1` 增加固定官方端点 `userQuestions/answer`（call）、`userQuestions/attachWait`（stream）与可选 `claudeCodeMods/pressBand`（call）、`claudeCodeMods/watchBand`（stream）。它们复用现有加密 carrier，不增加 Remote namespace。问答使用 Gateway 验证的 `agentId`、`callId`；Mods 使用 `agentId`、`generation` 和 `actionId`，所有业务校验由官方 Gateway/service 执行。禁止按 namespace 放开其他方法。
 

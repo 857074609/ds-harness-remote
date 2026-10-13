@@ -20812,7 +20812,10 @@ var TypertGatewaySwitch = class {
       this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal).then((result) => workspaceConnectionResult(endpoint, result));
+      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal).then(
+        (result) => workspaceConnectionResult(endpoint, result),
+        (error) => ({ ok: false, error: this.failure(error) })
+      );
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -31649,6 +31652,8 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "messageFeedback/put",
   "pluginInventory/list",
   "permissionPresets/catalog",
+  "schedule/list",
+  "schedule/catalog",
   "session/attachment",
   "session/cancel",
   "session/canOpenWorkspacePath",
@@ -32559,6 +32564,61 @@ function isPlainRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// src/plugin-route-dispatcher.ts
+function createPluginRouteDispatcher(readConnection, readPort) {
+  let cookie;
+  return async (route, body, signal) => {
+    signal.throwIfAborted();
+    const connection = readConnection();
+    const handler = connection?.createSharedFetchHandler?.("/api");
+    let response;
+    if (handler !== void 0) {
+      response = await withSignal(handler.fetch(new Request(`http://127.0.0.1/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body ?? {}),
+        signal
+      })), signal);
+    } else {
+      const port = readPort();
+      if (connection?.authenticatedUrl === void 0 || typeof port !== "number") {
+        return { status: 503, json: { ok: false, error: { code: "gateway/unavailable", message: "The local plugin route carrier is unavailable." } } };
+      }
+      const origin = `http://127.0.0.1:${port}`;
+      if (cookie === void 0) {
+        const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: "manual", signal });
+        const setCookie = typeof launch.headers.getSetCookie === "function" ? launch.headers.getSetCookie() : [];
+        cookie = setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
+      }
+      response = await fetch(`${origin}/${route}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", ...cookie === void 0 ? {} : { cookie } },
+        body: JSON.stringify(body ?? {}),
+        signal
+      });
+      if (response.status === 401) cookie = void 0;
+    }
+    const text = await response.text();
+    let json = null;
+    if (text !== "") {
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = text;
+      }
+    }
+    return { status: response.status, json };
+  };
+}
+function withSignal(pending, signal) {
+  return new Promise((resolve6, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+    void pending.then(resolve6, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}
+
 // src/cli.ts
 import { stat as stat7 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
@@ -33309,42 +33369,6 @@ var pluginSettingsNamespace = "ds-harness-remote";
 var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
-function createPluginRouteDispatcher(ctx) {
-  let cookie;
-  return async (route, body, signal) => {
-    const connection = ctx.get("connection");
-    const port = ctx.get("webServer")?.port;
-    if (connection?.authenticatedUrl === void 0 || typeof port !== "number") {
-      return { status: 503, json: { ok: false, error: { code: "gateway/unavailable", message: "The local plugin route carrier is unavailable." } } };
-    }
-    const origin = `http://127.0.0.1:${port}`;
-    if (cookie === void 0) {
-      const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: "manual" });
-      const setCookie = typeof launch.headers.getSetCookie === "function" ? launch.headers.getSetCookie() : [];
-      cookie = setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
-    }
-    const response = await fetch(`${origin}/${route}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...cookie === void 0 ? {} : { cookie }
-      },
-      body: JSON.stringify(body ?? {}),
-      signal
-    });
-    const text = await response.text();
-    let json = null;
-    if (text !== "") {
-      try {
-        json = JSON.parse(text);
-      } catch {
-        json = text;
-      }
-    }
-    if (response.status === 401) cookie = void 0;
-    return { status: response.status, json };
-  };
-}
 function apply(ctx, entry = void 0) {
   const readConfig = () => readEntryConfig(entry);
   const entryId = locateEntryId(ctx);
@@ -33439,7 +33463,10 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     localTypertGateway,
     () => ctx.get("fileViewerHost"),
     subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
-    () => createPluginRouteDispatcher(ctx)
+    () => createPluginRouteDispatcher(
+      () => ctx.get("connection"),
+      () => ctx.get("webServer")?.port
+    )
   );
   let clientRuntime;
   const hostControl = runtime;

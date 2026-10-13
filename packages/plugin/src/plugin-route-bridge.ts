@@ -5,7 +5,11 @@ import type { SafeLogger } from './logging.js'
 import { RpcError } from './safe-error.js'
 
 /** Local plugin web routes forwardable over the authenticated channel (POST only). */
-export const PLUGIN_ROUTE_PATTERN = /^api\/[A-Za-z0-9._/-]{1,64}$/
+export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot'] as const
+
+export function isAllowedPluginRoute(route: string): route is typeof PLUGIN_ROUTE_ALLOWLIST[number] {
+  return PLUGIN_ROUTE_ALLOWLIST.some(allowed => allowed === route)
+}
 
 export type PluginRouteDispatcher = (
   route: string,
@@ -14,7 +18,7 @@ export type PluginRouteDispatcher = (
 ) => Promise<{ status: number; json: unknown }>
 
 const callSchema = z.object({
-  route: z.string().regex(PLUGIN_ROUTE_PATTERN),
+  route: z.enum(PLUGIN_ROUTE_ALLOWLIST),
   body: z.record(z.string(), z.unknown()),
 }).strict()
 

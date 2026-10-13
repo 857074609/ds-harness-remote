@@ -742,9 +742,11 @@ Plugin Host 的业务路由只接受 capability 对应的官方 Harness tunnel�
 ### 16.4 plugin.route.call
 
 `plugin.route.call`（capability `plugin.route.v1`）把 Host 本机其他 DSH 插件的 HTTP 路由
-（首个用例：ds-bot 的 `POST api/bot`）通过认证业务通道转发给远程 Client。Host 侧只接受
-`route` 匹配白名单 `^api\/[A-Za-z0-9._\/-]{1,64}$` 的 POST 转发，`body` 必须是普通 JSON
-对象（数组与原始值拒绝）。
+（当前仅 ds-bot 的 `POST api/bot`）通过认证业务通道转发给远程 Client。Host 与 Client
+控制入口只接受 `route` 精确等于编译期固定白名单中的 `api/bot`；其他插件路径、官方
+Harness RPC 路径、路径规范化变体及 query 均以 `INVALID_MESSAGE` 拒绝，不进入本机
+Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remote 设置限制或
+终端归属与输入权校验。`body` 必须是普通 JSON 对象（数组与原始值拒绝）。
 
 ```json
 "params": { "route": "api/bot", "body": { "message": "hi" } }

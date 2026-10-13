@@ -15102,9 +15102,12 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
 }
 
 // src/plugin-route-bridge.ts
-var PLUGIN_ROUTE_PATTERN = /^api\/[A-Za-z0-9._/-]{1,64}$/;
+var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
+function isAllowedPluginRoute(route) {
+  return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
+}
 var callSchema = external_exports.object({
-  route: external_exports.string().regex(PLUGIN_ROUTE_PATTERN),
+  route: external_exports.enum(PLUGIN_ROUTE_ALLOWLIST),
   body: external_exports.record(external_exports.string(), external_exports.unknown())
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
@@ -23035,7 +23038,7 @@ var ClientModeRuntime = class {
       }
       if (endpoint === "plugin.route") {
         const value = record5(payload);
-        if (typeof value.route !== "string" || !PLUGIN_ROUTE_PATTERN.test(value.route)) {
+        if (typeof value.route !== "string" || !isAllowedPluginRoute(value.route)) {
           throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
         }
         if (!isRecord10(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");

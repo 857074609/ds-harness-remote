@@ -24,7 +24,7 @@ import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { uuidV7 } from './ids.js'
 import type { SafeLogger } from './logging.js'
 import { harnessSessionGeneration } from './harness-version.js'
-import { PLUGIN_ROUTE_PATTERN } from './plugin-route-bridge.js'
+import { isAllowedPluginRoute } from './plugin-route-bridge.js'
 import { RemoteHarnessApiProxy } from './remote-api-proxy.js'
 import { RemoteTypertGateway } from './remote-typert-gateway.js'
 import {
@@ -1325,7 +1325,7 @@ export class ClientModeRuntime {
       }
       if (endpoint === 'plugin.route') {
         const value = record(payload)
-        if (typeof value.route !== 'string' || !PLUGIN_ROUTE_PATTERN.test(value.route)) {
+        if (typeof value.route !== 'string' || !isAllowedPluginRoute(value.route)) {
           throw new ClientModeError('INVALID_MESSAGE', 'A valid plugin route is required.')
         }
         if (!isRecord(value.body)) throw new ClientModeError('INVALID_MESSAGE', 'A plugin route body object is required.')

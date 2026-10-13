@@ -33310,16 +33310,28 @@ var legacySettingsNamespace = "dsh-remote";
 var DEFAULT_ENTRY_ID = "ds-harness-remote";
 var INCLUDE_ENTRY_PREFIX = "include:";
 function createPluginRouteDispatcher(ctx) {
-  const connection = ctx.get("connection");
-  const handler = connection?.createSharedFetchHandler?.("/api");
-  if (handler === void 0) return void 0;
+  let cookie;
   return async (route, body, signal) => {
-    const response = await handler.fetch(new Request(`http://dsh.internal/${route}`, {
+    const connection = ctx.get("connection");
+    const port = ctx.get("webServer")?.port;
+    if (connection?.authenticatedUrl === void 0 || typeof port !== "number") {
+      return { status: 503, json: { ok: false, error: { code: "gateway/unavailable", message: "The local plugin route carrier is unavailable." } } };
+    }
+    const origin = `http://127.0.0.1:${port}`;
+    if (cookie === void 0) {
+      const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: "manual" });
+      const setCookie = typeof launch.headers.getSetCookie === "function" ? launch.headers.getSetCookie() : [];
+      cookie = setCookie.map((item) => item.split(";", 1)[0]).join("; ") || void 0;
+    }
+    const response = await fetch(`${origin}/${route}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...cookie === void 0 ? {} : { cookie }
+      },
       body: JSON.stringify(body ?? {}),
       signal
-    }));
+    });
     const text = await response.text();
     let json = null;
     if (text !== "") {
@@ -33329,6 +33341,7 @@ function createPluginRouteDispatcher(ctx) {
         json = text;
       }
     }
+    if (response.status === 401) cookie = void 0;
     return { status: response.status, json };
   };
 }

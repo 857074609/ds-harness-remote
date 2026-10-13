@@ -90,35 +90,54 @@ interface LoaderLike {
 }
 
 /**
- * Duck-typed slice of the DSH `connection` service that exposes local plugin
- * web routes under a shared prefix. The full type is not available to plugins,
- * so the runtime resolves it lazily via the thunk below.
+ * Duck-typed slices of the DSH `connection` and `webServer` services. The full
+ * types are not available to plugins, so the runtime resolves them lazily via
+ * the thunk below.
  */
 interface DshConnectionRouteHostLike {
-  createSharedFetchHandler?(prefix: string): { fetch(request: Request): Promise<Response> }
+  authenticatedUrl?(baseUrl: string): string
+}
+
+interface DshWebServerPortLike {
+  port?: number
 }
 
 /**
- * Lazily builds a bounded dispatcher that POSTs to Host-local plugin web
- * routes (first case: ds-bot's `api/bot`). Lazy on every call because the
- * connection service may be injected after this plugin activates.
+ * Loopback dispatcher for Host-local plugin web routes (first case: ds-bot's
+ * `api/bot`). The DSH connection service admits `/api` requests only with its
+ * HMAC session cookie, so the dispatcher trades the in-process launch token
+ * for a cookie once and then POSTs over loopback HTTP. Lazy on every call
+ * because the connection service may be injected after this plugin activates.
  */
 function createPluginRouteDispatcher(ctx: Context): PluginRouteDispatcher | undefined {
-  const connection = ctx.get('connection') as DshConnectionRouteHostLike | undefined
-  const handler = connection?.createSharedFetchHandler?.('/api')
-  if (handler === undefined) return undefined
+  let cookie: string | undefined
   return async (route, body, signal) => {
-    const response = await handler.fetch(new Request(`http://dsh.internal/${route}`, {
+    const connection = ctx.get('connection') as DshConnectionRouteHostLike | undefined
+    const port = (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port
+    if (connection?.authenticatedUrl === undefined || typeof port !== 'number') {
+      return { status: 503, json: { ok: false, error: { code: 'gateway/unavailable', message: 'The local plugin route carrier is unavailable.' } } }
+    }
+    const origin = `http://127.0.0.1:${port}`
+    if (cookie === undefined) {
+      const launch = await fetch(connection.authenticatedUrl(`${origin}/`), { redirect: 'manual' })
+      const setCookie = typeof launch.headers.getSetCookie === 'function' ? launch.headers.getSetCookie() : []
+      cookie = setCookie.map(item => item.split(';', 1)[0]).join('; ') || undefined
+    }
+    const response = await fetch(`${origin}/${route}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        ...(cookie === undefined ? {} : { cookie }),
+      },
       body: JSON.stringify(body ?? {}),
       signal,
-    }))
+    })
     const text = await response.text()
     let json: unknown = null
     if (text !== '') {
       try { json = JSON.parse(text) } catch { json = text }
     }
+    if (response.status === 401) cookie = undefined
     return { status: response.status, json }
   }
 }

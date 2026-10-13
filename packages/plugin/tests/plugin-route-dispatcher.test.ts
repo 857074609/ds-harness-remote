@@ -22,7 +22,7 @@ describe('Host plugin route carrier', () => {
       await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state', payload: null } }))
         .resolves.toEqual({ status: 200, json: { ok: true, value: { revision: 1 } } })
       await unregister()
-      await expect(bridge.call({ route: 'api/bot', body: {} }))
+      await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state' } }))
         .resolves.toEqual({ status: 404, json: 'not found' })
       expect(fetch).toHaveBeenCalledOnce()
       expect(readPort).not.toHaveBeenCalled()

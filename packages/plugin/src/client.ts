@@ -8,7 +8,7 @@ import {
   type RemoteFileContentProvider,
 } from './remote-file-content-provider.js'
 import { CONTROL_RPC_PREFIX, STATUS_STREAM_PATH } from './control-route.js'
-import { createPluginRouteFetch } from './plugin-route-client.js'
+import { createPluginRouteCatalogGuard, createPluginRouteFetch } from './plugin-route-client.js'
 import { createStatusFeed, type StatusFeed } from './status-stream.js'
 import { localeNamespace, en, zh, type LocaleKey, type Translate, type LocalizedMessage } from './client-locale.js'
 
@@ -299,22 +299,9 @@ class ControlRouteUnavailableError extends Error {
 const originalPluginFetch = window.fetch
 let readyPluginSessions: (sessions: SessionsClientServiceLike) => void
 const pluginSessions = new Promise<SessionsClientServiceLike>(resolve => { readyPluginSessions = resolve })
-let pluginCatalogTarget: string | undefined
 const pluginRouteFetch = typeof originalPluginFetch === 'function' && typeof document !== 'undefined'
   ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
-    beforeResponse: async (status, body) => {
-      const target = typeof status.connectedTargetDeviceId === 'string' ? status.connectedTargetDeviceId : 'remote'
-      const sessions = await pluginSessions
-      if (body.endpoint === 'state' && pluginCatalogTarget === target
-        && sessions.list.getSnapshot().phase === 'ready') return
-      // DS Bot may publish a roster/new Session before its Host event reaches the
-      // official manager. Refresh that manager, without inventing Session rows.
-      await sessions.refresh?.()
-      if (sessions.list.getSnapshot().phase !== 'ready') {
-        throw new Error('The Remote Session catalog is not ready.')
-      }
-      pluginCatalogTarget = target
-    },
+    beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions),
   })
   : undefined
 if (pluginRouteFetch !== undefined) window.fetch = pluginRouteFetch

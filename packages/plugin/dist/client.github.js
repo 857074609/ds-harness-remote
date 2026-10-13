@@ -1718,7 +1718,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         throw new PluginRouteFailure("remote-plugin/control-invalid", "The local Remote control response is invalid. Reload the Remote plugin.");
       if (envelope.result.ok !== !0) {
         let error = isRecord(envelope.result.error) ? envelope.result.error : void 0, code = (isRecord(error?.details) ? error.details : void 0)?.remoteCode ?? error?.code;
-        throw code === "FEATURE_NOT_SUPPORTED" || code === "METHOD_NOT_FOUND" ? new PluginRouteFailure("remote-plugin/host-unsupported", "The selected Host does not support plugin route forwarding. Update and reload Remote on the Host, then reconnect.") : code === "REMOTE_NOT_CONNECTED" || code === "TRANSPORT_CLOSED" ? new PluginRouteFailure("remote-plugin/disconnected", "The Remote Host is disconnected. Reconnect to load DS Bot.") : new PluginRouteFailure("remote-plugin/control-rejected", "The Remote plugin route request was rejected by the control channel.");
+        throw code === "FEATURE_NOT_SUPPORTED" || code === "METHOD_NOT_FOUND" ? new PluginRouteFailure("remote-plugin/host-unsupported", "The selected Host does not support plugin route forwarding. Update and reload Remote on the Host, then reconnect.") : code === "REMOTE_NOT_CONNECTED" || code === "TRANSPORT_CLOSED" ? new PluginRouteFailure("remote-plugin/disconnected", "The Remote Host is disconnected. Reconnect to load DS Bot.") : code === "INVALID_MESSAGE" ? new PluginRouteFailure("remote-plugin/operation-not-allowed", "This DS Bot operation is not allowed over Remote. Use the Host locally.") : new PluginRouteFailure("remote-plugin/control-rejected", "The Remote plugin route request was rejected by the control channel.");
       }
       return envelope.result.value;
     };
@@ -1745,7 +1745,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         if (statusCode === 503) throw new PluginRouteFailure("remote-plugin/host-carrier-unavailable", "The Host plugin route carrier is unavailable. Update and reload Remote on the Host.");
         if (statusCode >= 200 && statusCode < 300 && options.beforeResponse !== void 0)
           try {
-            await waitWithSignal(options.beforeResponse(status, body), lifetime);
+            await waitWithSignal(options.beforeResponse(status, body, result.json, lifetime), lifetime);
           } catch {
             throw lifetime.throwIfAborted(), new PluginRouteFailure("remote-plugin/catalog-unavailable", "The Remote Harness Session catalog is not ready. Reconnect before loading DS Bot.");
           }
@@ -1764,6 +1764,85 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }), { status: 200, headers: { "content-type": "application/json" } });
       }
     };
+  }
+  function createPluginRouteCatalogGuard(readSessions) {
+    return async (_status, body, json, signal) => {
+      if (!isRecord(json) || json.ok !== !0 || !isRecord(json.value)) return;
+      let required = botSessionIds(body.endpoint, json.value);
+      if (required.size === 0) return;
+      let sessions = await readSessions(), containsSessions = () => {
+        let snapshot = sessions.list.getSnapshot(), known = new Set(snapshot.ids);
+        return snapshot.phase === "ready" && [...required].every((id) => known.has(id));
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (signal.throwIfAborted(), containsSessions()) return;
+        if (sessions.refresh === void 0) break;
+        await sessions.refresh();
+      }
+      if (signal.throwIfAborted(), !containsSessions()) throw new Error("The Remote Session catalog does not contain the published Sessions.");
+    };
+  }
+  function botSessionIds(endpoint, value) {
+    let ids = /* @__PURE__ */ new Set(), add = (id) => {
+      if (id != null) {
+        if (typeof id != "string" || id.length === 0) throw new Error("Invalid Bot Session identity.");
+        ids.add(id);
+      }
+    }, addArray = (input) => {
+      if (input !== void 0) {
+        if (!Array.isArray(input)) throw new Error("Invalid Bot Session identities.");
+        input.forEach(add);
+      }
+    }, bot = (input) => {
+      if (!isRecord(input)) throw new Error("Invalid Bot catalog entry.");
+      add(input.id), add(input.sessionId), addArray(input.parts), Array.isArray(input.segments) && input.segments.forEach((segment) => {
+        if (!isRecord(segment)) throw new Error("Invalid Bot Session segment.");
+        add(segment.sessionId);
+      });
+    }, room = (input) => {
+      if (!isRecord(input)) throw new Error("Invalid Bot room entry.");
+      add(input.id), addArray(input.parts), isRecord(input.sessions) && Object.values(input.sessions).forEach(add);
+    }, agent = (input) => {
+      if (!isRecord(input)) throw new Error("Invalid Bot agent entry.");
+      addArray(input.sessions);
+    }, roster = () => {
+      for (let [key, visit] of [["bots", bot], ["rooms", room], ["agents", agent]])
+        if (value[key] !== void 0) {
+          if (!Array.isArray(value[key])) throw new Error("Invalid Bot roster.");
+          value[key].forEach(visit);
+        }
+    };
+    switch (endpoint) {
+      case "state":
+      case "delete-bot":
+      case "delete-room":
+      case "set-main":
+      case "remove-agent":
+        roster();
+        break;
+      case "create-bot":
+      case "duplicate-bot":
+      case "update-bot":
+        bot(value);
+        break;
+      case "create-room":
+        room(value);
+        break;
+      case "update-room":
+        room(value.room);
+        break;
+      case "add-agent":
+        agent(value);
+        break;
+      case "agent-session":
+      case "agent-adopt":
+        add(value.sessionId);
+        break;
+      case "set-flags":
+        Array.isArray(value.sessions) ? agent(value) : Array.isArray(value.members) ? room(value) : bot(value);
+        break;
+    }
+    return ids;
   }
   function waitWithSignal(pending, signal) {
     return new Promise((resolve, reject) => {
@@ -2363,15 +2442,8 @@ Minimum version required to store current data is: ` + bestVersion + `.
     }
   }, originalPluginFetch = window.fetch, readyPluginSessions, pluginSessions = new Promise((resolve) => {
     readyPluginSessions = resolve;
-  }), pluginCatalogTarget, pluginRouteFetch = typeof originalPluginFetch == "function" && typeof document < "u" ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
-    beforeResponse: async (status, body) => {
-      let target = typeof status.connectedTargetDeviceId == "string" ? status.connectedTargetDeviceId : "remote", sessions = await pluginSessions;
-      if (!(body.endpoint === "state" && pluginCatalogTarget === target && sessions.list.getSnapshot().phase === "ready")) {
-        if (await sessions.refresh?.(), sessions.list.getSnapshot().phase !== "ready")
-          throw new Error("The Remote Session catalog is not ready.");
-        pluginCatalogTarget = target;
-      }
-    }
+  }), pluginRouteFetch = typeof originalPluginFetch == "function" && typeof document < "u" ? createPluginRouteFetch(originalPluginFetch.bind(window), document.baseURI, {
+    beforeResponse: createPluginRouteCatalogGuard(() => pluginSessions)
   }) : void 0;
   pluginRouteFetch !== void 0 && (window.fetch = pluginRouteFetch);
   function controlRouteUnavailableStatus() {

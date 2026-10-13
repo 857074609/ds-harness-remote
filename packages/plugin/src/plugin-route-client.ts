@@ -8,7 +8,7 @@ class PluginRouteFailure extends Error {
 
 export interface PluginRouteClientOptions {
   /** Publish a remote roster only after the official Session catalog has caught up. */
-  beforeResponse?(status: Record<string, unknown>, body: Record<string, unknown>): Promise<void>
+  beforeResponse?(status: Record<string, unknown>, body: Record<string, unknown>, json: unknown, signal: AbortSignal): Promise<void>
 }
 
 /** Route authority is read before each plugin request, including the first page load. */
@@ -40,6 +40,9 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
       }
       if (code === 'REMOTE_NOT_CONNECTED' || code === 'TRANSPORT_CLOSED') {
         throw new PluginRouteFailure('remote-plugin/disconnected', 'The Remote Host is disconnected. Reconnect to load DS Bot.')
+      }
+      if (code === 'INVALID_MESSAGE') {
+        throw new PluginRouteFailure('remote-plugin/operation-not-allowed', 'This DS Bot operation is not allowed over Remote. Use the Host locally.')
       }
       throw new PluginRouteFailure('remote-plugin/control-rejected', 'The Remote plugin route request was rejected by the control channel.')
     }
@@ -79,7 +82,7 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
       if (statusCode === 503) throw new PluginRouteFailure('remote-plugin/host-carrier-unavailable', 'The Host plugin route carrier is unavailable. Update and reload Remote on the Host.')
       if (statusCode >= 200 && statusCode < 300 && options.beforeResponse !== undefined) {
         try {
-          await waitWithSignal(options.beforeResponse(status, body), lifetime)
+          await waitWithSignal(options.beforeResponse(status, body, result.json, lifetime), lifetime)
         } catch {
           lifetime.throwIfAborted()
           throw new PluginRouteFailure('remote-plugin/catalog-unavailable', 'The Remote Harness Session catalog is not ready. Reconnect before loading DS Bot.')
@@ -104,6 +107,90 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
       }), { status: 200, headers: { 'content-type': 'application/json' } })
     }
   }
+}
+
+export interface PluginRouteSessions {
+  list: { getSnapshot(): { ids: readonly string[]; phase: string } }
+  refresh?(): Promise<void>
+}
+
+/** `ready` is monotone in Harness; prove membership instead of trusting refresh's void result. */
+export function createPluginRouteCatalogGuard(
+  readSessions: () => Promise<PluginRouteSessions>,
+): NonNullable<PluginRouteClientOptions['beforeResponse']> {
+  return async (_status, body, json, signal) => {
+    if (!isRecord(json) || json.ok !== true || !isRecord(json.value)) return
+    const required = botSessionIds(body.endpoint, json.value)
+    if (required.size === 0) return
+    const sessions = await readSessions()
+    const containsSessions = () => {
+      const snapshot = sessions.list.getSnapshot()
+      const known = new Set(snapshot.ids)
+      return snapshot.phase === 'ready' && [...required].every(id => known.has(id))
+    }
+    // A first refresh may join a pull that started before the Bot mutation.
+    // One further pull lets that in-flight baseline finish without an unbounded retry loop.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      signal.throwIfAborted()
+      if (containsSessions()) return
+      if (sessions.refresh === undefined) break
+      await sessions.refresh()
+    }
+    signal.throwIfAborted()
+    if (!containsSessions()) throw new Error('The Remote Session catalog does not contain the published Sessions.')
+  }
+}
+
+function botSessionIds(endpoint: unknown, value: Record<string, unknown>): Set<string> {
+  const ids = new Set<string>()
+  const add = (id: unknown) => {
+    if (id === undefined || id === null) return
+    if (typeof id !== 'string' || id.length === 0) throw new Error('Invalid Bot Session identity.')
+    ids.add(id)
+  }
+  const addArray = (input: unknown) => {
+    if (input === undefined) return
+    if (!Array.isArray(input)) throw new Error('Invalid Bot Session identities.')
+    input.forEach(add)
+  }
+  const bot = (input: unknown) => {
+    if (!isRecord(input)) throw new Error('Invalid Bot catalog entry.')
+    add(input.id)
+    add(input.sessionId)
+    addArray(input.parts)
+    if (Array.isArray(input.segments)) input.segments.forEach(segment => {
+      if (!isRecord(segment)) throw new Error('Invalid Bot Session segment.')
+      add(segment.sessionId)
+    })
+  }
+  const room = (input: unknown) => {
+    if (!isRecord(input)) throw new Error('Invalid Bot room entry.')
+    add(input.id)
+    addArray(input.parts)
+    if (isRecord(input.sessions)) Object.values(input.sessions).forEach(add)
+  }
+  const agent = (input: unknown) => {
+    if (!isRecord(input)) throw new Error('Invalid Bot agent entry.')
+    // Agent IDs are roster identities, not Harness Session IDs.
+    addArray(input.sessions)
+  }
+  const roster = () => {
+    for (const [key, visit] of [['bots', bot], ['rooms', room], ['agents', agent]] as const) {
+      if (value[key] === undefined) continue
+      if (!Array.isArray(value[key])) throw new Error('Invalid Bot roster.')
+      value[key].forEach(visit)
+    }
+  }
+  switch (endpoint) {
+    case 'state': case 'delete-bot': case 'delete-room': case 'set-main': case 'remove-agent': roster(); break
+    case 'create-bot': case 'duplicate-bot': case 'update-bot': bot(value); break
+    case 'create-room': room(value); break
+    case 'update-room': room(value.room); break
+    case 'add-agent': agent(value); break
+    case 'agent-session': case 'agent-adopt': add(value.sessionId); break
+    case 'set-flags': Array.isArray(value.sessions) ? agent(value) : Array.isArray(value.members) ? room(value) : bot(value); break
+  }
+  return ids
 }
 
 function waitWithSignal<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {

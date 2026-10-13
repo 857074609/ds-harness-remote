@@ -746,10 +746,24 @@ Plugin Host 的业务路由只接受 capability 对应的官方 Harness tunnel�
 控制入口只接受 `route` 精确等于编译期固定白名单中的 `api/bot`；其他插件路径、官方
 Harness RPC 路径、路径规范化变体及 query 均以 `INVALID_MESSAGE` 拒绝，不进入本机
 Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remote 设置限制或
-终端归属与输入权校验。`body` 必须是普通 JSON 对象（数组与原始值拒绝）。
+终端归属与输入权校验。`body` 只允许 `{ endpoint, payload? }`，`payload` 为普通 JSON
+对象或 `null`（数组与原始值拒绝）；额外顶层字段拒绝。Host 在进入任何本机 carrier 前
+按 `endpoint` 执行以下编译期固定操作白名单，新增上游操作默认拒绝：
+
+- 查询：`state`、`models`、`efforts`、`exchange`、`earlier`、`usage`、`room-progress`、`schedules`。
+- Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
+- 群聊管理：`create-room`、`update-room`、`delete-room`。
+- Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
+- 会话交互：`send`、`answer-question`、`dismiss-question`、`approval-answer`、`stop-member-work`。
+
+`approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
+安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断
+文件及本机偏好设置等操作均不开放；不允许通过 `api/bot` 间接扩大 Harness Remote 权限。
+被拒绝的操作返回 `INVALID_MESSAGE`，浏览器兼容入口显示安全的
+`remote-plugin/operation-not-allowed` 原生错误封装。
 
 ```json
-"params": { "route": "api/bot", "body": { "message": "hi" } }
+"params": { "route": "api/bot", "body": { "endpoint": "state", "payload": null } }
 ```
 
 Result 为 `{ "status": number, "json": unknown }`，即本机路由的 HTTP 状态码与解析后的 JSON
@@ -766,9 +780,14 @@ loopback HTTP；不存在可用 carrier 时返回 503，未注册路由保留官
 每次请求先通过本机控制接口读取当前 authority；控制 HTTP 请求必须使用官方
 `{ type: "client-request", rpcId, method, payload }`，响应按 `rpcId` 关联。只有明确的本地模式
 才调用原始本地路由；远程模式断线、缺少 capability 或当前使用 CodeX/ACP 会话目录时拒绝，
-不得回落到本地数据。首次远程 roster 和后续非 `state` 操作响应发布前，Client 刷新官方
-Session 目录，避免插件在该目录可解析 Session ID 之前调用 `sessions.retain`。不创建另一套
-Session 实例或写入持久化。以上属于 DS Bot 的兼容入口，不代表任意插件前端已完成适配。
+不得回落到本地数据。成功 roster 或会话创建/更新响应发布前，Client 校验响应引用的
+Bot 当前/历史 Session、群聊及成员 Session、Agent Session 已存在于官方 Session 目录。
+Agent 的 roster ID 不作为 Session ID。目录缺少引用时通过公开 `sessions.refresh` 最多
+刷新两次（第一次可能加入创建前已在途的旧 baseline）；仍缺少 ID、刷新失败或没有可用
+刷新方法时拒绝发布。`phase=ready` 是官方目录单调的初始化状态，不代表本次刷新成功；
+不能仅据此发布新 ID。已可解析的 Session 无需额外刷新，无 roster 的 `state.unchanged`
+响应不引入新 Session。不创建另一套 Session 实例或写入持久化。以上属于 DS Bot 的
+兼容入口，不代表任意插件前端已完成适配。
 
 该兼容入口的拒绝使用 DS Bot 原生的 HTTP 200 + `{ ok: false, error: { code, message,
 details } }`；这不是调用成功，Client 必须读取 `ok`。断线、Host 缺少路由能力、CodeX/ACP

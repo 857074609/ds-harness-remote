@@ -15103,12 +15103,49 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
 
 // src/plugin-route-bridge.ts
 var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
+var BOT_REMOTE_OPERATIONS = [
+  "state",
+  "models",
+  "efforts",
+  "exchange",
+  "earlier",
+  "usage",
+  "room-progress",
+  "schedules",
+  "create-bot",
+  "duplicate-bot",
+  "update-bot",
+  "delete-bot",
+  "set-main",
+  "set-flags",
+  "create-room",
+  "update-room",
+  "delete-room",
+  "add-agent",
+  "agent-session",
+  "agent-adopt",
+  "agent-archive",
+  "agent-rename",
+  "remove-agent",
+  "send",
+  "answer-question",
+  "dismiss-question",
+  "approval-answer",
+  "stop-member-work"
+];
 function isAllowedPluginRoute(route) {
   return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
 }
 var callSchema = external_exports.object({
   route: external_exports.enum(PLUGIN_ROUTE_ALLOWLIST),
-  body: external_exports.record(external_exports.string(), external_exports.unknown())
+  body: external_exports.object({
+    endpoint: external_exports.enum(BOT_REMOTE_OPERATIONS),
+    payload: external_exports.record(external_exports.string(), external_exports.unknown()).nullable().optional()
+  }).strict().superRefine((body, ctx) => {
+    if (body.endpoint === "approval-answer" && body.payload?.choice !== "allow" && body.payload?.choice !== "reject") {
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Only one-time approval or rejection is supported." });
+    }
+  })
 }).strict();
 var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
 var PluginRouteBridge = class {

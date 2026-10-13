@@ -13,11 +13,11 @@ describe('PluginRouteBridge', () => {
   it('forwards valid calls to the dispatcher and returns the bounded status/json envelope', async () => {
     const dispatch = dispatcher({ json: { ok: true, value: { answer: 42 } } })
     const bridge = new PluginRouteBridge(dispatch)
-    await expect(bridge.call({ route: 'api/bot', body: { message: 'hi' } })).resolves.toEqual({
+    await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state', payload: null } })).resolves.toEqual({
       status: 200,
       json: { ok: true, value: { answer: 42 } },
     })
-    expect(dispatch).toHaveBeenCalledWith('api/bot', { message: 'hi' }, expect.any(AbortSignal))
+    expect(dispatch).toHaveBeenCalledWith('api/bot', { endpoint: 'state', payload: null }, expect.any(AbortSignal))
   })
 
   it('rejects routes outside the exact plugin allowlist before dispatch', async () => {
@@ -31,8 +31,44 @@ describe('PluginRouteBridge', () => {
       run: async () => {
         const dispatch = dispatcher()
         const bridge = new PluginRouteBridge(dispatch)
-        await expect(bridge.call({ route, body: {} })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        await expect(bridge.call({ route, body: { endpoint: 'state' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
         expect(dispatch).not.toHaveBeenCalled()
+      },
+    })))
+  })
+
+  it('admits reviewed Bot operations and refuses local administration before dispatch', async () => {
+    await runScenarios([
+      ...['state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules'].map(endpoint => ({
+        name: `admit ${endpoint}`, body: { endpoint, payload: {} }, allowed: true,
+      })),
+      { name: 'one-time approval', body: { endpoint: 'approval-answer', payload: { choice: 'allow' } }, allowed: true },
+      { name: 'deny approval', body: { endpoint: 'approval-answer', payload: { choice: 'reject' } }, allowed: true },
+      ...[
+        'update-install', 'dsh-update-install', 'schedule-create', 'schedule-delete',
+        'secret-set', 'secret-allow', 'secret-update', 'secret-delete', 'secret-cancel',
+        'connector-connect', 'connector-disconnect', 'connector-retry',
+        'capability-save', 'capability-delete', 'capability-approve', 'bot-capability',
+        'memory-ask', 'memory-forget', 'browser-wait', 'browser-result',
+        'diagnostics', 'diagnostics-log', 'diagnostics-clear', 'set-prefs',
+        'future-operation', 'State', 'state/child', 'state\n',
+      ].map(endpoint => ({ name: `refuse ${endpoint}`, body: { endpoint, payload: {} }, allowed: false })),
+      { name: 'missing operation', body: {}, allowed: false },
+      { name: 'extra top-level body fields', body: { endpoint: 'state', extra: true }, allowed: false },
+      { name: 'array payload', body: { endpoint: 'state', payload: [] }, allowed: false },
+      { name: 'session-wide approval', body: { endpoint: 'approval-answer', payload: { choice: 'allow_session' } }, allowed: false },
+    ].map(row => ({
+      name: row.name,
+      run: async () => {
+        const dispatch = dispatcher()
+        const call = new PluginRouteBridge(dispatch).call({ route: 'api/bot', body: row.body })
+        if (row.allowed) {
+          await expect(call).resolves.toMatchObject({ status: 200 })
+          expect(dispatch).toHaveBeenCalledOnce()
+        } else {
+          await expect(call).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+          expect(dispatch).not.toHaveBeenCalled()
+        }
       },
     })))
   })
@@ -47,13 +83,13 @@ describe('PluginRouteBridge', () => {
 
   it('rejects oversized request bodies with INVALID_MESSAGE', async () => {
     const bridge = new PluginRouteBridge(dispatcher())
-    await expect(bridge.call({ route: 'api/bot', body: { blob: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES) } }))
+    await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'send', payload: { text: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES) } } }))
       .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
   })
 
   it('rejects oversized responses with RESPONSE_TOO_LARGE', async () => {
     const bridge = new PluginRouteBridge(dispatcher({ json: { blob: 'x'.repeat(MAX_SECURE_MESSAGE_BYTES) } }))
-    await expect(bridge.call({ route: 'api/bot', body: {} }))
+    await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state' } }))
       .rejects.toMatchObject({ code: 'RESPONSE_TOO_LARGE' })
   })
 
@@ -61,7 +97,7 @@ describe('PluginRouteBridge', () => {
     const bridge = new PluginRouteBridge(vi.fn(async () => {
       throw new RpcError('TIMEOUT', 'The plugin route call timed out.', undefined, true)
     }))
-    await expect(bridge.call({ route: 'api/bot', body: {} }))
+    await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state' } }))
       .rejects.toMatchObject({ code: 'TIMEOUT', retryable: true })
   })
 })

@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Adds a Host-side DS Bot operation allowlist: remote chat and roster management remain available; installation, upgrades, schedule mutations, credentials, capability scripts, and unknown operations are refused before local dispatch.
+- Gates DS Bot roster and newly created Session responses on membership in the official Session catalog, with at most two refreshes for a missing identity; an already-ready catalog or a silently failed refresh cannot publish unknown Sessions.
 - Restricts plugin route forwarding to the exact `api/bot` endpoint, preventing official Harness RPCs from bypassing the Remote allowlist, local settings restrictions, and terminal policy.
 - Reports DS Bot forwarding refusals with distinct safe error codes in its native error envelope, including missing Host routes, unsupported carriers, disconnected or incompatible catalogs, and catalog readiness failures.
 - Adds the native schedule UI's read-only `schedule/list` and `schedule/catalog` endpoints to the fixed Remote allowlist, keeps remote RPC failures in the official response envelope, and dispatches Host plugin routes through the official Connection Fetch carrier on Desktop without requiring a local HTTP server.
@@ -8,6 +10,8 @@
 
 ### 中文
 
+- Host 对 DS Bot 子操作实行固定白名单，保留远程会话与成员/群聊管理；安装升级、日程增删、凭据、能力脚本及未知操作在本机 dispatch 前拒绝。
+- DS Bot roster 和新会话响应必须通过官方 Session 目录的 ID 校验，缺失时最多刷新两次；目录曾进入 ready 或刷新失败后正常返回，均不能放行尚不可解析的新 Session。
 - 插件路由转发仅开放精确的 `api/bot` 端点，阻止官方 Harness RPC 绕过 Remote 白名单、本地设置限制和终端策略。
 - DS Bot 转发拒绝保留原生错误封装与具体安全错误码，区分 Host 未加载路由、能力缺失、断线、后端不兼容和会话目录未就绪，避免统一显示 HTTP 502。
 - 补齐原生日程 UI 的只读 `schedule/list` 与 `schedule/catalog` 固定白名单，远程 RPC 错误保留官方响应封装；Host 插件路由优先使用官方 Connection Fetch carrier，使 Desktop 不依赖本机 HTTP 服务。

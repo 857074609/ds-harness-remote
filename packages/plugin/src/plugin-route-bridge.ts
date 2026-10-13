@@ -7,6 +7,15 @@ import { RpcError } from './safe-error.js'
 /** Local plugin web routes forwardable over the authenticated channel (POST only). */
 export const PLUGIN_ROUTE_ALLOWLIST = ['api/bot'] as const
 
+/** Reviewed DS Bot operations; new upstream operations stay local by default. */
+export const BOT_REMOTE_OPERATIONS = [
+  'state', 'models', 'efforts', 'exchange', 'earlier', 'usage', 'room-progress', 'schedules',
+  'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
+  'create-room', 'update-room', 'delete-room',
+  'add-agent', 'agent-session', 'agent-adopt', 'agent-archive', 'agent-rename', 'remove-agent',
+  'send', 'answer-question', 'dismiss-question', 'approval-answer', 'stop-member-work',
+] as const
+
 export function isAllowedPluginRoute(route: string): route is typeof PLUGIN_ROUTE_ALLOWLIST[number] {
   return PLUGIN_ROUTE_ALLOWLIST.some(allowed => allowed === route)
 }
@@ -19,7 +28,14 @@ export type PluginRouteDispatcher = (
 
 const callSchema = z.object({
   route: z.enum(PLUGIN_ROUTE_ALLOWLIST),
-  body: z.record(z.string(), z.unknown()),
+  body: z.object({
+    endpoint: z.enum(BOT_REMOTE_OPERATIONS),
+    payload: z.record(z.string(), z.unknown()).nullable().optional(),
+  }).strict().superRefine((body, ctx) => {
+    if (body.endpoint === 'approval-answer' && body.payload?.choice !== 'allow' && body.payload?.choice !== 'reject') {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Only one-time approval or rejection is supported.' })
+    }
+  }),
 }).strict()
 
 /** Local plugin route call timeout, mirroring the Harness API bridge budget. */

@@ -3,7 +3,7 @@ import type { AddressInfo } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { registerControlRoute, type HostWebServerLike } from '../src/control-route.js'
-import { createPluginRouteFetch } from '../src/plugin-route-client.js'
+import { createPluginRouteCatalogGuard, createPluginRouteFetch } from '../src/plugin-route-client.js'
 
 const servers: Server[] = []
 const cleanup = async () => {
@@ -79,11 +79,16 @@ describe('browser plugin route authority', () => {
       name: cancel ? 'cancel while catalog is loading' : 'publish only after catalog is ready',
       run: async () => {
         const host = await carrier()
+        host.routeJson = { ok: true, value: { bots: [{ id: 'new-session' }] } }
         let finishCatalog!: () => void
         let catalogStarted!: () => void
         const started = new Promise<void>(resolve => { catalogStarted = resolve })
         const ready = new Promise<void>(resolve => { finishCatalog = resolve })
-        const beforeResponse = vi.fn(async () => { catalogStarted(); await ready })
+        let ids: string[] = []
+        const refresh = vi.fn(async () => { catalogStarted(); await ready; ids = ['new-session'] })
+        const beforeResponse = vi.fn(createPluginRouteCatalogGuard(async () => ({
+          list: { getSnapshot: () => ({ ids, phase: 'ready' }) }, refresh,
+        })))
         const original: typeof fetch = (input, init) => fetch(input instanceof Request ? input : new URL(String(input), host.baseUrl), init)
         const wrapped = createPluginRouteFetch(original, host.baseUrl, { beforeResponse })
         const controller = new AbortController()
@@ -97,6 +102,7 @@ describe('browser plugin route authority', () => {
           try {
             await expect(response).rejects.toMatchObject({ name: 'AbortError' })
             expect(published).toBe(false)
+            expect(refresh).toHaveBeenCalledOnce()
           } finally {
             finishCatalog()
           }
@@ -104,9 +110,69 @@ describe('browser plugin route authority', () => {
         }
         finishCatalog()
         expect((await response).status).toBe(200)
-        expect(beforeResponse).toHaveBeenCalledWith(remoteStatus(), { endpoint: 'state' })
+        expect(refresh).toHaveBeenCalledOnce()
+        expect(beforeResponse).toHaveBeenCalledWith(remoteStatus(), { endpoint: 'state' }, host.routeJson, expect.any(AbortSignal))
       },
     })), cleanup)
+  })
+
+  it('publishes roster Sessions only when they are present in the official catalog, including after a joined stale pull', async () => {
+    await runScenarios([
+      { name: 'ready catalog with missing Session after swallowed refresh failure', initial: ['old-session'], arrivesAt: 0, succeeds: false, pulls: 2 },
+      { name: 'new full roster after an earlier ready catalog', initial: ['old-session'], arrivesAt: 1, succeeds: true, pulls: 1 },
+      { name: 'first pull joins a baseline from before Bot creation', initial: ['old-session'], arrivesAt: 2, succeeds: true, pulls: 2 },
+      { name: 'already catalogued Session', initial: ['new-session'], arrivesAt: 0, succeeds: true, pulls: 0 },
+      { name: 'missing public refresh method', initial: ['old-session'], arrivesAt: 0, succeeds: false, pulls: 0, noRefresh: true },
+    ].map(row => ({
+      name: row.name,
+      run: async () => {
+        const host = await carrier()
+        host.routeJson = { ok: true, value: { bots: [{ id: 'new-session' }], rooms: [], agents: [] } }
+        let ids = row.initial
+        let pulls = 0
+        const refresh = vi.fn(async () => {
+          if (++pulls === row.arrivesAt) ids = ['new-session']
+        })
+        const sessions = {
+          list: { getSnapshot: () => ({ ids, phase: 'ready' }) },
+          ...(row.noRefresh ? {} : { refresh }),
+        }
+        const original: typeof fetch = (input, init) => fetch(input instanceof Request ? input : new URL(String(input), host.baseUrl), init)
+        const wrapped = createPluginRouteFetch(original, host.baseUrl, {
+          beforeResponse: createPluginRouteCatalogGuard(async () => sessions),
+        })
+        const result = await (await wrapped('api/bot', { method: 'POST', body: JSON.stringify({ endpoint: 'state' }) })).json()
+        if (row.succeeds) expect(result).toEqual(host.routeJson)
+        else expect(result).toMatchObject({ ok: false, error: { code: 'remote-plugin/catalog-unavailable' } })
+        expect(refresh).toHaveBeenCalledTimes(row.pulls)
+        expect(host.local).not.toHaveBeenCalled()
+      },
+    })), cleanup)
+  })
+
+  it('checks Session references in each Bot response shape without treating roster Agent IDs as Sessions', async () => {
+    await runScenarios([
+      { endpoint: 'state', value: { bots: [{ id: 'bot', sessionId: 'current', parts: ['part'] }], rooms: [{ id: 'room', parts: ['member'] }], agents: [{ id: 'agent-roster-id', sessions: ['agent-session'] }] }, ids: ['bot', 'current', 'part', 'room', 'member', 'agent-session'] },
+      { endpoint: 'create-bot', value: { id: 'bot', segments: [{ sessionId: 'current' }] }, ids: ['bot', 'current'] },
+      { endpoint: 'create-room', value: { id: 'room', sessions: { bot: 'member' } }, ids: ['room', 'member'] },
+      { endpoint: 'update-room', value: { room: { id: 'room', parts: ['member'] } }, ids: ['room', 'member'] },
+      { endpoint: 'add-agent', value: { id: 'agent-roster-id', sessions: ['agent-session'] }, ids: ['agent-session'] },
+      { endpoint: 'agent-session', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },
+      { endpoint: 'agent-adopt', value: { sessionId: 'agent-session' }, ids: ['agent-session'] },
+      { endpoint: 'set-flags', value: { id: 'room', members: ['bot'], sessions: { bot: 'member' } }, ids: ['room', 'member'] },
+    ].map(row => ({
+      name: row.endpoint,
+      run: async () => {
+        let ids: string[] = []
+        const refresh = vi.fn(async () => { ids = row.ids })
+        const guard = createPluginRouteCatalogGuard(async () => ({ list: { getSnapshot: () => ({ ids, phase: 'ready' }) }, refresh }))
+        await guard(remoteStatus(), { endpoint: row.endpoint }, { ok: true, value: row.value }, new AbortController().signal)
+        expect(refresh).toHaveBeenCalledOnce()
+        ids = row.ids.slice(0, -1)
+        refresh.mockImplementation(async () => {})
+        await expect(guard(remoteStatus(), { endpoint: row.endpoint }, { ok: true, value: row.value }, new AbortController().signal)).rejects.toThrow('does not contain')
+      },
+    })))
   })
 
   it('preserves cancellation and rejects uncorrelated control responses without reaching local routes', async () => {
@@ -146,6 +212,7 @@ describe('browser plugin route authority', () => {
       { name: 'unsupported Host RPC', remoteCode: 'FEATURE_NOT_SUPPORTED', code: 'remote-plugin/host-unsupported' },
       { name: 'lost Host connection', remoteCode: 'TRANSPORT_CLOSED', code: 'remote-plugin/disconnected' },
       { name: 'other control refusal', remoteCode: 'PERMISSION_DENIED', code: 'remote-plugin/control-rejected' },
+      { name: 'disallowed Bot operation', remoteCode: 'INVALID_MESSAGE', code: 'remote-plugin/operation-not-allowed' },
       { name: 'catalog not ready', catalog: true, code: 'remote-plugin/catalog-unavailable' },
     ].map(row => ({
       name: row.name,
@@ -182,6 +249,7 @@ async function carrier(prefix = '') {
     fetch: undefined as unknown as typeof fetch,
     routeStatus: 200,
     rejectCode: undefined as string | undefined,
+    routeJson: { ok: true, value: { source: 'remote' } } as unknown,
   }
   registerControlRoute({ requestRejection: () => undefined, rpc: { handle: () => { throw new Error('Unexpected fallback') } } },
     async (endpoint, payload) => {
@@ -189,7 +257,7 @@ async function carrier(prefix = '') {
       expect(endpoint).toBe('plugin.route')
       host.forward(payload)
       if (host.rejectCode !== undefined) return { ok: false, error: { code: 'internal', message: 'private upstream data', details: { remoteCode: host.rejectCode } } }
-      return { ok: true, value: { status: host.routeStatus, json: { ok: true, value: { source: 'remote' } } } }
+      return { ok: true, value: { status: host.routeStatus, json: host.routeJson } }
     }, { register: route => { routes.push(route); return () => undefined } })
   const server = createServer((request, response) => {
     request.url = request.url?.slice(prefix.length)

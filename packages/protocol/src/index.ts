@@ -531,7 +531,7 @@ export interface TransportStats {
 /** Local plugin web route call tunneled inside the authenticated business channel. */
 export interface PluginRouteCallParams {
   route: string
-  body: unknown
+  body: { endpoint: string; payload?: Record<string, unknown> | null }
 }
 
 export interface PluginRouteCallResult {

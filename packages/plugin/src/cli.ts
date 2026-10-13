@@ -13,6 +13,7 @@ import {
   ServerApiError,
   type DeviceAuthorization,
   type OAuthProvider,
+  type OAuthProviderInfo,
   type OAuthQrPollResult,
   type OAuthQrSession,
 } from './server-api.js'
@@ -27,6 +28,7 @@ interface CliWriter {
 }
 
 interface CliHostApi {
+  oauthProviders(): Promise<OAuthProviderInfo[]>
   startOAuthQrLogin(provider: OAuthProvider): Promise<OAuthQrSession>
   pollOAuthQrLogin(
     identity: HostIdentity,
@@ -96,17 +98,22 @@ async function register(args: readonly string[], runtime: CliRuntime): Promise<n
 }
 
 async function login(args: readonly string[], runtime: CliRuntime): Promise<number> {
-  if (args.length > 1) throw new CliUsageError('Usage: ds-harness-remote login [github|zhihu]')
-  const provider = args[0] ?? 'zhihu'
-  if (provider !== 'github' && provider !== 'zhihu') {
-    throw new CliUsageError('Login provider must be github or zhihu.')
-  }
-
+  if (args.length > 1) throw new CliUsageError('Usage: ds-harness-remote login [provider|list]')
   const context = await hostContext(runtime)
+  const providers = (await context.api.oauthProviders()).filter(item => item.qrStartUrl != null)
+  if (args[0] === 'list') {
+    write(runtime.stdout, providers.length === 0 ? 'No QR sign-in providers are available.\n'
+      : providers.map(item => `${item.displayName}: ds-harness-remote login ${item.id}\n`).join(''))
+    return 0
+  }
+  const selected = args[0] === undefined
+    ? providers.find(item => item.id === 'zhihu') ?? providers[0]
+    : providers.find(item => item.id === args[0])
+  if (selected === undefined) throw new CliUsageError('OAuth provider unavailable. Run "ds-harness-remote login list" to see available providers.')
+  const provider = selected.id
   const session = await context.api.startOAuthQrLogin(provider)
   const qr = await runtime.renderQr(session.scanUrl)
-  const providerName = provider === 'github' ? 'GitHub' : 'Zhihu'
-  write(runtime.stdout, `Using ${providerName} QR login. ${alternativeProviderHint(provider)}\n`)
+  write(runtime.stdout, `Using ${selected.displayName} QR login. Run "ds-harness-remote login list" for available providers.\n`)
   write(runtime.stdout, 'Scan this QR code to authorize this Host:\n\n')
   write(runtime.stdout, `${qr.trimEnd()}\n`)
   write(runtime.stdout, `Authorization URL: ${terminalLink(session.scanUrl, runtime.stdout)}\n\nWaiting for authorization...\n`)
@@ -301,12 +308,6 @@ function authorizedMessage(authorization: DeviceAuthorization): string {
     : `Remote Host login complete for ${authorization.account}.`
 }
 
-function alternativeProviderHint(provider: OAuthProvider): string {
-  return provider === 'zhihu'
-    ? 'GitHub is also supported: ds-harness-remote login github'
-    : 'Zhihu is also supported: ds-harness-remote login zhihu'
-}
-
 function authorizationLabel(method: ServerCredentials['authorizationMethod']): string {
   if (method === 'host_registration_code') return 'Host registration code'
   if (method === 'owned_device') return 'owned device'
@@ -328,13 +329,13 @@ function cliErrorMessage(error: unknown): string {
 function helpText(): string {
   return [
     'Usage:',
-    '  ds-harness-remote login [github|zhihu]',
+    '  ds-harness-remote login [provider|list]',
     '  ds-harness-remote register <server-token>',
     '  ds-harness-remote status',
     '  ds-harness-remote logout',
     '',
     'Inside dsh-TUI, use /remote login, /remote status, or /remote logout.',
-    'login defaults to Zhihu and authorizes this computer as a Remote Host with a terminal QR code.',
+    'login uses an available QR provider (preferring Zhihu). Use login list to see available providers.',
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
     'Host configuration is not exposed by this CLI yet. Restart dsh-tui after login or logout.',
     '',

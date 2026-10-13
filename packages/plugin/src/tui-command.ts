@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { ResolvedConfig } from './config.js'
 import { renderCompactTerminalQr, renderTerminalQr } from './cli.js'
-import { ServerApiError, type OAuthProvider, type OAuthQrSession } from './server-api.js'
+import { ServerApiError, type OAuthProvider, type OAuthProviderInfo, type OAuthQrSession } from './server-api.js'
 import type { HostPluginRuntime } from './service.js'
 
 const QR_POLL_INTERVAL_MS = 2_000
@@ -112,7 +112,7 @@ export function installTuiRemoteCommand(
     const definition: CommandDefinitionLike = {
       name: 'remote',
       description: 'Manage Remote Host login and connection status',
-      input: { hint: '[status | login [github|zhihu] | logout]' },
+      input: { hint: '[status | login [provider|list] | logout]' },
       recordInput: false,
       handler: async ({ rawInput }) => {
         const args = rawInput.trim().split(/\s+/u).filter(Boolean)
@@ -122,9 +122,18 @@ export function installTuiRemoteCommand(
           return { kind: 'success', text: formatRemoteStatusInline(resolveTarget()) }
         }
         if (command === 'login' && args.length <= 2) {
-          const provider = args[1] ?? 'zhihu'
-          if (provider !== 'github' && provider !== 'zhihu') {
-            return { kind: 'error', text: 'Usage: /remote login [github|zhihu]' }
+          const provider = args[1] ?? ''
+          if (provider === 'list') {
+            const target = resolveTarget()
+            if (target === undefined) return remoteNotReady()
+            try {
+              const providers = await target.runtime.hostOAuthProviders()
+              return { kind: 'success', text: providers.filter(item => item.qrStartUrl != null)
+                .map(item => `${item.displayName}: /remote login ${item.id}`).join('\n') || 'No QR sign-in providers are available.' }
+            } catch (error) { return { kind: 'error', text: errorCode(error) } }
+          }
+          if (provider !== '' && !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
+            return { kind: 'error', text: 'Usage: /remote login [provider|list]' }
           }
           if (scenes === undefined) {
             return {
@@ -168,7 +177,7 @@ export function installTuiRemoteCommand(
           en: 'Manage Remote Host login and connection status',
           zh: '管理 Remote Host 登录和连接状态',
         },
-        children: remoteCommandChildren,
+        children: path => remoteCommandChildren(path, login.completionProviders()),
     }))
     const disposeScene = registerOptional(tuiContext, 'login scene', () => scenes?.register({
         id: REMOTE_LOGIN_SCENE_ID,
@@ -229,7 +238,7 @@ function registerOptional(
   }
 }
 
-function remoteCommandChildren(canonicalPath: readonly string[]): readonly CommandCompletionNodeLike[] {
+function remoteCommandChildren(canonicalPath: readonly string[], providers: readonly OAuthProviderInfo[]): readonly CommandCompletionNodeLike[] {
   if (canonicalPath.length === 1 && canonicalPath[0] === 'remote') {
     return [
       {
@@ -239,8 +248,8 @@ function remoteCommandChildren(canonicalPath: readonly string[]): readonly Comma
       },
       {
         name: 'login',
-        description: 'Authorize this Host with a GitHub or Zhihu QR code',
-        descriptions: { zh: '使用 GitHub 或知乎二维码授权当前 Host' },
+        description: 'Authorize this Host with an available OAuth QR provider',
+        descriptions: { zh: '使用服务端提供的 OAuth 二维码授权当前 Host' },
       },
       {
         name: 'logout',
@@ -250,10 +259,10 @@ function remoteCommandChildren(canonicalPath: readonly string[]): readonly Comma
     ]
   }
   if (canonicalPath.length === 2 && canonicalPath[0] === 'remote' && canonicalPath[1] === 'login') {
-    return [
-      { name: 'zhihu', description: 'Sign in with Zhihu (default)', descriptions: { zh: '使用知乎登录（默认）' } },
-      { name: 'github', description: 'Sign in with GitHub', descriptions: { zh: '使用 GitHub 登录' } },
-    ]
+    return [{ name: 'list', description: 'List available sign-in providers', descriptions: { zh: '列出可用登录方式' } },
+      ...providers.filter(item => item.qrStartUrl != null).map(item => ({
+        name: item.id, description: `Sign in with ${item.displayName}`, descriptions: { zh: `使用 ${item.displayName} 登录` },
+      }))]
   }
   return []
 }
@@ -286,7 +295,7 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
       ? ['Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting.']
       : status.error === 'SERVER_CREDENTIALS_BUSY'
         ? ['Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again.']
-        : status.accountRequired ? ['Authorize again with /remote login [github|zhihu].'] : []),
+        : status.accountRequired ? ['Authorize again with /remote login [provider|list].'] : []),
     `Harness Remote API: ${capabilities.has('harness.api.v1')
       ? 'available (ApiProxy)'
       : capabilities.has('harness.remote.v3')
@@ -298,7 +307,7 @@ function remoteStatusLines(target: TuiRemoteTarget | undefined): readonly string
     `Codex Remote: ${codex.enabled ? codex.state : 'disabled'}`,
     `Agent ACP: ${cursor.enabled ? cursor.state : 'disabled'}`,
     '',
-    'Commands: /remote login [github|zhihu] · /remote status · /remote logout',
+    'Commands: /remote login [provider|list] · /remote status · /remote logout',
   ]
 }
 
@@ -311,7 +320,7 @@ function remoteCommandUsage(): string {
     'Usage:',
     '  /remote',
     '  /remote status',
-    '  /remote login [github|zhihu]',
+    '  /remote login [provider|list]',
     '  /remote logout',
   ].join('\n')
 }
@@ -327,10 +336,32 @@ class RemoteLoginController {
   private current: LoginSnapshot = { phase: 'idle', provider: 'zhihu' }
   private readonly listeners = new Set<(snapshot: LoginSnapshot) => void>()
   private attempt = 0
+  private providers: OAuthProviderInfo[] = []
+  private providersLoading = false
+  private providersCheckedAt = 0
+  private providersServerUrl: string | undefined
 
   constructor(private readonly resolveTarget: () => TuiRemoteTarget | undefined) {}
 
   snapshot = (): LoginSnapshot => this.current
+
+  completionProviders(): readonly OAuthProviderInfo[] {
+    const target = this.resolveTarget()
+    if (!this.providersLoading && target !== undefined
+      && (target.config.serverUrl !== this.providersServerUrl || Date.now() - this.providersCheckedAt > 30_000)) {
+      this.providersLoading = true
+      this.providersServerUrl = target.config.serverUrl
+      this.providersCheckedAt = Date.now()
+      this.providers = []
+      void target.runtime.hostOAuthProviders().then(items => { this.providers = items })
+        .catch(() => undefined).finally(() => { this.providersLoading = false })
+    }
+    return this.providers
+  }
+
+  providerName(provider: string): string {
+    return this.providers.find(item => item.id === provider)?.displayName ?? provider
+  }
 
   subscribe = (listener: (snapshot: LoginSnapshot) => void): (() => void) => {
     this.listeners.add(listener)
@@ -351,6 +382,11 @@ class RemoteLoginController {
     try {
       const target = this.resolveTarget()
       if (target === undefined) throw new Error('REMOTE_NOT_READY')
+      this.providers = await target.runtime.hostOAuthProviders()
+      if (attempt !== this.attempt) return
+      const available = this.providers.filter(item => item.qrStartUrl != null)
+      if (provider === '') provider = (available.find(item => item.id === 'zhihu') ?? available[0])?.id ?? ''
+      if (!available.some(item => item.id === provider)) throw new Error('OAUTH_PROVIDER_UNAVAILABLE')
       const session = await target.runtime.startHostOAuthQrLogin(provider)
       const [qr, compactQr] = await Promise.all([
         renderTerminalQr(session.scanUrl),
@@ -413,11 +449,10 @@ function createRemoteLoginScene(controller: RemoteLoginController): (props: Scen
       }
     })
 
-    const provider = snapshot.provider === 'github' ? 'GitHub' : 'Zhihu'
-    const other = snapshot.provider === 'github' ? '/remote login zhihu' : '/remote login github'
+    const provider = controller.providerName(snapshot.provider)
     const children: unknown[] = [
       React.createElement(ui.Text, { key: 'title', bold: true, color: 'accent' }, 'Remote Host login'),
-      React.createElement(ui.Text, { key: 'provider' }, `Provider: ${provider} · You can also use ${other}`),
+      React.createElement(ui.Text, { key: 'provider' }, `Provider: ${provider} · Available providers: /remote login list`),
     ]
 
     if (snapshot.phase === 'loading') {

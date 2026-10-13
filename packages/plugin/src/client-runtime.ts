@@ -1168,6 +1168,7 @@ export class ClientModeRuntime {
     try {
       if (endpoint === 'status') return ok(await this.detailedStatus())
       if (endpoint === 'devices') return ok(await this.devices())
+      if (endpoint === 'client.account.providers') return ok(await this.server.oauthProviders())
       if (endpoint === 'client.account.login') {
         const value = record(payload)
         if (typeof value.email !== 'string' || typeof value.password !== 'string') {
@@ -1178,8 +1179,8 @@ export class ClientModeRuntime {
       if (endpoint === 'client.account.qr.start') {
         const value = record(payload)
         const provider = value.provider ?? 'zhihu'
-        if (provider !== 'zhihu' && provider !== 'github') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A supported OAuth provider is required.')
+        if (typeof provider !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
+          throw new ClientModeError('INVALID_MESSAGE', 'An OAuth provider ID is required.')
         }
         return ok(await this.startClientOAuthQrLogin(provider))
       }

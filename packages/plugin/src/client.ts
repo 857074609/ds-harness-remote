@@ -11,6 +11,7 @@ import { CONTROL_RPC_PREFIX, STATUS_STREAM_PATH } from './control-route.js'
 import { createPluginRouteCatalogGuard, createPluginRouteFetch } from './plugin-route-client.js'
 import { createStatusFeed, type StatusFeed } from './status-stream.js'
 import { localeNamespace, en, zh, type LocaleKey, type Translate, type LocalizedMessage } from './client-locale.js'
+import type { OAuthProviderInfo } from './server-api.js'
 
 declare global {
   interface Window {
@@ -132,8 +133,8 @@ interface OAuthQrSession {
   expiresIn: number
 }
 
-type OAuthProvider = 'zhihu' | 'github'
-type LoginMethod = OAuthProvider | 'password'
+type OAuthProvider = string
+type LoginMethod = `oauth:${string}` | 'password'
 
 interface OAuthQrPollResult {
   status: 'pending' | 'expired' | 'complete'
@@ -1060,8 +1061,12 @@ window.__ModuleLoader__.load({
       const [email, setEmail] = React.useState('')
       const [password, setPassword] = React.useState('')
       const [loginServerUrl, setLoginServerUrl] = React.useState('https://dsh.r2049.cn')
-      const [loginMethod, setLoginMethod] = React.useState<LoginMethod>(props.preferredQrProvider)
-      const [loginMethodManuallySelected, setLoginMethodManuallySelected] = React.useState(false)
+      const [loginMethod, setLoginMethod] = React.useState<LoginMethod>('password')
+      const loginMethodManuallySelected = React.useRef(false)
+      const [oauthProviders, setOAuthProviders] = React.useState<OAuthProviderInfo[]>([])
+      const [providersLoading, setProvidersLoading] = React.useState(false)
+      const [providersFailed, setProvidersFailed] = React.useState(false)
+      const [providerReload, setProviderReload] = React.useState(0)
       const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
       const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
       const [qrExpired, setQrExpired] = React.useState(false)
@@ -1072,7 +1077,11 @@ window.__ModuleLoader__.load({
       const [error, setError] = React.useState<string | undefined>(undefined)
 
       React.useEffect(() => {
-        if (!open) setDevicesOpen(false)
+        if (!open) {
+          setDevicesOpen(false)
+          qrFlowRun.current += 1
+          setBusy(false)
+        }
       }, [open])
 
       React.useEffect(() => {
@@ -1147,9 +1156,42 @@ window.__ModuleLoader__.load({
       }
 
       React.useEffect(() => {
-        if (!open || !needsAuthorization || loginMethod === 'password' || qrSession !== undefined || qrExpired) return
-        void startQrLogin(loginMethod)
-      }, [open, needsAuthorization, loginMethod, qrSession, qrExpired])
+        if (!open || !needsAuthorization) return
+        let active = true
+        qrFlowRun.current += 1
+        setBusy(false)
+        setQrSession(undefined)
+        setQrImage(undefined)
+        setQrExpired(false)
+        setOAuthProviders([])
+        setProvidersLoading(true)
+        setProvidersFailed(false)
+        void props.control<OAuthProviderInfo[]>('client.account.providers').then(items => {
+          if (!active) return
+          const available = items.filter(item => item.qrStartUrl != null)
+          setOAuthProviders(available)
+          setLoginMethod(current => {
+            if (loginMethodManuallySelected.current && (current === 'password'
+              || available.some(item => `oauth:${item.id}` === current))) return current
+            const preferred = available.find(item => item.id === props.preferredQrProvider) ?? available[0]
+            return preferred === undefined ? 'password' : `oauth:${preferred.id}`
+          })
+        }).catch(reason => {
+          if (!active) return
+          setProvidersFailed(true)
+          setLoginMethod('password')
+          setError(messageOf(reason))
+        }).finally(() => {
+          if (active) setProvidersLoading(false)
+        })
+        return () => { active = false }
+      }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload])
+
+      React.useEffect(() => {
+        if (!open || !needsAuthorization || providersLoading || loginMethod === 'password'
+          || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod) || qrSession !== undefined || qrExpired) return
+        void startQrLogin(loginMethod.slice(6))
+      }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired])
 
       React.useEffect(() => {
         if (!open || loginMethod === 'password' || qrSession === undefined) return
@@ -1209,18 +1251,8 @@ window.__ModuleLoader__.load({
         }
       }, [open, loginMethod, qrSession])
 
-      React.useEffect(() => {
-        if (loginMethodManuallySelected || loginMethod === props.preferredQrProvider) return
-        qrFlowRun.current += 1
-        setLoginMethod(props.preferredQrProvider)
-        setQrSession(undefined)
-        setQrImage(undefined)
-        setQrExpired(false)
-        setError(undefined)
-      }, [props.preferredQrProvider, loginMethodManuallySelected])
-
       const selectLoginMethod = (method: LoginMethod): void => {
-        setLoginMethodManuallySelected(true)
+        loginMethodManuallySelected.current = true
         if (method === loginMethod) return
         qrFlowRun.current += 1
         setLoginMethod(method)
@@ -1230,16 +1262,17 @@ window.__ModuleLoader__.load({
         setError(undefined)
       }
 
-      const orderedQrProviders: OAuthProvider[] = props.preferredQrProvider === 'zhihu'
-        ? ['zhihu', 'github']
-        : ['github', 'zhihu']
+      const orderedQrProviders = [...oauthProviders].sort((a, b) =>
+        Number(b.id === props.preferredQrProvider) - Number(a.id === props.preferredQrProvider))
+      const selectedProvider = oauthProviders.find(item => `oauth:${item.id}` === loginMethod)
+      const scanLabel = t('scanWithProvider', { provider: selectedProvider?.displayName ?? '' })
 
-      const qrLoginTab = (provider: OAuthProvider): unknown => React.createElement('button', {
-        key: provider, type: 'button', role: 'tab', id: `dsh-remote-${provider}-tab`,
-        'aria-selected': loginMethod === provider, 'aria-controls': `dsh-remote-${provider}-panel`,
-        className: loginMethod === provider ? 'isActive' : '', disabled: busy,
-        onClick: () => selectLoginMethod(provider),
-      }, t(provider === 'github' ? 'githubLogin' : 'zhihuLogin'))
+      const qrLoginTab = (provider: OAuthProviderInfo): unknown => React.createElement('button', {
+        key: provider.id, type: 'button', role: 'tab', id: `dsh-remote-oauth:${provider.id}-tab`,
+        'aria-selected': loginMethod === `oauth:${provider.id}`, 'aria-controls': `dsh-remote-oauth:${provider.id}-panel`,
+        className: loginMethod === `oauth:${provider.id}` ? 'isActive' : '', disabled: busy,
+        onClick: () => selectLoginMethod(`oauth:${provider.id}`),
+      }, t('providerLogin', { provider: provider.displayName }))
 
       const selectHost = async (host: RemoteDevice): Promise<void> => {
         setBusy(true)
@@ -1776,7 +1809,13 @@ window.__ModuleLoader__.load({
                       className: loginMethod === 'password' ? 'isActive' : '', disabled: busy,
                       onClick: () => selectLoginMethod('password'),
                     }, t('accountPasswordLogin'))),
-                  loginMethod !== 'password'
+                  providersLoading ? React.createElement('p', { role: 'status' }, t('loadingLoginProviders')) : null,
+                  providersFailed ? React.createElement('button', {
+                    type: 'button', onClick: () => { setError(undefined); setProviderReload(value => value + 1) },
+                  }, t('retryLoginProviders')) : null,
+                  !providersLoading && !providersFailed && oauthProviders.length === 0
+                    ? React.createElement('p', { role: 'status' }, t('noLoginProviders')) : null,
+                  loginMethod !== 'password' && selectedProvider !== undefined
                     ? React.createElement('div', {
                       className: 'dshRemoteQrLogin', role: 'tabpanel', id: `dsh-remote-${loginMethod}-panel`,
                       'aria-labelledby': `dsh-remote-${loginMethod}-tab`,
@@ -1792,11 +1831,11 @@ window.__ModuleLoader__.load({
                           },
                           React.createElement('img', {
                             src: qrImage, width: 184, height: 184,
-                            alt: t(loginMethod === 'github' ? 'scanWithGitHub' : 'scanWithZhihu'),
+                            alt: scanLabel,
                           }),
                           React.createElement('span', null, t('openInBrowser'), ' ↗'))
                           : null,
-                      React.createElement('strong', null, t(loginMethod === 'github' ? 'scanWithGitHub' : 'scanWithZhihu')),
+                      React.createElement('strong', null, scanLabel),
                       React.createElement('p', null, t('scanLoginHint')),
                       status?.serverUrl === undefined ? null : React.createElement('p', { className: 'dshRemoteServiceAddress' },
                         t('currentServiceAddress'), ' ', React.createElement('a', {
@@ -2572,7 +2611,7 @@ window.__ModuleLoader__.load({
         '.dshRemoteLoginTabs{width:min(440px,100%);display:flex;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteLoginTabs>button{position:relative;min-height:38px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 14px;font:inherit;font-size:13px;cursor:pointer}.dshRemoteLoginTabs>button:hover:not(:disabled){color:var(--dsw-alias-label-primary)}.dshRemoteLoginTabs>button.isActive{color:var(--dsw-alias-label-primary);font-weight:600}.dshRemoteLoginTabs>button.isActive::after{content:"";position:absolute;right:12px;bottom:-1px;left:12px;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-brand-primary)}.dshRemoteLoginTabs>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;border-radius:6px}',
         '.dshRemoteClientLogin{width:min(440px,100%);display:flex;flex-direction:column;gap:8px}.dshRemoteClientLogin input{min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteClientLogin button{align-self:flex-start;min-height:40px;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}',
         '.dshRemoteQrLogin{width:min(440px,100%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0 2px;text-align:center}.dshRemoteQrLogin img,.dshRemoteQrPlaceholder{box-sizing:border-box;width:200px;height:200px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:#fff;padding:8px}.dshRemoteQrOpen{display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none}.dshRemoteQrOpen:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrOpen:hover img{border-color:var(--dsw-alias-label-dimmed)}.dshRemoteQrOpen:focus-visible{border-radius:12px;outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}.dshRemoteQrPlaceholder{display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary)}.dshRemoteQrLogin>strong{font-size:14px}.dshRemoteQrLogin>p{max-width:48ch;margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}.dshRemoteQrLogin>.dshRemoteServiceAddress{margin-top:2px;color:var(--dsw-alias-label-tertiary)}.dshRemoteServiceAddress>a{color:var(--dsw-alias-label-secondary);text-decoration:none}.dshRemoteServiceAddress>a:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrLogin>button,.dshRemoteClientLogin>.dshRemoteLoginSwitch{min-height:32px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;font:inherit;font-size:12px;cursor:pointer}.dshRemoteQrLogin>button:hover,.dshRemoteClientLogin>.dshRemoteLoginSwitch:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteClientLogin>.dshRemoteLoginSwitch{align-self:flex-start;background:transparent;color:var(--dsw-alias-label-secondary);padding-left:0}',
-        '.dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;gap:10px;overflow:hidden;white-space:nowrap}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>span{flex:0 0 auto;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:400}.dshRemoteLoginTabs{box-sizing:border-box;width:100%}.dshRemoteLoginTabs>button{min-width:0;flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:300px;min-height:300px}.dshRemoteClientLogin{align-items:stretch;padding-top:16px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}.dshRemoteQrLogin{padding-top:12px}',
+        '.dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;gap:10px;overflow:hidden;white-space:nowrap}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>span{flex:0 0 auto;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:400}.dshRemoteLoginTabs{box-sizing:border-box;width:100%;flex-wrap:wrap}.dshRemoteLoginTabs>button{min-width:120px;flex:1 0 auto;display:flex;align-items:center;justify-content:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:300px;min-height:300px}.dshRemoteClientLogin{align-items:stretch;padding-top:16px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}.dshRemoteQrLogin{padding-top:12px}',
         '.dshRemoteHostControlToggle{display:flex;align-items:center;gap:7px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:18px;white-space:nowrap;cursor:default}.dshRemoteHostControlToggle>input{appearance:none;box-sizing:border-box;position:relative;width:32px;height:18px;flex:0 0 auto;margin:0;border:1px solid var(--dsw-alias-label-secondary);border-radius:999px;background:var(--dsw-alias-bg-layer-3);cursor:pointer;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l2);transition:background .16s ease-out,border-color .16s ease-out,box-shadow .16s ease-out}.dshRemoteHostControlToggle>input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:var(--dsw-alias-label-secondary);transition:transform .16s ease-out,background .16s ease-out}.dshRemoteHostControlToggle>input:checked{border-color:var(--dsw-alias-state-success-primary);background:var(--dsw-alias-state-success-primary);box-shadow:none}.dshRemoteHostControlToggle>input:checked::after{transform:translateX(14px);background:var(--dsw-alias-bg-layer-1)}.dshRemoteHostControlToggle>input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px}.dshRemoteHostControlToggle>input:disabled{opacity:.5;cursor:default}@media(prefers-reduced-motion:reduce){.dshRemoteHostControlToggle>input,.dshRemoteHostControlToggle>input::after{transition:none}}',
         '.dshRemoteAccountFooter{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--dsw-alias-border-l2);padding-top:14px;color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteAccountExit{flex:0 0 auto;border:0;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;padding:5px 0;font-size:12px;line-height:1.5;white-space:nowrap}.dshRemoteAccountExit:hover:not(:disabled){color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteAccountExit:disabled{opacity:.5;cursor:default;text-decoration:none}',
         '.dshRemoteLocalLink{align-self:flex-start;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 0;cursor:pointer}.dshRemoteLocalLink:hover{color:var(--dsw-alias-label-primary)}',

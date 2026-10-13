@@ -80,37 +80,65 @@ Authorization: Bearer <accountToken>
 
 ### 3.2 OAuth 与扫码登录
 
-先检查当前 Server 是否启用对应 OAuth：
+客户端先匿名获取当前 Server 可用的 OAuth 列表：
 
 ```http
-GET /api/v1/auth/oauth/status
-GET /api/v1/auth/oauth/github/status
+GET /api/v1/auth/oauth/providers
 ```
 
-返回 `{ "configured": true }` 后，Web 登录可分别打开：
+响应使用 `Cache-Control: no-store`，只包含已配置完整凭据的提供商，不返回密钥、token 或账号信息：
 
-```text
-{serverUrl}/api/v1/auth/oauth/start?return_to=/app
-{serverUrl}/api/v1/auth/oauth/github/start?return_to=/app
+```json
+{
+  "items": [
+    {
+      "id": "google",
+      "displayName": "Google",
+      "startUrl": "/api/v1/auth/oauth/google/start",
+      "qrStartUrl": "/api/v1/auth/oauth/qr/start?provider=google"
+    }
+  ]
+}
 ```
 
-当前 Server 完成 Web 授权后会回到同源 `/app?token=<accountToken>`。Android Client 可使用固定 App scheme `dshremote://oauth` 作为 `return_to`，Server 会回跳 `dshremote://oauth?token=<accountToken>`；除此之外的外部 URL 或自定义 scheme 必须被规范化为 `/app`，避免开放重定向。
+`id` 是服务端定义的字符串，不是客户端枚举；按返回顺序展示 `displayName`。
+入口 URL 是相对于所选 Server base URL 的 `/api/v1/auth/` 路径。
+客户端必须拒绝外域、协议相对地址、控制字符和路径越界；不得根据已知提供商拼接入口。
+新字段应允许向前兼容。空 `items` 表示暂无可用 OAuth，应保留邮箱密码登录。
+`qrStartUrl` 缺省或为 `null` 表示不支持扫码，桌面插件只显示支持扫码的条目。
 
-桌面插件使用一次性扫码会话，`provider` 可为 `zhihu` 或 `github`；省略时为兼容旧客户端默认使用 `zhihu`：
+Web 登录打开 `startUrl` 并添加 `return_to=/app`。授权后回到同源
+`/app?token=<accountToken>`。Android 可使用固定 App scheme `dshremote://oauth`；其他
+外部 URL 或自定义 scheme 会被规范化为 `/app`，避免开放重定向。
 
-```http
-POST /api/v1/auth/oauth/qr/start?provider=github
-```
-
-Server 返回 `{ "qrId", "scanUrl", "expiresIn", "provider" }`。插件只把同源 `scanUrl` 编码成二维码，并轮询：
+桌面插件向所选条目的 `qrStartUrl` 发起 `POST`，Server 返回
+`{ "qrId", "scanUrl", "expiresIn", "provider" }`。插件只把同源 `scanUrl` 编码成二维码，并轮询：
 
 ```http
 GET /api/v1/auth/oauth/qr/{qrId}
 ```
 
-结果依次为 `pending`、`complete`（含一次性 `token`）或 `expired`。手机在 `scanUrl` 完成 GitHub/知乎 OAuth 后只看到完成页；Web token 不进入二维码、手机回调 URL 或日志，并且只能由发起插件领取一次。插件领取后立即用该 token 注册本机 device，再丢弃 web token。
+结果为 `pending`、`complete`（含一次性 `token`）或 `expired`。手机授权后只显示完成页；
+Web token 不进入二维码、手机回调 URL 或日志，并且只能由发起插件领取一次。
+插件领取后立即用该 token 注册本机 device，再丢弃 web token。
 
-账号 token 当前没有 refresh 接口；过期后需要重新登录。已经注册并持有有效 device refresh token 的 Host 后台运行不依赖账号 token。
+旧的 `/oauth/status`、`/oauth/github/status`、`/oauth/google/status` 和各提供商
+`start`/`callback` 接口继续兼容；`POST /oauth/qr/start` 省略 `provider` 时仍默认知乎。
+未知 provider 返回 422，已支持但未配置的 provider 返回 503。
+插件仅在列表接口返回 404 时回退查询旧的知乎/GitHub状态接口；网络故障、服务端错误和
+无效列表必须显示错误与重试入口，不能假装可用。
+
+插件 Remote 登录页在进入授权页面和 Server 切换时重新获取列表，按语言偏好优先选择
+已启用的知乎或 GitHub，其余条目保留服务端顺序，未启用的偏好不会阻挡其他提供商。
+命令行使用 `ds-harness-remote login list`，dsh-TUI 使用 `/remote login list` 查看可用条目，
+随后通过 `login <id>` 登录。未指定 ID 时优先选择可用的知乎，否则选择首个扫码提供商。
+
+新增 OAuth 需要在 Server 实现授权、回调与账号绑定，并在 `app/api/auth.py` 的
+`OAUTH_PROVIDERS` 注册展示名称、入口、配置检查和扫码分发函数。部署服务端后，已接入列表
+协议的插件会自动展示；新增提供商无需再次修改、构建或发布插件。现有旧插件需先更新一次。
+
+账号 token 当前没有 refresh 接口；过期后需要重新登录。持有有效 device refresh token
+的已注册 Host 后台运行不依赖账号 token。
 
 ## 4. 生成本机设备身份
 

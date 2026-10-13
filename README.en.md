@@ -190,6 +190,8 @@ ciphertext and keeps the same Host/Client identity boundary. See [Network and tr
 for the topology, control and data planes, NAT behavior, fallback, reconnect semantics, and current
 validation status.
 
+OAuth sign-in methods are loaded from the Server. Use `ds-harness-remote login list` or `/remote login list` to see available QR providers; new server integrations need no further plugin release.
+
 ## Security
 
 - Session traffic is end-to-end encrypted. The service relays ciphertext without storing session plaintext or device private keys.

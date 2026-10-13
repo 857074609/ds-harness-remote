@@ -246,7 +246,7 @@ describe('ClientModeRuntime Host account control', () => {
     )
   })
 
-  it('forwards only supported QR login providers to the Server API', async () => {
+  it('forwards opaque QR provider IDs and rejects malformed control input', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-qr-provider-'))
     directories.push(directory)
     const startOAuthQrLogin = vi.fn(async (provider: string) => ({
@@ -274,13 +274,19 @@ describe('ClientModeRuntime Host account control', () => {
 
     await expect(runtime.handleControl(
       'client.account.qr.start',
-      { provider: 'unknown' },
+      { provider: 'future-provider' },
+      signal,
+    )).resolves.toMatchObject({ ok: true })
+    expect(startOAuthQrLogin).toHaveBeenCalledWith('future-provider')
+    await expect(runtime.handleControl(
+      'client.account.qr.start',
+      { provider: { id: 'github' } },
       signal,
     )).resolves.toMatchObject({
       ok: false,
       error: { code: 'internal', details: { remoteCode: 'INVALID_MESSAGE' } },
     })
-    expect(startOAuthQrLogin).toHaveBeenCalledTimes(1)
+    expect(startOAuthQrLogin).toHaveBeenCalledTimes(2)
     await runtime.close()
   })
 

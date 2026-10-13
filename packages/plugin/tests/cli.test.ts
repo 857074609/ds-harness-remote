@@ -23,6 +23,7 @@ describe('Remote CLI', () => {
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
       calls.push({ url, init })
+      if (url.endsWith('/auth/oauth/providers')) return json({ items: [providerInfo('github')] })
       if (url.endsWith('/auth/oauth/qr/start?provider=github')) return json({
         qrId: 'github-qr-session-1234567890',
         scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
@@ -47,6 +48,8 @@ describe('Remote CLI', () => {
     })).resolves.toBe(0)
 
     expect(calls.map(call => call.url)).toEqual([
+      'https://dsh.r2049.cn/api/v1/auth/oauth/providers',
+      'https://dsh.r2049.cn/api/v1/auth/oauth/providers',
       'https://dsh.r2049.cn/api/v1/auth/oauth/qr/start?provider=github',
       'https://dsh.r2049.cn/api/v1/auth/oauth/qr/github-qr-session-1234567890',
       'https://dsh.r2049.cn/api/v1/auth/me',
@@ -84,6 +87,7 @@ describe('Remote CLI', () => {
       stderr: errors,
       renderQr: async () => '<zhihu-qr>',
       createHostApi: () => ({
+        oauthProviders: vi.fn(async () => [providerInfo('zhihu')]),
         startOAuthQrLogin: start,
         pollOAuthQrLogin: poll,
         bindIdentity: vi.fn(),
@@ -95,7 +99,6 @@ describe('Remote CLI', () => {
 
     expect(start).toHaveBeenCalledWith('zhihu')
     expect(output.text).toContain('<zhihu-qr>')
-    expect(output.text).toContain('GitHub is also supported: ds-harness-remote login github')
     expect(errors.text).toContain('QR login expired')
   })
 
@@ -121,6 +124,7 @@ describe('Remote CLI', () => {
       env,
       stdout: output,
       createHostApi: () => ({
+        oauthProviders: vi.fn(async () => []),
         startOAuthQrLogin: vi.fn(),
         pollOAuthQrLogin: vi.fn(),
         bindIdentity: vi.fn(),
@@ -194,4 +198,9 @@ function tokens() {
     refreshToken: 'refresh-token-value',
     refreshTokenExpiresAt: Date.now() + 120_000,
   }
+}
+
+function providerInfo(id: string) {
+  return { id, displayName: id, startUrl: `/api/v1/auth/oauth/${id}/start`,
+    qrStartUrl: `/api/v1/auth/oauth/qr/start?provider=${id}` }
 }

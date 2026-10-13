@@ -20,6 +20,7 @@ import {
   ServerApiError,
   type DeviceAuthorization,
   type OAuthProvider,
+  type OAuthProviderInfo,
   type OAuthQrPollResult,
   type OAuthQrSession,
 } from './server-api.js'
@@ -261,6 +262,13 @@ export class HostPluginRuntime {
       throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before reconnecting.', false)
     }
     this.serverConnection.reconnect()
+  }
+
+  async hostOAuthProviders(): Promise<OAuthProviderInfo[]> {
+    if (this.serverApi === undefined) {
+      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Remote Host Server is unavailable.', false)
+    }
+    return this.serverApi.oauthProviders()
   }
 
   async startHostOAuthQrLogin(provider: OAuthProvider): Promise<OAuthQrSession> {

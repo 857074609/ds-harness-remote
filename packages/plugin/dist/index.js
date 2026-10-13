@@ -20426,13 +20426,54 @@ var HostServerApi = class {
       isAdmin: login2.isAdmin
     };
   }
+  async oauthProviders() {
+    let body;
+    try {
+      body = await this.publicRequest("/api/v1/auth/oauth/providers", { method: "GET" });
+    } catch (error) {
+      if (!(error instanceof ServerApiError) || error.status !== 404) throw error;
+      const legacy = [
+        { id: "zhihu", displayName: "Zhihu", startUrl: "/api/v1/auth/oauth/start", statusUrl: "/api/v1/auth/oauth/status" },
+        { id: "github", displayName: "GitHub", startUrl: "/api/v1/auth/oauth/github/start", statusUrl: "/api/v1/auth/oauth/github/status" }
+      ];
+      const items = await Promise.all(legacy.map(async ({ statusUrl, ...provider }) => {
+        try {
+          const status2 = requireRecord(await this.publicRequest(statusUrl, { method: "GET" }), "OAuth status");
+          if (typeof status2.configured !== "boolean") throw invalidOAuthProviders();
+          return status2.configured ? [{ ...provider, qrStartUrl: `/api/v1/auth/oauth/qr/start?provider=${provider.id}` }] : [];
+        } catch (reason) {
+          if (reason instanceof ServerApiError && reason.status === 404) return [];
+          throw reason;
+        }
+      }));
+      return items.flat();
+    }
+    const value = requireRecord(body, "OAuth providers");
+    if (!Array.isArray(value.items)) throw invalidOAuthProviders();
+    const ids = /* @__PURE__ */ new Set();
+    return value.items.map((item) => {
+      const provider = requireRecord(item, "OAuth provider");
+      if (typeof provider.id !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id) || ids.has(provider.id) || typeof provider.displayName !== "string" || !provider.displayName.trim() || provider.displayName.length > 128 || TERMINAL_CONTROL_CHARACTERS.test(provider.displayName) || !isOAuthEntryPath(provider.startUrl) || provider.qrStartUrl != null && !isOAuthEntryPath(provider.qrStartUrl)) throw invalidOAuthProviders();
+      ids.add(provider.id);
+      return {
+        id: provider.id,
+        displayName: provider.displayName,
+        startUrl: provider.startUrl,
+        ...typeof provider.qrStartUrl === "string" ? { qrStartUrl: provider.qrStartUrl } : {}
+      };
+    });
+  }
   async startOAuthQrLogin(provider = "zhihu") {
-    const value = requireRecord(await this.publicRequest(`/api/v1/auth/oauth/qr/start?provider=${provider}`, {
+    const entry = (await this.oauthProviders()).find((item) => item.id === provider);
+    if (entry?.qrStartUrl == null) {
+      throw new ServerApiError("OAUTH_PROVIDER_UNAVAILABLE", "This OAuth provider is unavailable for QR login.", false);
+    }
+    const value = requireRecord(await this.publicRequest(entry.qrStartUrl, {
       method: "POST",
       body: "{}"
     }), "QR login");
     const scanUrl = normalizeOAuthScanUrl(value.scanUrl, this.baseUrl);
-    if (typeof value.qrId !== "string" || value.qrId.length < 20 || scanUrl === void 0 || !Number.isSafeInteger(value.expiresIn) || provider === "github" && value.provider !== "github" || value.provider !== void 0 && value.provider !== provider) {
+    if (typeof value.qrId !== "string" || value.qrId.length < 20 || scanUrl === void 0 || !Number.isSafeInteger(value.expiresIn) || provider !== "zhihu" && value.provider !== provider || value.provider !== void 0 && value.provider !== provider) {
       throw new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid QR login session.", false);
     }
     return { qrId: value.qrId, scanUrl, expiresIn: value.expiresIn };
@@ -20668,6 +20709,12 @@ var HostServerApi = class {
     return this.identity;
   }
 };
+function isOAuthEntryPath(value) {
+  return typeof value === "string" && /^\/api\/v1\/auth\/[^\s\\#]*$/.test(value) && !TERMINAL_CONTROL_CHARACTERS.test(value) && !value.split("?")[0]?.split("/").some((segment) => segment === "." || segment === ".." || /%/u.test(segment));
+}
+function invalidOAuthProviders() {
+  return new ServerApiError("INVALID_MESSAGE", "The Server returned an invalid OAuth provider list.", false);
+}
 function normalizeOAuthScanUrl(value, baseUrl) {
   if (typeof value !== "string" || TERMINAL_CONTROL_CHARACTERS.test(value)) return void 0;
   try {
@@ -22920,6 +22967,7 @@ var ClientModeRuntime = class {
     try {
       if (endpoint === "status") return ok2(await this.detailedStatus());
       if (endpoint === "devices") return ok2(await this.devices());
+      if (endpoint === "client.account.providers") return ok2(await this.server.oauthProviders());
       if (endpoint === "client.account.login") {
         const value = record5(payload);
         if (typeof value.email !== "string" || typeof value.password !== "string") {
@@ -22930,8 +22978,8 @@ var ClientModeRuntime = class {
       if (endpoint === "client.account.qr.start") {
         const value = record5(payload);
         const provider = value.provider ?? "zhihu";
-        if (provider !== "zhihu" && provider !== "github") {
-          throw new ClientModeError("INVALID_MESSAGE", "A supported OAuth provider is required.");
+        if (typeof provider !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
+          throw new ClientModeError("INVALID_MESSAGE", "An OAuth provider ID is required.");
         }
         return ok2(await this.startClientOAuthQrLogin(provider));
       }
@@ -32317,6 +32365,12 @@ var HostPluginRuntime = class {
     }
     this.serverConnection.reconnect();
   }
+  async hostOAuthProviders() {
+    if (this.serverApi === void 0) {
+      throw new ServerApiError("SERVER_NOT_CONFIGURED", "Remote Host Server is unavailable.", false);
+    }
+    return this.serverApi.oauthProviders();
+  }
   async startHostOAuthQrLogin(provider) {
     if (this.serverApi === void 0) {
       throw new ServerApiError("SERVER_NOT_CONFIGURED", "Remote Host Server is unavailable.", false);
@@ -32696,16 +32750,20 @@ async function register(args, runtime) {
   return 0;
 }
 async function login(args, runtime) {
-  if (args.length > 1) throw new CliUsageError("Usage: ds-harness-remote login [github|zhihu]");
-  const provider = args[0] ?? "zhihu";
-  if (provider !== "github" && provider !== "zhihu") {
-    throw new CliUsageError("Login provider must be github or zhihu.");
-  }
+  if (args.length > 1) throw new CliUsageError("Usage: ds-harness-remote login [provider|list]");
   const context = await hostContext(runtime);
+  const providers = (await context.api.oauthProviders()).filter((item) => item.qrStartUrl != null);
+  if (args[0] === "list") {
+    write(runtime.stdout, providers.length === 0 ? "No QR sign-in providers are available.\n" : providers.map((item) => `${item.displayName}: ds-harness-remote login ${item.id}
+`).join(""));
+    return 0;
+  }
+  const selected = args[0] === void 0 ? providers.find((item) => item.id === "zhihu") ?? providers[0] : providers.find((item) => item.id === args[0]);
+  if (selected === void 0) throw new CliUsageError('OAuth provider unavailable. Run "ds-harness-remote login list" to see available providers.');
+  const provider = selected.id;
   const session = await context.api.startOAuthQrLogin(provider);
   const qr = await runtime.renderQr(session.scanUrl);
-  const providerName = provider === "github" ? "GitHub" : "Zhihu";
-  write(runtime.stdout, `Using ${providerName} QR login. ${alternativeProviderHint(provider)}
+  write(runtime.stdout, `Using ${selected.displayName} QR login. Run "ds-harness-remote login list" for available providers.
 `);
   write(runtime.stdout, "Scan this QR code to authorize this Host:\n\n");
   write(runtime.stdout, `${qr.trimEnd()}
@@ -32883,9 +32941,6 @@ async function renderCompactTerminalQr(url) {
 function authorizedMessage(authorization) {
   return authorization.account === void 0 ? "Remote Host login complete." : `Remote Host login complete for ${authorization.account}.`;
 }
-function alternativeProviderHint(provider) {
-  return provider === "zhihu" ? "GitHub is also supported: ds-harness-remote login github" : "Zhihu is also supported: ds-harness-remote login zhihu";
-}
 function authorizationLabel(method) {
   if (method === "host_registration_code") return "Host registration code";
   if (method === "owned_device") return "owned device";
@@ -32902,13 +32957,13 @@ function cliErrorMessage(error) {
 function helpText() {
   return [
     "Usage:",
-    "  ds-harness-remote login [github|zhihu]",
+    "  ds-harness-remote login [provider|list]",
     "  ds-harness-remote register <server-token>",
     "  ds-harness-remote status",
     "  ds-harness-remote logout",
     "",
     "Inside dsh-TUI, use /remote login, /remote status, or /remote logout.",
-    "login defaults to Zhihu and authorizes this computer as a Remote Host with a terminal QR code.",
+    "login uses an available QR provider (preferring Zhihu). Use login list to see available providers.",
     `The Server is ${DEFAULT_REMOTE_SERVER_URL}.`,
     "Host configuration is not exposed by this CLI yet. Restart dsh-tui after login or logout.",
     ""
@@ -32951,7 +33006,7 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
     const definition = {
       name: "remote",
       description: "Manage Remote Host login and connection status",
-      input: { hint: "[status | login [github|zhihu] | logout]" },
+      input: { hint: "[status | login [provider|list] | logout]" },
       recordInput: false,
       handler: async ({ rawInput }) => {
         const args = rawInput.trim().split(/\s+/u).filter(Boolean);
@@ -32961,9 +33016,19 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
           return { kind: "success", text: formatRemoteStatusInline(resolveTarget()) };
         }
         if (command === "login" && args.length <= 2) {
-          const provider = args[1] ?? "zhihu";
-          if (provider !== "github" && provider !== "zhihu") {
-            return { kind: "error", text: "Usage: /remote login [github|zhihu]" };
+          const provider = args[1] ?? "";
+          if (provider === "list") {
+            const target2 = resolveTarget();
+            if (target2 === void 0) return remoteNotReady();
+            try {
+              const providers = await target2.runtime.hostOAuthProviders();
+              return { kind: "success", text: providers.filter((item) => item.qrStartUrl != null).map((item) => `${item.displayName}: /remote login ${item.id}`).join("\n") || "No QR sign-in providers are available." };
+            } catch (error) {
+              return { kind: "error", text: errorCode5(error) };
+            }
+          }
+          if (provider !== "" && !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
+            return { kind: "error", text: "Usage: /remote login [provider|list]" };
           }
           if (scenes === void 0) {
             return {
@@ -33007,7 +33072,7 @@ function installTuiRemoteCommand(ctx, resolveTarget) {
         en: "Manage Remote Host login and connection status",
         zh: "\u7BA1\u7406 Remote Host \u767B\u5F55\u548C\u8FDE\u63A5\u72B6\u6001"
       },
-      children: remoteCommandChildren
+      children: (path) => remoteCommandChildren(path, login2.completionProviders())
     }));
     const disposeScene = registerOptional(tuiContext, "login scene", () => scenes?.register({
       id: REMOTE_LOGIN_SCENE_ID,
@@ -33051,7 +33116,7 @@ function registerOptional(ctx, feature, register2) {
     };
   }
 }
-function remoteCommandChildren(canonicalPath) {
+function remoteCommandChildren(canonicalPath, providers) {
   if (canonicalPath.length === 1 && canonicalPath[0] === "remote") {
     return [
       {
@@ -33061,8 +33126,8 @@ function remoteCommandChildren(canonicalPath) {
       },
       {
         name: "login",
-        description: "Authorize this Host with a GitHub or Zhihu QR code",
-        descriptions: { zh: "\u4F7F\u7528 GitHub \u6216\u77E5\u4E4E\u4E8C\u7EF4\u7801\u6388\u6743\u5F53\u524D Host" }
+        description: "Authorize this Host with an available OAuth QR provider",
+        descriptions: { zh: "\u4F7F\u7528\u670D\u52A1\u7AEF\u63D0\u4F9B\u7684 OAuth \u4E8C\u7EF4\u7801\u6388\u6743\u5F53\u524D Host" }
       },
       {
         name: "logout",
@@ -33073,8 +33138,12 @@ function remoteCommandChildren(canonicalPath) {
   }
   if (canonicalPath.length === 2 && canonicalPath[0] === "remote" && canonicalPath[1] === "login") {
     return [
-      { name: "zhihu", description: "Sign in with Zhihu (default)", descriptions: { zh: "\u4F7F\u7528\u77E5\u4E4E\u767B\u5F55\uFF08\u9ED8\u8BA4\uFF09" } },
-      { name: "github", description: "Sign in with GitHub", descriptions: { zh: "\u4F7F\u7528 GitHub \u767B\u5F55" } }
+      { name: "list", description: "List available sign-in providers", descriptions: { zh: "\u5217\u51FA\u53EF\u7528\u767B\u5F55\u65B9\u5F0F" } },
+      ...providers.filter((item) => item.qrStartUrl != null).map((item) => ({
+        name: item.id,
+        description: `Sign in with ${item.displayName}`,
+        descriptions: { zh: `\u4F7F\u7528 ${item.displayName} \u767B\u5F55` }
+      }))
     ];
   }
   return [];
@@ -33097,13 +33166,13 @@ function remoteStatusLines(target2) {
     `Authorization: ${status2.authorized ? status2.account === void 0 ? "logged in" : `logged in (${status2.account})` : "logged out"}`,
     `Server connection: ${connection}`,
     ...status2.error === void 0 ? [] : [`Connection error: ${status2.error}`],
-    ...status2.error === "CONNECTION_REPLACED" ? ["Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting."] : status2.error === "SERVER_CREDENTIALS_BUSY" ? ["Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again."] : status2.accountRequired ? ["Authorize again with /remote login [github|zhihu]."] : [],
+    ...status2.error === "CONNECTION_REPLACED" ? ["Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting."] : status2.error === "SERVER_CREDENTIALS_BUSY" ? ["Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again."] : status2.accountRequired ? ["Authorize again with /remote login [provider|list]."] : [],
     `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : "disabled"}`,
     `Agent ACP: ${cursor2.enabled ? cursor2.state : "disabled"}`,
     "",
-    "Commands: /remote login [github|zhihu] \xB7 /remote status \xB7 /remote logout"
+    "Commands: /remote login [provider|list] \xB7 /remote status \xB7 /remote logout"
   ];
 }
 function formatRemoteStatusInline(target2) {
@@ -33114,7 +33183,7 @@ function remoteCommandUsage() {
     "Usage:",
     "  /remote",
     "  /remote status",
-    "  /remote login [github|zhihu]",
+    "  /remote login [provider|list]",
     "  /remote logout"
   ].join("\n");
 }
@@ -33131,7 +33200,29 @@ var RemoteLoginController = class {
   current = { phase: "idle", provider: "zhihu" };
   listeners = /* @__PURE__ */ new Set();
   attempt = 0;
+  providers = [];
+  providersLoading = false;
+  providersCheckedAt = 0;
+  providersServerUrl;
   snapshot = () => this.current;
+  completionProviders() {
+    const target2 = this.resolveTarget();
+    if (!this.providersLoading && target2 !== void 0 && (target2.config.serverUrl !== this.providersServerUrl || Date.now() - this.providersCheckedAt > 3e4)) {
+      this.providersLoading = true;
+      this.providersServerUrl = target2.config.serverUrl;
+      this.providersCheckedAt = Date.now();
+      this.providers = [];
+      void target2.runtime.hostOAuthProviders().then((items) => {
+        this.providers = items;
+      }).catch(() => void 0).finally(() => {
+        this.providersLoading = false;
+      });
+    }
+    return this.providers;
+  }
+  providerName(provider) {
+    return this.providers.find((item) => item.id === provider)?.displayName ?? provider;
+  }
   subscribe = (listener) => {
     this.listeners.add(listener);
     return () => {
@@ -33150,6 +33241,11 @@ var RemoteLoginController = class {
     try {
       const target2 = this.resolveTarget();
       if (target2 === void 0) throw new Error("REMOTE_NOT_READY");
+      this.providers = await target2.runtime.hostOAuthProviders();
+      if (attempt !== this.attempt) return;
+      const available = this.providers.filter((item) => item.qrStartUrl != null);
+      if (provider === "") provider = (available.find((item) => item.id === "zhihu") ?? available[0])?.id ?? "";
+      if (!available.some((item) => item.id === provider)) throw new Error("OAUTH_PROVIDER_UNAVAILABLE");
       const session = await target2.runtime.startHostOAuthQrLogin(provider);
       const [qr, compactQr] = await Promise.all([
         renderTerminalQr(session.scanUrl),
@@ -33203,11 +33299,10 @@ function createRemoteLoginScene(controller) {
         close();
       }
     });
-    const provider = snapshot.provider === "github" ? "GitHub" : "Zhihu";
-    const other = snapshot.provider === "github" ? "/remote login zhihu" : "/remote login github";
+    const provider = controller.providerName(snapshot.provider);
     const children = [
       React.createElement(ui.Text, { key: "title", bold: true, color: "accent" }, "Remote Host login"),
-      React.createElement(ui.Text, { key: "provider" }, `Provider: ${provider} \xB7 You can also use ${other}`)
+      React.createElement(ui.Text, { key: "provider" }, `Provider: ${provider} \xB7 Available providers: /remote login list`)
     ];
     if (snapshot.phase === "loading") {
       children.push(React.createElement(ui.Text, { key: "loading", color: "subtle" }, "Creating authorization QR code\u2026"));

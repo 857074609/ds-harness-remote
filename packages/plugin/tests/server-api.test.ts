@@ -16,10 +16,63 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('discovers future providers and uses their advertised QR entry without account credentials', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-oauth-discovery-'))
+    directories.push(directory)
+    const provider = { ...oauthProvider('future-provider'), displayName: 'Future Provider',
+      qrStartUrl: '/api/v1/auth/oauth/future/qr/start?mode=desktop' }
+    const fetchMock = vi.fn(async (input, init) => {
+      expect(init?.headers).not.toHaveProperty('Authorization')
+      if (String(input).endsWith('/oauth/providers')) return json({ items: [provider], futureField: true })
+      expect(String(input)).toBe(`https://dsh.r2049.cn${provider.qrStartUrl}`)
+      expect(init?.method).toBe('POST')
+      return json({ qrId: 'future-qr-session-1234567890', scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/future', expiresIn: 600, provider: provider.id })
+    }) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+    expect(await api.oauthProviders()).toEqual([provider])
+    await expect(api.startOAuthQrLogin(provider.id)).resolves.toMatchObject({ expiresIn: 600 })
+    await expect(api.startOAuthQrLogin('unlisted')).rejects.toMatchObject({ code: 'OAUTH_PROVIDER_UNAVAILABLE' })
+  })
+
+  it('rejects unsafe discovery and mismatched future-provider QR sessions', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-oauth-discovery-invalid-'))
+    directories.push(directory)
+    const valid = oauthProvider('future-provider')
+    await runScenarios([
+      { name: 'external entry', provider: { ...valid, qrStartUrl: 'https://evil.example/start' } },
+      { name: 'protocol-relative entry', provider: { ...valid, startUrl: '//evil.example/start' } },
+      { name: 'traversal entry', provider: { ...valid, qrStartUrl: '/api/v1/auth/../devices' } },
+      { name: 'encoded traversal', provider: { ...valid, qrStartUrl: '/api/v1/auth/%2e%2e/devices' } },
+      { name: 'control character in name', provider: { ...valid, displayName: 'Future\u001b[31m' } },
+      { name: 'invalid ID', provider: { ...valid, id: 'future&provider=github' } },
+      { name: 'mismatched QR provider', provider: valid },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const fetchMock = vi.fn(async input => String(input).endsWith('/oauth/providers')
+        ? json({ items: [scenario.provider] })
+        : json({ qrId: 'future-qr-session-1234567890', scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/future', expiresIn: 600, provider: 'github' })) as unknown as typeof fetch
+      const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+      await expect(api.startOAuthQrLogin('future-provider')).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+    } })))
+  })
+
+  it('falls back to configured legacy providers only when discovery is absent', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'dsh-oauth-legacy-'))
+    directories.push(directory)
+    const fetchMock = vi.fn(async input => {
+      const path = String(input)
+      if (path.endsWith('/oauth/providers')) return json({}, 404)
+      if (path.endsWith('/oauth/github/status')) return json({ configured: true })
+      if (path.endsWith('/oauth/status')) return json({ configured: false })
+      throw new Error(`Unexpected request: ${path}`)
+    }) as unknown as typeof fetch
+    const api = new HostServerApi('https://dsh.r2049.cn', new ServerCredentialStore(directory), fetchMock)
+    expect(await api.oauthProviders()).toEqual([oauthProvider('github')])
+  })
+
   it('starts a GitHub QR login through the provider-aware Server endpoint', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-github-qr-'))
     directories.push(directory)
-    const fetchMock = vi.fn(async () => json({
+    const fetchMock = vi.fn(async input => String(input).endsWith('/oauth/providers') ? json({ items: [oauthProvider('github')] }) : json({
       qrId: 'github-qr-session-1234567890',
       scanUrl: 'HTTPS://DSH.R2049.CN:443/api/v1/auth/q/github-qr-session-1234567890',
       expiresIn: 600,
@@ -36,7 +89,7 @@ describe('HostServerApi', () => {
       scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/github-qr-session-1234567890',
       expiresIn: 600,
     })
-    expect(String(vi.mocked(fetchMock).mock.calls[0]?.[0])).toBe(
+    expect(String(vi.mocked(fetchMock).mock.calls[1]?.[0])).toBe(
       'https://dsh.r2049.cn/api/v1/auth/oauth/qr/start?provider=github',
     )
   })
@@ -44,7 +97,7 @@ describe('HostServerApi', () => {
   it('rejects QR login URLs containing terminal control characters', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-server-unsafe-qr-'))
     directories.push(directory)
-    const fetchMock = vi.fn(async () => json({
+    const fetchMock = vi.fn(async input => String(input).endsWith('/oauth/providers') ? json({ items: [oauthProvider('github')] }) : json({
       qrId: 'github-qr-session-1234567890',
       scanUrl: 'https://dsh.r2049.cn/api/v1/auth/q/qr\u001b]8;;https://evil.example\u0007',
       expiresIn: 600,
@@ -503,6 +556,11 @@ describe('HostServerApi', () => {
   })
 })
 
+function oauthProvider(id: string) {
+  return { id, displayName: id === 'github' ? 'GitHub' : id,
+    startUrl: `/api/v1/auth/oauth/${id}/start`, qrStartUrl: `/api/v1/auth/oauth/qr/start?provider=${id}` }
+}
+
 function hostIdentity(): HostIdentity {
   const keys = generateKeyPair(new Uint8Array(32).fill(9))
   return {
@@ -531,8 +589,8 @@ function tokens(overrides: Partial<TestTokens> = {}): TestTokens {
   }
 }
 
-function json(value: unknown): Response {
-  return new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
+function json(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 }
 
 function errorJson(code: string, message: string, status: number): Response {

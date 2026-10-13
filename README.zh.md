@@ -102,7 +102,7 @@ curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
 ## 快速开始
 
 1. 从 Harness 侧边栏打开 **Remote** 入口。
-2. 使用 GitHub/知乎扫码登录，或使用账号密码登录。
+2. 使用服务端提供的 OAuth 扫码登录方式，或使用账号密码登录。提供商列表动态获取，新增服务端集成无需再次发布插件。
 3. Host 启动后默认允许控制当前机器，远程终端也默认开启；需要时可在详细 Remote 设置中关闭远程终端。
 4. 在另一台设备上打开 DeepSeek Harness 桌面版、Remote Web 或 Android 客户端，并登录同一账号。
 5. 选择在线 Host，再选择已有 Workspace 或浏览远端目录后打开。
@@ -192,6 +192,8 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 所有路径都承载同一份 Noise 密文，并保持相同的 Host/Client 身份边界。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
+
+OAuth 登录方式由服务端动态提供。使用 `ds-harness-remote login list` 或 `/remote login list` 查看可用扫码方式；新增服务端集成无需再次发布插件。
 
 ## 安全边界
 

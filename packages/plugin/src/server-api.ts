@@ -26,7 +26,15 @@ export interface OAuthQrSession {
   expiresIn: number
 }
 
-export type OAuthProvider = 'zhihu' | 'github'
+/** Server-owned opaque provider ID; new integrations need no plugin release. */
+export type OAuthProvider = string
+
+export interface OAuthProviderInfo {
+  id: OAuthProvider
+  displayName: string
+  startUrl: string
+  qrStartUrl?: string | null
+}
 
 export type OAuthQrPollResult =
   | { status: 'pending' | 'expired' }
@@ -152,8 +160,53 @@ export class HostServerApi {
     }
   }
 
+  async oauthProviders(): Promise<OAuthProviderInfo[]> {
+    let body: unknown
+    try {
+      body = await this.publicRequest<unknown>('/api/v1/auth/oauth/providers', { method: 'GET' })
+    } catch (error) {
+      if (!(error instanceof ServerApiError) || error.status !== 404) throw error
+      // Older servers expose only individual status endpoints. Do not hide
+      // network errors or malformed discovery responses behind this fallback.
+      const legacy = [
+        { id: 'zhihu', displayName: 'Zhihu', startUrl: '/api/v1/auth/oauth/start', statusUrl: '/api/v1/auth/oauth/status' },
+        { id: 'github', displayName: 'GitHub', startUrl: '/api/v1/auth/oauth/github/start', statusUrl: '/api/v1/auth/oauth/github/status' },
+      ]
+      const items = await Promise.all(legacy.map(async ({ statusUrl, ...provider }) => {
+        try {
+          const status = requireRecord(await this.publicRequest<unknown>(statusUrl, { method: 'GET' }), 'OAuth status')
+          if (typeof status.configured !== 'boolean') throw invalidOAuthProviders()
+          return status.configured ? [{ ...provider, qrStartUrl: `/api/v1/auth/oauth/qr/start?provider=${provider.id}` }] : []
+        } catch (reason) {
+          if (reason instanceof ServerApiError && reason.status === 404) return []
+          throw reason
+        }
+      }))
+      return items.flat()
+    }
+    const value = requireRecord(body, 'OAuth providers')
+    if (!Array.isArray(value.items)) throw invalidOAuthProviders()
+    const ids = new Set<string>()
+    return value.items.map(item => {
+      const provider = requireRecord(item, 'OAuth provider')
+      if (typeof provider.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider.id)
+        || ids.has(provider.id)
+        || typeof provider.displayName !== 'string' || !provider.displayName.trim()
+        || provider.displayName.length > 128 || TERMINAL_CONTROL_CHARACTERS.test(provider.displayName)
+        || !isOAuthEntryPath(provider.startUrl)
+        || (provider.qrStartUrl != null && !isOAuthEntryPath(provider.qrStartUrl))) throw invalidOAuthProviders()
+      ids.add(provider.id)
+      return { id: provider.id, displayName: provider.displayName, startUrl: provider.startUrl,
+        ...(typeof provider.qrStartUrl === 'string' ? { qrStartUrl: provider.qrStartUrl } : {}) }
+    })
+  }
+
   async startOAuthQrLogin(provider: OAuthProvider = 'zhihu'): Promise<OAuthQrSession> {
-    const value = requireRecord(await this.publicRequest<unknown>(`/api/v1/auth/oauth/qr/start?provider=${provider}`, {
+    const entry = (await this.oauthProviders()).find(item => item.id === provider)
+    if (entry?.qrStartUrl == null) {
+      throw new ServerApiError('OAUTH_PROVIDER_UNAVAILABLE', 'This OAuth provider is unavailable for QR login.', false)
+    }
+    const value = requireRecord(await this.publicRequest<unknown>(entry.qrStartUrl, {
       method: 'POST',
       body: '{}',
     }), 'QR login')
@@ -161,7 +214,7 @@ export class HostServerApi {
     if (typeof value.qrId !== 'string' || value.qrId.length < 20
       || scanUrl === undefined
       || !Number.isSafeInteger(value.expiresIn)
-      || (provider === 'github' && value.provider !== 'github')
+      || (provider !== 'zhihu' && value.provider !== provider)
       || (value.provider !== undefined && value.provider !== provider)) {
       throw new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid QR login session.', false)
     }
@@ -434,6 +487,16 @@ export class HostServerApi {
     if (this.identity === undefined) throw new ServerApiError('IDENTITY_INVALID', 'The device identity is not loaded.', false)
     return this.identity
   }
+}
+
+function isOAuthEntryPath(value: unknown): value is string {
+  return typeof value === 'string' && /^\/api\/v1\/auth\/[^\s\\#]*$/.test(value)
+    && !TERMINAL_CONTROL_CHARACTERS.test(value)
+    && !value.split('?')[0]?.split('/').some(segment => segment === '.' || segment === '..' || /%/u.test(segment))
+}
+
+function invalidOAuthProviders(): ServerApiError {
+  return new ServerApiError('INVALID_MESSAGE', 'The Server returned an invalid OAuth provider list.', false)
 }
 
 function normalizeOAuthScanUrl(value: unknown, baseUrl: string): string | undefined {

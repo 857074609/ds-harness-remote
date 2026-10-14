@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode, RefObject } from 'react'
+import { createContext, useContext, useId, useRef, useState, type ComponentType, type ReactNode, type RefObject } from 'react'
 import {
   ActivityIndicator,
   Pressable,
@@ -7,9 +7,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type StyleProp,
   type TextInputProps,
   View,
+  type ViewStyle,
 } from 'react-native'
+import { BlurTargetView, BlurView } from 'expo-blur'
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { AlertCircle, ArrowLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
 import { radius, spacing, type } from './theme'
 import { useTheme, type ThemeColors } from './theme-context'
@@ -25,12 +29,13 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh,
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  if (!scroll) return <View style={styles.screen}>{children}</View>
+  const inset = useHeaderInset()
+  if (!scroll) return <View style={[styles.screen, { paddingTop: inset }]}>{children}</View>
   return (
     <ScrollView
       ref={scrollRef}
       style={styles.screen}
-      contentContainerStyle={styles.screenContent}
+      contentContainerStyle={[styles.screenContent, { paddingTop: inset }]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
       refreshControl={onRefresh === undefined
@@ -39,6 +44,7 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh,
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
+            progressViewOffset={inset}
             colors={[colors.primary]}
             progressBackgroundColor={colors.surface}
             tintColor={colors.primary}
@@ -47,6 +53,66 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh,
     >
       {children}
     </ScrollView>
+  )
+}
+
+const HeaderBlurTargetContext = createContext<RefObject<View | null> | undefined>(undefined)
+const HeaderInsetContext = createContext(0)
+
+/** Height of the overlaid header that scrollable content must pad its top by; 0 outside a `BlurHeaderFrame`. */
+export function useHeaderInset(): number {
+  return useContext(HeaderInsetContext)
+}
+
+/**
+ * Overlays `header` (normally a `TopBar`) on `children`, which scroll beneath
+ * it and show through frosted. Scrollable children pad their content by
+ * `useHeaderInset()` (or the render-prop argument); with `inset`, fixed
+ * content is pushed below the header instead.
+ */
+export function BlurHeaderFrame({ header, children, inset = false }: {
+  header: ReactNode
+  children: ReactNode | ((headerHeight: number) => ReactNode)
+  inset?: boolean
+}) {
+  const styles = useThemedStyles(createStyles)
+  const blurTarget = useRef<View>(null)
+  // Seeded with the single-line TopBar minimum until the header measures.
+  const [height, setHeight] = useState(60)
+  const contentInset = inset ? 0 : height
+  return (
+    <View style={styles.screen}>
+      <BlurTargetView ref={blurTarget} style={styles.frameContent}>
+        {/* The blur records the target's inner native view, so the opaque background must live inside it. */}
+        <View style={[styles.screen, inset && { paddingTop: height }]}>
+          <HeaderInsetContext.Provider value={contentInset}>
+            {typeof children === 'function' ? children(contentInset) : children}
+          </HeaderInsetContext.Provider>
+        </View>
+      </BlurTargetView>
+      <View style={styles.frameHeader} onLayout={event => setHeight(event.nativeEvent.layout.height)}>
+        <HeaderBlurTargetContext.Provider value={blurTarget}>{header}</HeaderBlurTargetContext.Provider>
+        {/* Feathers the frosted bar into the content instead of ending on a hard edge. */}
+        <VerticalFade from={0.15} to={0} style={styles.frameFade} />
+      </View>
+    </View>
+  )
+}
+
+/** Background-colored overlay whose opacity runs from `from` (top) to `to` (bottom). */
+function VerticalFade({ from, to, style }: { from: number; to: number; style: StyleProp<ViewStyle> }) {
+  const { colors } = useTheme()
+  const id = `fade${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  return (
+    <Svg style={style} pointerEvents="none">
+      <Defs>
+        <LinearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={colors.background} stopOpacity={from} />
+          <Stop offset="1" stopColor={colors.background} stopOpacity={to} />
+        </LinearGradient>
+      </Defs>
+      <Rect width="100%" height="100%" fill={`url(#${id})`} />
+    </Svg>
   )
 }
 
@@ -60,12 +126,28 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
   /** Set above 1 when the title carries structured text that may not fit one line. */
   titleLines?: number
 }) {
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
+  // Inside a BlurHeaderFrame the bar frosts the content beneath it instead of painting a surface.
+  const blurTarget = useContext(HeaderBlurTargetContext)
   const styles = useThemedStyles(createStyles)
   const hasSubtitle = subtitle !== undefined && subtitle.length > 0
   const tallerBar = hasSubtitle || titleLines > 1
   return (
-    <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle]}>
+    <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle, blurTarget !== undefined && styles.topBarBlurred]}>
+      {blurTarget !== undefined && (
+        <BlurView blurTarget={blurTarget} blurMethod="dimezisBlurViewSdk31Plus" intensity={35}
+          tint={scheme === 'dark' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
+      )}
+      {/* Frosted translucent backdrop (80% opacity) matching modern iOS/assistant styling */}
+      {blurTarget !== undefined && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.80)' : 'rgba(255, 255, 255, 0.80)' }
+          ]}
+          pointerEvents="none"
+        />
+      )}
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} hitSlop={12} />
@@ -102,7 +184,11 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
             )
         )}
       </View>
-      <View style={[styles.topBarSide, styles.topBarTrailing]}>{action}</View>
+      <View style={[styles.topBarSide, styles.topBarTrailing]}>
+        {action !== undefined && action !== null && (
+          <View style={styles.topBarPillGroup}>{action}</View>
+        )}
+      </View>
     </View>
   )
 }
@@ -348,11 +434,16 @@ function createStyles(colors: ThemeColors) {
     screen: { flex: 1, backgroundColor: colors.background },
     screenContent: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxxl },
     topBar: { minHeight: 60, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, flexDirection: 'row', alignItems: 'center', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator, backgroundColor: colors.surface },
+    frameContent: { flex: 1 },
+    frameFade: { position: 'absolute', top: '100%', left: 0, right: 0, height: spacing.lg },
+    frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
+    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0, overflow: 'hidden' },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
-    topBarSide: { minWidth: 52, flexDirection: 'row', alignItems: 'center' },
+    topBarSide: { flexDirection: 'row', alignItems: 'center' },
     topBarTrailing: { justifyContent: 'flex-end' },
-    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 1 },
-    topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink },
+    topBarPillGroup: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceStrong, borderRadius: radius.pill, paddingHorizontal: 2 },
+    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'flex-start', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
+    topBarTitle: { ...type.heading, textAlign: 'left', color: colors.ink, fontWeight: '700' },
     topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },

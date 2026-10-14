@@ -6,6 +6,7 @@ import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
 import {
+  BlurHeaderFrame,
   Button,
   EmptyState,
   IconButton,
@@ -91,91 +92,92 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
 
   return (
     <View style={styles.flex}>
-      <TopBar
+      <BlurHeaderFrame header={<TopBar
         title={isHome ? 'DSH Remote' : zhCN.devices.myDevices}
         onBack={onBack}
         action={isHome && onMore !== undefined
           ? <IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
           : undefined}
-      />
-      <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
-        {isHome
-          ? <>
-              {shortcuts.length > 0 && onShortcut !== undefined && (
-                <View>
-                  <SectionTitle>{showingFavorites ? zhCN.devices.favorites : zhCN.devices.recent}</SectionTitle>
-                  <View style={styles.favoriteLinks}>
-                    {shortcuts.map(shortcut => (
-                      <View key={`${shortcut.deviceId}:${shortcut.key}`} style={styles.favoriteRow}>
-                        <Pressable
-                          accessibilityRole="link"
-                          accessibilityLabel={showingFavorites
-                            ? zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))
-                            : zhCN.devices.openRecent(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
-                          onPress={() => onShortcut(shortcut)}
-                          style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
-                        >
-                          <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
-                          <Text style={styles.favoriteLinkMeta} numberOfLines={1}>· {shortcutDeviceName(shortcut)}</Text>
-                        </Pressable>
-                        {showingFavorites && (
+      />}>
+        <Screen refreshing={refreshing} onRefresh={() => void refresh()}>
+          {isHome
+            ? <>
+                {shortcuts.length > 0 && onShortcut !== undefined && (
+                  <View>
+                    <SectionTitle>{showingFavorites ? zhCN.devices.favorites : zhCN.devices.recent}</SectionTitle>
+                    <View style={styles.favoriteLinks}>
+                      {shortcuts.map(shortcut => (
+                        <View key={`${shortcut.deviceId}:${shortcut.key}`} style={styles.favoriteRow}>
                           <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
-                            hitSlop={8}
-                            onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
-                            style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
+                            accessibilityRole="link"
+                            accessibilityLabel={showingFavorites
+                              ? zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))
+                              : zhCN.devices.openRecent(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
+                            onPress={() => onShortcut(shortcut)}
+                            style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
                           >
-                            <X size={16} color={colors.muted} />
+                            <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
+                            <Text style={styles.favoriteLinkMeta} numberOfLines={1}>· {shortcutDeviceName(shortcut)}</Text>
                           </Pressable>
-                        )}
-                      </View>
-                    ))}
+                          {showingFavorites && (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
+                              hitSlop={8}
+                              onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
+                              style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
+                            >
+                              <X size={16} color={colors.muted} />
+                            </Pressable>
+                          )}
+                        </View>
+                      ))}
+                    </View>
                   </View>
+                )}
+                <SectionTitle action={<RefreshAction refreshing={refreshing} onPress={() => void refresh()} />}>
+                  {zhCN.devices.myDevices}
+                </SectionTitle>
+              </>
+            : <View style={styles.pageHeading}>
+                <View>
+                  <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
+                  <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
                 </View>
-              )}
-              <SectionTitle action={<RefreshAction refreshing={refreshing} onPress={() => void refresh()} />}>
-                {zhCN.devices.myDevices}
-              </SectionTitle>
-            </>
-          : <View style={styles.pageHeading}>
-              <View>
-                <Text style={styles.title}>{zhCN.devices.myDevices}</Text>
-                <Text style={styles.subtitle}>{zhCN.devices.lead}</Text>
-              </View>
-              <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
-            </View>}
+                <RefreshAction refreshing={refreshing} onPress={() => void refresh()} />
+              </View>}
 
-        {refreshing && deviceRows.length === 0
-          ? <LoadingRows />
-          : deviceRows.length === 0
-            ? <EmptyState
-                icon={Laptop}
-                title={zhCN.devices.emptyTitle}
-                body={zhCN.devices.emptyBody}
-              />
-            : <View>{deviceRows.map(({ device, exiting }) => (
-                <SwipeableDeviceRow
-                  key={device.deviceId}
-                  device={device}
-                  open={openRowId === device.deviceId}
-                  exiting={exiting}
-                  animateIn={!initialDeviceIds.current.has(device.deviceId)}
-                  locked={mutationPending}
-                  onOpenChange={open => setOpenRowId(current => open
-                    ? device.deviceId
-                    : current === device.deviceId ? undefined : current)}
-                  onPress={() => {
-                    // With a row open, a tap only dismisses it, as in platform swipe lists.
-                    if (openRowId !== undefined) { setOpenRowId(undefined); return }
-                    onDevice(device)
-                  }}
-                  onRemove={() => removeDevice(device)}
-                  onRename={() => { setOpenRowId(undefined); setRenameTarget(device) }}
-                  onExited={() => forgetLeaving(device.deviceId)}
+          {refreshing && deviceRows.length === 0
+            ? <LoadingRows />
+            : deviceRows.length === 0
+              ? <EmptyState
+                  icon={Laptop}
+                  title={zhCN.devices.emptyTitle}
+                  body={zhCN.devices.emptyBody}
                 />
-              ))}</View>}
-      </Screen>
+              : <View>{deviceRows.map(({ device, exiting }) => (
+                  <SwipeableDeviceRow
+                    key={device.deviceId}
+                    device={device}
+                    open={openRowId === device.deviceId}
+                    exiting={exiting}
+                    animateIn={!initialDeviceIds.current.has(device.deviceId)}
+                    locked={mutationPending}
+                    onOpenChange={open => setOpenRowId(current => open
+                      ? device.deviceId
+                      : current === device.deviceId ? undefined : current)}
+                    onPress={() => {
+                      // With a row open, a tap only dismisses it, as in platform swipe lists.
+                      if (openRowId !== undefined) { setOpenRowId(undefined); return }
+                      onDevice(device)
+                    }}
+                    onRemove={() => removeDevice(device)}
+                    onRename={() => { setOpenRowId(undefined); setRenameTarget(device) }}
+                    onExited={() => forgetLeaving(device.deviceId)}
+                  />
+                ))}</View>}
+        </Screen>
+      </BlurHeaderFrame>
       {isHome && (
         <View style={styles.homeFooter}>
           <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
@@ -843,89 +845,90 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 
   return (
     <View style={styles.flex}>
-      <TopBar title={zhCN.devices.title} onBack={onBack} />
-      <Screen>
-        <View style={styles.deviceHero}>
-          <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
-          <View style={styles.deviceHeroCopy}>
-            <Text style={styles.deviceName}>{device.name}</Text>
-            <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
-          </View>
-          <StatusBadge
-            status={connectionBadgeStatus(isSelected, connection.phase, connection.stats.mode, device.online)}
-          />
-        </View>
-
-        <Button label={zhCN.devices.rename} icon={Pencil} variant="quiet" onPress={() => setRenaming(true)} />
-
-        {connection.error !== undefined && isSelected && (
-          <View style={styles.connectionError}>
-            <Text style={styles.connectionErrorTitle}>{zhCN.devices.connectionInterrupted}</Text>
-            <Text style={styles.connectionErrorBody}>{connection.error}</Text>
-            <Button label={zhCN.common.retry} variant="secondary" onPress={() => void reconnect()} />
-          </View>
-        )}
-
-        {!device.trusted
-          ? <View style={styles.connectArea}>
-              <View style={styles.trustHeader}>
-                <View style={styles.trustIcon}><ShieldCheck size={22} color={colors.primary} /></View>
-                <View style={styles.trustCopy}>
-                  <Text style={styles.connectCopy}>{zhCN.devices.trustExplanation}</Text>
-                  {device.fingerprint !== undefined && <Text selectable style={styles.fingerprint}>{device.fingerprint}</Text>}
-                </View>
-              </View>
-              <Button label={zhCN.devices.trust} onPress={() => void trustAndContinue()} />
+      <BlurHeaderFrame header={<TopBar title={zhCN.devices.title} onBack={onBack} />}>
+        <Screen>
+          <View style={styles.deviceHero}>
+            <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
+            <View style={styles.deviceHeroCopy}>
+              <Text style={styles.deviceName}>{device.name}</Text>
+              <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
             </View>
-          : !isConnected
+            <StatusBadge
+              status={connectionBadgeStatus(isSelected, connection.phase, connection.stats.mode, device.online)}
+            />
+          </View>
+
+          <Button label={zhCN.devices.rename} icon={Pencil} variant="quiet" onPress={() => setRenaming(true)} />
+
+          {connection.error !== undefined && isSelected && (
+            <View style={styles.connectionError}>
+              <Text style={styles.connectionErrorTitle}>{zhCN.devices.connectionInterrupted}</Text>
+              <Text style={styles.connectionErrorBody}>{connection.error}</Text>
+              <Button label={zhCN.common.retry} variant="secondary" onPress={() => void reconnect()} />
+            </View>
+          )}
+
+          {!device.trusted
             ? <View style={styles.connectArea}>
-                <Text style={styles.connectCopy}>{device.online ? zhCN.devices.connectReady : zhCN.devices.offlineHelp}</Text>
-                <Button label={zhCN.devices.secureConnect} onPress={onConnect} disabled={!device.online} />
+                <View style={styles.trustHeader}>
+                  <View style={styles.trustIcon}><ShieldCheck size={22} color={colors.primary} /></View>
+                  <View style={styles.trustCopy}>
+                    <Text style={styles.connectCopy}>{zhCN.devices.trustExplanation}</Text>
+                    {device.fingerprint !== undefined && <Text selectable style={styles.fingerprint}>{device.fingerprint}</Text>}
+                  </View>
+                </View>
+                <Button label={zhCN.devices.trust} onPress={() => void trustAndContinue()} />
               </View>
-            : <>
-                <SectionTitle>{zhCN.devices.info}</SectionTitle>
-                <View style={styles.group}>
-                  <KeyValue label={zhCN.devices.harness} value={descriptor?.version ?? zhCN.devices.unknownVersion} />
-                  <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
-                  {descriptor?.provider !== undefined && <KeyValue label={zhCN.devices.provider} value={descriptor.provider} />}
-                  {descriptor?.model !== undefined && <KeyValue label={zhCN.devices.model} value={descriptor.model} />}
-                  <View style={styles.contentCounts}>
-                    <View style={styles.contentCount}><Text style={styles.contentCountValue}>{workspaces.length}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.workspaces}</Text></View>
-                    <View style={styles.contentCountDivider} />
-                    <View style={styles.contentCount}><Text style={styles.contentCountValue}>{descriptor?.attachedSessions ?? 0}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.conversations}</Text></View>
-                  </View>
+            : !isConnected
+              ? <View style={styles.connectArea}>
+                  <Text style={styles.connectCopy}>{device.online ? zhCN.devices.connectReady : zhCN.devices.offlineHelp}</Text>
+                  <Button label={zhCN.devices.secureConnect} onPress={onConnect} disabled={!device.online} />
                 </View>
-
-                <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
-                <View style={styles.group}>
-                  <KeyValue
-                    label={zhCN.devices.path}
-                    value={connectionPath(connection.stats.mode)}
-                    onPress={() => setShowNetworkDetails(current => !current)}
-                    expanded={showNetworkDetails}
-                  />
-                  {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
-                  <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
-                </View>
-
-                {showNetworkDetails && <View style={styles.networkDetails}>
-                  <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
+              : <>
+                  <SectionTitle>{zhCN.devices.info}</SectionTitle>
                   <View style={styles.group}>
-                    <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
-                    <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
-                    {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(networkDetails.controlChannelUrl)} mono />}
-                    {networkDetails?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(networkDetails.webRtc.protocol, networkDetails.webRtc.relayProtocol)} />}
-                    {networkDetails?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(networkDetails.webRtc.localCandidateType, networkDetails.webRtc.localAddressScope, networkDetails.webRtc.remoteCandidateType, networkDetails.webRtc.remoteAddressScope)} />}
-                    {networkDetails?.webRtc?.currentRoundTripTimeMs !== undefined && <KeyValue label={zhCN.devices.roundTripTime} value={`${networkDetails.webRtc.currentRoundTripTimeMs.toLocaleString()} ms`} />}
-                    {networkDetails?.webRtc?.availableOutgoingBitrate !== undefined && <KeyValue label={zhCN.devices.availableBitrate} value={formatBitrate(networkDetails.webRtc.availableOutgoingBitrate)} />}
-                    {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={networkDetails.connectedAt === undefined ? zhCN.common.unavailable : new Date(networkDetails.connectedAt).toLocaleString()} />}
-                    {(connection.stats.bytesSent !== undefined || connection.stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(connection.stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(connection.stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
+                    <KeyValue label={zhCN.devices.harness} value={descriptor?.version ?? zhCN.devices.unknownVersion} />
+                    <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
+                    {descriptor?.provider !== undefined && <KeyValue label={zhCN.devices.provider} value={descriptor.provider} />}
+                    {descriptor?.model !== undefined && <KeyValue label={zhCN.devices.model} value={descriptor.model} />}
+                    <View style={styles.contentCounts}>
+                      <View style={styles.contentCount}><Text style={styles.contentCountValue}>{workspaces.length}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.workspaces}</Text></View>
+                      <View style={styles.contentCountDivider} />
+                      <View style={styles.contentCount}><Text style={styles.contentCountValue}>{descriptor?.attachedSessions ?? 0}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.conversations}</Text></View>
+                    </View>
                   </View>
-                </View>}
 
-                {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
-              </>}
-      </Screen>
+                  <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+                  <View style={styles.group}>
+                    <KeyValue
+                      label={zhCN.devices.path}
+                      value={connectionPath(connection.stats.mode)}
+                      onPress={() => setShowNetworkDetails(current => !current)}
+                      expanded={showNetworkDetails}
+                    />
+                    {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
+                    <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
+                  </View>
+
+                  {showNetworkDetails && <View style={styles.networkDetails}>
+                    <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
+                    <View style={styles.group}>
+                      <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
+                      <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
+                      {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(networkDetails.controlChannelUrl)} mono />}
+                      {networkDetails?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(networkDetails.webRtc.protocol, networkDetails.webRtc.relayProtocol)} />}
+                      {networkDetails?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(networkDetails.webRtc.localCandidateType, networkDetails.webRtc.localAddressScope, networkDetails.webRtc.remoteCandidateType, networkDetails.webRtc.remoteAddressScope)} />}
+                      {networkDetails?.webRtc?.currentRoundTripTimeMs !== undefined && <KeyValue label={zhCN.devices.roundTripTime} value={`${networkDetails.webRtc.currentRoundTripTimeMs.toLocaleString()} ms`} />}
+                      {networkDetails?.webRtc?.availableOutgoingBitrate !== undefined && <KeyValue label={zhCN.devices.availableBitrate} value={formatBitrate(networkDetails.webRtc.availableOutgoingBitrate)} />}
+                      {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={networkDetails.connectedAt === undefined ? zhCN.common.unavailable : new Date(networkDetails.connectedAt).toLocaleString()} />}
+                      {(connection.stats.bytesSent !== undefined || connection.stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(connection.stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(connection.stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
+                    </View>
+                  </View>}
+
+                  {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
+                </>}
+        </Screen>
+      </BlurHeaderFrame>
       {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
     </View>
   )
@@ -953,62 +956,63 @@ export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSe
 
   return (
     <View style={styles.flex}>
-      <TopBar
+      <BlurHeaderFrame header={<TopBar
         title={zhCN.sessions.title}
         onBack={onBack}
         action={<IconButton label={zhCN.sessions.new} icon={CirclePlus} tint={colors.primary} onPress={() => void createSession()} disabled={creating} />}
-      />
-      <Screen>
-        <View style={styles.pageHeading}>
-          <View><Text style={styles.title}>{zhCN.sessions.deviceTitle}</Text><Text style={styles.subtitle}>{zhCN.sessions.lead}</Text></View>
-        </View>
-        {creating && <Text style={styles.creatingText}>{zhCN.sessions.creating}</Text>}
-        {active.length === 0 && archived.length === 0
-          ? <EmptyState
-              icon={MessageSquareText}
-              title={zhCN.sessions.emptyTitle}
-              body={zhCN.sessions.emptyBody}
-              action={<Button label={zhCN.sessions.new} icon={CirclePlus} onPress={() => void createSession()} loading={creating} />}
-            />
-          : <View>
-              {active.map(session => (
-                <SwipeableSessionRow
-                  key={session.sessionId}
-                  session={session}
-                  open={openSessionId === session.sessionId}
-                  locked={busy !== undefined}
-                  busy={busy === `archive:${session.sessionId}`}
-                  onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
-                  onArchive={() => useAppStore.getState().archiveSession(session.sessionId)}
-                  onPress={() => { setOpenSessionId(undefined); void open(session) }}
-                />
-              ))}
-              {archived.length > 0 && (
-                <View style={styles.archivedSection}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ expanded: showArchived }}
-                    onPress={() => setShowArchived(current => !current)}
-                    style={styles.archivedHeader}
-                  >
-                    <Archive size={16} color={colors.muted} />
-                    <Text style={styles.archivedTitle}>{zhCN.sessions.archived(archived.length)}</Text>
-                    {showArchived ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
-                  </Pressable>
-                  {showArchived && archived.map(session => (
-                    <ListRow
-                      key={session.sessionId}
-                      title={sessionTitle(session)}
-                      subtitle={session.cwd}
-                      meta={updatedText(session.updatedAt)}
-                      icon={Archive}
-                      onPress={() => void open(session)}
-                    />
-                  ))}
-                </View>
-              )}
-            </View>}
-      </Screen>
+      />}>
+        <Screen>
+          <View style={styles.pageHeading}>
+            <View><Text style={styles.title}>{zhCN.sessions.deviceTitle}</Text><Text style={styles.subtitle}>{zhCN.sessions.lead}</Text></View>
+          </View>
+          {creating && <Text style={styles.creatingText}>{zhCN.sessions.creating}</Text>}
+          {active.length === 0 && archived.length === 0
+            ? <EmptyState
+                icon={MessageSquareText}
+                title={zhCN.sessions.emptyTitle}
+                body={zhCN.sessions.emptyBody}
+                action={<Button label={zhCN.sessions.new} icon={CirclePlus} onPress={() => void createSession()} loading={creating} />}
+              />
+            : <View>
+                {active.map(session => (
+                  <SwipeableSessionRow
+                    key={session.sessionId}
+                    session={session}
+                    open={openSessionId === session.sessionId}
+                    locked={busy !== undefined}
+                    busy={busy === `archive:${session.sessionId}`}
+                    onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
+                    onArchive={() => useAppStore.getState().archiveSession(session.sessionId)}
+                    onPress={() => { setOpenSessionId(undefined); void open(session) }}
+                  />
+                ))}
+                {archived.length > 0 && (
+                  <View style={styles.archivedSection}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: showArchived }}
+                      onPress={() => setShowArchived(current => !current)}
+                      style={styles.archivedHeader}
+                    >
+                      <Archive size={16} color={colors.muted} />
+                      <Text style={styles.archivedTitle}>{zhCN.sessions.archived(archived.length)}</Text>
+                      {showArchived ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
+                    </Pressable>
+                    {showArchived && archived.map(session => (
+                      <ListRow
+                        key={session.sessionId}
+                        title={sessionTitle(session)}
+                        subtitle={session.cwd}
+                        meta={updatedText(session.updatedAt)}
+                        icon={Archive}
+                        onPress={() => void open(session)}
+                      />
+                    ))}
+                  </View>
+                )}
+              </View>}
+        </Screen>
+      </BlurHeaderFrame>
     </View>
   )
 }

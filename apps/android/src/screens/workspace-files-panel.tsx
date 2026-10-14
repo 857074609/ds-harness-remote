@@ -5,7 +5,7 @@ import { requireSessionTools } from '../state/store'
 import type { WorkspaceDirectory, WorkspaceText } from '../services/session-tools'
 import { classifyWorkspaceFile, loadWorkspacePreview } from '../services/workspace-file-preview'
 import { strings as t } from '../locales/i18n'
-import { Button, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { useTheme } from '../ui/theme-context'
 import { spacing, type } from '../ui/theme'
 import { sessionToolsError } from './session-tools-error'
@@ -55,12 +55,11 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
     else if (path !== '') setPath(path.split('/').slice(0, -1).join('/'))
     else onClose()
   }
-  return <View style={styles.container}>
-    <TopBar
-      title={t.tools.files}
-      onBack={back}
-      action={<IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading} />}
-    />
+  return <BlurHeaderFrame inset header={<TopBar
+    title={t.tools.files}
+    onBack={back}
+    action={<IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading} />}
+  />}>
     <View style={styles.toolbar}>
       <Text style={[styles.path, { color: colors.ink }]} numberOfLines={2}>{file ?? (path || t.tools.root)}</Text>
     </View>
@@ -93,7 +92,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
         ? <PdfPreview key={`${file}:${revision}`} data={binary.data} label={file ?? t.tools.files} />
         : <Image accessibilityLabel={file} source={{ uri: `data:${binary.mimeType};base64,${binary.data}` }} style={styles.image} resizeMode="contain" onError={() => setError(t.tools.previewFailed)} />}
     </>}
-  </View>
+  </BlurHeaderFrame>
 }
 const styles = StyleSheet.create({
   container: { flex: 1 }, toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, padding: spacing.sm },

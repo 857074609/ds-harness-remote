@@ -7,7 +7,7 @@ import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, 
 import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, MessagesSquare, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
-import { Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
 import { transportPreferenceOptions } from '../types'
 import type { LoginMethod } from '../types'
 import { radius, spacing, type } from '../ui/theme'
@@ -63,54 +63,55 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
 
   return (
     <View style={styles.flex}>
-      <TopBar title={zhCN.setup.title} onBack={onBack} />
-      <Screen>
-        <Text style={styles.productName}>DeepSeek Harness Remote</Text>
-        <Text style={styles.title}>{config === undefined ? zhCN.setup.signIn : zhCN.setup.signInAgain}</Text>
-        <Text style={styles.lead}>{zhCN.setup.lead}</Text>
+      <BlurHeaderFrame header={<TopBar title={zhCN.setup.title} onBack={onBack} />}>
+        <Screen>
+          <Text style={styles.productName}>DeepSeek Harness Remote</Text>
+          <Text style={styles.title}>{config === undefined ? zhCN.setup.signIn : zhCN.setup.signInAgain}</Text>
+          <Text style={styles.lead}>{zhCN.setup.lead}</Text>
 
-        <View style={styles.form}>
-          <View style={styles.methodTabs}>
-            <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'oauth' }} onPress={() => setLoginMethod('oauth')} style={[styles.methodTab, loginMethod === 'oauth' && styles.methodTabActive]}>
-              <Text style={[styles.methodTabText, loginMethod === 'oauth' && styles.methodTabTextActive]}>{zhCN.setup.oauth}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'github-oauth' }} onPress={() => setLoginMethod('github-oauth')} style={[styles.methodTab, loginMethod === 'github-oauth' && styles.methodTabActive]}>
-              <Text style={[styles.methodTabText, loginMethod === 'github-oauth' && styles.methodTabTextActive]}>{zhCN.setup.githubOAuth}</Text>
-            </Pressable>
-            <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'password' }} onPress={() => setLoginMethod('password')} style={[styles.methodTab, loginMethod === 'password' && styles.methodTabActive]}>
-              <Text style={[styles.methodTabText, loginMethod === 'password' && styles.methodTabTextActive]}>{zhCN.setup.passwordMethod}</Text>
-            </Pressable>
-          </View>
+          <View style={styles.form}>
+            <View style={styles.methodTabs}>
+              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'oauth' }} onPress={() => setLoginMethod('oauth')} style={[styles.methodTab, loginMethod === 'oauth' && styles.methodTabActive]}>
+                <Text style={[styles.methodTabText, loginMethod === 'oauth' && styles.methodTabTextActive]}>{zhCN.setup.oauth}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'github-oauth' }} onPress={() => setLoginMethod('github-oauth')} style={[styles.methodTab, loginMethod === 'github-oauth' && styles.methodTabActive]}>
+                <Text style={[styles.methodTabText, loginMethod === 'github-oauth' && styles.methodTabTextActive]}>{zhCN.setup.githubOAuth}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'password' }} onPress={() => setLoginMethod('password')} style={[styles.methodTab, loginMethod === 'password' && styles.methodTabActive]}>
+                <Text style={[styles.methodTabText, loginMethod === 'password' && styles.methodTabTextActive]}>{zhCN.setup.passwordMethod}</Text>
+              </Pressable>
+            </View>
 
-          {loginMethod === 'oauth'
-            ? <>
-                <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} />
-                <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
-              </>
-            : loginMethod === 'github-oauth'
+            {loginMethod === 'oauth'
               ? <>
-                  <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} />
+                  <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} />
                   <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
                 </>
-              : <>
-                <Field label={zhCN.setup.email} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder={zhCN.setup.emailPlaceholder} />
-                <Field label={zhCN.setup.password} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" returnKeyType="go" onSubmitEditing={() => { if (canSubmit) void submit() }} placeholder={zhCN.setup.passwordPlaceholder} hint={zhCN.setup.passwordHint} />
-                <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit} />
-              </>}
+              : loginMethod === 'github-oauth'
+                ? <>
+                    <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} />
+                    <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
+                  </>
+                : <>
+                  <Field label={zhCN.setup.email} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder={zhCN.setup.emailPlaceholder} />
+                  <Field label={zhCN.setup.password} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" returnKeyType="go" onSubmitEditing={() => { if (canSubmit) void submit() }} placeholder={zhCN.setup.passwordPlaceholder} hint={zhCN.setup.passwordHint} />
+                  <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit} />
+                </>}
 
-          <View style={styles.serverSection}>
-            <Field label={zhCN.setup.server} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.serverHint} placeholder="https://remote.example.com" />
+            <View style={styles.serverSection}>
+              <Field label={zhCN.setup.server} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.serverHint} placeholder="https://remote.example.com" />
+            </View>
           </View>
-        </View>
 
-        <View style={styles.securityNote}>
-          <LockKeyhole size={20} color={colors.primary} />
-          <View style={styles.securityCopy}>
-            <Text style={styles.securityTitle}>{zhCN.setup.trustTitle}</Text>
-            <Text style={styles.securityBody}>{zhCN.setup.trustBody}</Text>
+          <View style={styles.securityNote}>
+            <LockKeyhole size={20} color={colors.primary} />
+            <View style={styles.securityCopy}>
+              <Text style={styles.securityTitle}>{zhCN.setup.trustTitle}</Text>
+              <Text style={styles.securityBody}>{zhCN.setup.trustBody}</Text>
+            </View>
           </View>
-        </View>
-      </Screen>
+        </Screen>
+      </BlurHeaderFrame>
     </View>
   )
 }
@@ -150,97 +151,98 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
 
   return (
     <View style={styles.flex}>
-      <TopBar title={zhCN.settings.title} onBack={onBack} />
-      <Screen>
-        <View style={styles.settingsHeader}>
-          <View style={styles.settingsIcon}><Settings size={25} color={colors.primary} /></View>
-          <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
-        </View>
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
+        <Screen>
+          <View style={styles.settingsHeader}>
+            <View style={styles.settingsIcon}><Settings size={25} color={colors.primary} /></View>
+            <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
+          </View>
 
-        <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
-        <View style={styles.preferenceList}>
-          {languageOptions().map(option => {
-            const chosen = option.value === languagePreference
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="button"
-                accessibilityState={{ selected: chosen }}
-                onPress={() => void setLanguagePreference(option.value)}
-                style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
-              >
-                <Text style={[styles.preferenceName, styles.languageName]}>{option.name}</Text>
-                {chosen && <Check size={17} color={colors.primary} />}
-              </Pressable>
-            )
-          })}
-          <Text style={styles.preferenceNote}>{zhCN.settings.languageNote}</Text>
-        </View>
+          <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
+          <View style={styles.preferenceList}>
+            {languageOptions().map(option => {
+              const chosen = option.value === languagePreference
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: chosen }}
+                  onPress={() => void setLanguagePreference(option.value)}
+                  style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
+                >
+                  <Text style={[styles.preferenceName, styles.languageName]}>{option.name}</Text>
+                  {chosen && <Check size={17} color={colors.primary} />}
+                </Pressable>
+              )
+            })}
+            <Text style={styles.preferenceNote}>{zhCN.settings.languageNote}</Text>
+          </View>
 
-        <Text style={styles.groupLabel}>{zhCN.settings.theme}</Text>
-        <View style={styles.segmentRow} accessibilityRole="tablist">
-          {themeOptions().map(option => {
-            const chosen = option.value === themePreference
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: chosen }}
-                onPress={() => void setThemePreference(option.value)}
-                style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
-              >
-                <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>
-                  {option.name}
-                </Text>
-              </Pressable>
-            )
-          })}
-        </View>
+          <Text style={styles.groupLabel}>{zhCN.settings.theme}</Text>
+          <View style={styles.segmentRow} accessibilityRole="tablist">
+            {themeOptions().map(option => {
+              const chosen = option.value === themePreference
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: chosen }}
+                  onPress={() => void setThemePreference(option.value)}
+                  style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
+                >
+                  <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>
+                    {option.name}
+                  </Text>
+                </Pressable>
+              )
+            })}
+          </View>
 
-        <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>
-        <View style={styles.group}>
-          <KeyValue label={zhCN.settings.server} value={config?.baseUrl ?? zhCN.settings.notConfigured} />
-          <KeyValue label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
-          <KeyValue label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
-          <KeyValue label={zhCN.settings.protocol} value="DSH Remote v1" />
-        </View>
+          <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>
+          <View style={styles.group}>
+            <KeyValue label={zhCN.settings.server} value={config?.baseUrl ?? zhCN.settings.notConfigured} />
+            <KeyValue label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
+            <KeyValue label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
+            <KeyValue label={zhCN.settings.protocol} value="DSH Remote v1" />
+          </View>
 
-        <Text style={styles.groupLabel}>{zhCN.settings.transport}</Text>
-        <View style={styles.preferenceList}>
-          {transportPreferenceOptions().map(option => {
-            const chosen = option.value === preference
-            return (
-              <Pressable
-                key={option.value}
-                accessibilityRole="button"
-                accessibilityState={{ selected: chosen }}
-                onPress={() => void setPreference(option.value)}
-                style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
-              >
-                <View style={styles.preferenceCopy}>
-                  <Text style={styles.preferenceName}>{option.name}</Text>
-                  <Text style={styles.preferenceDescription}>{option.description}</Text>
-                </View>
-                {chosen && <Check size={17} color={colors.primary} />}
-              </Pressable>
-            )
-          })}
-          <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
-        </View>
+          <Text style={styles.groupLabel}>{zhCN.settings.transport}</Text>
+          <View style={styles.preferenceList}>
+            {transportPreferenceOptions().map(option => {
+              const chosen = option.value === preference
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: chosen }}
+                  onPress={() => void setPreference(option.value)}
+                  style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
+                >
+                  <View style={styles.preferenceCopy}>
+                    <Text style={styles.preferenceName}>{option.name}</Text>
+                    <Text style={styles.preferenceDescription}>{option.description}</Text>
+                  </View>
+                  {chosen && <Check size={17} color={colors.primary} />}
+                </Pressable>
+              )
+            })}
+            <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
+          </View>
 
-        <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
-        <View style={styles.group}>
-          <KeyValue label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} mono />
-          <KeyValue label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} mono />
-          <View style={styles.keyNote}><KeyRound size={17} color={colors.muted} /><Text style={styles.keyNoteText}>{zhCN.settings.keyNote}</Text></View>
-        </View>
+          <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
+          <View style={styles.group}>
+            <KeyValue label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} mono />
+            <KeyValue label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} mono />
+            <View style={styles.keyNote}><KeyRound size={17} color={colors.muted} /><Text style={styles.keyNoteText}>{zhCN.settings.keyNote}</Text></View>
+          </View>
 
-        <View style={styles.resetArea}>
-          <Button label={zhCN.settings.signOut} variant="secondary" onPress={confirmSignOut} />
-          <View style={styles.resetGap} />
-          <Button label={zhCN.settings.resetLocal} icon={RotateCcw} variant="danger" onPress={confirmReset} />
-        </View>
-      </Screen>
+          <View style={styles.resetArea}>
+            <Button label={zhCN.settings.signOut} variant="secondary" onPress={confirmSignOut} />
+            <View style={styles.resetGap} />
+            <Button label={zhCN.settings.resetLocal} icon={RotateCcw} variant="danger" onPress={confirmReset} />
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
     </View>
   )
 }
@@ -443,20 +445,21 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
 
   return (
     <View style={styles.flex}>
-      <TopBar title={zhCN.settings.about} onBack={onBack} />
-      <Screen>
-        <View style={styles.aboutHero}>
-          <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} resizeMode="contain" />
-          <Text style={styles.aboutProductName}>DeepSeek Harness Remote</Text>
-          <Text style={styles.aboutVersion}>{versionLabel}</Text>
-        </View>
+      <BlurHeaderFrame header={<TopBar title={zhCN.settings.about} onBack={onBack} />}>
+        <Screen>
+          <View style={styles.aboutHero}>
+            <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} resizeMode="contain" />
+            <Text style={styles.aboutProductName}>DeepSeek Harness Remote</Text>
+            <Text style={styles.aboutVersion}>{versionLabel}</Text>
+          </View>
 
-        <View style={styles.group}>
-          <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
-          <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />
-          <SettingsLink label={zhCN.settings.updateUrl} url={updateUrl} />
-        </View>
-      </Screen>
+          <View style={styles.group}>
+            <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
+            <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />
+            <SettingsLink label={zhCN.settings.updateUrl} url={updateUrl} />
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
     </View>
   )
 }

@@ -1,5 +1,13 @@
 ## Unreleased
 
+- Replaces the minimal shared CodeX/ACP shell bridge with a Host-owned terminal controller: verified default/candidate interactive shells, xterm screen snapshots, bounded output followers, idempotent allocation and retryable process cleanup. Committed terminals survive request timeouts and disconnects; backend reconfiguration and Host shutdown await cleanup. Remote scopes, device ownership and input claims remain isolated.
+- Adds conservative unattended reclamation only after two hours of confirmed idle activity without window holds or followers. PTY/activity support comes from the Host subprocess provider; the compatibility pipe fallback still lacks terminal resize and job control. Windows/Linux and encrypted cross-device acceptance remain pending.
+
+### 中文
+
+- CodeX / ACP 的简易 shell bridge 改为共用 Host 终端控制器：验证默认/可选交互 shell、xterm 屏幕快照、有界输出订阅、幂等创建和可重试进程清理。已创建终端不受请求超时或断线影响；后端重配与 Host 关闭等待清理，保留会话 scope、设备归属与连接输入权隔离。
+- 无窗口持有者或 follower、连续两小时明确 idle 时才自动回收。PTY 和 activity 由 Host subprocess 提供；兼容 pipe 仍不支持终端 resize/job control。Windows/Linux 与加密跨设备验收待完成。
+
 ## 0.5.7 - 2026-10-14
 
 - Discovers enabled OAuth providers from the Server for Desktop, CLI, and dsh-TUI login, including server-defined QR providers; older Servers fall back to configured GitHub/Zhihu status endpoints only when discovery returns 404.

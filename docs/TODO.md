@@ -213,6 +213,8 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 
 - [x] alpha.2 官方只读文件树/预览 API allowlist、默认开启且可在详细 Remote 设置中关闭的原生终端开关
 - [x] 终端按设备归属、连接 attachment 校验；禁止 Remote 修改插件自身访问设置
+- [x] CodeX / ACP 共用终端控制器：Host 默认交互 shell 与可选 shell、xterm 屏幕恢复、幂等创建、有界订阅和等待进程清理
+- [ ] 本轮 CodeX / ACP 终端的 Desktop / Android 跨设备、Windows 与 Linux PTY、shell 配置与长时间 idle 回收验收
 - [x] 白名单 IPv4 loopback HTTP/WebSocket 通道与独立本机预览 origin
 - [x] Relay 背压、串行加密发送、有界 stream 消费队列
 - [ ] Windows/Linux 真机、跨机高延迟 Relay、大输出终端、多设备回归

@@ -331,3 +331,26 @@ Plugin 类型检查、42 个测试文件 / 372 个测试和 `git diff --check` �
 限时问答只使用固定 `userQuestions/answer` / `attachWait` 与既有 `$events/result`，根据官方投影恢复 `continued` 问题；断线释放 claim，不重放回答。可选 Mods 只开放官方 `watchBand` / `pressBand`。Web SSE 使用文档相对地址以保留代理前缀。真实跨设备、Android 原生 UI 与真实代理验收仍需另行验证。
 
 本轮验证：全仓 check/test 与生产 build 通过，最终问答状态改动后 client-core 38、Android 88 个测试再次通过；Plugin 250 个测试与 DSH bundle 校验通过。官方 `0.2.0-rc.2` / `0.2.1-alpha.1` Gateway 包的事件流、取消、目标切换和断线 fail-closed 烟测通过。该烟测不等于完整 Desktop / Android 跨设备 E2E。Metro noble/hashes exports fallback 警告仍存在。
+
+
+## CodeX / ACP terminal controller (2026-10-15)
+
+按用户授权，CodeX / ACP 共用 `remote-terminal-controller.ts`，参考官方 TerminalController 的终端语义，
+不创建 Harness Agent 或 SessionStore 记录。`workspace-bridge.ts` 仅负责可信 session/cwd 与只读文件 scope；
+终端通过 `remote-terminal-provider.ts` 使用 Host subprocess 的默认 shell 探测、可执行文件验证、PTY、
+可用的 shell activity 与进程范围清理。普通 shell 使用 `-i`、PowerShell 使用 `-NoLogo`，选定 shell 必须
+来自验证后的候选列表；无 discovery 的旧本地 provider 只验证默认 shell。无 subprocess 的 pipe 兼容路径
+不支持 PTY resize/job control，其清理只覆盖直接 shell；完整进程范围清理由 subprocess provider 负责。
+
+Host xterm headless 保存屏幕并序列化重连快照：scrollback 1000 行，快照最多 256 KiB，可缩减历史行；
+follower JSON 队列最多 1 MiB，超限显式失败，重连恢复屏幕而不重放输入。每会话 8 个、每领域 256 个
+保留/启动中终端；创建对活动 ID 幂等，关闭中取消迟到分配，已提交终端与请求超时/连接生命周期分离。
+设备归属和 attachment 输入权保留，终端各 scope 必须一致；新 follower 或断开释放旧输入权。
+无 hold/follower 且持续两小时明确 idle 才回收，busy/unknown 或观测间隔过长不累计 idle。
+后端重配/Host 关闭等待进程清理，失败时保留关闭中的归属并重试；清理成功释放设备配额，迟到 RPC
+不能释放新一代归属。终端输出与屏幕不写日志或持久化。
+
+本轮 Plugin check、46 文件 / 296 个测试、build、DSH bundle 校验与根 GitHub 入口加载通过。
+使用发布版 `dsh-subprocess-local@0.2.1-alpha.1` 的 macOS 真 PTY 烟测通过：zsh 交互启动、
+创建请求取消后继续运行、resize、断开拒绝旧输入、重连屏幕恢复和等待清理；该本机烟测不等于
+Desktop / Android 加密跨设备 E2E、Windows/Linux PTY 或真实两小时闲置验收。

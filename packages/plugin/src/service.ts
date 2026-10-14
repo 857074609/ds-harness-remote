@@ -75,7 +75,7 @@ export class HostPluginRuntime {
   private closed = false
   private readonly codex: CodexRemoteDomain
   private readonly acp: AcpRemoteGateway
-  private readonly codexWorkspaceState = new CodexWorkspaceState()
+  private readonly codexWorkspaceState = new CodexWorkspaceState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
   private localCodexPeer?: CodexPeerBridge
   private localCodexPublish: PublishCodexFrame = async () => undefined
   private localAcpPeer?: AcpPeerBridge
@@ -173,7 +173,10 @@ export class HostPluginRuntime {
   setAgentBackends(config: ResolvedConfig): Promise<void> {
     const update = this.backendUpdate.catch(() => undefined).then(async () => {
       if (this.closed) throw new Error('remote runtime is closed')
+      const codexChanged = JSON.stringify(this.config.codex) !== JSON.stringify(config.codex)
       await Promise.all([this.codex.reconfigure(config.codex), this.acp.reconfigure(config.acp ?? { enabled: false, backends: [] })])
+      if (codexChanged) await this.codexWorkspaceState.dispose()
+      this.config.codex = config.codex
     })
     this.backendUpdate = update
     return update
@@ -424,8 +427,8 @@ export class HostPluginRuntime {
     this.localCodexPeer = undefined
     await this.localAcpPeer?.closeAll()
     this.localAcpPeer = undefined
-    await this.codex.close()
-    await this.acp.close()
+    const shutdown = await Promise.allSettled([this.codexWorkspaceState.dispose(), this.codex.close(), this.acp.close()])
+    if (shutdown.some(result => result.status === 'rejected')) throw new RpcError('HOST_SHUTDOWN_FAILED', 'Some Host backend processes could not be stopped.')
     this.logger.info('host runtime stopped')
   }
 

@@ -1621,11 +1621,41 @@ official `WebTerminalInfo` including `controllerId`. `write|resize|rename|close`
 resolve to void, `retain` acknowledges with `{type:"retained"}` without taking input
 ownership, and `follow` starts with `{type:"snapshot",sequence,screen,info}` followed
 by `{type:"output",sequence,data}` where each `sequence` is exactly the previous one
-plus one. The Host starts the shell through its `subprocess` service (PTY, containment,
-process-range termination) when that service is available and falls back to a plain
-pipe otherwise. This carrier has no terminal emulator, so `screen` is a bounded raw
-output journal replayed into the client emulator, prefixed with a reset when the
-journal was truncated.
+plus one. CodeX and ACP share a Host-owned `RemoteTerminalController`, without
+registering Harness Agents or writing SessionStore. Shell discovery uses the
+Host subprocess execution environment and verifies installed candidates. The
+provider's default shell is first; ordinary POSIX shells use `-i`, PowerShell uses
+`-NoLogo`, and cmd uses no extra arguments. `create.request.shellPath` may select
+only an exact verified candidate. An unavailable declared default fails rather
+than silently selecting a different shell. Older local providers without discovery
+verify only the Host-local environment/account default shell, without treating
+unclassified provider errors as missing candidates.
+
+The Host starts shells through its `subprocess` service (PTY, supported shell
+activity inspection, containment and process-range termination) when available.
+Allocation cancellation is detached after publication: request timeouts and
+transport disconnects cannot kill committed terminals. The compatibility fallback
+is a plain pipe; it cannot provide PTY resize or terminal job control.
+
+The controller maintains a bounded xterm headless screen and serializes its current
+state for `snapshot.screen`; Clients reset their emulator before applying it. A
+snapshot may include fewer scrollback rows to stay within 256 KiB. Each output
+frame contains at most 16,384 UTF-16 code units, preserving surrogate pairs, and
+slow followers fail explicitly when their queued JSON frames exceed 1 MiB. A new
+attachment recovers the screen; input is never replayed. Terminal policy and tool
+dispatch must resolve the same session; conflicting `agentId`, `sessionId` or
+`workspaceFileScopeId` values fail closed.
+
+Creation is idempotent for an active `(sessionId,id)`, including pending allocation;
+there are at most 8 retained/pending terminals per session and 256 per domain.
+`follow` grants input to that physical attachment; a newer follower or detachment
+revokes the old input claim. `retain` keeps a window hold without taking input.
+A shell is reclaimed only after two hours of continuously confirmed idle activity
+without holds or followers; unsupported/unknown activity and busy jobs never
+qualify. Disconnect only detaches subscriptions. Backend reconfiguration and Host
+shutdown cancel pending allocations and await process cleanup; failed cleanup
+keeps the terminal and its device ownership closed to input for explicit retry
+and periodic cleanup retry. No terminal output is written to logs or persistence.
 
 ### ACP catalog reads without prewarming
 

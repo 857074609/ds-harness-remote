@@ -10,13 +10,25 @@ const id = z.string().regex(/^[A-Za-z0-9_:-]{1,256}$/)
 
 /** Host-lifetime device ownership survives transport reconnects; never supplied by the client. */
 export class TerminalPolicy {
-  private readonly attachments = new Map<string, string>()
+  private static readonly claims = new WeakMap<Map<string, string>, Map<string, object>>()
+  private readonly attachments = new Map<string, { id: string; claim?: object }>()
+  private readonly claims: Map<string, object>
   constructor(private readonly enabled: boolean | (() => boolean), private readonly deviceId: string,
-    private readonly owners: Map<string, string>) {}
+    private readonly owners: Map<string, string>) {
+    this.claims = TerminalPolicy.claims.get(owners) ?? new Map()
+    TerminalPolicy.claims.set(owners, this.claims)
+  }
 
-  check(endpoint: string, payload: unknown): { key?: string; created?: boolean } {
+  /** Host process cleanup releases the exact terminal identity for every connection. */
+  static releaseOwner(owners: Map<string, string>, key: string): void {
+    owners.delete(key)
+    TerminalPolicy.claims.get(owners)?.delete(key)
+  }
+
+  check(endpoint: string, payload: unknown): { key?: string; created?: boolean; claim?: object } {
     if (!(typeof this.enabled === 'function' ? this.enabled() : this.enabled)) throw new RpcError('TERMINAL_DISABLED',
       'Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / 远程终端未开启，请在 Host 的 Remote 设置中开启「远程终端」，开关切换后立即保存并生效。')
+    for (const [key, attachment] of this.attachments) if (this.owners.get(key) !== this.deviceId || this.claims.get(key) !== attachment.claim) this.attachments.delete(key)
     const args = z.object({ args: z.record(z.unknown()) }).strict().parse(payload).args
     const rawSessionId = args.agentId ?? args.sessionId
     const sessionId = id.parse(rawSessionId)
@@ -33,19 +45,24 @@ export class TerminalPolicy {
       if (!this.owners.has(key) && this.owners.size >= 256) throw new RpcError('RATE_LIMITED', 'Too many retained remote terminals.')
       const created = !this.owners.has(key)
       this.owners.set(key, this.deviceId)
-      return { key, created }
+      if (created || !this.claims.has(key)) this.claims.set(key, {})
+      return { key, created, claim: this.claims.get(key) }
     }
     if (this.owners.get(key) !== this.deviceId) this.deny()
-    if (endpoint === 'terminal/follow') this.attachments.set(key, id.parse(args.attachmentId))
+    if (endpoint === 'terminal/follow') this.attachments.set(key, { id: id.parse(args.attachmentId), claim: this.claims.get(key) })
     if (endpoint === 'terminal/write' || endpoint === 'terminal/resize') {
-      if (this.attachments.get(key) !== id.parse(args.attachmentId)) this.deny()
+      if (this.attachments.get(key)?.id !== id.parse(args.attachmentId)) this.deny()
     }
-    return { key }
+    return { key, claim: this.claims.get(key) }
   }
 
-  result(endpoint: string, payload: unknown, result: TypertRpcResult, reservation: { key?: string; created?: boolean }): TypertRpcResult {
-    if (reservation.key !== undefined && ((!result.ok && reservation.created) || (result.ok && endpoint === 'terminal/close'))) {
-      this.owners.delete(reservation.key)
+  result(endpoint: string, payload: unknown, result: TypertRpcResult, reservation: { key?: string; created?: boolean; claim?: object }): TypertRpcResult {
+    const releases = (!result.ok && reservation.created && result.error.code !== 'TERMINAL_CLEANUP_FAILED') || (result.ok && endpoint === 'terminal/close')
+    // Cleanup can finish before an older RPC response. Its response must not
+    // release a new allocation that has since claimed the same identity.
+    if (reservation.key !== undefined && releases && this.owners.get(reservation.key) === this.deviceId
+      && this.claims.get(reservation.key) === reservation.claim) {
+      TerminalPolicy.releaseOwner(this.owners, reservation.key)
       this.attachments.delete(reservation.key)
     }
     if (endpoint === 'terminal/list' && result.ok && Array.isArray(result.value)) {

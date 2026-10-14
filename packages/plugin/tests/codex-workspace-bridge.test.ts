@@ -2,10 +2,13 @@ import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
-import { CodexWorkspaceBridge, subprocessTerminalSpawner, type RemoteTerminalProcess, type RemoteTerminalSpawner } from '../src/codex-workspace-bridge.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CodexWorkspaceBridge, CodexWorkspaceState, subprocessTerminalSpawner, type RemoteTerminalProcess, type RemoteTerminalSpawner } from '../src/codex-workspace-bridge.js'
 
 const signal = new AbortController().signal
+const states: CodexWorkspaceState[] = []
+function state(): CodexWorkspaceState { const value = new CodexWorkspaceState(); states.push(value); return value }
+afterEach(async () => { await Promise.all(states.splice(0).map(value => value.dispose())) })
 
 /** Pull frames as the Host publishes them, so ordering is observable. */
 class FakeOutput implements AsyncIterable<string> {
@@ -87,17 +90,23 @@ describe('CodeX workspace and terminal bridge', () => {
     const bridge = new CodexWorkspaceBridge(async thread => thread === 'missing' ? undefined : '/does/not/exist', () => true)
     await expect(bridge.call('workspaceFiles/list', { args: { workspaceFileScopeId: 'codex:missing', path: '.' } }, signal)).rejects.toMatchObject({ code: 'CODEX_WORKSPACE_UNAVAILABLE' })
     await expect(bridge.call('workspaceFiles/list', { args: { workspaceFileScopeId: 'codex:', path: '.' } }, signal)).rejects.toMatchObject({ code: 'CODEX_SESSION_INVALID' })
+    for (const endpoint of ['terminal/create', 'terminal/list', 'terminal/follow', 'terminal/retain']) {
+      const payload = { args: { agentId: 'codex:one', workspaceFileScopeId: 'codex:other', id: 't1', request: { id: 't1' } } }
+      const result = endpoint === 'terminal/follow' || endpoint === 'terminal/retain'
+        ? bridge.open(endpoint, payload, signal) : bridge.call(endpoint, payload, signal)
+      await expect(result).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+    }
     await bridge.closeAll()
   })
 
   it('answers the official terminal environment, shells and info shapes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-codex-'))
     const resolved = await realpath(root)
-    const bridge = new CodexWorkspaceBridge(async () => root, () => true, undefined, fakeSpawner().spawn)
+    const bridge = new CodexWorkspaceBridge(async () => root, () => true, state(), fakeSpawner().spawn)
     const environment = await bridge.call('terminal/environment', { args: { agentId: 'codex:one' } }, signal)
     expect(environment).toMatchObject({ ok: true, value: { cwd: resolved, maxInputBytes: expect.any(Number), maxCols: expect.any(Number), maxRows: expect.any(Number), scrollback: expect.any(Number) } })
     const shells = await bridge.call('terminal/shells', { args: { agentId: 'codex:one' } }, signal)
-    expect(shells?.ok && shells.value).toEqual([{ path: expect.any(String), args: expect.any(Array), name: expect.any(String) }])
+    expect(shells?.ok && shells.value).toEqual(expect.arrayContaining([{ path: expect.any(String), args: expect.any(Array), name: expect.any(String) }]))
     const created = await bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 80, rows: 24 } } }, signal)
     expect(created).toMatchObject({
       ok: true,
@@ -114,10 +123,13 @@ describe('CodeX workspace and terminal bridge', () => {
     const one = await mkdtemp(join(tmpdir(), 'dsh-codex-one-'))
     const two = await mkdtemp(join(tmpdir(), 'dsh-codex-two-'))
     const provider = fakeSpawner()
-    const bridge = new CodexWorkspaceBridge(async thread => thread === 'one' ? one : two, () => true, undefined, provider.spawn)
+    const bridge = new CodexWorkspaceBridge(async thread => thread === 'one' ? one : two, () => true, state(), provider.spawn)
     await bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 80, rows: 24 } } }, signal)
     await expect(bridge.call('terminal/list', { args: { sessionId: 'codex:two' } }, signal)).resolves.toMatchObject({ ok: true, value: [] })
     await expect(bridge.call('terminal/write', { args: { agentId: 'codex:two', id: 't1', attachmentId: 'a1', data: 'x' } }, signal)).rejects.toMatchObject({ code: 'CODEX_TERMINAL_NOT_FOUND' })
+    // Only a live attachment may mutate input or dimensions.
+    const stream = await bridge.open('terminal/follow', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a1' } }, signal)
+    await frame(stream)
     // Mutations resolve to void, and the stored title still changes.
     await expect(bridge.call('terminal/rename', { args: { agentId: 'codex:one', id: 't1', title: 'renamed' } }, signal)).resolves.toEqual({ ok: true })
     await expect(bridge.call('terminal/resize', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a1', cols: 100, rows: 30 } }, signal)).resolves.toEqual({ ok: true })
@@ -132,7 +144,7 @@ describe('CodeX workspace and terminal bridge', () => {
   it('acknowledges retention, then replays a snapshot and ordered output to the new controller', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-codex-'))
     const provider = fakeSpawner()
-    const bridge = new CodexWorkspaceBridge(async () => root, () => true, undefined, provider.spawn)
+    const bridge = new CodexWorkspaceBridge(async () => root, () => true, state(), provider.spawn)
     await bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 80, rows: 24 } } }, signal)
 
     const retention = await bridge.open('terminal/retain', { args: { sessionId: 'codex:one', id: 't1' } }, signal)
@@ -149,7 +161,7 @@ describe('CodeX workspace and terminal bridge', () => {
 
     // A second attachment takes input ownership and recovers from the journal.
     const second = await bridge.open('terminal/follow', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a2' } }, signal)
-    await expect(frame(second)).resolves.toMatchObject({ type: 'snapshot', sequence: 2, screen: 'onetwo', info: { controllerId: 'a2' } })
+    await expect(frame(second)).resolves.toMatchObject({ type: 'snapshot', sequence: 2, screen: expect.stringContaining('onetwo'), info: { controllerId: 'a2' } })
     await expect(frame(first)).resolves.toMatchObject({ type: 'state', info: { controllerId: 'a2' } })
 
     await bridge.closeAll(); await rm(root, { recursive: true, force: true })
@@ -158,7 +170,7 @@ describe('CodeX workspace and terminal bridge', () => {
   it('reports the exit state once the process ends', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-codex-'))
     const provider = fakeSpawner()
-    const bridge = new CodexWorkspaceBridge(async () => root, () => true, undefined, provider.spawn)
+    const bridge = new CodexWorkspaceBridge(async () => root, () => true, state(), provider.spawn)
     await bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 80, rows: 24 } } }, signal)
     const stream = await bridge.open('terminal/follow', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a1' } }, signal)
     await frame(stream)
@@ -182,19 +194,27 @@ describe('CodeX workspace and terminal bridge', () => {
       terminate: async () => { output.end(); settle({ exitCode: 0 }) },
       done,
     }
-    const bridge = new CodexWorkspaceBridge(async () => root, () => true, undefined,
-      subprocessTerminalSpawner({ spawnTerminal: async spec => { spawns.push(spec); return handle } }))
+    const bridge = new CodexWorkspaceBridge(async () => root, () => true, state(),
+      subprocessTerminalSpawner({
+        terminalEnvironment: async () => ({ platform: 'posix', defaultShell: '/bin/bash' }),
+        resolveExecutable: async file => { if (file !== '/bin/bash' && file !== 'bash') throw Object.assign(new Error(), { name: 'SubprocessExecutableNotFoundError' }); return '/bin/bash' },
+        spawnTerminal: async spec => { spawns.push(spec); return handle },
+      }))
 
-    await expect(bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 90, rows: 30 } } }, signal))
+    const allocation = new AbortController()
+    await expect(bridge.call('terminal/create', { args: { agentId: 'codex:one', request: { id: 't1', cols: 90, rows: 30 } } }, allocation.signal))
       .resolves.toMatchObject({ ok: true, value: { id: 't1', cols: 90, rows: 30 } })
     expect(spawns).toEqual([{
-      argv: [expect.any(String)],
+      argv: ['/bin/bash', '-i'],
       cwd: await realpath(root),
       cols: 90,
       rows: 30,
       terminalType: 'xterm-256color',
       env: { DSH_SESSION_ID: 'codex:one' },
+      shellActivity: true, graceMs: 1000, signal: expect.any(AbortSignal),
     }])
+    allocation.abort()
+    expect((spawns[0]!.signal as AbortSignal).aborted).toBe(false)
 
     const stream = await bridge.open('terminal/follow', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a1' } }, signal)
     await expect(frame(stream)).resolves.toMatchObject({ type: 'snapshot', sequence: 0, info: { controllerId: 'a1' } })
@@ -205,6 +225,7 @@ describe('CodeX workspace and terminal bridge', () => {
     await bridge.call('terminal/resize', { args: { agentId: 'codex:one', id: 't1', attachmentId: 'a1', cols: 100, rows: 40 } }, signal)
     expect(writes).toEqual(['ls\n'])
     expect(resizes).toEqual([[100, 40]])
+    await expect(frame(stream)).resolves.toMatchObject({ type: 'state', info: { cols: 100, rows: 40 } })
     await bridge.call('terminal/close', { args: { agentId: 'codex:one', id: 't1' } }, signal)
     await expect(frame(stream)).resolves.toMatchObject({ type: 'state', info: { state: 'exited' } })
     await bridge.closeAll(); await rm(root, { recursive: true, force: true })

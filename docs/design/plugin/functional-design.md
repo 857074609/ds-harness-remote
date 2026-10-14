@@ -1,6 +1,6 @@
 # Remote Plugin 功能设计
 
-更新时间：2026-10-08；目标项目：`packages/plugin`。
+更新时间：2026-10-15；目标项目：`packages/plugin`。
 
 ## 1. 数据面
 
@@ -29,6 +29,7 @@
 | `client-runtime.ts` / `client.ts` | 加密 capability、工作区类型、选择与内存 carrier |
 | `workspace-bridge.ts` / `codex-workspace-bridge.ts` | 有界只读文件和按会话隔离的 CodeX 工具 scope |
 | `terminal-policy.ts` | Host 开关、设备归属、连接输入权 |
+| `remote-terminal-controller.ts` / `remote-terminal-provider.ts` | CodeX / ACP 终端 owner、shell 探测、PTY、有界屏幕与订阅、retain/idle 和并发清理 |
 | `loopback-host.ts` / `loopback-preview.ts` | Host 白名单请求与 Client 本机独立预览 origin |
 | `codex/` | App Server、authority、allowlist、虚拟 carrier、审批 |
 | `acp/` | 后端注册表、gateway、独立工具、transfer、虚拟 carrier |

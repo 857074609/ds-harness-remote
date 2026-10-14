@@ -219,9 +219,9 @@ export class HarnessRemoteBridge {
       try {
         codexResult = await this.codexWorkspace.call(params.endpoint, params.payload, AbortSignal.timeout(60_000))
       } catch (error) {
-        // A failed allocation must release the device ownership it reserved.
+        // Release failed allocations only after their process cleanup succeeds.
         if (reservation !== undefined) {
-          this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
+          this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: error instanceof RpcError ? error.code : 'FAILED', message: '', details: {} } }, reservation)
         }
         throw error
       }

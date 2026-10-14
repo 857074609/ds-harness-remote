@@ -47,6 +47,7 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - No public listening port or public IP is required on the Harness Host. Connect from anywhere with internet access over a bidirectional end-to-end encrypted channel.
 - Prefer P2P connections, use TURN relay nodes worldwide, and fall back to Server Relay when needed.
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
+- CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
 
 ## Install
 

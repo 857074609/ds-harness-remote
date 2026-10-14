@@ -23,7 +23,7 @@ export class AcpWorkspaceTools {
       if (!checked.ok) throw new RpcError(checked.error.code, checked.error.message)
       return checked.value
     } catch (error) {
-      if (reservation) this.terminal.result(endpoint, payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
+      if (reservation) this.terminal.result(endpoint, payload, { ok: false, error: { code: error instanceof RpcError ? error.code : 'FAILED', message: '', details: {} } }, reservation)
       throw error
     }
   }

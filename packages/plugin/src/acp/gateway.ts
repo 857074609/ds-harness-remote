@@ -87,7 +87,7 @@ export class AcpRemoteGateway {
     unsubscribeUnavailable: () => void
   }>()
   private readonly sessionCwds = new Map<string, { backend: string; cwd: string }>()
-  private readonly workspaceState = new WorkspaceBridgeState()
+  private readonly workspaceState = new WorkspaceBridgeState(key => TerminalPolicy.releaseOwner(this.terminalOwners, key))
   private readonly terminalOwners = new Map<string, string>()
   private readonly workspaceTools = new Map<string, AcpWorkspaceTools>()
   private readonly peers = new Map<string, AcpPeerBridge>()
@@ -568,13 +568,7 @@ export class AcpRemoteGateway {
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
-    for (const [key, terminal] of this.workspaceState.terminals) {
-      if (changed.has(terminal.sessionId.startsWith('acp:') ? 'antigravity' : 'cursor')) {
-        void Promise.resolve(terminal.process?.terminate()).catch(() => undefined)
-        for (const queue of terminal.subscribers) queue.end()
-        this.workspaceState.terminals.delete(key)
-      }
-    }
+    await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : 'cursor'))
     for (const id of sessions) {      this.sessionOwners.delete(id)
       this.sessionBackends.delete(id)
       this.recentFrames.delete(id)
@@ -602,21 +596,19 @@ export class AcpRemoteGateway {
     for (const peer of this.peers.values()) await peer.closeAll()
     this.peers.clear()
     this.sessionCwds.clear()
-    for (const terminal of this.workspaceState.terminals.values()) {
-      void Promise.resolve(terminal.process?.terminate()).catch(() => undefined)
-      for (const queue of terminal.subscribers) queue.end()
-    }
-    this.workspaceState.terminals.clear()
-    this.terminalOwners.clear()
+    const terminals = this.workspaceState.dispose().then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped.'))
     this.sessionOwners.clear()
     this.sessionBackends.clear()
     this.recentFrames.clear()
     this.turnCatchUp.clear()
     this.approvals.clear()
-    await Promise.all([...this.startingClients.keys()].map(client => client.close()))
-    await this.disposeAllInstances()
+    const processes = await Promise.allSettled([...this.startingClients.keys()].map(client => client.close()).concat(this.disposeAllInstances()))
+    const terminalError = await terminals
+    if (!terminalError) this.terminalOwners.clear()
     this.available = false
     this.state = 'disabled'
+    if (terminalError) throw terminalError
+    if (processes.some(result => result.status === 'rejected')) throw new RpcError('ACP_SHUTDOWN_FAILED', 'Some ACP backend processes could not be stopped.')
   }
 
   private async launchAcp(): Promise<void> {

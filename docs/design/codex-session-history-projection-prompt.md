@@ -83,7 +83,11 @@ snapshot 保持 header/cursor/records/hasMore 和事件顺序；实时流处理�
 路径规范化、realpath、符号链接、尺寸与会话有效性校验和 Harness 工具一致，不能越过该 Thread cwd。
 
 只读文件使用固定 `workspaceFiles/*` 语义。终端使用官方 `terminal/*` shape、快照、controllerId、follow/retain 与单调输出序号，
-遵循 Host 开关、设备归属与连接输入权。Host subprocess 可用时提供 PTY，否则 pipe；Client 模拟器重放有界原始输出。
+遵循 Host 开关、设备归属与连接输入权。CodeX / ACP 共用 `RemoteTerminalController`，通过 Host subprocess
+探测默认 shell 与可选 shell，使用交互参数；有 PTY 时启用官方进程范围管理和可用的 shell activity。
+Host xterm headless 保存有界屏幕并序列化重连快照，不再回放原始日志。重复创建幂等，断线释放输入权但保留进程；
+后端重配或 Host 关闭等待清理，启动中关闭也回收迟到进程。两小时无持有者且持续明确 idle 才自动回收，unknown/busy 不回收。
+无 subprocess 的兼容 pipe 不支持 PTY resize 或终端 job control。
 这是受控会话工具入口，不能成为 raw App Server shell/command 或通用 filesystem RPC。
 
 ## 7. 生命周期与验证

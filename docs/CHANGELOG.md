@@ -1,5 +1,11 @@
 ## Unreleased
 
+## 0.5.7 - 2026-10-14
+
+- Discovers enabled OAuth providers from the Server for Desktop, CLI, and dsh-TUI login, including server-defined QR providers; older Servers fall back to configured GitHub/Zhihu status endpoints only when discovery returns 404.
+- Clarifies Android recovery instructions when another Harness process holds a Session writer, including fully exiting the other process before retrying (#108, contributed by @dreamfarer-space).
+- Reports the selected TURN relay node through the optional `transport.selected.turnNode` field and tolerates CodeX resume refusals for newly created, not-yet-persisted Threads when changing permissions; actual permission-update failures still reject the request.
+- Advances the Plugin and Android app to `0.5.7` (Android `versionCode 45`).
 - Adds a Host-side DS Bot operation allowlist: remote chat and roster management remain available; installation, upgrades, schedule mutations, credentials, capability scripts, and unknown operations are refused before local dispatch.
 - Gates DS Bot roster and newly created Session responses on membership in the official Session catalog, with at most two refreshes for a missing identity; an already-ready catalog or a silently failed refresh cannot publish unknown Sessions.
 - Restricts plugin route forwarding to the exact `api/bot` endpoint, preventing official Harness RPCs from bypassing the Remote allowlist, local settings restrictions, and terminal policy.
@@ -10,6 +16,10 @@
 
 ### 中文
 
+- Desktop、CLI 与 dsh-TUI 登录从 Server 发现已启用的 OAuth 登录方式，支持服务端定义的扫码 provider；仅发现接口返回 404 时兼容旧 Server 的 GitHub/知乎配置状态接口。
+- Android 遇到其他 Harness 进程占用 Session writer 时，明确提示完整退出占用进程再重试（#108，由 @dreamfarer-space 贡献）。
+- 通过可选 `transport.selected.turnNode` 字段上报实际选择的 TURN 节点；CodeX 新建且尚未持久化的 Thread 修改权限时，兼容其 resume 拒绝，真实权限更新失败仍保持拒绝。
+- Plugin 与 Android App 升级到 `0.5.7`（Android `versionCode 45`）。
 - Host 对 DS Bot 子操作实行固定白名单，保留远程会话与成员/群聊管理；安装升级、日程增删、凭据、能力脚本及未知操作在本机 dispatch 前拒绝。
 - DS Bot roster 和新会话响应必须通过官方 Session 目录的 ID 校验，缺失时最多刷新两次；目录曾进入 ready 或刷新失败后正常返回，均不能放行尚不可解析的新 Session。
 - 插件路由转发仅开放精确的 `api/bot` 端点，阻止官方 Harness RPC 绕过 Remote 白名单、本地设置限制和终端策略。

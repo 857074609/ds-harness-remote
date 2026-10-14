@@ -93,7 +93,7 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
       <View style={styles.frameHeader} onLayout={event => setHeight(event.nativeEvent.layout.height)}>
         <HeaderBlurTargetContext.Provider value={blurTarget}>{header}</HeaderBlurTargetContext.Provider>
         {/* Feathers the frosted bar into the content instead of ending on a hard edge. */}
-        <VerticalFade from={0.35} to={0} style={styles.frameFade} />
+        <VerticalFade from={0.15} to={0} style={styles.frameFade} />
       </View>
     </View>
   )
@@ -135,12 +135,19 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
   return (
     <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle, blurTarget !== undefined && styles.topBarBlurred]}>
       {blurTarget !== undefined && (
-        // Android < 12 falls back to the translucent tint without blur.
-        <BlurView blurTarget={blurTarget} blurMethod="dimezisBlurViewSdk31Plus" intensity={70}
+        <BlurView blurTarget={blurTarget} blurMethod="dimezisBlurViewSdk31Plus" intensity={35}
           tint={scheme === 'dark' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
       )}
-      {/* Near-opaque under the status bar, thinning toward the content. */}
-      {blurTarget !== undefined && <VerticalFade from={0.92} to={0.35} style={StyleSheet.absoluteFill} />}
+      {/* Frosted translucent backdrop (80% opacity) matching modern iOS/assistant styling */}
+      {blurTarget !== undefined && (
+        <View
+          style={[
+            StyleSheet.absoluteFill,
+            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.80)' : 'rgba(255, 255, 255, 0.80)' }
+          ]}
+          pointerEvents="none"
+        />
+      )}
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} hitSlop={12} />
@@ -177,7 +184,11 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
             )
         )}
       </View>
-      <View style={[styles.topBarSide, styles.topBarTrailing]}>{action}</View>
+      <View style={[styles.topBarSide, styles.topBarTrailing]}>
+        {action !== undefined && action !== null && (
+          <View style={styles.topBarPillGroup}>{action}</View>
+        )}
+      </View>
     </View>
   )
 }
@@ -428,10 +439,11 @@ function createStyles(colors: ThemeColors) {
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
     topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0, overflow: 'hidden' },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
-    topBarSide: { minWidth: 52, flexDirection: 'row', alignItems: 'center' },
+    topBarSide: { flexDirection: 'row', alignItems: 'center' },
     topBarTrailing: { justifyContent: 'flex-end' },
-    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', gap: 1 },
-    topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink },
+    topBarPillGroup: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceStrong, borderRadius: radius.pill, paddingHorizontal: 2 },
+    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'flex-start', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
+    topBarTitle: { ...type.heading, textAlign: 'left', color: colors.ink, fontWeight: '700' },
     topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },

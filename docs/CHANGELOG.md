@@ -2,11 +2,13 @@
 
 - Replaces the minimal shared CodeX/ACP shell bridge with a Host-owned terminal controller: verified default/candidate interactive shells, xterm screen snapshots, bounded output followers, idempotent allocation and retryable process cleanup. Committed terminals survive request timeouts and disconnects; backend reconfiguration and Host shutdown await cleanup. Remote scopes, device ownership and input claims remain isolated.
 - Adds conservative unattended reclamation only after two hours of confirmed idle activity without window holds or followers. PTY/activity support comes from the Host subprocess provider; the compatibility pipe fallback still lacks terminal resize and job control. Windows/Linux and encrypted cross-device acceptance remain pending.
+- Fixes terminal cancellation after allocation commit and binds input to the current connection's follower even when attachment IDs are reused. Disconnect also revokes pending follows. ACP reconfiguration continues stopping changed backends after cleanup errors and retries unfinished cleanup when the same settings are saved again; affected backends stay unavailable until cleanup succeeds.
 
 ### 中文
 
 - CodeX / ACP 的简易 shell bridge 改为共用 Host 终端控制器：验证默认/可选交互 shell、xterm 屏幕快照、有界输出订阅、幂等创建和可重试进程清理。已创建终端不受请求超时或断线影响；后端重配与 Host 关闭等待清理，保留会话 scope、设备归属与连接输入权隔离。
 - 无窗口持有者或 follower、连续两小时明确 idle 时才自动回收。PTY 和 activity 由 Host subprocess 提供；兼容 pipe 仍不支持终端 resize/job control。Windows/Linux 与加密跨设备验收待完成。
+- 修复分配提交后的请求取消，并将输入权绑定到当前连接的 follower，即使复用 attachment ID 也不能跨连接输入；断开同时撤销尚未完成的 follow。ACP 重配遇到清理失败仍停止变化后端，再次保存相同设置可重试未完成清理，相关后端在清理成功前保持不可用。
 
 ## 0.5.7 - 2026-10-14
 

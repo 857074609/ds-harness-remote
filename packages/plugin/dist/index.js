@@ -31396,7 +31396,7 @@ var RemoteTerminalController = class {
         return;
       }
       if (endpoint !== "terminal/write" && endpoint !== "terminal/resize") throw new RpcError("METHOD_NOT_FOUND", "The terminal method does not exist.");
-      if (identifier(args.attachmentId) !== terminal.controllerId || !terminal.controller || terminal.state !== "running") throw new RpcError("PERMISSION_DENIED", "This attachment does not own terminal input.");
+      if (identifier(args.attachmentId) !== terminal.controllerId || !terminal.controller || !this.subscriptions.has(terminal.controller) || terminal.state !== "running") throw new RpcError("PERMISSION_DENIED", "This attachment does not own terminal input.");
       terminal.invalidate();
       if (endpoint === "terminal/write") {
         if (typeof args.data !== "string" || Buffer.byteLength(args.data) > MAX_INPUT_BYTES) throw new RpcError("INVALID_MESSAGE", "Terminal input is invalid or too large.");
@@ -31429,15 +31429,19 @@ var RemoteTerminalController = class {
         terminal.emit({ type: "state", info: terminal.info() });
       }
     });
-    if (endpoint === "terminal/retain") {
-      terminal.invalidate();
-      terminal.holders.add(follower);
-      follower.push({ type: "retained" });
-    } else if (endpoint === "terminal/follow") {
-      const attachmentId = identifier(args.attachmentId);
-      try {
+    this.subscriptions.add(follower);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+    try {
+      if (endpoint === "terminal/retain") {
+        terminal.invalidate();
+        terminal.holders.add(follower);
+        follower.push({ type: "retained" });
+      } else if (endpoint === "terminal/follow") {
+        const attachmentId = identifier(args.attachmentId);
         await terminal.enqueue(() => {
           this.check(signal);
+          if (!this.subscriptions.has(follower)) throw new RpcError("TRANSPORT_CLOSED", "The terminal attachment was disconnected.");
           if (terminal.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is closing.");
           const screen = terminal.snapshot();
           terminal.invalidate();
@@ -31448,15 +31452,14 @@ var RemoteTerminalController = class {
           terminal.followers.add(follower);
           if (terminal.state !== "running") follower.finish();
         });
-      } catch (error) {
-        follower.close();
-        throw error;
-      }
-    } else throw new RpcError("METHOD_NOT_FOUND", "The terminal stream does not exist.");
-    this.subscriptions.add(follower);
-    signal.addEventListener("abort", abort, { once: true });
-    if (signal.aborted) abort();
-    return follower;
+      } else throw new RpcError("METHOD_NOT_FOUND", "The terminal stream does not exist.");
+      this.check(signal);
+      if (!this.subscriptions.has(follower)) throw new RpcError("TRANSPORT_CLOSED", "The terminal attachment was disconnected.");
+      return follower;
+    } catch (error) {
+      follower.close();
+      throw error;
+    }
   }
   /** A connection only disposes its subscriptions; the Host still owns the shells. */
   closeAll() {
@@ -31522,7 +31525,6 @@ var RemoteTerminalController = class {
     })();
     try {
       await terminal.pending;
-      this.check(signal);
       if (terminal.closing) throw this.scopeError("TERMINAL_NOT_FOUND", "The terminal is closing.");
       return terminal.info();
     } catch (error) {
@@ -33834,6 +33836,8 @@ var AcpRemoteGateway = class {
   turnCatchUp = /* @__PURE__ */ new Map();
   startPromise;
   startingClients = /* @__PURE__ */ new Map();
+  /** Desired configuration is saved immediately; unfinished cleanup must remain retryable. */
+  pendingReconfiguration = /* @__PURE__ */ new Set();
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends() {
     if (!this.config.enabled) return [];
@@ -33841,7 +33845,7 @@ var AcpRemoteGateway = class {
   }
   start() {
     if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
-    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve();
+    if (!this.config.enabled || !this.enabledBackends().some((id5) => !this.pendingReconfiguration.has(id5))) return Promise.resolve();
     this.startPromise ??= this.startOnce().finally(() => {
       this.startPromise = void 0;
     });
@@ -33861,12 +33865,12 @@ var AcpRemoteGateway = class {
     }
   }
   isAvailable() {
-    return this.config.enabled && this.available && [...this.backendInstances.values()].some((inst) => inst.client.isReady());
+    return this.config.enabled && this.available && this.availableBackends().length > 0;
   }
   availableBackends() {
     const list = [];
     for (const [id5, inst] of this.backendInstances) {
-      if (this.enabledBackends().includes(id5) && inst.client.isReady()) list.push(id5);
+      if (!this.pendingReconfiguration.has(id5) && this.enabledBackends().includes(id5) && inst.client.isReady()) list.push(id5);
     }
     return list;
   }
@@ -34205,19 +34209,20 @@ var AcpRemoteGateway = class {
       backends: value.backends.filter((item) => ["cursor", "antigravity"].includes(item.id))
     });
     this.config = config;
-    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return;
+    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return;
     if (this.restartTimer !== void 0) clearTimeout(this.restartTimer);
     this.restartTimer = void 0;
-    const changed = new Set(previous.backends.filter((item) => {
+    const changed = /* @__PURE__ */ new Set([...this.pendingReconfiguration, ...previous.backends.filter((item) => {
       const next = config.backends.find((candidate) => candidate.id === item.id);
       return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next);
-    }).map((item) => item.id));
-    await Promise.all([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
+    }).map((item) => item.id)]);
+    for (const id5 of changed) this.pendingReconfiguration.add(id5);
+    const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()));
     await this.startPromise?.catch(() => void 0);
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
     for (const [id5, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id5);
-    await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : "cursor"));
+    const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
     for (const id5 of sessions) {
       this.sessionOwners.delete(id5);
       this.sessionBackends.delete(id5);
@@ -34225,16 +34230,20 @@ var AcpRemoteGateway = class {
       this.turnCatchUp.delete(id5);
     }
     for (const [id5, approval] of this.approvals) if (approval.backend !== void 0 && changed.has(approval.backend)) this.approvals.delete(id5);
-    for (const id5 of changed) {
+    const processes = await Promise.allSettled([...changed].map(async (id5) => {
       const instance = this.backendInstances.get(id5);
-      if (instance === void 0) continue;
-      this.backendInstances.delete(id5);
+      if (instance === void 0) return;
       await this.disposeInstance(instance);
-    }
+      if (this.backendInstances.get(id5) === instance) this.backendInstances.delete(id5);
+    }));
     this.available = this.availableBackends().length > 0;
-    this.state = this.available ? "ready" : "disabled";
+    const cleanupFailed = terminalError !== void 0 || [...stopping, ...processes].some((result) => result.status === "rejected");
+    this.state = this.available ? "ready" : cleanupFailed && this.enabledBackends().length > 0 ? "unavailable" : "disabled";
     this.restartAttempt = 0;
-    this.unavailableCode = void 0;
+    this.unavailableCode = terminalError?.code ?? (cleanupFailed ? "ACP_RECONFIGURE_FAILED" : void 0);
+    if (terminalError) throw terminalError;
+    if (cleanupFailed) throw new RpcError("ACP_RECONFIGURE_FAILED", "Some ACP backend processes could not be stopped. Save the backend settings again to retry.");
+    for (const id5 of changed) this.pendingReconfiguration.delete(id5);
     await this.start();
   }
   async close() {
@@ -34260,7 +34269,7 @@ var AcpRemoteGateway = class {
     if (processes.some((result) => result.status === "rejected")) throw new RpcError("ACP_SHUTDOWN_FAILED", "Some ACP backend processes could not be stopped.");
   }
   async launchAcp() {
-    const candidates = this.config.backends.filter((item) => this.enabledBackends().includes(item.id));
+    const candidates = this.config.backends.filter((item) => !this.pendingReconfiguration.has(item.id) && this.enabledBackends().includes(item.id));
     const results = await Promise.allSettled(candidates.map(async (candidate) => {
       if (this.backendInstances.get(candidate.id)?.client.isReady()) return;
       let lastError;
@@ -34283,7 +34292,7 @@ var AcpRemoteGateway = class {
     }
     if (this.isAvailable()) {
       this.state = "ready";
-      this.unavailableCode = void 0;
+      if (this.pendingReconfiguration.size === 0) this.unavailableCode = void 0;
       this.restartAttempt = 0;
       return;
     }
@@ -34291,7 +34300,7 @@ var AcpRemoteGateway = class {
     throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
   backendCurrent(backend) {
-    return this.config.enabled && backend.enabled && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
+    return this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
   }
   async launchBackendCandidate(backend, binary) {
     const id5 = backend.id;
@@ -34471,7 +34480,7 @@ var AcpRemoteGateway = class {
     this.approvalExpiryTimer.unref?.();
   }
   requireAcp(backend) {
-    if (!this.config.enabled || backend !== void 0 && !this.enabledBackends().includes(backend) || !this.isAvailable()) {
+    if (!this.config.enabled || backend !== void 0 && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend)) || !this.isAvailable()) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Cursor ACP is disabled or unavailable on this Host.");
     }
     if (backend !== void 0) {

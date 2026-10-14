@@ -1636,6 +1636,9 @@ activity inspection, containment and process-range termination) when available.
 Allocation cancellation is detached after publication: request timeouts and
 transport disconnects cannot kill committed terminals. The compatibility fallback
 is a plain pipe; it cannot provide PTY resize or terminal job control.
+After allocation passes its cancellation and enable checks and starts the output
+pump, creation remains successful even if the request is cancelled before its
+response returns; this preserves the committed terminal's device claim.
 
 The controller maintains a bounded xterm headless screen and serializes its current
 state for `snapshot.screen`; Clients reset their emulator before applying it. A
@@ -1650,12 +1653,19 @@ Creation is idempotent for an active `(sessionId,id)`, including pending allocat
 there are at most 8 retained/pending terminals per session and 256 per domain.
 `follow` grants input to that physical attachment; a newer follower or detachment
 revokes the old input claim. `retain` keeps a window hold without taking input.
+Input additionally requires that the current controller follower belongs to the
+calling connection; reusing an attachment ID on another connection does not grant
+the old connection access. Disconnect also fences pending follower opens.
 A shell is reclaimed only after two hours of continuously confirmed idle activity
 without holds or followers; unsupported/unknown activity and busy jobs never
 qualify. Disconnect only detaches subscriptions. Backend reconfiguration and Host
 shutdown cancel pending allocations and await process cleanup; failed cleanup
 keeps the terminal and its device ownership closed to input for explicit retry
 and periodic cleanup retry. No terminal output is written to logs or persistence.
+ACP cleanup errors do not skip changed backend shutdown. Unfinished backend
+reconfiguration is retained separately from the desired configuration: affected
+backends cannot accept RPC or restart until cleanup succeeds, and saving the same
+settings retries that cleanup. Unchanged backends remain usable.
 
 ### ACP catalog reads without prewarming
 

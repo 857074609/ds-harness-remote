@@ -354,3 +354,9 @@ follower JSON 队列最多 1 MiB，超限显式失败，重连恢复屏幕而不
 使用发布版 `dsh-subprocess-local@0.2.1-alpha.1` 的 macOS 真 PTY 烟测通过：zsh 交互启动、
 创建请求取消后继续运行、resize、断开拒绝旧输入、重连屏幕恢复和等待清理；该本机烟测不等于
 Desktop / Android 加密跨设备 E2E、Windows/Linux PTY 或真实两小时闲置验收。
+
+2026-10-15 review 修复：分配提交后的请求取消仍返回创建成功，保留终端与设备 claim；输入/resize
+同时校验当前 follower 属于调用连接，断开也撤销尚未完成的 follow。ACP 重配保留未完成清理状态，
+终端清理失败仍尝试停止所有变化后端；再次保存相同设置可重试，清理成功前相关后端禁止 RPC/启动，
+其余后端保持可用。Plugin check、46 文件 / 299 个测试与 build 通过；新增核心场景覆盖取消提交点、
+attachment ID 跨连接复用、pending follow 断开，以及终端/后端清理失败后同配置重试。

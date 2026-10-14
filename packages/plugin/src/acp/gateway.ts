@@ -110,6 +110,8 @@ export class AcpRemoteGateway {
 
   private startPromise?: Promise<void>
   private readonly startingClients = new Map<CursorAcpLike, ResolvedAcpBackendConfig>()
+  /** Desired configuration is saved immediately; unfinished cleanup must remain retryable. */
+  private readonly pendingReconfiguration = new Set<string>()
 
   constructor(
     public config: ResolvedAcpConfig,
@@ -133,7 +135,7 @@ export class AcpRemoteGateway {
 
   start(): Promise<void> {
     if (this.closed) return Promise.reject(new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.'))
-    if (!this.config.enabled || this.enabledBackends().length === 0) return Promise.resolve()
+    if (!this.config.enabled || !this.enabledBackends().some(id => !this.pendingReconfiguration.has(id))) return Promise.resolve()
     this.startPromise ??= this.startOnce().finally(() => { this.startPromise = undefined })
     return this.startPromise
   }
@@ -153,13 +155,13 @@ export class AcpRemoteGateway {
   }
 
   isAvailable(): boolean {
-    return this.config.enabled && this.available && [...this.backendInstances.values()].some(inst => inst.client.isReady())
+    return this.config.enabled && this.available && this.availableBackends().length > 0
   }
 
   availableBackends(): string[] {
     const list: string[] = []
     for (const [id, inst] of this.backendInstances) {
-      if (this.enabledBackends().includes(id) && inst.client.isReady()) list.push(id)
+      if (!this.pendingReconfiguration.has(id) && this.enabledBackends().includes(id) && inst.client.isReady()) list.push(id)
     }
     return list
   }
@@ -556,35 +558,43 @@ export class AcpRemoteGateway {
     const implemented = (value: ResolvedAcpConfig) => ({ enabled: value.enabled,
       backends: value.backends.filter(item => ['cursor', 'antigravity'].includes(item.id)) })
     this.config = config
-    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config))) return
+    if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
     this.restartTimer = undefined
-    const changed = new Set(previous.backends.filter(item => {
+    const changed = new Set([...this.pendingReconfiguration, ...previous.backends.filter(item => {
       const next = config.backends.find(candidate => candidate.id === item.id)
       return previous.enabled !== config.enabled || JSON.stringify(item) !== JSON.stringify(next)
-    }).map(item => item.id))
-    await Promise.all([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
+    }).map(item => item.id)])
+    for (const id of changed) this.pendingReconfiguration.add(id)
+    const stopping = await Promise.allSettled([...this.startingClients].filter(([, backend]) => changed.has(backend.id)).map(([client]) => client.close()))
     await this.startPromise?.catch(() => undefined)
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
-    await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : 'cursor'))
+    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : 'cursor'))
+      .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
     for (const id of sessions) {      this.sessionOwners.delete(id)
       this.sessionBackends.delete(id)
       this.recentFrames.delete(id)
       this.turnCatchUp.delete(id)
     }
     for (const [id, approval] of this.approvals) if (approval.backend !== undefined && changed.has(approval.backend)) this.approvals.delete(id)
-    for (const id of changed) {
+    // A terminal cleanup failure must not prevent stopping any changed backend.
+    // Keep failed backend instances fenced from RPC/startup until a later retry.
+    const processes = await Promise.allSettled([...changed].map(async id => {
       const instance = this.backendInstances.get(id)
-      if (instance === undefined) continue
-      this.backendInstances.delete(id)
+      if (instance === undefined) return
       await this.disposeInstance(instance)
-    }
+      if (this.backendInstances.get(id) === instance) this.backendInstances.delete(id)
+    }))
     this.available = this.availableBackends().length > 0
-    this.state = this.available ? 'ready' : 'disabled'
+    const cleanupFailed = terminalError !== undefined || [...stopping, ...processes].some(result => result.status === 'rejected')
+    this.state = this.available ? 'ready' : cleanupFailed && this.enabledBackends().length > 0 ? 'unavailable' : 'disabled'
     this.restartAttempt = 0
-    this.unavailableCode = undefined
+    this.unavailableCode = terminalError?.code ?? (cleanupFailed ? 'ACP_RECONFIGURE_FAILED' : undefined)
+    if (terminalError) throw terminalError
+    if (cleanupFailed) throw new RpcError('ACP_RECONFIGURE_FAILED', 'Some ACP backend processes could not be stopped. Save the backend settings again to retry.')
+    for (const id of changed) this.pendingReconfiguration.delete(id)
     await this.start()
   }
 
@@ -612,7 +622,7 @@ export class AcpRemoteGateway {
   }
 
   private async launchAcp(): Promise<void> {
-    const candidates = this.config.backends.filter(item => this.enabledBackends().includes(item.id))
+    const candidates = this.config.backends.filter(item => !this.pendingReconfiguration.has(item.id) && this.enabledBackends().includes(item.id))
     const results = await Promise.allSettled(candidates.map(async candidate => {
       if (this.backendInstances.get(candidate.id)?.client.isReady()) return
       let lastError: unknown
@@ -632,7 +642,7 @@ export class AcpRemoteGateway {
     if (this.enabledBackends().length === 0) { this.state = 'disabled'; return }
     if (this.isAvailable()) {
       this.state = 'ready'
-      this.unavailableCode = undefined
+      if (this.pendingReconfiguration.size === 0) this.unavailableCode = undefined
       this.restartAttempt = 0
       return
     }
@@ -641,7 +651,7 @@ export class AcpRemoteGateway {
   }
 
   private backendCurrent(backend: ResolvedAcpBackendConfig): boolean {
-    return this.config.enabled && backend.enabled
+    return this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id)
       && JSON.stringify(this.config.backends.find(item => item.id === backend.id)) === JSON.stringify(backend)
   }
 
@@ -839,7 +849,7 @@ export class AcpRemoteGateway {
   }
 
   private requireAcp(backend?: string): CursorAcpLike {
-    if (!this.config.enabled || (backend !== undefined && !this.enabledBackends().includes(backend)) || !this.isAvailable()) {
+    if (!this.config.enabled || (backend !== undefined && (!this.enabledBackends().includes(backend) || this.pendingReconfiguration.has(backend))) || !this.isAvailable()) {
       throw new RpcError('CURSOR_UNAVAILABLE', 'Cursor ACP is disabled or unavailable on this Host.')
     }
     if (backend !== undefined) {

@@ -248,7 +248,8 @@ export class RemoteTerminalController {
         return
       }
       if (endpoint !== 'terminal/write' && endpoint !== 'terminal/resize') throw new RpcError('METHOD_NOT_FOUND', 'The terminal method does not exist.')
-      if (identifier(args.attachmentId) !== terminal.controllerId || !terminal.controller || terminal.state !== 'running') throw new RpcError('PERMISSION_DENIED', 'This attachment does not own terminal input.')
+      if (identifier(args.attachmentId) !== terminal.controllerId || !terminal.controller
+        || !this.subscriptions.has(terminal.controller) || terminal.state !== 'running') throw new RpcError('PERMISSION_DENIED', 'This attachment does not own terminal input.')
       terminal.invalidate()
       if (endpoint === 'terminal/write') {
         if (typeof args.data !== 'string' || Buffer.byteLength(args.data) > MAX_INPUT_BYTES) throw new RpcError('INVALID_MESSAGE', 'Terminal input is invalid or too large.')
@@ -277,14 +278,20 @@ export class RemoteTerminalController {
         terminal.emit({ type: 'state', info: terminal.info() })
       }
     })
-    if (endpoint === 'terminal/retain') {
-      terminal.invalidate(); terminal.holders.add(follower)
-      follower.push({ type: 'retained' })
-    } else if (endpoint === 'terminal/follow') {
-      const attachmentId = identifier(args.attachmentId)
-      try {
+    // Register before awaiting the serialized snapshot, so disconnect can also
+    // revoke a follower whose open request has not returned yet.
+    this.subscriptions.add(follower)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+    try {
+      if (endpoint === 'terminal/retain') {
+        terminal.invalidate(); terminal.holders.add(follower)
+        follower.push({ type: 'retained' })
+      } else if (endpoint === 'terminal/follow') {
+        const attachmentId = identifier(args.attachmentId)
         await terminal.enqueue(() => {
           this.check(signal)
+          if (!this.subscriptions.has(follower)) throw new RpcError('TRANSPORT_CLOSED', 'The terminal attachment was disconnected.')
           if (terminal.closing) throw this.scopeError('TERMINAL_NOT_FOUND', 'The terminal is closing.')
           const screen = terminal.snapshot()
           terminal.invalidate(); terminal.controller = follower; terminal.controllerId = attachmentId
@@ -293,12 +300,11 @@ export class RemoteTerminalController {
           terminal.followers.add(follower)
           if (terminal.state !== 'running') follower.finish()
         })
-      } catch (error) { follower.close(); throw error }
-    } else throw new RpcError('METHOD_NOT_FOUND', 'The terminal stream does not exist.')
-    this.subscriptions.add(follower)
-    signal.addEventListener('abort', abort, { once: true })
-    if (signal.aborted) abort()
-    return follower
+      } else throw new RpcError('METHOD_NOT_FOUND', 'The terminal stream does not exist.')
+      this.check(signal)
+      if (!this.subscriptions.has(follower)) throw new RpcError('TRANSPORT_CLOSED', 'The terminal attachment was disconnected.')
+      return follower
+    } catch (error) { follower.close(); throw error }
   }
 
   /** A connection only disposes its subscriptions; the Host still owns the shells. */
@@ -352,7 +358,9 @@ export class RemoteTerminalController {
     })()
     try {
       await terminal.pending
-      this.check(signal)
+      // pending resolves only after allocation has been checked and committed.
+      // Returning failure for later request cancellation would also release
+      // its device claim while the committed shell is still alive.
       if (terminal.closing) throw this.scopeError('TERMINAL_NOT_FOUND', 'The terminal is closing.')
       return terminal.info()
     }

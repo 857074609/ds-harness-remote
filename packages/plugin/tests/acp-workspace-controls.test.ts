@@ -10,8 +10,69 @@ import { AntigravityAcpClient } from '../src/acp/adapters/antigravity-process.js
 import { cachedAgyModels, parseAgyModels } from '../src/acp/adapters/antigravity/models.js'
 import { parseAcpCall } from '../src/acp/method-policy.js'
 import type { SafeLogger } from '../src/logging.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import type { RemoteTerminalSpawner } from '../src/remote-terminal-provider.js'
 
 const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as SafeLogger
+
+it('ACP reconfiguration stops changed backends despite failed cleanup and retries identical settings', async () => {
+  await runScenarios(['terminal', 'backend'].flatMap(failure => ['command', 'disable'].map(action => ({ name: `${action}: ${failure} cleanup fails`, run: async () => {
+    const temp = await mkdtemp(join(tmpdir(), 'acp-reconfigure-'))
+    const cwd = await realpath(temp)
+    const makeClient = () => ({ start: vi.fn(async () => {}), isReady: () => true,
+      call: vi.fn(async () => ({ sessionId: 'native-1' })), respond: async () => {}, respondError: async () => {},
+      onInbound: () => () => {}, onUnavailable: () => () => {}, close: vi.fn(async () => {}) })
+    const old = makeClient(), replacement = makeClient(), other = makeClient()
+    const factory = vi.fn((_binary, _logger, backend) => backend.id === 'antigravity' ? other : backend.command === 'old-cursor' ? old : replacement)
+    let cleanupFails = true
+    const terminalStop = vi.fn(async () => {
+      if (failure === 'terminal' && cleanupFails) throw new Error('PTY cleanup unavailable')
+    })
+    old.close.mockImplementation(async () => {
+      if (failure === 'backend' && cleanupFails) throw new Error('ACP cleanup unavailable')
+    })
+    const spawn: RemoteTerminalSpawner = Object.assign(async () => ({ output: (async function* () {})(),
+      write: async () => {}, resize: async () => {}, terminate: terminalStop, completed: new Promise<{ exitCode: number | null }>(() => {}) }),
+      { shells: async () => [{ path: '/verified/sh', args: ['-i'], name: 'sh' }] })
+    const initial = { enabled: true, backends: [
+      { id: 'cursor', enabled: true, command: 'old-cursor', args: ['acp'] },
+      { id: 'antigravity', enabled: true, command: 'agy', args: [] },
+    ] }
+    const updated = { ...initial, backends: initial.backends.map(backend => backend.id === 'cursor'
+      ? { ...backend, command: action === 'command' ? 'new-cursor' : backend.command, enabled: action !== 'disable' } : backend) }
+    const gateway = new AcpRemoteGateway(initial, logger, factory, undefined, () => true, spawn)
+    try {
+      await gateway.start()
+      const peer = gateway.createPeer({ connectionId: 'peer', peerDeviceId: 'device' }, async () => {})!
+      await peer.call({ method: 'session/new', params: { backend: 'cursor', cwd } })
+      await peer.call({ method: 'dsh/toolCall', params: { backend: 'cursor', sessionId: 'native-1',
+        endpoint: 'terminal/create', args: { agentId: 'cursor:native-1', request: { id: 'term' } } } })
+      await expect(gateway.reconfigure(updated)).rejects.toMatchObject({ code: failure === 'terminal' ? 'TERMINAL_CLEANUP_FAILED' : 'ACP_RECONFIGURE_FAILED' })
+      expect(old.close).toHaveBeenCalledTimes(1)
+      expect(other.close).not.toHaveBeenCalled()
+      expect(gateway.availableBackends()).toEqual(['antigravity'])
+      await expect(peer.call({ method: 'initialize', params: { backend: 'cursor' } })).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+      await expect(peer.call({ method: 'initialize', params: { backend: 'antigravity' } })).resolves.toMatchObject({ backend: 'antigravity' })
+      // Startup while cleanup remains pending cannot resurrect the old backend
+      // or launch its replacement ahead of successful process cleanup.
+      await gateway.start()
+      expect(factory).toHaveBeenCalledTimes(2)
+      cleanupFails = false
+      await gateway.reconfigure(updated)
+      expect(terminalStop).toHaveBeenCalledTimes(failure === 'terminal' ? 2 : 1)
+      expect(old.close).toHaveBeenCalledTimes(failure === 'backend' ? 2 : 1)
+      expect(other.close).not.toHaveBeenCalled()
+      expect(gateway.availableBackends().sort()).toEqual(action === 'command' ? ['antigravity', 'cursor'] : ['antigravity'])
+      expect(factory).toHaveBeenCalledTimes(action === 'command' ? 3 : 2)
+      await gateway.reconfigure(updated)
+      expect(old.close).toHaveBeenCalledTimes(failure === 'backend' ? 2 : 1)
+      expect(factory).toHaveBeenCalledTimes(action === 'command' ? 3 : 2)
+    } finally {
+      cleanupFails = false
+      try { await gateway.close() } finally { await rm(temp, { recursive: true, force: true }) }
+    }
+  } }))))
+})
 
 it('ACP tools enforce session authority, containment, terminal ownership and stream closure', async () => {
   const temp = await mkdtemp(join(tmpdir(), 'acp-tools-'))

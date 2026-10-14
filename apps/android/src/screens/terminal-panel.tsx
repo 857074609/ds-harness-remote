@@ -8,7 +8,7 @@ import { TerminalAttachment } from '../services/terminal-attachment'
 import type { TerminalInfo } from '../services/session-tools'
 import { terminalHtml } from '../generated/terminal-html'
 import { strings as t } from '../locales/i18n'
-import { Button, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { useTheme } from '../ui/theme-context'
 import { spacing, type } from '../ui/theme'
 import { sessionToolsError } from './session-tools-error'
@@ -149,12 +149,11 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
     else if (!writable) status = info.state === 'running' ? t.tools.controlDenied : t.tools.exited
   }
   const statusBusy = pending || (error === undefined && active !== undefined && info === undefined)
-  return <View style={styles.container}>
-    <TopBar
-      title={t.tools.terminal}
-      onBack={onClose}
-      action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
-    />
+  return <BlurHeaderFrame inset header={<TopBar
+    title={t.tools.terminal}
+    onBack={onClose}
+    action={<IconButton label={t.tools.newTerminal} icon={CirclePlus} tint={colors.primary} onPress={() => void create()} disabled={busy || !ready} />}
+  />}>
     <ScrollView horizontal keyboardShouldPersistTaps="always" style={styles.controls} contentContainerStyle={styles.row}>
       {items.map(item => <Button key={item.id} label={terminalLabel(item)} variant={active === item.id ? 'primary' : 'quiet'} onPress={() => setActive(item.id)} disabled={busy} />)}
       {active && <Button label={t.tools.closeTerminal} variant="danger" disabled={busy} onPress={close} />}
@@ -189,7 +188,7 @@ export function TerminalPanel({ sessionId, onClose }: { sessionId: string; onClo
       <Button label={t.tools.keyboard} variant="secondary" disabled={!writable} onPress={() => send({ type: 'focus' })} />
       {([[t.tools.interrupt, '\x03'], [t.tools.tab, '\t'], [t.tools.escape, '\x1b'], [t.tools.up, '\x1b[A'], [t.tools.down, '\x1b[B'], [t.tools.left, '\x1b[D'], [t.tools.right, '\x1b[C'], [t.tools.backspace, '\x7f'], [t.tools.enter, '\r']] as const).map(([label, data]) => <Button key={label} label={label} variant="secondary" disabled={!writable} onPress={() => input(data)} />)}
     </ScrollView>
-  </View>
+  </BlurHeaderFrame>
 }
 /** A tab labelled with its working directory says nothing on a phone-width strip; the shell name does. */
 function terminalLabel(item: TerminalInfo): string {

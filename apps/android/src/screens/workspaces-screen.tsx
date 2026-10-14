@@ -3,7 +3,7 @@ import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextIn
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
-import { Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -243,7 +243,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
 
   return (
     <View style={styles.flex}>
-      <TopBar
+      <BlurHeaderFrame header={<TopBar
         title={deviceSubtitle}
         titleLines={2}
         onTitlePress={onDeviceInfo}
@@ -256,198 +256,199 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
             )}
           </View>
         )}
-      />
-      <Screen scrollRef={scrollRef} refreshing={refreshing} onRefresh={() => void refresh()}>
-        {showBackendTabs && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">
-          <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeBackend === 'harness' }}
-            onPress={() => selectBackend('harness')}
-            style={({ pressed }) => [
-              styles.backendTab,
-              activeBackend === 'harness' && styles.backendTabActive,
-              pressed && styles.workspaceRowPressed,
-            ]}
-          >
-            <Text style={[styles.backendTabText, activeBackend === 'harness' && styles.backendTabTextActive]}>{zhCN.workspaces.dsh}</Text>
-          </Pressable>
-          {codexAvailable && <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeBackend === 'codex' }}
-            onPress={() => selectBackend('codex')}
-            style={({ pressed }) => [
-              styles.backendTab,
-              activeBackend === 'codex' && styles.backendTabActive,
-              pressed && styles.workspaceRowPressed,
-            ]}
-          >
-            <Text style={[styles.backendTabText, activeBackend === 'codex' && styles.backendTabTextActive]}>{zhCN.workspaces.codex}</Text>
-          </Pressable>}
-          {cursorAvailable && <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeBackend === 'cursor' }}
-            onPress={() => selectBackend('cursor')}
-            style={({ pressed }) => [
-              styles.backendTab,
-              activeBackend === 'cursor' && styles.backendTabActive,
-              pressed && styles.workspaceRowPressed,
-            ]}
-          >
-            <Text style={[styles.backendTabText, activeBackend === 'cursor' && styles.backendTabTextActive]}>{zhCN.workspaces.cursor}</Text>
-          </Pressable>}
-          {antigravityAvailable && <Pressable
-            accessibilityRole="tab"
-            accessibilityState={{ selected: activeBackend === 'antigravity' }}
-            onPress={() => selectBackend('antigravity')}
-            style={({ pressed }) => [
-              styles.backendTab,
-              activeBackend === 'antigravity' && styles.backendTabActive,
-              pressed && styles.workspaceRowPressed,
-            ]}
-          >
-            <Text style={[styles.backendTabText, activeBackend === 'antigravity' && styles.backendTabTextActive]}>{zhCN.workspaces.antigravity}</Text>
-          </Pressable>}
-        </View>}
-        {backendWorkspaces.length > 0 && (
-          <View style={[styles.searchField, !showBackendTabs && styles.contentTop]}>
-            <Search size={18} color={colors.muted} />
-            <TextInput
-              accessibilityLabel={zhCN.workspaces.search}
-              style={styles.searchInput}
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              placeholder={zhCN.workspaces.search}
-              placeholderTextColor={colors.muted}
-              returnKeyType="search"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {searchQuery.length > 0 && (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={zhCN.workspaces.clearSearch}
-                hitSlop={8}
-                onPress={() => setSearchQuery('')}
-                style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
-              >
-                <X size={17} color={colors.muted} />
-              </Pressable>
-            )}
-          </View>
-        )}
-        {backendWorkspaces.length === 0
-          ? <View style={!showBackendTabs ? styles.contentTop : undefined}>
-              <EmptyState
-                icon={FolderOpen}
-                title={zhCN.workspaces.emptyTitle}
-                body={zhCN.workspaces.emptyBody}
-                action={<Button label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />}
+      />}>
+        <Screen scrollRef={scrollRef} refreshing={refreshing} onRefresh={() => void refresh()}>
+          {showBackendTabs && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">
+            <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeBackend === 'harness' }}
+              onPress={() => selectBackend('harness')}
+              style={({ pressed }) => [
+                styles.backendTab,
+                activeBackend === 'harness' && styles.backendTabActive,
+                pressed && styles.workspaceRowPressed,
+              ]}
+            >
+              <Text style={[styles.backendTabText, activeBackend === 'harness' && styles.backendTabTextActive]}>{zhCN.workspaces.dsh}</Text>
+            </Pressable>
+            {codexAvailable && <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeBackend === 'codex' }}
+              onPress={() => selectBackend('codex')}
+              style={({ pressed }) => [
+                styles.backendTab,
+                activeBackend === 'codex' && styles.backendTabActive,
+                pressed && styles.workspaceRowPressed,
+              ]}
+            >
+              <Text style={[styles.backendTabText, activeBackend === 'codex' && styles.backendTabTextActive]}>{zhCN.workspaces.codex}</Text>
+            </Pressable>}
+            {cursorAvailable && <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeBackend === 'cursor' }}
+              onPress={() => selectBackend('cursor')}
+              style={({ pressed }) => [
+                styles.backendTab,
+                activeBackend === 'cursor' && styles.backendTabActive,
+                pressed && styles.workspaceRowPressed,
+              ]}
+            >
+              <Text style={[styles.backendTabText, activeBackend === 'cursor' && styles.backendTabTextActive]}>{zhCN.workspaces.cursor}</Text>
+            </Pressable>}
+            {antigravityAvailable && <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeBackend === 'antigravity' }}
+              onPress={() => selectBackend('antigravity')}
+              style={({ pressed }) => [
+                styles.backendTab,
+                activeBackend === 'antigravity' && styles.backendTabActive,
+                pressed && styles.workspaceRowPressed,
+              ]}
+            >
+              <Text style={[styles.backendTabText, activeBackend === 'antigravity' && styles.backendTabTextActive]}>{zhCN.workspaces.antigravity}</Text>
+            </Pressable>}
+          </View>}
+          {backendWorkspaces.length > 0 && (
+            <View style={[styles.searchField, !showBackendTabs && styles.contentTop]}>
+              <Search size={18} color={colors.muted} />
+              <TextInput
+                accessibilityLabel={zhCN.workspaces.search}
+                style={styles.searchInput}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+                placeholder={zhCN.workspaces.search}
+                placeholderTextColor={colors.muted}
+                returnKeyType="search"
+                autoCapitalize="none"
+                autoCorrect={false}
               />
-            </View>
-          : filteredWorkspaces.length === 0
-            ? <EmptyState
-                icon={Search}
-                title={zhCN.workspaces.noSearchResults}
-                body={zhCN.workspaces.noSearchResultsBody}
-                action={<Button label={zhCN.workspaces.clearSearch} variant="secondary" onPress={() => setSearchQuery('')} />}
-              />
-            : <View>{filteredWorkspaces.map(workspace => {
-              const workspaceSessions = workspace.sessionIds.flatMap(sessionId => {
-                const session = sessions.find(item => item.sessionId === sessionId)
-                return session === undefined ? [] : [session]
-              })
-              const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
-              const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
-              const visibleWorkspaceSessions = showAllSessions ? workspaceSessions : workspaceSessions.slice(0, 3)
-              const collapsed = collapsedWorkspaceIds.has(workspaceKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
-              const favorited = favoriteKeys.has(workspaceKey)
-              return (
-                <View
-                  key={workspace.workspaceId}
-                  style={[styles.workspaceGroup, focusedWorkspaceKey === workspaceKey && styles.workspaceGroupFocused]}
-                  onLayout={event => {
-                    const offset = event.nativeEvent.layout.y
-                    workspaceOffsets.current.set(workspaceKey, offset)
-                    if (pendingScrollKey.current === workspaceKey) {
-                      pendingScrollKey.current = undefined
-                      scrollRef.current?.scrollTo({ y: Math.max(0, offset - spacing.sm), animated: true })
-                    }
-                  }}
+              {searchQuery.length > 0 && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.workspaces.clearSearch}
+                  hitSlop={8}
+                  onPress={() => setSearchQuery('')}
+                  style={({ pressed }) => [styles.clearSearch, pressed && styles.workspaceRowPressed]}
                 >
-                  <View style={styles.workspaceRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={collapsed ? zhCN.workspaces.expandWorkspace(workspace.title) : zhCN.workspaces.collapseWorkspace(workspace.title)}
-                      accessibilityState={{ expanded: !collapsed }}
-                      onPress={() => toggleWorkspace(workspace)}
-                      style={({ pressed }) => [styles.workspaceToggle, pressed && styles.workspaceRowPressed]}
-                    >
-                      <View style={styles.workspaceIcon}>
-                        {workspace.backend === 'codex'
-                          ? <Code2 size={18} color={colors.primary} />
-                          : workspace.backend === 'cursor' || workspace.backend === 'antigravity'
-                            ? <Sparkles size={18} color={colors.primary} />
-                            : collapsed
-                              ? <Folder size={18} color={colors.primary} />
-                              : <FolderOpen size={18} color={colors.primary} />}
+                  <X size={17} color={colors.muted} />
+                </Pressable>
+              )}
+            </View>
+          )}
+          {backendWorkspaces.length === 0
+            ? <View style={!showBackendTabs ? styles.contentTop : undefined}>
+                <EmptyState
+                  icon={FolderOpen}
+                  title={zhCN.workspaces.emptyTitle}
+                  body={zhCN.workspaces.emptyBody}
+                  action={<Button label={zhCN.workspaces.create} icon={CirclePlus} onPress={() => setCreateOpen(true)} />}
+                />
+              </View>
+            : filteredWorkspaces.length === 0
+              ? <EmptyState
+                  icon={Search}
+                  title={zhCN.workspaces.noSearchResults}
+                  body={zhCN.workspaces.noSearchResultsBody}
+                  action={<Button label={zhCN.workspaces.clearSearch} variant="secondary" onPress={() => setSearchQuery('')} />}
+                />
+              : <View>{filteredWorkspaces.map(workspace => {
+                const workspaceSessions = workspace.sessionIds.flatMap(sessionId => {
+                  const session = sessions.find(item => item.sessionId === sessionId)
+                  return session === undefined ? [] : [session]
+                })
+                const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
+                const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
+                const visibleWorkspaceSessions = showAllSessions ? workspaceSessions : workspaceSessions.slice(0, 3)
+                const collapsed = collapsedWorkspaceIds.has(workspaceKey) || collapsedWorkspaceIds.has(workspace.workspaceId)
+                const favorited = favoriteKeys.has(workspaceKey)
+                return (
+                  <View
+                    key={workspace.workspaceId}
+                    style={[styles.workspaceGroup, focusedWorkspaceKey === workspaceKey && styles.workspaceGroupFocused]}
+                    onLayout={event => {
+                      const offset = event.nativeEvent.layout.y
+                      workspaceOffsets.current.set(workspaceKey, offset)
+                      if (pendingScrollKey.current === workspaceKey) {
+                        pendingScrollKey.current = undefined
+                        scrollRef.current?.scrollTo({ y: Math.max(0, offset - spacing.sm), animated: true })
+                      }
+                    }}
+                  >
+                    <View style={styles.workspaceRow}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={collapsed ? zhCN.workspaces.expandWorkspace(workspace.title) : zhCN.workspaces.collapseWorkspace(workspace.title)}
+                        accessibilityState={{ expanded: !collapsed }}
+                        onPress={() => toggleWorkspace(workspace)}
+                        style={({ pressed }) => [styles.workspaceToggle, pressed && styles.workspaceRowPressed]}
+                      >
+                        <View style={styles.workspaceIcon}>
+                          {workspace.backend === 'codex'
+                            ? <Code2 size={18} color={colors.primary} />
+                            : workspace.backend === 'cursor' || workspace.backend === 'antigravity'
+                              ? <Sparkles size={18} color={colors.primary} />
+                              : collapsed
+                                ? <Folder size={18} color={colors.primary} />
+                                : <FolderOpen size={18} color={colors.primary} />}
+                        </View>
+                        <View style={styles.workspaceCopy}>
+                          <Text style={styles.workspaceTitle} numberOfLines={1}>{workspace.title}</Text>
+                          <Text style={styles.workspacePath} numberOfLines={1} ellipsizeMode="tail">
+                            {workspaceParentPath(workspace.path)}
+                          </Text>
+                        </View>
+                        {collapsed
+                          ? <ChevronRight size={18} color={colors.subtle} />
+                          : <ChevronDown size={18} color={colors.subtle} />}
+                      </Pressable>
+                      <View style={styles.workspaceRowActions}>
+                        <IconButton
+                          dense
+                          label={favorited ? zhCN.workspaces.removeFavorite(workspace.title) : zhCN.workspaces.addFavorite(workspace.title)}
+                          icon={Star}
+                          tint={favorited ? colors.primary : colors.subtle}
+                          fill={favorited ? colors.primary : 'none'}
+                          onPress={() => toggleFavorite(workspace)}
+                        />
+                        <IconButton dense label={zhCN.workspaces.newSessionIn(workspace.title)} icon={CirclePlus} tint={colors.primary} onPress={() => void createInWorkspace(workspace.workspaceId)} />
+                        {workspace.backend !== 'codex' && <IconButton dense label={zhCN.workspaces.options} icon={MoreVertical} onPress={() => setActionsTarget(workspace)} />}
                       </View>
-                      <View style={styles.workspaceCopy}>
-                        <Text style={styles.workspaceTitle} numberOfLines={1}>{workspace.title}</Text>
-                        <Text style={styles.workspacePath} numberOfLines={1} ellipsizeMode="tail">
-                          {workspaceParentPath(workspace.path)}
-                        </Text>
-                      </View>
-                      {collapsed
-                        ? <ChevronRight size={18} color={colors.subtle} />
-                        : <ChevronDown size={18} color={colors.subtle} />}
-                    </Pressable>
-                    <View style={styles.workspaceRowActions}>
-                      <IconButton
-                        dense
-                        label={favorited ? zhCN.workspaces.removeFavorite(workspace.title) : zhCN.workspaces.addFavorite(workspace.title)}
-                        icon={Star}
-                        tint={favorited ? colors.primary : colors.subtle}
-                        fill={favorited ? colors.primary : 'none'}
-                        onPress={() => toggleFavorite(workspace)}
-                      />
-                      <IconButton dense label={zhCN.workspaces.newSessionIn(workspace.title)} icon={CirclePlus} tint={colors.primary} onPress={() => void createInWorkspace(workspace.workspaceId)} />
-                      {workspace.backend !== 'codex' && <IconButton dense label={zhCN.workspaces.options} icon={MoreVertical} onPress={() => setActionsTarget(workspace)} />}
                     </View>
+                    {!collapsed && (workspaceSessions.length === 0
+                      ? <Pressable onPress={() => void createInWorkspace(workspace.workspaceId)} style={styles.noSessions}><Text style={styles.noSessionsText}>{zhCN.workspaces.noSessions}</Text></Pressable>
+                      : <>
+                          {visibleWorkspaceSessions.map(session => {
+                            return <SwipeableSessionRow
+                              key={session.sessionId}
+                              session={session}
+                              compact
+                              title={resolveSessionTitle(session)}
+                              meta={relativeTime(session.updatedAt)}
+                              open={openSessionId === session.sessionId}
+                              locked={busy !== undefined}
+                              busy={busy === `archive:${session.sessionId}`}
+                              onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
+                              onArchive={() => archiveSession(session.sessionId)}
+                              onPress={() => { setOpenSessionId(undefined); void open(session) }}
+                            />
+                          })}
+                          {!showAllSessions && workspaceSessions.length > visibleWorkspaceSessions.length && (
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={zhCN.workspaces.loadAllSessions}
+                              onPress={() => loadAllSessions(workspaceKey)}
+                              style={({ pressed }) => [styles.loadAllSessions, pressed && styles.workspaceRowPressed]}
+                            >
+                              <Text style={styles.loadAllSessionsText}>{zhCN.workspaces.loadAllSessions}</Text>
+                              <ChevronDown size={17} color={colors.primary} />
+                            </Pressable>
+                          )}
+                        </>)}
                   </View>
-                  {!collapsed && (workspaceSessions.length === 0
-                    ? <Pressable onPress={() => void createInWorkspace(workspace.workspaceId)} style={styles.noSessions}><Text style={styles.noSessionsText}>{zhCN.workspaces.noSessions}</Text></Pressable>
-                    : <>
-                        {visibleWorkspaceSessions.map(session => {
-                          return <SwipeableSessionRow
-                            key={session.sessionId}
-                            session={session}
-                            compact
-                            title={resolveSessionTitle(session)}
-                            meta={relativeTime(session.updatedAt)}
-                            open={openSessionId === session.sessionId}
-                            locked={busy !== undefined}
-                            busy={busy === `archive:${session.sessionId}`}
-                            onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
-                            onArchive={() => archiveSession(session.sessionId)}
-                            onPress={() => { setOpenSessionId(undefined); void open(session) }}
-                          />
-                        })}
-                        {!showAllSessions && workspaceSessions.length > visibleWorkspaceSessions.length && (
-                          <Pressable
-                            accessibilityRole="button"
-                            accessibilityLabel={zhCN.workspaces.loadAllSessions}
-                            onPress={() => loadAllSessions(workspaceKey)}
-                            style={({ pressed }) => [styles.loadAllSessions, pressed && styles.workspaceRowPressed]}
-                          >
-                            <Text style={styles.loadAllSessionsText}>{zhCN.workspaces.loadAllSessions}</Text>
-                            <ChevronDown size={17} color={colors.primary} />
-                          </Pressable>
-                        )}
-                      </>)}
-                </View>
-              )
-            })}</View>}
-      </Screen>
+                )
+              })}</View>}
+        </Screen>
+      </BlurHeaderFrame>
 
       <CreateWorkspaceModal
         visible={createOpen}

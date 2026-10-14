@@ -28,7 +28,7 @@ import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import { chatSections, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
-import { Button, IconButton, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { MarkdownLinkProvider, markdownFilePath, NativeMarkdown } from '../ui/markdown'
 import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
 import { radius, spacing, type } from '../ui/theme'
@@ -856,8 +856,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
           },
         ]
       : []
-  return (
-    <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+  const header = <>
       <TopBar
         title={sessionTitle(session)}
         titleLines={2}
@@ -877,12 +876,15 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
           <Text style={styles.connectionBannerText}>{connectionRetrying ? zhCN.chat.reconnecting : zhCN.chat.offline}</Text>
         </View>
       )}
-
-      {trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
+    </>
+  return (
+    <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+      {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
         key={session.sessionId}
         style={styles.list}
-        contentContainerStyle={[styles.listContent, visibleMessages.length === 0 && styles.emptyList]}
+        contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
         data={visibleSections}
         keyExtractor={item => item.key}
         renderItem={renderChatItem}
@@ -914,7 +916,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
               : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
           </Pressable>
         ) : undefined}
-      />}
+      />}</BlurHeaderFrame>
 
       {mentionType !== null && (
         <Pressable

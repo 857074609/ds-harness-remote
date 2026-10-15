@@ -8,6 +8,56 @@ import type { TypertGatewayLike } from '../src/harness-api-bridge.js'
 import { TypertGatewaySwitch } from '../src/typert-gateway-switch.js'
 
 describe('TypertGatewaySwitch', () => {
+  it('preserves the calling peer on local RPC paths without forwarding it to a remote Host', async () => {
+    const signal = new AbortController().signal
+    const peer = { signal: new AbortController().signal }
+    const payload = { args: {} }
+    const localDispatch = vi.fn(async (_endpoint: string, _payload: unknown, callSignal: AbortSignal, callingPeer?: typeof peer) => {
+      // New Gateway releases require this lifetime instead of supplying an operator fallback.
+      const aborted = callingPeer!.signal.aborted
+      expect(callingPeer).toBe(peer)
+      expect(callSignal).toBe(signal)
+      return { ok: true as const, value: aborted }
+    })
+    const gateway = { invoke: vi.fn(async () => 'local'), dispatchRpc: localDispatch }
+    const originalDispatch = gateway.dispatchRpc
+    const remote = {
+      invoke: vi.fn(async () => 'remote'),
+      dispatch: vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: 'remote' })),
+      open: vi.fn(async () => (async function* () {})()),
+    }
+    const target = new TypertGatewaySwitch(gateway)
+    target.install()
+    try {
+      await runScenarios([
+        { name: 'initial local mode', run: async () => {
+          await expect(gateway.dispatchRpc('session/list', payload, signal, peer)).resolves.toEqual({ ok: true, value: false })
+        } },
+        { name: 'local-only namespace while remote is selected', run: async () => {
+          target.selectRemote(remote)
+          await expect(gateway.dispatchRpc('dynamicCordisRunner/inventory', payload, signal, peer)).resolves.toEqual({ ok: true, value: false })
+          expect(remote.dispatch).not.toHaveBeenCalled()
+        } },
+        { name: 'remote calls keep their three-argument transport contract', run: async () => {
+          target.selectRemote(remote)
+          await expect(gateway.dispatchRpc('session/list', payload, signal, peer)).resolves.toEqual({ ok: true, value: 'remote' })
+          expect(remote.dispatch).toHaveBeenCalledTimes(1)
+          expect(remote.dispatch).toHaveBeenCalledWith('session/list', payload, signal)
+        } },
+        { name: 'explicit return to local mode', run: async () => {
+          target.selectLocal()
+          await expect(gateway.dispatchRpc('session/list', payload, signal, peer)).resolves.toEqual({ ok: true, value: false })
+        } },
+        { name: 'restore reinstates the original dispatcher', run: async () => {
+          target.restore()
+          expect(gateway.dispatchRpc).toBe(originalDispatch)
+          await expect(gateway.dispatchRpc('session/list', payload, signal, peer)).resolves.toEqual({ ok: true, value: false })
+        } },
+      ])
+    } finally {
+      target.restore()
+    }
+  })
   it('returns remote RPC refusals in the official HTTP envelope without calling local services', async () => {
     const ctx = new Context()
     try {

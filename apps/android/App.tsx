@@ -57,7 +57,7 @@ function AppShell() {
   return (
     <>
       <ThemedStatusBar />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
         <AppNavigator />
       </SafeAreaView>
     </>

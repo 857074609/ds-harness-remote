@@ -170,6 +170,15 @@ export interface SessionModels {
 }
 
 /** Native ApiProxy session row projection (mirrors @deepseek-ai/dsh-host-apiproxy). */
+/** Direct-child roster row from the parent session's `subagentCatalog` projection. */
+export interface SubagentCatalogEntry {
+  /** Child session id (external-mode entries may have no openable session). */
+  id: string
+  createdAt: number
+  mode: 'one-shot' | 'continuable' | 'external' | 'unknown'
+  label?: string
+}
+
 export interface RemoteSession {
   sessionId: string
   backend?: AgentBackend

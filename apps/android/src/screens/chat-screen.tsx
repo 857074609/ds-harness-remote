@@ -21,13 +21,13 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { Archive, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, X } from 'lucide-react-native'
+import { Archive, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, Users, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
-import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
+import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, SubagentCatalogEntry, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { MarkdownLinkProvider, markdownFilePath, NativeMarkdown } from '../ui/markdown'
 import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
@@ -85,6 +85,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [draft, setDraft] = useState('')
   const [trajectory, setTrajectory] = useState(false)
   const [subagentsOpen, setSubagentsOpen] = useState(false)
+  const [teamOpen, setTeamOpen] = useState(false)
 
   const archiveCurrentSession = () => {
     if (session === undefined || busy !== undefined) return
@@ -248,6 +249,14 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const childSessions = useMemo(
     () => sessions.filter(item => item.parentSessionId === session?.sessionId),
     [sessions, session?.sessionId])
+  // Agent-team roster: the parent's `subagentCatalog` projection is the
+  // authoritative direct-child list (including external agents that own no
+  // session). It has always arrived with the projections and was never shown.
+  const teamRoster = useMemo(() => {
+    const raw = (session?.projections?.values as Record<string, unknown> | undefined)?.subagentCatalog
+    return Array.isArray(raw) ? raw.filter((entry): entry is SubagentCatalogEntry =>
+      typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
+  }, [session?.projections?.values])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
@@ -255,7 +264,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
-    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen || teamOpen
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -389,6 +398,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (subagentsOpen) {
         setSubagentsOpen(false)
+        return true
+      }
+      if (teamOpen) {
+        setTeamOpen(false)
         return true
       }
       if (plusMenuOpen) {
@@ -924,6 +937,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
               icon={Layers} dense tint={childSessions.some(item => item.running) ? colors.primary : undefined}
               onPress={() => { Keyboard.dismiss(); setMentionType(null); setSubagentsOpen(true) }} />
           )}
+          {teamRoster.length > 0 && (
+            <IconButton label={zhCN.chat.teamTitle(teamRoster.length)}
+              icon={Users} dense tint={teamRoster.some(item => sessions.find(row => row.sessionId === item.id)?.running === true) ? colors.primary : undefined}
+              onPress={() => { Keyboard.dismiss(); setMentionType(null); setTeamOpen(true) }} />
+          )}
           <IconButton label={zhCN.sessions.archive} icon={Archive} dense onPress={archiveCurrentSession} disabled={busy !== undefined} />
           <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
@@ -1261,6 +1279,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
       <ChildAgentPanel visible={subagentsOpen} sessions={childSessions} onClose={() => setSubagentsOpen(false)}
         onOpen={session => { setSubagentsOpen(false); void openSession(session) }} />
+      <TeamAgentPanel visible={teamOpen} roster={teamRoster} sessions={sessions} onClose={() => setTeamOpen(false)}
+        onOpen={session => { setTeamOpen(false); void openSession(session) }} />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
@@ -2434,6 +2454,64 @@ function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
               <ChevronRight size={15} color={colors.subtle} />
             </Pressable>
           ))}
+        </ScrollView>
+      </ModalSurface>
+    </Modal>
+  )
+}
+
+/** Agent-team roster popover: the parent's `subagentCatalog` members with live state. */
+function TeamAgentPanel({ visible, roster, sessions, onClose, onOpen }: {
+  visible: boolean
+  roster: SubagentCatalogEntry[]
+  sessions: RemoteSession[]
+  onClose: () => void
+  onOpen: (session: RemoteSession) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const modeLabel = (entry: SubagentCatalogEntry) => entry.mode === 'continuable'
+    ? zhCN.chat.teamModeContinuable
+    : entry.mode === 'external'
+      ? zhCN.chat.teamModeExternal
+      : entry.mode === 'unknown'
+        ? zhCN.chat.teamModeUnknown
+        : zhCN.chat.teamModeOneShot
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{zhCN.chat.teamTitle(roster.length)}</Text>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
+          {roster.map(entry => {
+            const session = sessions.find(item => item.sessionId === entry.id)
+            const title = entry.label ?? session?.title ?? entry.id
+            const row = (
+              <>
+                <Text style={styles.queueDockText} numberOfLines={2}>{title}</Text>
+                {session?.running === true
+                  ? <Text style={styles.subagentRunning}>{zhCN.status.running}</Text>
+                  : <Text style={styles.subagentIdle}>{modeLabel(entry)}</Text>}
+              </>
+            )
+            return session === undefined
+              ? <View key={entry.id} style={styles.subagentRow} accessibilityLabel={`${title} ${modeLabel(entry)}`}>
+                  {row}
+                  <View style={{ width: 15 }} />
+                </View>
+              : <Pressable
+                  key={entry.id}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${title} ${modeLabel(entry)}`}
+                  onPress={() => onOpen(session)}
+                  style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
+                >
+                  {row}
+                  <ChevronRight size={15} color={colors.subtle} />
+                </Pressable>
+          })}
         </ScrollView>
       </ModalSurface>
     </Modal>

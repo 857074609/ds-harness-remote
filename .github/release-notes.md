@@ -1,25 +1,39 @@
 ## 中文
 
-- **DS Bot 远程接入**：可在远程 Harness 工作区使用 Host 上已启用的 DS Bot，会话、成员与群聊管理通过加密通道转发。Host 与 Client 插件均需更新。
-- **远程访问边界**：DS Bot 操作采用固定白名单，安装升级、日程增删、凭据、能力脚本及未知操作保留在 Host 本地；新会话只有进入官方 Session 目录后才会展示。
-- **登录方式自动发现**：Desktop、CLI 与 dsh-TUI 从 Server 获取已启用的 OAuth 登录方式，支持服务端定义的扫码 provider，并兼容旧 Server 的 GitHub/知乎登录状态接口。
-- **侧栏与日程**：Remote 与 DS Bot 入口上下排列，展开侧栏保留文字和独立退出按钮；补齐原生日程 UI 的只读列表接口。
-- **文件预览与恢复**：修复远程图片和 Office 预览的字节丢失，兼容 CodeX 新会话修改权限时的 resume 拒绝，并明确 Android 会话写入被占用时完整退出另一 Harness 进程的恢复步骤。
-- **TURN 节点信息**：上报实际选择的 TURN 节点，帮助 Server 识别连接使用的中继；旧 Server 可忽略该可选字段。
+- **Android 界面更新**：毛玻璃悬浮顶栏、胶囊操作按钮与圆角悬浮输入框；浅色主题统一为白色，细化卡片轮廓和会话行按压反馈。
+- **新对话默认权限**：手机设置可保存新建 Harness / CodeX 对话的默认权限，支持使用默认权限、工作区内修改和完全权限。已有对话保持原权限；Harness 以 Host 确认结果为准，CodeX 按 Host / Thread 保存实际返回的权限。
+- **会话入口简化**：移除 Android 独立「对话」页面，统一从设备的工作区进入会话；Remote 登录方式选项保持单行显示。
+- **CodeX / ACP 终端改进**：支持验证后的交互 shell、终端屏幕快照恢复和更可靠的进程清理；已创建终端可跨请求超时和断线保留。修复取消、输入权隔离及后端重配清理重试，无窗口或订阅且连续两小时确认空闲后才自动回收。
+- **Host 兼容与稳定性**：修复 Harness `0.2.1-alpha.4` 本地 RPC 丢失调用方 Peer 导致的 `gateway/internal` / `signal` 错误；Host 关闭时取消鉴权等 HTTP 请求，并让超时覆盖响应体读取；修复 AGY 原生 SQLite 加载兼容问题。
+- **云 Host 构建入口**：镜像构建与 bootstrap 收入 `apps/cloud-host`，固定依赖、持久化设备凭据并维护镜像变更记录；云镜像独立管理版本。
 
-Plugin 与 Android 均为 **0.5.7**（Android `versionCode 45`）。iOS 客户端仍在内测招募中，欢迎通过 [iOS issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) 报名和反馈。
+### 感谢贡献者
+
+感谢 [@dreamfarer-space](https://github.com/dreamfarer-space)（择梦舟）贡献 Android 界面改进与 Host 修复：
+
+- [#111](https://github.com/liguobao/ds-harness-remote/pull/111)：Android 毛玻璃顶栏。
+- [#112](https://github.com/liguobao/ds-harness-remote/pull/112)：胶囊悬浮导航栏与标题对齐。
+- [#113](https://github.com/liguobao/ds-harness-remote/pull/113)：悬浮输入框与浅色主题优化。
+- [#116](https://github.com/liguobao/ds-harness-remote/pull/116)：本地 Gateway RPC 保留调用方 Peer。
+- [#117](https://github.com/liguobao/ds-harness-remote/pull/117)：Host 关闭请求取消与 AGY SQLite 加载修复。
+
+Plugin 与 Android 均为 **0.5.8**（Android `versionCode 46`）。终端已完成 macOS 真 PTY 烟测；Windows/Linux PTY、Desktop/Android 加密跨设备及真实两小时空闲回收验收仍待完成。兼容 pipe 路径不支持 resize/job control。iOS 客户端仍在内测招募中，欢迎通过 [iOS issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) 报名和反馈。
 
 ## English
 
-- **Remote DS Bot:** use DS Bot enabled on the Host from a Remote Harness workspace. Chat, roster, and group management travel through the encrypted channel. Update the Remote plugin on both Host and Client.
-- **Access boundaries:** a fixed DS Bot operation allowlist keeps installation, upgrades, schedule mutations, credentials, capability scripts, and unknown operations local to the Host. New Sessions are exposed only after they enter the official Session catalog.
-- **OAuth discovery:** Desktop, CLI, and dsh-TUI discover enabled login providers from the Server, including server-defined QR providers, with a fallback for older GitHub/Zhihu status endpoints.
-- **Sidebar and schedules:** stacks Remote below DS Bot, retains labels and a separate Exit action in the expanded sidebar, and supports the native schedule UI's read-only list endpoints.
-- **Previews and recovery:** preserves remote image and Office preview bytes, handles CodeX resume refusals for newly created Threads during permission changes, and explains how Android users can recover from Session writer conflicts by fully exiting the other Harness process.
-- **TURN node reporting:** reports the selected TURN relay node so the Server can identify the relay in use. Older Servers may ignore this optional field.
+- **Android interface refresh:** frosted floating headers, pill actions, a rounded floating composer, and a white light theme with subtle card outlines and rounded conversation-row feedback.
+- **Default permissions for new chats:** save a local preference for new Harness / CodeX chats: backend default, workspace write, or full access. Existing chats retain their permissions. Harness uses the Host-confirmed result; CodeX saves the returned policy per Host and Thread.
+- **Simpler navigation:** access conversations through their device's workspace after removal of the standalone Android Conversations screen. Remote login method tabs stay on one row.
+- **CodeX / ACP terminals:** verified interactive shells, screen snapshot recovery, and reliable process cleanup. Created terminals survive request timeouts and disconnects. Fixes cancellation, input ownership, and cleanup retries during backend reconfiguration; unattended terminals are reclaimed only after two hours of confirmed idle activity without window holds or followers.
+- **Host compatibility and stability:** preserves the calling Peer in local Gateway RPCs to fix Harness `0.2.1-alpha.4` `gateway/internal` / missing `signal` errors. Host shutdown cancels HTTP work including authentication; deadlines cover response body reads. Fixes native SQLite loading for AGY session discovery.
+- **Cloud Host build inputs:** moves image builds and bootstrap into `apps/cloud-host`, with pinned dependencies, persistent device credentials, and a separate image changelog. Cloud images retain their own release versions.
 
-Upgrade Plugin and Android to **0.5.7** (Android `versionCode 45`). The iOS client is currently collecting beta users and feedback through [iOS issue #20](https://github.com/liguobao/ds-harness-remote/issues/20).
+### Thanks to our contributor
+
+Thanks to [@dreamfarer-space](https://github.com/dreamfarer-space) for Android interface improvements in [#111](https://github.com/liguobao/ds-harness-remote/pull/111), [#112](https://github.com/liguobao/ds-harness-remote/pull/112), and [#113](https://github.com/liguobao/ds-harness-remote/pull/113), local Gateway Peer preservation in [#116](https://github.com/liguobao/ds-harness-remote/pull/116), and Host shutdown / AGY SQLite fixes in [#117](https://github.com/liguobao/ds-harness-remote/pull/117).
+
+Plugin and Android are **0.5.8** (Android `versionCode 46`). Terminal smoke tests passed with a real macOS PTY; Windows/Linux PTY, encrypted Desktop/Android cross-device behavior, and actual two-hour idle reclamation still await acceptance testing. The compatibility pipe path does not support resize or job control. The iOS client is collecting beta users and feedback through [iOS issue #20](https://github.com/liguobao/ds-harness-remote/issues/20).
 
 ---
 
-[安装说明](https://github.com/liguobao/ds-harness-remote/blob/main/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/main/README.md#install) · [完整改动 / Changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.5...v0.5.7)
+[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.8/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.8/README.md#install) · [完整改动 / Changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.7...v0.5.8)

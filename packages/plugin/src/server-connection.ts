@@ -164,6 +164,7 @@ export class HostServerConnection {
         await this.connectOnce()
         delayMs = this.config.reconnect.initialDelayMs
       } catch (error) {
+        if (this.stopped) return
         const code = errorCode(error)
         if (code === 'CREDENTIALS_REFRESHED') continue
         this.terminalError = code

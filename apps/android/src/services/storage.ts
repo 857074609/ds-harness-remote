@@ -8,7 +8,7 @@ import type { Messages } from '../locales/types'
 import enUS from '../locales/en-US'
 import zhCN from '../locales/zh-CN'
 import { isThemePreference, type ThemePreference } from '../ui/theme'
-import type { AgentBackend, CodexPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
+import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
 
 const KEYS = {
   config: 'dshremote.server.v1',
@@ -20,6 +20,7 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
+  defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
   workspaceBackends: 'dshremote.workspace-backends.v1',
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
@@ -163,6 +164,15 @@ export async function loadThemePreference(): Promise<ThemePreference> {
 
 export async function saveThemePreference(value: ThemePreference): Promise<void> {
   await writeJson(KEYS.themePreference, { value })
+}
+
+export async function loadDefaultPermissionPreset(): Promise<DefaultPermissionPreset> {
+  const stored = await readJson<{ value: unknown }>(KEYS.defaultPermissionPreset)
+  return codexPermissionPreset(stored?.value) ?? 'default'
+}
+
+export async function saveDefaultPermissionPreset(value: DefaultPermissionPreset): Promise<void> {
+  await writeJson(KEYS.defaultPermissionPreset, { value })
 }
 
 export async function loadCollapsedWorkspaceIds(deviceId: string): Promise<string[]> {

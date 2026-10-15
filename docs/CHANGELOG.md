@@ -1,11 +1,33 @@
-## Unreleased
+## 0.5.8 - 2026-10-16
 
+- Refreshes Android with frosted floating headers, pill actions, a rounded floating composer, and a white light theme with subtle card outlines (#111, #112, #113).
+- Keeps Remote login method tabs on one row.
+- Moves the cloud Host image build inputs and bootstrap into `apps/cloud-host`, with pinned dependencies, persistent device credentials, and an image changelog; image releases remain separately versioned.
+- Advances the Plugin and Android app to `0.5.8` (Android `versionCode 46`).
+- Thanks @dreamfarer-space for the Android interface improvements and Host compatibility/lifecycle fixes in #111, #112, #113, #116, and #117.
+- Adds Android's locally saved default permissions for new Harness and CodeX chats: backend default, workspace write, or full access. Backend default preserves Harness computer settings and CodeX workspace write. Existing chats keep their permissions; new Harness chats require Host confirmation, and CodeX remembers the returned policy per Host and Thread.
+- Cancels Host Server HTTP requests, including authentication and response body consumption, when the runtime closes; keeps the request deadline active through body reads. The TUI lifecycle test uses an abortable local fixture instead of a live Server.
+- Loads Node's SQLite builtin natively so AGY session discovery remains usable with older Vite test runners when the optional `sqlite3` CLI is absent.
+- Preserves the caller's Peer when the gateway switch forwards local RPCs, preventing `gateway/internal` / missing `signal` failures with Harness `0.2.1-alpha.4`. Remote tunnel calls retain their existing three-argument contract.
+- Removes Android's standalone Conversations menu and screen; conversations are accessed through their device's workspace. Archive confirmation no longer points to the removed screen.
+- Rounds the pressed highlight on Android workspace conversation rows and adds padding around its contents.
 - Replaces the minimal shared CodeX/ACP shell bridge with a Host-owned terminal controller: verified default/candidate interactive shells, xterm screen snapshots, bounded output followers, idempotent allocation and retryable process cleanup. Committed terminals survive request timeouts and disconnects; backend reconfiguration and Host shutdown await cleanup. Remote scopes, device ownership and input claims remain isolated.
 - Adds conservative unattended reclamation only after two hours of confirmed idle activity without window holds or followers. PTY/activity support comes from the Host subprocess provider; the compatibility pipe fallback still lacks terminal resize and job control. Windows/Linux and encrypted cross-device acceptance remain pending.
 - Fixes terminal cancellation after allocation commit and binds input to the current connection's follower even when attachment IDs are reused. Disconnect also revokes pending follows. ACP reconfiguration continues stopping changed backends after cleanup errors and retries unfinished cleanup when the same settings are saved again; affected backends stay unavailable until cleanup succeeds.
 
 ### 中文
 
+- Android 更新毛玻璃悬浮顶栏、胶囊操作按钮和圆角悬浮输入框；浅色主题统一为白色，并增加精细卡片轮廓（#111、#112、#113）。
+- Remote 登录方式选项保持单行显示。
+- 云 Host 镜像构建输入和 bootstrap 收入 `apps/cloud-host`，固定依赖、持久化设备凭据并维护镜像变更记录；镜像仍独立管理版本。
+- Plugin 与 Android App 升级到 `0.5.8`（Android `versionCode 46`）。
+- 感谢 @dreamfarer-space 在 #111、#112、#113、#116、#117 中贡献 Android 界面改进及 Host 兼容性和生命周期修复。
+- Android 设置新增「新对话默认权限」并保存在手机本地，可选择使用默认权限、工作区内修改或完全权限，自动用于新建 Harness / CodeX 对话。「默认」保留 Harness 电脑端设置与 CodeX 工作区内修改行为。已有对话不变；Harness 读取 Host 确认后的权限，CodeX 按 Host / Thread 保存实际返回的权限。
+- Host 关闭时取消 Server HTTP 请求（包括鉴权和响应体读取），请求超时覆盖完整响应读取阶段；TUI 生命周期测试改用可取消的受控请求，隔离真实 Server。
+- AGY 会话发现通过 Node 原生加载 SQLite 内置模块，兼容旧版 Vite 测试运行器且无需依赖可选的 `sqlite3` 命令。
+- 修复 Gateway 切换器转发本地 RPC 时丢失调用方 Peer，导致 Harness `0.2.1-alpha.4` 返回 `gateway/internal` / 缺少 `signal` 的问题；远程隧道仍保留原有三参数调用契约。
+- 移除 Android 独立「对话」菜单及列表页，统一从所属设备的工作区进入会话；归档确认文案不再指向已移除的页面。
+- Android 工作区中的会话行按压高亮改为圆角，并为内部内容增加留白。
 - CodeX / ACP 的简易 shell bridge 改为共用 Host 终端控制器：验证默认/可选交互 shell、xterm 屏幕快照、有界输出订阅、幂等创建和可重试进程清理。已创建终端不受请求超时或断线影响；后端重配与 Host 关闭等待清理，保留会话 scope、设备归属与连接输入权隔离。
 - 无窗口持有者或 follower、连续两小时明确 idle 时才自动回收。PTY 和 activity 由 Host subprocess 提供；兼容 pipe 仍不支持终端 resize/job control。Windows/Linux 与加密跨设备验收待完成。
 - 修复分配提交后的请求取消，并将输入权绑定到当前连接的 follower，即使复用 attachment ID 也不能跨连接输入；断开同时撤销尚未完成的 follow。ACP 重配遇到清理失败仍停止变化后端，再次保存相同设置可重试未完成清理，相关后端在清理成功前保持不可用。

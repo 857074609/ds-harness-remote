@@ -83,9 +83,10 @@ function applyNativeEvent(
     const detail = turnEndDetail(reasonData)
     const settled: ChatItem[] = settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
       ? { ...item, turnEnd: { reason, time: event.time, ...(detail === undefined ? {} : { detail }) } } : item)
-    // A turn that failed before producing anything owns no rows at all; give it
-    // one so the failure is visible instead of silently absent.
-    const owned = settled.some(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn))
+    // User bubbles do not render turn-end state, and context is hidden. A turn
+    // with only those rows still needs a process row to carry the failure.
+    const owned = settled.some(item => (item.kind !== 'message' || (item.role === 'assistant' && !item.context))
+      && (item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)))
     // Only a real failure payload (kind 'failed'/'error') warrants the
     // synthetic row: a bare/legacy turn/end without `reason` must not be
     // rendered as a failure, and a stopped turn is user-initiated.

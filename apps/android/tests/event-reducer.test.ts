@@ -146,6 +146,34 @@ describe('remote mux frame reducer', () => {
     )
   })
 
+  it('preserves failure evidence when a turn has no non-user activity', async () => {
+    const prompt = sessionEvent({ type: 'user/message', seq: 1, time: 1001,
+      data: { turn: 1, message: { id: 'prompt', source: { kind: 'user', rpcId: 'rpc' },
+        content: [{ type: 'text', text: 'hello' }] } } })
+    await runScenarios([
+      { name: 'failure before any history', events: [], reason: { kind: 'error', error: { message: 'rate limited' } }, failed: true },
+      { name: 'failure after the user prompt', events: [prompt], reason: { kind: 'error', error: { message: 'rate limited' } }, failed: true },
+      { name: 'failure with hidden context', events: [prompt, sessionEvent({ type: 'developer/message', seq: 2,
+        data: { turn: 1, message: { id: 'context', content: [{ type: 'text', text: 'context' }] } } })],
+        reason: { kind: 'error', error: { message: 'rate limited' } }, failed: true },
+      { name: 'completion after the user prompt', events: [prompt], reason: { kind: 'completed' }, failed: false },
+      { name: 'user stop after the prompt', events: [prompt], reason: { kind: 'aborted' }, failed: false },
+      { name: 'legacy end without failure evidence', events: [prompt], reason: undefined, failed: false },
+    ].map(({ name, events, reason, failed }) => ({ name, run: () => {
+      const end = sessionEvent({ type: 'turn/end', seq: 3, time: 1002, data: { turn: 1, reason } })
+      const original = foldHistory(events.map(event => ({ event })), 's1', true)
+      const live = applyMuxFrame(original, frame('', { type: 'session/event', sessionId: 's1', event: end }))
+      expect(live).toEqual(foldHistory([...events, end].map(event => ({ event })), 's1', true))
+      const activity = live.filter(item => item.kind !== 'message' || (item.role === 'assistant' && !item.context))
+      expect(activity).toHaveLength(failed ? 1 : 0)
+      if (failed) expect(activity[0]).toMatchObject({ kind: 'message', role: 'assistant', turn: '1',
+        turnEnd: { reason: 'failed', time: 1002, detail: 'rate limited' } })
+      // Repeated end frames must update the evidence without duplicating a row.
+      expect(applyMuxFrame(live, frame('', { type: 'session/event', sessionId: 's1', event: end }))).toEqual(live)
+      if (events.length > 0) expect(live[0]).toMatchObject({ id: 'prompt', nativeSeq: 1, nativeTime: 1001 })
+    } })))
+  })
+
   it('preserves assistant text and reasoning through stream finalization', async () => {
     await runScenarios([
       {

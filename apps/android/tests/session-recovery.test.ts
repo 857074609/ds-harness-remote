@@ -4,12 +4,13 @@ import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../s
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
 import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 
-const { proxy, transport, storage, authenticate, acp } = vi.hoisted(() => ({
+const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
-    sessionList: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn() },
+    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn() },
-  storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn() },
+  storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
+  codex: { request: vi.fn() },
   authenticate: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
@@ -19,6 +20,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   connect = transport.connect
   close = transport.close
   hasCodex() { return false }
+  requireCodex() { return codex }
   hasCursor = transport.hasCursor
   hasAntigravity = transport.hasAntigravity
   requireCursor() { return acp }
@@ -66,6 +68,33 @@ const prepareScenario1 = () => {
 beforeEach(prepareScenario1)
 
 describe('ordered history recovery', () => {
+  it('retains queue adoption across either ordering of the inbox and prompt acknowledgement', async () => {
+    await runScenarios(['inbox-first', 'ack-first'].map(order => ({ name: order, run: async () => {
+      prepareScenario1()
+      const running = { ...session, running: true }
+      useAppStore.setState({ selectedSession: running, sessions: [running] })
+      let acknowledge!: () => void
+      proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
+      const rpcId = `adoption-${order}`
+      const sending = useAppStore.getState().sendMessage('queued prompt', [], rpcId)
+      const projectInbox = (value: unknown, seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '',
+        payload: { type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value } } as MuxStreamFrame)
+      const inbox = { 'next-turn': [{ id: 'host-item', source: { kind: 'user', rpcId },
+        content: [{ type: 'text', text: 'queued prompt' }] }] }
+      if (order === 'inbox-first') projectInbox(inbox, 1)
+      acknowledge()
+      expect(await sending).toBe('sent')
+      if (order === 'ack-first') projectInbox(inbox, 1)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ requestRpcId: rpcId,
+        sendState: 'queued', queuedAdopted: true })
+      // Another device removes it; one projection of grace prevents racing its echo.
+      projectInbox({ 'next-turn': [] }, 2)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ queuedAdopted: true })
+      projectInbox({ 'next-turn': [] }, 3)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ sendState: 'canceled', queuedAdopted: true })
+    } })))
+  })
+
   it('reconciles local delivery states by marking, never by deleting', async () => {
     const row = (id: string, requestRpcId: string, sendState: 'queued' | 'failed' | 'unconfirmed', createdAt = 1): ChatItem => ({
       kind: 'message', id, sessionId: 's1', role: 'user', text: 'hello', createdAt, requestRpcId, sendState,
@@ -435,6 +464,76 @@ describe('session restore state machine', () => {
 })
 
 describe('authoritative permission projection', () => {
+  it('applies new Harness chat defaults only after Host confirmation', async () => {
+    await runScenarios([
+      ...(['default', 'workspace-write', 'danger-full-access'] as const).map(preset => ({
+        name: `creates with ${preset} without changing the existing conversation`,
+        run: async () => {
+          const created = { ...session, sessionId: 'new', blank: true,
+            projections: { values: { permissions: { currentValue: preset } } } }
+          useAppStore.setState({ defaultPermissionPreset: preset })
+          proxy.sessionCreate.mockResolvedValue({ sessionId: 'new' })
+          proxy.sessionList.mockResolvedValue([session, created])
+          expect(await useAppStore.getState().createSession()).toBe(true)
+          expect(proxy.sessionSelectPermission.mock.calls).toEqual(preset === 'default' ? [] : [['new', preset]])
+          expect(useAppStore.getState().selectedSession?.projections?.values?.permissions).toEqual({ currentValue: preset })
+          expect(useAppStore.getState().sessions.find(item => item.sessionId === 's1')).toEqual(session)
+        },
+      })),
+      ...(['rejected', 'unconfirmed', 'disconnected'] as const).map(reason => ({
+        name: `does not open a new conversation when permissions are ${reason}`,
+        run: async () => {
+          useAppStore.setState({ defaultPermissionPreset: 'danger-full-access' })
+          proxy.sessionCreate.mockResolvedValue({ sessionId: 'new' })
+          proxy.sessionList.mockResolvedValue([session, { ...session, sessionId: 'new' }])
+          if (reason === 'rejected') proxy.sessionSelectPermission.mockRejectedValue(new Error('refused'))
+          if (reason === 'disconnected') proxy.sessionCreate.mockImplementation(async () => {
+            await useAppStore.getState().disconnect()
+            return { sessionId: 'new' }
+          })
+          expect(await useAppStore.getState().createSession()).toBe(false)
+          expect(useAppStore.getState().selectedSession?.sessionId).not.toBe('new')
+          if (reason === 'disconnected') expect(proxy.sessionSelectPermission).not.toHaveBeenCalled()
+        },
+      })),
+      {
+        name: 'opening an existing conversation never applies the configured default',
+        run: async () => {
+          useAppStore.setState({ defaultPermissionPreset: 'danger-full-access' })
+          expect(await useAppStore.getState().openSession(session)).toBe(true)
+          expect(proxy.sessionSelectPermission).not.toHaveBeenCalled()
+          expect(useAppStore.getState().selectedSession?.projections?.values?.permissions).toEqual({ currentValue: 'default' })
+        },
+      },
+    ], prepareScenario1)
+  })
+
+  it('starts CodeX with the default and remembers the actual permission for that Host and Thread', async () => {
+    await runScenarios([
+      ...(['default', 'workspace-write', 'danger-full-access'] as const).flatMap(preset =>
+        (preset === 'danger-full-access' ? ['workspace-write', 'danger-full-access'] as const : ['workspace-write'] as const).map(effective => ({
+          name: `requests ${preset} and preserves the returned ${effective} policy`,
+          run: async () => {
+            const workspace = { workspaceId: 'codex:project', backend: 'codex' as const, title: 'project', path: '/project', sessionIds: [], createdAt: '', updatedAt: '' }
+            const openSession = vi.fn(async () => true)
+            useAppStore.setState({ defaultPermissionPreset: preset, workspaces: [workspace], openSession,
+              selectedDevice: { deviceId: 'host', name: 'Host', platform: 'linux', identityKey: 'key', membershipId: 'member', online: true, trusted: true } })
+            codex.request.mockResolvedValue({ thread: { id: 'thread', cwd: '/project' },
+              approvalPolicy: effective === 'danger-full-access' ? 'never' : 'on-request', sandbox: effective })
+            expect(await useAppStore.getState().createSession(workspace.workspaceId)).toBe(true)
+            expect(codex.request).toHaveBeenCalledWith('thread/start', {
+              cwd: '/project', permissionPreset: preset === 'default' ? 'workspace-write' : preset,
+            })
+            expect(storage.saveCodexPermissionPreset).toHaveBeenCalledWith('host', 'thread', effective)
+            expect(openSession).toHaveBeenCalledWith(expect.objectContaining({
+              nativeId: 'thread', projections: { values: expect.objectContaining({ permissions: expect.objectContaining({ currentValue: effective }) }) },
+            }))
+            expect(proxy.sessionSelectPermission).not.toHaveBeenCalled()
+          },
+        }))),
+    ], prepareScenario1)
+  })
+
   const projection = (value: string, seq: number): MuxStreamFrame => ({ rpcId: '', payload: { type: 'session/projection', sessionId: 's1', key: 'permissions', value: { currentValue: value }, seq } })
   it('requires authoritative permission projections and change confirmation', async () => {
     await runScenarios(

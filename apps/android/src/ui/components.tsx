@@ -16,6 +16,7 @@ import { BlurTargetView, BlurView } from 'expo-blur'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { AlertCircle, ArrowLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
 import { radius, spacing, type } from './theme'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
@@ -75,10 +76,11 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
   children: ReactNode | ((headerHeight: number) => ReactNode)
   inset?: boolean
 }) {
+  const insets = useSafeAreaInsets()
   const styles = useThemedStyles(createStyles)
   const blurTarget = useRef<View>(null)
   // Seeded with the single-line TopBar minimum until the header measures.
-  const [height, setHeight] = useState(60)
+  const [height, setHeight] = useState(56 + insets.top)
   const contentInset = inset ? 0 : height
   return (
     <View style={styles.screen}>
@@ -92,8 +94,6 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
       </BlurTargetView>
       <View style={styles.frameHeader} onLayout={event => setHeight(event.nativeEvent.layout.height)}>
         <HeaderBlurTargetContext.Provider value={blurTarget}>{header}</HeaderBlurTargetContext.Provider>
-        {/* Feathers the frosted bar into the content instead of ending on a hard edge. */}
-        <VerticalFade from={0.15} to={0} style={styles.frameFade} />
       </View>
     </View>
   )
@@ -116,16 +116,29 @@ function VerticalFade({ from, to, style }: { from: number; to: number; style: St
   )
 }
 
-export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack, action, titleLines = 1 }: {
+export function TopBar({
+  title,
+  subtitle,
+  onSubtitlePress,
+  onTitlePress,
+  onBack,
+  backIcon,
+  backLabel,
+  action,
+  titleLines = 1,
+}: {
   title: string
   subtitle?: string
   onSubtitlePress?: () => void
   onTitlePress?: () => void
   onBack?: () => void
+  backIcon?: ComponentType<{ size?: number; color?: string; fill?: string; strokeWidth?: number }>
+  backLabel?: string
   action?: ReactNode
   /** Set above 1 when the title carries structured text that may not fit one line. */
   titleLines?: number
 }) {
+  const insets = useSafeAreaInsets()
   const { colors, scheme } = useTheme()
   // Inside a BlurHeaderFrame the bar frosts the content beneath it instead of painting a surface.
   const blurTarget = useContext(HeaderBlurTargetContext)
@@ -133,29 +146,44 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
   const hasSubtitle = subtitle !== undefined && subtitle.length > 0
   const tallerBar = hasSubtitle || titleLines > 1
   return (
-    <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle, blurTarget !== undefined && styles.topBarBlurred]}>
+    <View
+      style={[
+        styles.topBar,
+        { paddingTop: insets.top + spacing.xs, minHeight: 56 + insets.top },
+        tallerBar && styles.topBarWithSubtitle,
+        blurTarget !== undefined && styles.topBarBlurred,
+      ]}
+    >
       {blurTarget !== undefined && (
-        <BlurView blurTarget={blurTarget} blurMethod="dimezisBlurViewSdk31Plus" intensity={35}
-          tint={scheme === 'dark' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
+        <BlurView
+          blurTarget={blurTarget}
+          blurMethod="dimezisBlurViewSdk31Plus"
+          intensity={50}
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}
+          pointerEvents="none"
+        />
       )}
-      {/* Frosted translucent backdrop (80% opacity) matching modern iOS/assistant styling */}
+      {/* Frosted translucent backdrop (~60% opacity) matching modern iOS/assistant styling */}
       {blurTarget !== undefined && (
         <View
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.80)' : 'rgba(255, 255, 255, 0.80)' }
+            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.65)' : 'rgba(255, 255, 255, 0.60)' }
           ]}
           pointerEvents="none"
         />
       )}
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
-          <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={onBack} hitSlop={12} />
+          <View style={styles.topBarCircleButton}>
+            <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? ArrowLeft} onPress={onBack} dense hitSlop={8} />
+          </View>
         )}
       </View>
       <View style={styles.topBarTitles}>
         {onTitlePress === undefined
-          ? <Text style={styles.topBarTitle} numberOfLines={titleLines}>{title}</Text>
+          ? <Text style={styles.topBarTitle} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
           : (
             <Pressable
               accessibilityRole="button"
@@ -164,12 +192,12 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
               hitSlop={4}
               style={({ pressed }) => [styles.topBarTitleRow, pressed && styles.iconButtonPressed]}
             >
-              <Text style={styles.topBarTitle} numberOfLines={titleLines}>{title}</Text>
+              <Text style={styles.topBarTitle} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
             </Pressable>
           )}
         {hasSubtitle && (
           onSubtitlePress === undefined
-            ? <Text style={styles.topBarSubtitle} numberOfLines={1}>{subtitle}</Text>
+            ? <Text style={styles.topBarSubtitle} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
             : (
               <Pressable
                 accessibilityRole="button"
@@ -178,7 +206,7 @@ export function TopBar({ title, subtitle, onSubtitlePress, onTitlePress, onBack,
                 hitSlop={4}
                 style={({ pressed }) => [styles.topBarSubtitleRow, pressed && styles.iconButtonPressed]}
               >
-                <Text style={styles.topBarSubtitle} numberOfLines={1}>{subtitle}</Text>
+                <Text style={styles.topBarSubtitle} numberOfLines={1} ellipsizeMode="tail">{subtitle}</Text>
                 <ChevronRight size={14} color={colors.subtle} />
               </Pressable>
             )
@@ -437,15 +465,44 @@ function createStyles(colors: ThemeColors) {
     frameContent: { flex: 1 },
     frameFade: { position: 'absolute', top: '100%', left: 0, right: 0, height: spacing.lg },
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0, overflow: 'hidden' },
+    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0 },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
     topBarSide: { flexDirection: 'row', alignItems: 'center' },
     topBarTrailing: { justifyContent: 'flex-end' },
-    topBarPillGroup: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surfaceStrong, borderRadius: radius.pill, paddingHorizontal: 2 },
-    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'flex-start', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
-    topBarTitle: { ...type.heading, textAlign: 'left', color: colors.ink, fontWeight: '700' },
-    topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
-    topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
+    topBarCircleButton: {
+      width: 40,
+      height: 40,
+      borderRadius: radius.pill,
+      backgroundColor: colors.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1.5 },
+      shadowOpacity: 0.08,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    topBarPillGroup: {
+      height: 40,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderRadius: radius.pill,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.separator,
+      paddingHorizontal: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1.5 },
+      shadowOpacity: 0.08,
+      shadowRadius: 4,
+      elevation: 2,
+    },
+    topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
+    topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink, fontWeight: '700' },
+    topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
+    topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
     iconButtonDense: { width: 40, height: 40 },

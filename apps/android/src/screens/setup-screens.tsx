@@ -4,12 +4,12 @@ import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, MessagesSquare, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
+import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { BlurHeaderFrame, Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
 import { transportPreferenceOptions } from '../types'
-import type { LoginMethod } from '../types'
+import type { DefaultPermissionPreset, LoginMethod } from '../types'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -126,10 +126,33 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
+  const defaultPermission = useAppStore(state => state.defaultPermissionPreset)
+  const setDefaultPermission = useAppStore(state => state.setDefaultPermissionPreset)
+  const [permissionSaving, setPermissionSaving] = useState(false)
   const reset = useAppStore(state => state.resetLocalData)
   const signOut = useAppStore(state => state.signOut)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+
+  const pickDefaultPermission = (preset: DefaultPermissionPreset) => {
+    if (permissionSaving || preset === defaultPermission) return
+    const save = async () => {
+      setPermissionSaving(true)
+      try {
+        await setDefaultPermission(preset)
+      } catch {
+        Alert.alert(zhCN.settings.defaultPermissionSaveFailed, zhCN.settings.defaultPermissionSaveFailedBody)
+      } finally {
+        setPermissionSaving(false)
+      }
+    }
+    if (preset === 'danger-full-access') {
+      Alert.alert(zhCN.settings.defaultPermissionFullAccessTitle, zhCN.settings.defaultPermissionFullAccessBody, [
+        { text: zhCN.common.cancel, style: 'cancel' },
+        { text: zhCN.chat.enable, style: 'destructive', onPress: () => void save() },
+      ])
+    } else void save()
+  }
 
   const confirmReset = () => Alert.alert(
     zhCN.settings.resetTitle,
@@ -198,6 +221,34 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
             })}
           </View>
 
+          <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>
+          <View style={styles.preferenceList} accessibilityRole="radiogroup">
+            {([
+              { value: 'default', name: zhCN.settings.defaultPermissionHost, description: zhCN.settings.defaultPermissionHostDescription },
+              { value: 'workspace-write', name: zhCN.chat.permissionWorkspaceWrite, description: zhCN.chat.permissionWorkspaceWriteDescription },
+              { value: 'danger-full-access', name: zhCN.chat.permissionFullAccess, description: zhCN.chat.permissionFullAccessDescription },
+            ] satisfies Array<{ value: DefaultPermissionPreset; name: string; description: string }>).map(option => {
+              const chosen = option.value === defaultPermission
+              return (
+                <Pressable
+                  key={option.value}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: chosen, disabled: permissionSaving }}
+                  disabled={permissionSaving}
+                  onPress={() => pickDefaultPermission(option.value)}
+                  style={[styles.preferenceOption, styles.permissionOption, chosen && styles.preferenceOptionChosen]}
+                >
+                  <View style={styles.preferenceCopy}>
+                    <Text style={styles.preferenceName}>{option.name}</Text>
+                    <Text style={styles.preferenceDescription}>{option.description}</Text>
+                  </View>
+                  {chosen && <Check size={17} color={colors.primary} />}
+                </Pressable>
+              )
+            })}
+            <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
+          </View>
+
           <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>
           <View style={styles.group}>
             <KeyValue label={zhCN.settings.server} value={config?.baseUrl ?? zhCN.settings.notConfigured} />
@@ -247,13 +298,12 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onSessions }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
   onAbout: () => void
   onDevices?: () => void
-  onSessions?: () => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -273,9 +323,6 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
       <View accessibilityRole="menu" style={styles.homeMenuCard} pointerEvents="box-none">
         {onDevices !== undefined && (
           <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
-        )}
-        {onSessions !== undefined && (
-          <HomeMenuRow icon={MessagesSquare} label={zhCN.sessions.title} onPress={onSessions} />
         )}
         <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
         <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
@@ -545,6 +592,7 @@ function createStyles(colors: ThemeColors) {
   preferenceList: { gap: spacing.xs },
   preferenceOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
   preferenceOptionChosen: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  permissionOption: { minHeight: 48 },
   preferenceCopy: { flex: 1 },
   preferenceName: { ...type.smallStrong, color: colors.ink },
   languageName: { flex: 1 },

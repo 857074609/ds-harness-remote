@@ -76,6 +76,7 @@ import {
   loadRecentWorkspaces,
   loadServerConfig,
   loadThemePreference,
+  loadDefaultPermissionPreset,
   loadTransportPreference,
   loadTrustedHosts,
   saveFavoriteWorkspaces,
@@ -85,6 +86,7 @@ import {
   saveCodexPermissionPreset,
   saveServerConfig,
   saveThemePreference,
+  saveDefaultPermissionPreset,
   saveTransportPreference,
   trustHost,
 } from '../services/storage'
@@ -93,6 +95,7 @@ import type {
   AgentPresetOption,
   ChatItem,
   CodexPermissionPreset,
+  DefaultPermissionPreset,
   ConnectionProbeTransport,
   ConnectionNetworkDetails,
   ConnectionStage,
@@ -163,6 +166,7 @@ interface AppState {
   languagePreference: LanguagePreference
   language: AppLanguage
   themePreference: ThemePreference
+  defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
   pendingOAuthLoginMethod?: RedirectLoginMethod
   authPhase: AuthPhase
@@ -226,6 +230,7 @@ interface AppState {
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
+  setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void
   resetLocalData(): Promise<void>
   signOut(): Promise<void>
@@ -350,6 +355,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   languagePreference: 'system',
   language: getActiveLanguage(),
   themePreference: 'system',
+  defaultPermissionPreset: 'default',
   // Keep process rows available on a fresh install; their own disclosures
   // start closed so the conversation still opens at the answer.
   authPhase: 'idle',
@@ -359,7 +365,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async bootstrap() {
     set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
     try {
-      const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId] = await Promise.all([
+      const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset] = await Promise.all([
         loadServerConfig(),
         loadOrCreateIdentity(),
         loadTransportPreference(),
@@ -368,6 +374,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         loadFavoriteWorkspaces(),
         loadRecentWorkspaces(),
         loadLastConnectedDeviceId(),
+        loadDefaultPermissionPreset(),
       ])
       const language = applyLanguagePreference(languagePreference)
       set({
@@ -378,6 +385,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         languagePreference,
         language,
         themePreference,
+        defaultPermissionPreset,
         favoriteWorkspaces,
         recentWorkspaces,
         lastConnectedDeviceId,
@@ -1108,6 +1116,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async createSession(workspaceId) {
     if (get().connection.phase !== 'connected') return false
+    const generation = connectionGeneration
+    const defaultPermission = get().defaultPermissionPreset
     set({ busyAction: 'create-session', error: undefined })
     try {
       const workspace = workspaceId === undefined ? undefined : get().workspaces.find(item => item.workspaceId === workspaceId)
@@ -1115,11 +1125,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         const client = connection.requireCodex()
         const result = record(await client.request('thread/start', {
           cwd: workspace.path,
-          permissionPreset: 'workspace-write',
+          permissionPreset: defaultPermission === 'default' ? 'workspace-write' : defaultPermission,
         }))
+        if (generation !== connectionGeneration) return false
         const display = projectCodexThread(result.thread)
         if (display === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
-        const created = codexSession(display)
+        const effectivePreset = codexPermissionPresetFromResponse(result)
+          ?? (defaultPermission === 'default' ? 'workspace-write' : defaultPermission)
+        const created = codexSession(display, effectivePreset)
+        const hostDeviceId = get().selectedDevice?.deviceId
+        if (hostDeviceId === undefined) throw new Error(zhCN.runtime.connectHostFirst)
+        await saveCodexPermissionPreset(hostDeviceId, display.nativeId, effectivePreset)
+        if (generation !== connectionGeneration) return false
         set(state => ({
           sessions: [created, ...state.sessions.filter(item => item.sessionId !== created.sessionId)],
           workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
@@ -1170,7 +1187,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
+      if (generation !== connectionGeneration) return false
+      if (defaultPermission !== 'default') {
+        await proxy.sessionSelectPermission(sessionId, defaultPermission)
+        if (generation !== connectionGeneration) return false
+      }
       const sessions = await proxy.sessionList()
+      if (generation !== connectionGeneration) return false
+      const created = sessions.find(session => session.sessionId === sessionId)
+      if (defaultPermission !== 'default') {
+        const permissions = created?.projections?.values?.permissions
+        if (typeof permissions !== 'object' || permissions === null || !('currentValue' in permissions) || permissions.currentValue !== defaultPermission) {
+          throw new Error(zhCN.settings.defaultPermissionNotConfirmed)
+        }
+      }
       set(state => ({
         sessions,
         busyAction: undefined,
@@ -1180,7 +1210,6 @@ export const useAppStore = create<AppState>((set, get) => ({
             : item),
         }),
       }))
-      const created = sessions.find(session => session.sessionId === sessionId)
       if (created === undefined) return false
       return get().openSession(created)
     } catch (error) {
@@ -2073,6 +2102,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       languagePreference: 'system',
       language,
       themePreference: 'system',
+      defaultPermissionPreset: 'default',
       lastConnectedDeviceId: undefined,
       pendingAutoConnectDeviceId: undefined,
       reauthRequired: false,
@@ -2081,7 +2111,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async signOut() {
-    const { config, identity, languagePreference, themePreference } = get()
+    const { config, identity, languagePreference, themePreference, defaultPermissionPreset } = get()
     await get().disconnect()
     if (config !== undefined && identity !== undefined) {
       try {
@@ -2094,6 +2124,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     await clearLocalData()
     await saveLanguagePreference(languagePreference)
     await saveThemePreference(themePreference)
+    await saveDefaultPermissionPreset(defaultPermissionPreset)
     const nextIdentity = await loadOrCreateIdentity()
     set({
       ...initialData(),
@@ -2121,6 +2152,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   async setThemePreference(themePreference) {
     await saveThemePreference(themePreference)
     set({ themePreference })
+  },
+
+  async setDefaultPermissionPreset(defaultPermissionPreset) {
+    await saveDefaultPermissionPreset(defaultPermissionPreset)
+    set({ defaultPermissionPreset })
   },
 
 

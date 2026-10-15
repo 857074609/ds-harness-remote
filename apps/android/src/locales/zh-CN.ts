@@ -71,6 +71,8 @@ const zhCN = {
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',
+    defaultPermission: '新对话默认权限', defaultPermissionHost: '使用默认权限', defaultPermissionHostDescription: 'DeepSeek Harness 沿用电脑端设置；CodeX 使用工作区内修改。', defaultPermissionNote: '自动应用于此手机新建的 DeepSeek Harness 和 CodeX 对话；已有对话不变。Cursor 和 AGY 不适用。',
+    defaultPermissionFullAccessTitle: '新对话默认开启完全权限？', defaultPermissionFullAccessBody: '此后在手机上新建的 DeepSeek Harness 和 CodeX 对话都可直接修改文件和运行命令，不再逐次确认。你仍可在单个对话中更改权限。', defaultPermissionSaveFailed: '无法保存默认权限', defaultPermissionSaveFailedBody: '本地存储写入失败，请重试。', defaultPermissionNotConfirmed: '电脑端未确认新对话的默认权限，请重新连接后重试。',
     transport: '连接方式', transportNote: '更改后会重新连接。直接连接失败时，将自动改用服务器转发。', identity: '此手机的身份', deviceId: '设备 ID', publicKey: '安全密钥', keyNote: '安全密钥由 Android 系统加密保存，不会离开此手机。',
     about: '关于', aboutLead: '查看当前版本、开源与更新信息', developer: '开发者', developerValue: '知乎@李国宝', appVersion: '当前版本', sourceCodeUrl: '开源地址', updateUrl: '更新地址', linkFailedTitle: '无法打开链接', linkFailedBody: '请检查网络或复制地址后在浏览器中打开。',
     more: '更多', checkUpdates: '检查更新', checkingUpdates: '正在检查更新…', updateFoundTitle: '发现新版本', updateFoundBody: (latest: string, current: string) => `发现新版本 v${latest}，当前版本 ${current}。`, downloadUpdate: '下载更新', openUpdates: '打开更新', downloadingUpdate: '正在下载更新', downloadFailedTitle: '下载失败', downloadFailedBody: '无法下载最新安装包，请检查网络后重试。', installFailedTitle: '无法打开安装程序', installFailedBody: '安装包已下载，但无法打开安装程序。请先允许此应用安装未知应用，再重试。', openInstallSettings: '去设置开启', upToDateTitle: '已是最新版本', upToDateBody: '当前已是最新版本。', checkFailedTitle: '检查更新失败', checkFailedBody: '请检查网络后重试。',
@@ -103,7 +105,7 @@ const zhCN = {
     networkDetails: '网络详情', phoneEndpoint: '手机端点', computerEndpoint: '电脑端点', relayEndpointUnavailable: '服务器转发未公开', connectionServer: '连接服务器', networkProtocol: '网络协议', candidatePath: '候选路径', roundTripTime: '往返延迟', availableBitrate: '可用上行带宽', traffic: '本次流量', connectedAt: '连接时间', sent: '发送', received: '接收',
     forgetTitle: (name: string) => `解除“${name}”的绑定？`, forgetBody: '这会从账号中移除这台设备并断开远程连接。再次使用前，需要在电脑端重新绑定。', forget: '解除绑定',
   },
-  sessions: { title: '对话', new: '新建对话', deviceTitle: '这台设备上的对话', lead: '从上次停下的地方继续', creating: '正在新建对话…', emptyTitle: '还没有对话', emptyBody: '新建对话，或先在电脑上的 DeepSeek Harness 中开始工作。', archived: (count: number) => `已归档 ${count}`, archive: '归档对话', archiveTitle: '归档这段对话？', archiveBody: '归档后会从活跃工作区隐藏，可在“对话 > 已归档”中再次找到。', continue: '继续对话', untitled: '新对话', child: '子任务对话' },
+  sessions: { archive: '归档对话', archiveTitle: '归档这段对话？', archiveBody: '归档后，这段对话会从工作区列表中隐藏。', untitled: '新对话', child: '子任务对话' },
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
   transport: { auto: '自动（推荐）', autoDescription: '优先尝试 P2P 直连，必要时自动改用 TURN 或服务器转发', turn: 'TURN 优先', turnDescription: '网络受限时，优先使用 TURN 转发以提高稳定性', relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
   workspaces: {

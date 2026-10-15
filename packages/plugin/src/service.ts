@@ -421,6 +421,7 @@ export class HostPluginRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.serverApi?.close()
     await this.serverConnection?.stop()
     await this.connections.close()
     await this.localCodexPeer?.closeAll()

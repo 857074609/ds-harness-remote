@@ -9,7 +9,7 @@ import type {
 } from './typert-gateway-contract.js'
 
 type RemoteInvoke = (request: TypertGatewayRequest) => Promise<unknown>
-type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<TypertRpcResult>
+type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal, peer?: unknown) => Promise<TypertRpcResult>
 type CarrierOpen = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<AsyncIterable<unknown>>
 
 /**
@@ -114,12 +114,17 @@ export class TypertGatewaySwitch {
         : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal)
     }
     if (this.originalDispatch !== undefined) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)
-        ? this.localDispatch!(endpoint, payload, signal)
-        : this.remoteTarget.dispatch(endpoint, payload, signal).then(
-          result => workspaceConnectionResult(endpoint, result),
-          error => ({ ok: false, error: this.failure(error) }),
-        )
+      this.runtime.dispatchRpc = (...args) => {
+        const [endpoint, payload, signal] = args
+        // The local Gateway owns the caller's Peer and its lifetime. Preserve
+        // every carrier argument; Peer objects never cross the Remote tunnel.
+        return this.remoteTarget === undefined || isLocalOnlyEndpoint(endpoint)
+          ? this.localDispatch!(...args)
+          : this.remoteTarget.dispatch(endpoint, payload, signal).then(
+            result => workspaceConnectionResult(endpoint, result),
+            error => ({ ok: false, error: this.failure(error) }),
+          )
+      }
     }
     if (this.originalOpen !== undefined) {
       const open = this.originalOpen

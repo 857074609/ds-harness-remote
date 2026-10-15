@@ -67,8 +67,12 @@ interface BlockParseCache {
   tailKey: number
 }
 
-/** Link reference definitions live in the parse env; a suffix parse would lose them. */
-const LINK_REF_DEFINITION = /^\[[^\]]+\]:/mu
+/**
+ * Reference definitions can change earlier blocks, including when first added
+ * in the tail. Their marker also covers indented/nested and multiline labels;
+ * conservatively reparse the whole message whenever it occurs.
+ */
+const LINK_REF_DEFINITION = /\]:/u
 
 function lineStartsOf(text: string): number[] {
   const starts = [0]
@@ -97,7 +101,7 @@ function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: s
   const cache = cacheRef.current
   if (cache !== undefined && cache.tailStart >= 0 && cache.tailKey >= 0
     && text.length > cache.text.length && text.startsWith(cache.text)
-    && !LINK_REF_DEFINITION.test(cache.text)) {
+    && !LINK_REF_DEFINITION.test(text)) {
     const suffix = text.slice(cache.tailStart)
     const suffixNodes = markdownTree(parser.parse(suffix, {}), cache.tailKey)
     const nodes = [...cache.nodes.slice(0, -1), ...suffixNodes]

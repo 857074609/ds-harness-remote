@@ -11,13 +11,14 @@
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
 - 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding/opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
+- 云实例 Host 运行镜像构建（`apps/cloud-host`）：镜像内 bootstrap 注册、凭证持久化、Host profile 启动与镜像变更记录
 - 依赖外部 Server 的 Mock Host/Smoke Client
 - Server 设计与跨仓库协议契约
 
 当前仓库禁止实现：
 
 - 完整多账号 Server、Remote Web 会话界面、Admin backend/frontend
-- 完整 Server 的数据库、migration、queue 及 Kubernetes、Terraform 等部署基础设施
+- 完整 Server 的数据库、migration、queue 及 Kubernetes、Terraform 等部署基础设施；`apps/cloud-host` 只维护镜像构建输入与容器内 bootstrap，不含部署控制器、集群清单或实例生命周期 API
 - `apps/server-web`、`apps/web` 等完整 Server 站点源码
 
 本仓库包含可独立部署的开源 Server，允许在 `apps/server` 内维护上述最小版本的 runtime、文件持久化、限流、Web 页面和 Docker 部署。完整多账号 Server、Remote Web 和 Admin 仍由独立 Server 仓库作为同一站点实现。本仓库必须保留 `docs/server.md` 和 `docs/protocol.md`；不得把完整 Server 的设计目标描述成开源自部署版本已实现的能力。
@@ -30,6 +31,7 @@ apps/
   vscode/              VS Code Extension Client（Host 列表、加密连接与远程会话）
   browser/             Chrome/Edge MV3 入口（Web 授权换取独立凭证 + 在线 Host + 打开 Remote Web）
   server/              开源自部署 Server（单账号 Relay、登录/设备状态页、Docker 部署）
+  cloud-host/          云实例 Host 运行镜像构建（bootstrap 注册 + DSH Host profile 启动，Docker 构建输入）
 packages/
   plugin/              Host runtime、Remote 工作区入口与原生 API 代理
   protocol/            Remote/Control frame 类型和运行时校验
@@ -96,7 +98,8 @@ NODE_ENV=production pnpm -r build
 常用命令：
 
 ```bash
-pnpm --filter @dsh-remote/plugin build --watch
+pnpm --filter ds-harness-remote build
+pnpm --filter ds-harness-remote check
 pnpm --filter @dsh-remote/android android
 pnpm --filter @dsh-remote/android start
 DSH_REMOTE_SERVER=ws://127.0.0.1:8080/ws/v1/connect pnpm --filter @dsh-remote/mock-host dev
@@ -118,7 +121,7 @@ pnpm --filter @dsh-remote/server build
 macOS/Linux 和 Windows 安装/卸载脚本只调用已有 `dsh plugin` 添加/移除 Remote，禁止安装、
 升级或卸载 DSH、Node.js、pnpm，禁止修改 PATH、npm 配置或注册/清理后台服务。普通用户运行。
 脚本支持 `DSH_COMMAND`、`DSH_PROFILE` 和安装版本 `REMOTE_VERSION`，保留已有 `DSH_HOME`。
-Desktop 应通过官方插件管理安装 npm 包 `ds-harness-remote@0.5.7`，或复用 Desktop 官方 `dsh` launcher 管理保留的
+Desktop 应通过官方插件管理安装 npm 包 `ds-harness-remote@0.5.8`，或复用 Desktop 官方 `dsh` launcher 管理保留的
 `desktop` profile；普通独立 CLI 默认 `web`。macOS 支持标准 app 目录启动器回退，Windows
 支持官方 HKCU 命令目录回退。找不到已有命令时给出 Desktop 操作说明并失败，不能宣称已安装。
 旧 service/runtime 不自动迁移或删除；token 安装包装脚本已停用。Windows 真机安装回归仍待完成。

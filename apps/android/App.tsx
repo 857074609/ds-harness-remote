@@ -5,7 +5,7 @@ import { useLocales } from 'expo-localization'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
-import { ConnectionScreen, DeviceDetailScreen, DevicesScreen, SessionsScreen } from './src/screens/device-screens'
+import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
 import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
 import { useAppStore } from './src/state/store'
@@ -27,7 +27,6 @@ type Route =
   | { name: 'device'; deviceId: string; source?: 'workspaces' }
   | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string }
   | { name: 'workspaces'; focusWorkspaceKey?: string }
-  | { name: 'sessions' }
   | { name: 'chat' }
   | { name: 'settings' }
   | { name: 'about' }
@@ -57,7 +56,7 @@ function AppShell() {
   return (
     <>
       <ThemedStatusBar />
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
         <AppNavigator />
       </SafeAreaView>
     </>
@@ -319,7 +318,6 @@ function AppNavigator() {
           if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId, source: 'workspaces' })
         }}
       />}
-      {route.name === 'sessions' && <SessionsScreen onBack={pop} onSession={() => push({ name: 'chat' })} />}
       {route.name === 'chat' && <ChatScreen onBack={pop} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
@@ -330,12 +328,6 @@ function AppNavigator() {
           ? () => {
               setHomeMenuOpen(false)
               push({ name: 'devices' })
-            }
-          : undefined}
-        onSessions={selectedDevice !== undefined && useAppStore.getState().connection.phase === 'connected'
-          ? () => {
-              setHomeMenuOpen(false)
-              push({ name: 'sessions' })
             }
           : undefined}
         onSettings={() => {

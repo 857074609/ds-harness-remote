@@ -25780,7 +25780,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.7";
+var PLUGIN_VERSION = "0.5.8";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -25796,11 +25796,16 @@ var HostServerApi = class {
   credentials;
   credentialsPromise;
   harnessVersion;
+  lifetime = new AbortController();
   bindIdentity(identity) {
     this.identity = identity;
   }
   setHarnessVersion(version) {
     this.harnessVersion = version;
+  }
+  /** End this runtime's HTTP requests, including authentication and response bodies. */
+  close() {
+    this.lifetime.abort(new ServerApiError("CONNECTION_CLOSED", "The Server API has been closed.", false));
   }
   currentAuthorization() {
     if (this.credentials === void 0) return void 0;
@@ -26110,11 +26115,16 @@ var HostServerApi = class {
   async publicRequest(path, init, accessToken) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1e4);
-    let response;
+    const signal = AbortSignal.any([
+      this.lifetime.signal,
+      controller.signal,
+      ...init.signal == null ? [] : [init.signal]
+    ]);
     try {
-      response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
+      signal.throwIfAborted();
+      const response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
         ...init,
-        signal: controller.signal,
+        signal,
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -26122,22 +26132,25 @@ var HostServerApi = class {
           ...init.headers
         }
       });
+      const body = await parseBody(response);
+      signal.throwIfAborted();
+      if (!response.ok) {
+        const envelope = body ?? {};
+        throw new ServerApiError(
+          typeof envelope.error?.code === "string" ? envelope.error.code : mapStatus(response.status),
+          typeof envelope.error?.message === "string" ? envelope.error.message : "The Server rejected the request.",
+          envelope.error?.retryable === true || response.status >= 500,
+          response.status
+        );
+      }
+      return body;
     } catch (error) {
+      if (this.lifetime.signal.aborted) throw this.lifetime.signal.reason;
+      if (error instanceof ServerApiError) throw error;
       throw new ServerApiError("CONNECTION_FAILED", error instanceof Error ? error.message : "Server request failed.", true);
     } finally {
       clearTimeout(timer);
     }
-    const body = await parseBody(response);
-    if (!response.ok) {
-      const envelope = body ?? {};
-      throw new ServerApiError(
-        typeof envelope.error?.code === "string" ? envelope.error.code : mapStatus(response.status),
-        typeof envelope.error?.message === "string" ? envelope.error.message : "The Server rejected the request.",
-        envelope.error?.retryable === true || response.status >= 500,
-        response.status
-      );
-    }
-    return body;
   }
   requireIdentity() {
     if (this.identity === void 0) throw new ServerApiError("IDENTITY_INVALID", "The device identity is not loaded.", false);
@@ -26334,10 +26347,13 @@ var TypertGatewaySwitch = class {
       this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal).then(
-        (result) => workspaceConnectionResult(endpoint, result),
-        (error) => ({ ok: false, error: this.failure(error) })
-      );
+      this.runtime.dispatchRpc = (...args) => {
+        const [endpoint, payload, signal] = args;
+        return this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(...args) : this.remoteTarget.dispatch(endpoint, payload, signal).then(
+          (result) => workspaceConnectionResult(endpoint, result),
+          (error) => ({ ok: false, error: this.failure(error) })
+        );
+      };
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;
@@ -33143,6 +33159,8 @@ import { promises as fs3 } from "node:fs";
 import { isAbsolute as isAbsolute5, join as join10, relative as relative3, resolve as resolve3, sep } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { homedir as homedir4 } from "node:os";
+import { createRequire as createRequire2 } from "node:module";
+var nodeRequire = createRequire2(import.meta.url);
 function cleanUserPrompt(raw) {
   if (!raw) return "";
   raw = stripAgyImageReferences(raw);
@@ -33259,7 +33277,7 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join10(
 }
 async function querySqliteJson(dbPath, sql, params = []) {
   try {
-    const { DatabaseSync } = await import("node:sqlite");
+    const { DatabaseSync } = nodeRequire("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
       const stmt = db.prepare(sql);
@@ -35764,6 +35782,7 @@ var HostServerConnection = class {
         await this.connectOnce();
         delayMs = this.config.reconnect.initialDelayMs;
       } catch (error) {
+        if (this.stopped) return;
         const code = errorCode4(error);
         if (code === "CREDENTIALS_REFRESHED") continue;
         this.terminalError = code;
@@ -38287,6 +38306,7 @@ var HostPluginRuntime = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.serverApi?.close();
     await this.serverConnection?.stop();
     await this.connections.close();
     await this.localCodexPeer?.closeAll();

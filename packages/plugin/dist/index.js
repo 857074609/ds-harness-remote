@@ -26347,10 +26347,13 @@ var TypertGatewaySwitch = class {
       this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
     }
     if (this.originalDispatch !== void 0) {
-      this.runtime.dispatchRpc = (endpoint, payload, signal) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(endpoint, payload, signal) : this.remoteTarget.dispatch(endpoint, payload, signal).then(
-        (result) => workspaceConnectionResult(endpoint, result),
-        (error) => ({ ok: false, error: this.failure(error) })
-      );
+      this.runtime.dispatchRpc = (...args) => {
+        const [endpoint, payload, signal] = args;
+        return this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint) ? this.localDispatch(...args) : this.remoteTarget.dispatch(endpoint, payload, signal).then(
+          (result) => workspaceConnectionResult(endpoint, result),
+          (error) => ({ ok: false, error: this.failure(error) })
+        );
+      };
     }
     if (this.originalOpen !== void 0) {
       const open = this.originalOpen;

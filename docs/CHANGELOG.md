@@ -2,6 +2,7 @@
 
 - Cancels Host Server HTTP requests, including authentication and response body consumption, when the runtime closes; keeps the request deadline active through body reads. The TUI lifecycle test uses an abortable local fixture instead of a live Server.
 - Loads Node's SQLite builtin natively so AGY session discovery remains usable with older Vite test runners when the optional `sqlite3` CLI is absent.
+- Preserves the caller's Peer when the gateway switch forwards local RPCs, preventing `gateway/internal` / missing `signal` failures with Harness `0.2.1-alpha.4`. Remote tunnel calls retain their existing three-argument contract.
 - Replaces the minimal shared CodeX/ACP shell bridge with a Host-owned terminal controller: verified default/candidate interactive shells, xterm screen snapshots, bounded output followers, idempotent allocation and retryable process cleanup. Committed terminals survive request timeouts and disconnects; backend reconfiguration and Host shutdown await cleanup. Remote scopes, device ownership and input claims remain isolated.
 - Adds conservative unattended reclamation only after two hours of confirmed idle activity without window holds or followers. PTY/activity support comes from the Host subprocess provider; the compatibility pipe fallback still lacks terminal resize and job control. Windows/Linux and encrypted cross-device acceptance remain pending.
 - Fixes terminal cancellation after allocation commit and binds input to the current connection's follower even when attachment IDs are reused. Disconnect also revokes pending follows. ACP reconfiguration continues stopping changed backends after cleanup errors and retries unfinished cleanup when the same settings are saved again; affected backends stay unavailable until cleanup succeeds.
@@ -10,6 +11,7 @@
 
 - Host 关闭时取消 Server HTTP 请求（包括鉴权和响应体读取），请求超时覆盖完整响应读取阶段；TUI 生命周期测试改用可取消的受控请求，隔离真实 Server。
 - AGY 会话发现通过 Node 原生加载 SQLite 内置模块，兼容旧版 Vite 测试运行器且无需依赖可选的 `sqlite3` 命令。
+- 修复 Gateway 切换器转发本地 RPC 时丢失调用方 Peer，导致 Harness `0.2.1-alpha.4` 返回 `gateway/internal` / 缺少 `signal` 的问题；远程隧道仍保留原有三参数调用契约。
 - CodeX / ACP 的简易 shell bridge 改为共用 Host 终端控制器：验证默认/可选交互 shell、xterm 屏幕快照、有界输出订阅、幂等创建和可重试进程清理。已创建终端不受请求超时或断线影响；后端重配与 Host 关闭等待清理，保留会话 scope、设备归属与连接输入权隔离。
 - 无窗口持有者或 follower、连续两小时明确 idle 时才自动回收。PTY 和 activity 由 Host subprocess 提供；兼容 pipe 仍不支持终端 resize/job control。Windows/Linux 与加密跨设备验收待完成。
 - 修复分配提交后的请求取消，并将输入权绑定到当前连接的 follower，即使复用 attachment ID 也不能跨连接输入；断开同时撤销尚未完成的 follow。ACP 重配遇到清理失败仍停止变化后端，再次保存相同设置可重试未完成清理，相关后端在清理成功前保持不可用。

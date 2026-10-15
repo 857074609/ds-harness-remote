@@ -11,13 +11,14 @@
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 alpha.1–rc.1 / v0.1.5 rc.1 与 v0.1.6 alpha.1 Session V3 Typert Remote 会话/Prompt）
 - Protocol、Crypto、WebRTC、Client Core 等共享能力
 - 开源自部署 Server（`apps/server`）：环境变量单账号、JSON 文件持久化设备凭据、Control/Noise handshake forwarding/opaque Relay、Web 登录与设备状态页，以及 Dockerfile/Compose 部署入口
+- 云实例 Host 运行镜像构建（`apps/cloud-host`）：镜像内 bootstrap 注册、凭证持久化、Host profile 启动与镜像变更记录
 - 依赖外部 Server 的 Mock Host/Smoke Client
 - Server 设计与跨仓库协议契约
 
 当前仓库禁止实现：
 
 - 完整多账号 Server、Remote Web 会话界面、Admin backend/frontend
-- 完整 Server 的数据库、migration、queue 及 Kubernetes、Terraform 等部署基础设施
+- 完整 Server 的数据库、migration、queue 及 Kubernetes、Terraform 等部署基础设施；`apps/cloud-host` 只维护镜像构建输入与容器内 bootstrap，不含部署控制器、集群清单或实例生命周期 API
 - `apps/server-web`、`apps/web` 等完整 Server 站点源码
 
 本仓库包含可独立部署的开源 Server，允许在 `apps/server` 内维护上述最小版本的 runtime、文件持久化、限流、Web 页面和 Docker 部署。完整多账号 Server、Remote Web 和 Admin 仍由独立 Server 仓库作为同一站点实现。本仓库必须保留 `docs/server.md` 和 `docs/protocol.md`；不得把完整 Server 的设计目标描述成开源自部署版本已实现的能力。
@@ -30,6 +31,7 @@ apps/
   vscode/              VS Code Extension Client（Host 列表、加密连接与远程会话）
   browser/             Chrome/Edge MV3 入口（Web 授权换取独立凭证 + 在线 Host + 打开 Remote Web）
   server/              开源自部署 Server（单账号 Relay、登录/设备状态页、Docker 部署）
+  cloud-host/          云实例 Host 运行镜像构建（bootstrap 注册 + DSH Host profile 启动，Docker 构建输入）
 packages/
   plugin/              Host runtime、Remote 工作区入口与原生 API 代理
   protocol/            Remote/Control frame 类型和运行时校验

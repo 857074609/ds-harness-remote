@@ -930,6 +930,7 @@ function createStyles(colors: ThemeColors) {
     marginBottom: spacing.lg,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
+    overflow: 'hidden',
     paddingHorizontal: spacing.sm,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: colors.separator,

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronDown, ChevronRight, ChevronUp, CircleCheck, CirclePlus, Code2, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronRight, CircleCheck, Code2, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -11,7 +11,6 @@ import {
   EmptyState,
   IconButton,
   KeyValue,
-  ListRow,
   LoadingRows,
   RefreshAction,
   Screen,
@@ -602,7 +601,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
           </Animated.View>
         </Pressable>
       </View>
-      <Animated.View style={[styles.swipeContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
+      <Animated.View style={[styles.swipeContent, compact && styles.compactSessionContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
         <View style={compact ? styles.compactSessionRow : styles.listRow}>
           <Pressable
             accessibilityRole="button"
@@ -611,7 +610,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
             onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'archive') void requestArchive() }}
             disabled={disabled}
             onPress={onPress}
-            style={({ pressed }) => [styles.swipeContentInner, pressed && styles.listRowPressed, disabled && styles.swipeContentBusy]}
+            style={({ pressed }) => [styles.swipeContentInner, compact && styles.compactSessionPressTarget, pressed && (compact ? styles.compactSessionPressed : styles.listRowPressed), disabled && styles.swipeContentBusy]}
           >
             {compact
               ? <SessionIcon size={17} color={colors.muted} />
@@ -934,89 +933,6 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   )
 }
 
-export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSession: (session: RemoteSession) => void }) {
-  const sessions = useAppStore(state => state.sessions)
-  const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
-  const busy = useAppStore(state => state.busyAction)
-  const openSession = useAppStore(state => state.openSession)
-  const createSession = useAppStore(state => state.createSession)
-  const [showArchived, setShowArchived] = useState(false)
-  const [openSessionId, setOpenSessionId] = useState<string>()
-
-  const open = async (session: RemoteSession) => {
-    if (await openSession(session)) onSession(session)
-  }
-
-  const archivedSet = new Set(archivedSessionIds)
-  const active = sessions.filter(session => !archivedSet.has(session.sessionId))
-  const archived = sessions.filter(session => archivedSet.has(session.sessionId))
-  const creating = busy === 'create-session'
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-
-  return (
-    <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar
-        title={zhCN.sessions.title}
-        onBack={onBack}
-        action={<IconButton label={zhCN.sessions.new} icon={CirclePlus} tint={colors.primary} onPress={() => void createSession()} disabled={creating} />}
-      />}>
-        <Screen>
-          <View style={styles.pageHeading}>
-            <View><Text style={styles.title}>{zhCN.sessions.deviceTitle}</Text><Text style={styles.subtitle}>{zhCN.sessions.lead}</Text></View>
-          </View>
-          {creating && <Text style={styles.creatingText}>{zhCN.sessions.creating}</Text>}
-          {active.length === 0 && archived.length === 0
-            ? <EmptyState
-                icon={MessageSquareText}
-                title={zhCN.sessions.emptyTitle}
-                body={zhCN.sessions.emptyBody}
-                action={<Button label={zhCN.sessions.new} icon={CirclePlus} onPress={() => void createSession()} loading={creating} />}
-              />
-            : <View>
-                {active.map(session => (
-                  <SwipeableSessionRow
-                    key={session.sessionId}
-                    session={session}
-                    open={openSessionId === session.sessionId}
-                    locked={busy !== undefined}
-                    busy={busy === `archive:${session.sessionId}`}
-                    onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
-                    onArchive={() => useAppStore.getState().archiveSession(session.sessionId)}
-                    onPress={() => { setOpenSessionId(undefined); void open(session) }}
-                  />
-                ))}
-                {archived.length > 0 && (
-                  <View style={styles.archivedSection}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityState={{ expanded: showArchived }}
-                      onPress={() => setShowArchived(current => !current)}
-                      style={styles.archivedHeader}
-                    >
-                      <Archive size={16} color={colors.muted} />
-                      <Text style={styles.archivedTitle}>{zhCN.sessions.archived(archived.length)}</Text>
-                      {showArchived ? <ChevronUp size={16} color={colors.muted} /> : <ChevronDown size={16} color={colors.muted} />}
-                    </Pressable>
-                    {showArchived && archived.map(session => (
-                      <ListRow
-                        key={session.sessionId}
-                        title={sessionTitle(session)}
-                        subtitle={session.cwd}
-                        meta={updatedText(session.updatedAt)}
-                        icon={Archive}
-                        onPress={() => void open(session)}
-                      />
-                    ))}
-                  </View>
-                )}
-              </View>}
-        </Screen>
-      </BlurHeaderFrame>
-    </View>
-  )
-}
-
 function sessionTitle(session: RemoteSession): string {
   const resolvedTitle = resolveSessionDisplayTitle(session)
   if (resolvedTitle !== undefined) return resolvedTitle
@@ -1161,6 +1077,9 @@ function createStyles(colors: ThemeColors) {
   rowSubtitle: { ...type.small, color: colors.muted },
   rowInlineSubtitle: { flex: 1 },
   rowMeta: { ...type.caption, color: colors.subtle },
+  compactSessionContent: { backgroundColor: colors.surface },
+  compactSessionPressTarget: { borderRadius: radius.md, overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginLeft: -spacing.sm },
+  compactSessionPressed: { backgroundColor: colors.surfaceStrong },
   compactSessionRow: { minHeight: 58, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   compactSessionCopy: { flex: 1 },
   compactSessionTitle: { ...type.smallStrong, color: colors.ink },
@@ -1214,10 +1133,6 @@ function createStyles(colors: ThemeColors) {
   contentCountLabel: { ...type.caption, color: colors.muted, marginTop: 2 },
   contentCountDivider: { width: StyleSheet.hairlineWidth, height: 32, backgroundColor: colors.separator },
   networkDetails: { marginTop: -spacing.sm },
-  creatingText: { ...type.small, color: colors.muted, marginBottom: spacing.sm },
-  archivedSection: { marginTop: spacing.lg },
-  archivedHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm },
-  archivedTitle: { ...type.smallStrong, color: colors.muted, flex: 1 },
   connectionDetails: { marginTop: spacing.lg },
   })
 }

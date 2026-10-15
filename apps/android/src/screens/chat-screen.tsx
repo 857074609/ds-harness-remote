@@ -2373,7 +2373,7 @@ function QuestionCard({ item, busy, onRespond }: {
 }
 
 /** Compact DSH QueueDock mirror: queued prompts waiting for the next turn. */
-function QueueDock({ items }: { items: { id?: string; preview: string }[] }) {
+function QueueDock({ items }: { items: { id?: string; rpcId?: string; preview: string }[] }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
@@ -2390,9 +2390,9 @@ function QueueDock({ items }: { items: { id?: string; preview: string }[] }) {
                 only be stopped by killing the running task (official QueueDock
                 offers edit/remove/steer per row). */}
             <IconButton label={zhCN.chat.queueSteer} icon={ArrowUp} dense
-              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer')} />
+              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer', item.rpcId)} />
             <IconButton label={zhCN.chat.queueRemove} icon={X} dense
-              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'remove')} />
+              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'remove', item.rpcId)} />
           </>}
         </View>
       ))}

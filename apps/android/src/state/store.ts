@@ -200,7 +200,7 @@ interface AppState {
   openSession(session: RemoteSession): Promise<boolean>
   sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string): Promise<SendMessageResult>
   retrySendMessage(itemId: string): Promise<boolean>
-  updateQueueItem(itemId: string, action: 'remove' | 'steer'): Promise<boolean>
+  updateQueueItem(itemId: string, action: 'remove' | 'steer', rpcId?: string): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
@@ -509,19 +509,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       set(state => {
         const known = new Set(state.sessions.map(item => item.sessionId))
         const marks: typeof state.sessionLifecycles = { ...state.sessionLifecycles }
-        for (const [id, entry] of Object.entries(marks)) {
-          const fresh = rows.find(item => item.sessionId === id)
-          if (fresh !== undefined && entry.running !== fresh.running) {
-            marks[id] = {
-              ...entry,
-              running: fresh.running,
-              // A run that ended while the list was watching leaves the "done"
-              // reminder; a fresh run clears it. Failure precision needs the
-              // turn/end frame (followed sessions), which keeps `failed` marks.
-              ...(fresh.running
-                ? { finished: undefined }
-                : { finished: entry.finished === 'failed' ? 'failed' as const : 'completed' as const }),
-            }
+        for (const row of state.sessions) {
+          const fresh = rows.find(item => item.sessionId === row.sessionId)
+          if (fresh === undefined) continue
+          const entry = marks[row.sessionId]
+          const wasRunning = entry?.running ?? row.running
+          if (wasRunning === fresh.running) continue
+          marks[row.sessionId] = {
+            seq: entry?.seq ?? -1,
+            turn: entry?.turn,
+            running: fresh.running,
+            // A run that ended while the list was watching leaves the "done"
+            // reminder; a fresh run clears it. Failure precision needs the
+            // turn/end frame (followed sessions), which keeps `failed` marks.
+            ...(fresh.running
+              ? { finished: undefined }
+              : { finished: entry?.finished === 'failed' ? 'failed' as const : 'completed' as const }),
           }
         }
         const updated = state.sessions.map(row => {
@@ -1789,7 +1792,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async updateQueueItem(itemId, action) {
+  async updateQueueItem(itemId, action, rpcId) {
     const session = get().selectedSession
     // Harness rows may carry `backend: undefined`; only the explicit non-harness
     // backends lack queue actions. The previous strict `'harness'` check silently
@@ -1799,11 +1802,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       || get().connection.phase !== 'connected') return false
     try {
       await connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
-      return true
     } catch (error) {
       set({ error: friendlyError(error) })
       return false
     }
+    // Settle the matching local optimistic row together with the Host queue:
+    // the dock lists local `queued` rows the inbox has not adopted, so without
+    // this the steered/removed item is immediately re-listed from local state
+    // and the buttons look like no-ops. Steer hands the row back to the
+    // timeline (its echo replaces it); remove retires it quietly.
+    if (rpcId !== undefined) {
+      set(state => ({
+        messages: {
+          ...state.messages,
+          [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+            item.kind === 'message' && item.requestRpcId === rpcId && item.sendState === 'queued'
+              ? { ...item, sendState: action === 'steer' ? undefined : 'canceled' as const }
+              : item),
+        },
+      }))
+    }
+    return true
   },
 
   async retrySendMessage(itemId) {

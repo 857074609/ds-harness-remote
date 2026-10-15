@@ -427,6 +427,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                               open={openSessionId === session.sessionId}
                               locked={busy !== undefined}
                               busy={busy === `archive:${session.sessionId}`}
+                              opening={busy === `session:${session.sessionId}`}
                               onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
                               onArchive={() => archiveSession(session.sessionId)}
                               onPress={() => { setOpenSessionId(undefined); void open(session) }}

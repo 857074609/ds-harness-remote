@@ -26,7 +26,7 @@ import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
-import { chatSections, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
+import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
 import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { MarkdownLinkProvider, markdownFilePath, NativeMarkdown } from '../ui/markdown'
@@ -48,6 +48,10 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
 
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
+/** Soft hint threshold; the composer accepts longer input instead of silently truncating. */
+const LONG_DRAFT_HINT = 12_000
+/** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
+const LONG_DRAFT_MAX = 256_000
 
 export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
   const session = useAppStore(state => state.selectedSession)
@@ -68,6 +72,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const loadOlderHistory = useAppStore(state => state.loadOlderHistory)
   const selectModel = useAppStore(state => state.selectModel)
   const selectPermission = useAppStore(state => state.selectPermission)
+  const retrySendMessage = useAppStore(state => state.retrySendMessage)
   const loadAgentPresets = useAppStore(state => state.loadAgentPresets)
   const selectAgentPreset = useAppStore(state => state.selectAgentPreset)
   const createSession = useAppStore(state => state.createSession)
@@ -79,6 +84,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const agentPresetSelecting = useAppStore(state => state.agentPresetSelecting)
   const [draft, setDraft] = useState('')
   const [trajectory, setTrajectory] = useState(false)
+  const [subagentsOpen, setSubagentsOpen] = useState(false)
 
   const archiveCurrentSession = () => {
     if (session === undefined || busy !== undefined) return
@@ -112,7 +118,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [mentionQuery, setMentionQuery] = useState('')
   const [selection, setSelection] = useState({ start: 0, end: 0 })
   const composerInputRef = useRef<TextInput>(null)
-  const keyboardVisibleRef = useRef(false)
   const draftRef = useRef('')
   const selectionRef = useRef({ start: 0, end: 0 })
   /** Start index of the active `/` / `@` trigger inside the draft. */
@@ -123,12 +128,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [fileListFailed, setFileListFailed] = useState(false)
   const skillRequestedRef = useRef<string | undefined>(undefined)
   const filesRequestedRef = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    keyboardVisibleRef.current = Keyboard.isVisible()
-    const shown = Keyboard.addListener('keyboardDidShow', () => { keyboardVisibleRef.current = true })
-    const hidden = Keyboard.addListener('keyboardDidHide', () => { keyboardVisibleRef.current = false })
-    return () => { shown.remove(); hidden.remove() }
-  }, [])
   const [permissionOptions, setPermissionOptions] = useState<PermissionSelect['options']>()
   const [permissionError, setPermissionError] = useState<string>()
   const [permissionRevision, setPermissionRevision] = useState(0)
@@ -215,7 +214,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
-    item.kind !== 'message' || (item.role !== 'system' && !item.context && (
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued' && (
       hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
       || (item.images?.length ?? 0) > 0))), [messages, session?.backend])
@@ -229,6 +228,26 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     }
     return interleaved
   }, [visibleSections])
+  // Queued prompts: the Host `inbox` projection is authoritative (includes
+  // items queued from other devices); local `queued` rows are the fallback for
+  // Hosts without projections. Rows in this state are hidden from the timeline.
+  const inboxProjection = (session?.projections?.values as Record<string, unknown> | undefined)?.inbox
+  const queueItems = useMemo(() => {
+    const inboxItems = inboxProjection === undefined ? [] : inboxQueuedItems(inboxProjection)
+    const adopted = inboxRpcIds(inboxProjection)
+    const pending = messages.flatMap(item => item.kind === 'message' && item.role === 'user' && item.sendState === 'queued'
+      && (item.requestRpcId === undefined || !adopted.has(item.requestRpcId)) ? [{ preview: item.text }] : [])
+    // Union (the official QueueDock's pendingQueue behaviour): inbox rows are
+    // authoritative and local rows not yet adopted by the projection cover the
+    // lag window, so a queued prompt is never invisible on both ends. Only
+    // inbox rows carry the host item id needed for queue actions.
+    return [...inboxItems, ...pending]
+  }, [inboxProjection, messages])
+  // Child (subagent) sessions spawned by this session — the data has always
+  // been in `sessions` (parentSessionId/origin), it just had no UI.
+  const childSessions = useMemo(
+    () => sessions.filter(item => item.parentSessionId === session?.sessionId),
+    [sessions, session?.sessionId])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
     ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
@@ -236,7 +255,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
-    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -350,10 +369,28 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
   // otherwise win the first dispatch while its cells are being measured.
-  const onBackRef = useRef(onBack)
-  onBackRef.current = onBack
+  // Back inside a subagent child returns to its parent conversation (the
+  // official subagent UI's navigation), instead of leaving the chat entirely.
+  const backFromChat = () => {
+    const parent = session?.parentSessionId === undefined
+      ? undefined
+      : sessions.find(item => item.sessionId === session.parentSessionId)
+    if (session?.parentSessionId !== undefined && parent !== undefined) {
+      Keyboard.dismiss()
+      void openSession(parent)
+      return
+    }
+    Keyboard.dismiss()
+    onBack()
+  }
+  const onBackRef = useRef(backFromChat)
+  onBackRef.current = backFromChat
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (subagentsOpen) {
+        setSubagentsOpen(false)
+        return true
+      }
       if (plusMenuOpen) {
         Keyboard.dismiss()
         setPlusMenuOpen(false)
@@ -399,7 +436,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         return true
       }
       if (trajectory) { setTrajectory(false); return true }
-      if (keyboardVisibleRef.current || Keyboard.isVisible()) {
+      // Dismiss the IME only while an input actually owns focus. A cached
+      // "keyboard visible" flag (or Keyboard.isVisible(), fed by the same
+      // events that Android can drop) once stale swallows every back press —
+      // the "back does nothing" dead end. Focus state is authoritative.
+      if (composerInputRef.current?.isFocused() === true) {
         Keyboard.dismiss()
         return true
       }
@@ -454,25 +495,38 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
 
   const submit = async () => {
     if (!connected || permissionSelecting) return
-    const text = draft.trim()
+    // Read the live ref: the render-closure `draft` can lag the last keystrokes
+    // typed right before the tap, silently dropping the tail of the message.
+    const submittedDraft = draftRef.current
+    const text = submittedDraft.trim()
     if (text.length === 0 && images.length === 0) return
+    if (text.length > LONG_DRAFT_MAX) {
+      Alert.alert(zhCN.chat.draftTooLongTitle, zhCN.chat.draftTooLong(LONG_DRAFT_MAX))
+      return
+    }
     const submittedImages = images
     applyDraft('')
     setImages([])
     setMentionType(null)
     selectionRef.current = { start: 0, end: 0 }
     setSelection({ start: 0, end: 0 })
-    if (!await sendMessage(text, submittedImages)) {
-      applyDraft(draft)
-      setImages(submittedImages)
+    const outcome = await sendMessage(text, submittedImages)
+    if (outcome === 'rejected') {
+      // Nothing was persisted (command failure): restore the draft without
+      // clobbering input typed while the send was in flight.
+      const inFlight = draftRef.current
+      applyDraft(inFlight.length === 0 ? submittedDraft : `${submittedDraft}\n${inFlight}`)
+      setImages(previous => previous.length === 0 ? submittedImages : [...submittedImages, ...previous])
       Alert.alert(zhCN.messageActions.failed, useAppStore.getState().error ?? zhCN.messageActions.unavailable)
-    } else {
+    } else if (outcome === 'sent') {
       const result = useAppStore.getState().commandResult
       if (result?.sessionId === session.sessionId && useAppStore.getState().selectedSession?.sessionId === session.sessionId) {
         Alert.alert(zhCN.mention.commandSection, result.text)
         useAppStore.setState({ commandResult: undefined })
       }
     }
+    // 'kept': the row stays in the timeline with an inline failed/unconfirmed
+    // state and a retry affordance — no Alert and no draft restore.
   }
 
   const pickImages = async () => {
@@ -572,7 +626,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       setTrajectory(false)
       return
     }
-    onBack()
+    onBackRef.current()
   }
 
   const pickModel = async (group: ModelProviderGroup, model: ModelCatalogModel, reasoningEffort?: string) => {
@@ -659,9 +713,9 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
 
   const sendPrompt = async (prompt: CustomPrompt) => {
     setPromptsPickerOpen(false)
-    const ok = await sendMessage(prompt.text)
-    if (ok) AccessibilityInfo.announceForAccessibility(zhCN.chat.toolPromptSent(prompt.title))
-    else Alert.alert(zhCN.chat.toolPromptSendFailed, zhCN.chat.toolPromptSendFailed)
+    const outcome = await sendMessage(prompt.text)
+    if (outcome === 'sent') AccessibilityInfo.announceForAccessibility(zhCN.chat.toolPromptSent(prompt.title))
+    else if (outcome === 'rejected') Alert.alert(zhCN.chat.toolPromptSendFailed, zhCN.chat.toolPromptSendFailed)
   }
 
   const persistPrompts = async (next: readonly CustomPrompt[]): Promise<boolean> => {
@@ -865,6 +919,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
             onPress={() => { Keyboard.dismiss(); setMentionType(null); setTrajectory(value => !value) }} />
+          {childSessions.length > 0 && (
+            <IconButton label={zhCN.chat.subagentsTitle(childSessions.length)}
+              icon={Layers} dense tint={childSessions.some(item => item.running) ? colors.primary : undefined}
+              onPress={() => { Keyboard.dismiss(); setMentionType(null); setSubagentsOpen(true) }} />
+          )}
           <IconButton label={zhCN.sessions.archive} icon={Archive} dense onPress={archiveCurrentSession} disabled={busy !== undefined} />
           <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
@@ -902,7 +961,9 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
           initialPinRef.current = false
           Keyboard.dismiss()
         }}
-        ListEmptyComponent={<WelcomeMessage />}
+        ListEmptyComponent={busy === `session:${session.sessionId}`
+          ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
+          : <WelcomeMessage />}
         ListHeaderComponent={historyHasMore ? (
           <Pressable
             accessibilityRole="button"
@@ -927,6 +988,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
         />
       )}
       <View style={styles.composerWrap}>
+        {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
         {images.length > 0 && (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} keyboardShouldPersistTaps="always" contentContainerStyle={styles.imageTray}>
@@ -987,7 +1049,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                     : zhCN.chat.placeholder}
               placeholderTextColor={colors.muted}
               multiline
-              maxLength={12_000}
               editable={connected && !permissionSelecting}
               selectionColor={colors.accent}
               cursorColor={colors.accent}
@@ -1026,7 +1087,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                 {modelSelecting ? <ActivityIndicator size="small" color={colors.muted} /> : <ChevronDown size={14} color={colors.muted} />}
               </Pressable>
             )}
-            {canStop
+            {canStop && draft.trim().length === 0 && images.length === 0
               ? <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.stop}
@@ -1039,7 +1100,26 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                     ? <ActivityIndicator size="small" color={colors.white} />
                     : <CircleStop size={20} color={colors.white} />}
                 </Pressable>
-              : <Pressable
+              : <>
+                {/* With text in the composer the primary action is the send
+                    (queueing) button — tapping where Send lives must never stop
+                    the running task (official InputBar behaviour). Stop stays
+                    available as its own secondary button. */}
+                {canStop && (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={zhCN.chat.stop}
+                    accessibilityState={{ disabled: stopping, busy: stopping }}
+                    disabled={stopping}
+                    onPress={() => void stopSession()}
+                    style={({ pressed }) => [styles.stopButtonSmall, pressed && !stopping && styles.stopPressed, stopping && styles.sendDisabled]}
+                  >
+                    {stopping
+                      ? <ActivityIndicator size="small" color={colors.white} />
+                      : <CircleStop size={17} color={colors.white} />}
+                  </Pressable>
+                )}
+                <Pressable
                   accessibilityRole="button"
                   accessibilityLabel={zhCN.chat.send}
                   accessibilityState={{ disabled: !connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0) }}
@@ -1048,10 +1128,14 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                   style={({ pressed }) => [styles.sendButton, pressed && styles.sendPressed, (!connected || permissionSelecting || (draft.trim().length === 0 && images.length === 0)) && styles.sendDisabled]}
                 >
                   <ArrowUp size={20} color={colors.white} />
-                </Pressable>}
+                </Pressable>
+                </>}
           </View>
         </View>
         </View>
+        {draft.length > LONG_DRAFT_HINT && (
+          <Text style={styles.composerHint}>{zhCN.chat.draftLong(draft.length)}</Text>
+        )}
         <Text style={styles.composerHint}>
           {session.backend === 'codex'
             ? zhCN.chat.codexPolicyHint
@@ -1175,6 +1259,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       )}
       <PermissionPicker loading={permissionLoading} error={permissionError} onRetry={() => setPermissionRevision(v => v + 1)} visible={permissionPickerOpen} permissions={permissions} onClose={() => setPermissionPickerOpen(false)} onPick={pickPermission} />
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
+      <ChildAgentPanel visible={subagentsOpen} sessions={childSessions} onClose={() => setSubagentsOpen(false)}
+        onOpen={session => { setSubagentsOpen(false); void openSession(session) }} />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker
@@ -1840,7 +1926,7 @@ const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllowed, bu
   foldAllowed: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
-  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1868,7 +1954,7 @@ const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllowed, bu
       accessibilityState={{ expanded, disabled: !canFold || process.length === 0 }}
       disabled={!canFold || process.length === 0} onPress={() => setOpen(value => !value)}
       style={({ pressed }) => [styles.turnProcessHeader, pressed && styles.reasoningHeaderPressed]}>
-      <Text style={styles.turnProcessLabel}>{label}</Text>
+      <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
       {canFold && process.length > 0 && (expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />)}
     </Pressable>}
     {expanded && segments.map((segment, index) => segment.kind === 'response'
@@ -1884,7 +1970,7 @@ const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, busyA
   closed: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
-  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -1930,7 +2016,7 @@ const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onA
   busyAction?: string
   compact: boolean
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
-  onQuestion: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+  onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   if (item.kind === 'approval') return <ApprovalCard item={item} busy={busyAction === `approval:${item.id}`} onRespond={onApproval} />
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
@@ -1940,6 +2026,43 @@ const ChatItemView = memo(function ChatItemView({ item, busyAction, compact, onA
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
   return <MessageBubble item={item} compact={compact} />
 })
+
+/** Retry affordance for a kept failed/unconfirmed row, with guarded resend. */
+function UserRowResend({ item, status }: { item: ChatMessage; status: string }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  const busyAction = useAppStore(state => state.busyAction)
+  const missingImages = (item.images?.length ?? 0) > 0 && (item.promptImages?.length ?? 0) === 0
+  const disabled = busyAction !== undefined || missingImages
+  const retry = () => {
+    const state = useAppStore.getState()
+    const backend = state.selectedSession?.backend
+    const resend = () => { void state.retrySendMessage(item.id) }
+    // Harness dedupes by request rpcId (official hasPromptRequest), so only
+    // the carriers without request ids need the double-execution warning.
+    if (item.sendState === 'unconfirmed' && backend !== undefined && backend !== 'harness') {
+      Alert.alert(zhCN.chat.sendUnconfirmed, zhCN.chat.resendConfirm, [
+        { text: zhCN.common.cancel, style: 'cancel' },
+        { text: zhCN.chat.resend, onPress: resend },
+      ])
+    } else resend()
+  }
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${status} · ${zhCN.chat.resend}`}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
+      onPress={retry}
+      style={({ pressed }) => [styles.resendRow, pressed && !disabled && styles.resendRowPressed, disabled && styles.resendRowDisabled]}
+    >
+      <RefreshCw size={13} color={disabled ? colors.muted : colors.danger} />
+      <Text style={[styles.resendText, disabled && styles.resendTextMuted, !disabled && styles.resendTextFailed]}>
+        {missingImages ? zhCN.chat.resendImageMissing : `${status} · ${zhCN.chat.resend}`}
+      </Text>
+    </Pressable>
+  )
+}
 
 function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean }) {
   const { colors } = useTheme()
@@ -1972,13 +2095,23 @@ function MessageBubble({ item, compact }: { item: ChatMessage; compact: boolean 
     )
   }
 
-  if (user) return <View style={styles.userBlock}>
-    <View style={styles.userBubble}>
-      {showImages && <ChatImages images={item.images!} alignEnd />}
-      {showText && <NativeMarkdown text={item.text} />}
+  if (user) {
+    const undelivered = item.sendState === 'failed' || item.sendState === 'unconfirmed'
+    const status = item.sendError ?? (item.sendState === 'failed' ? zhCN.chat.sendFailed : zhCN.chat.sendUnconfirmed)
+    return <View style={styles.userBlock}>
+      <View style={styles.userBubble}>
+        {showImages && <ChatImages images={item.images!} alignEnd />}
+        {showText && <NativeMarkdown text={item.text} />}
+      </View>
+      {item.sendState === 'canceled'
+        ? <Text style={styles.canceledText}>{zhCN.chat.sendCanceled}</Text>
+        : undelivered
+          ? <UserRowResend item={item} status={status} />
+          : <MessageActions item={item} />}
+      {/* Failed rows keep their actions: losing copy would be a regression. */}
+      {undelivered && item.sendState !== 'canceled' && <MessageActions item={item} />}
     </View>
-    <MessageActions item={item} />
-  </View>
+  }
 
   return (
     <View style={[styles.messageRow, user && styles.messageRowUser]}>
@@ -2150,11 +2283,12 @@ function ApprovalCard({ item, busy, onRespond }: {
 function QuestionCard({ item, busy, onRespond }: {
   item: QuestionActivity
   busy: boolean
-  onRespond: (itemId: string, selected: Record<string, string[]>) => Promise<void>
+  onRespond: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const [selected, setSelected] = useState<Record<string, string[]>>({})
+  const [custom, setCustom] = useState<Record<string, string>>({})
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
     if (item.deadline === undefined || item.outcome !== undefined) return
@@ -2174,6 +2308,7 @@ function QuestionCard({ item, busy, onRespond }: {
   }
 
   const toggle = (questionId: string, label: string, multi: boolean) => {
+    if (!multi) setCustom(current => (current[questionId] ?? '') === '' ? current : { ...current, [questionId]: '' })
     setSelected(current => {
       const values = current[questionId] ?? []
       const next = multi
@@ -2183,7 +2318,8 @@ function QuestionCard({ item, busy, onRespond }: {
     })
   }
 
-  const allAnswered = item.questions.every(question => (selected[question.id] ?? []).length > 0)
+  const allAnswered = item.questions.every(question => (selected[question.id] ?? []).length > 0
+    || (custom[question.id] ?? '').trim().length > 0)
 
   return (
     <View style={styles.questionCard} accessibilityRole="alert">
@@ -2213,10 +2349,94 @@ function QuestionCard({ item, busy, onRespond }: {
               </Pressable>
             )
           })}
+          <TextInput
+            style={styles.questionCustom}
+            accessibilityLabel={zhCN.chat.questionCustomPlaceholder}
+            placeholder={zhCN.chat.questionCustomPlaceholder}
+            placeholderTextColor={colors.muted}
+            value={custom[question.id] ?? ''}
+            onChangeText={text => {
+              // Official semantics: a single-select question keeps selection and
+              // custom text mutually exclusive; multi-select allows both.
+              if (question.multiSelect !== true && text.trim().length > 0) {
+                setSelected(current => ({ ...current, [question.id]: [] }))
+              }
+              setCustom(current => ({ ...current, [question.id]: text }))
+            }}
+            multiline
+          />
         </View>
       ))}
-      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected)} loading={busy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
+      <Button label={zhCN.chat.submitAnswer} onPress={() => void onRespond(item.id, selected, custom)} loading={busy} disabled={!allAnswered || (item.questionState === 'open' && remaining === 0)} />
     </View>
+  )
+}
+
+/** Compact DSH QueueDock mirror: queued prompts waiting for the next turn. */
+function QueueDock({ items }: { items: { id?: string; preview: string }[] }) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <View style={styles.queueDock} accessibilityRole="summary" accessibilityLabel={zhCN.chat.queueTitle(items.length)}>
+      <View style={styles.queueDockHeader}>
+        <ListTree size={14} color={colors.primary} />
+        <Text style={styles.queueDockTitle}>{zhCN.chat.queueTitle(items.length)}</Text>
+      </View>
+      {items.map((item, index) => (
+        <View key={item.id ?? `local:${index}`} style={styles.queueDockRow}>
+          <Text style={styles.queueDockText} numberOfLines={1}>{item.preview.trim().length > 0 ? item.preview.trim() : zhCN.chat.queuePending}</Text>
+          {item.id !== undefined && <>
+            {/* The stop-loss path: without remove/steer a mis-queued prompt can
+                only be stopped by killing the running task (official QueueDock
+                offers edit/remove/steer per row). */}
+            <IconButton label={zhCN.chat.queueSteer} icon={ArrowUp} dense
+              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'steer')} />
+            <IconButton label={zhCN.chat.queueRemove} icon={X} dense
+              onPress={() => void useAppStore.getState().updateQueueItem(item.id!, 'remove')} />
+          </>}
+        </View>
+      ))}
+    </View>
+  )
+}
+
+/** Popover listing the session's subagent (child) conversations (title-bar entry). */
+function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
+  visible: boolean
+  sessions: RemoteSession[]
+  onClose: () => void
+  onOpen: (session: RemoteSession) => void
+}) {
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <ModalSurface onClose={onClose}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{zhCN.chat.subagentsTitle(sessions.length)}</Text>
+          <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
+        </View>
+        <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
+          {sessions.map(item => (
+            <Pressable
+              key={item.sessionId}
+              accessibilityRole="button"
+              accessibilityLabel={resolveSessionDisplayTitle(item) ?? item.title ?? zhCN.sessions.child}
+              onPress={() => onOpen(item)}
+              style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
+            >
+              <Text style={styles.queueDockText} numberOfLines={2}>
+                {resolveSessionDisplayTitle(item) ?? item.title ?? zhCN.sessions.child}
+              </Text>
+              {item.running
+                ? <Text style={styles.subagentRunning}>{zhCN.status.running}</Text>
+                : <Text style={styles.subagentIdle}>{zhCN.sessions.child}</Text>}
+              <ChevronRight size={15} color={colors.subtle} />
+            </Pressable>
+          ))}
+        </ScrollView>
+      </ModalSurface>
+    </Modal>
   )
 }
 
@@ -2415,6 +2635,24 @@ function createStyles(colors: ThemeColors) {
   permissionResolvedText: { ...type.smallStrong, color: colors.ink },
   questionBlock: { gap: spacing.xs },
   questionText: { ...type.bodyStrong, color: colors.ink },
+  queueDock: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.surface, padding: spacing.sm, marginBottom: spacing.sm, gap: spacing.xxs },
+  queueDockHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  queueDockTitle: { ...type.smallStrong, color: colors.ink },
+  queueDockRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  queueDockText: { ...type.small, color: colors.muted, flex: 1 },
+  resendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 44, paddingHorizontal: spacing.xs },
+  resendRowPressed: { opacity: 0.6 },
+  resendText: { ...type.small, color: colors.primary },
+  canceledText: { ...type.small, color: colors.muted, paddingHorizontal: spacing.xs, minHeight: 44, textAlignVertical: 'center' },
+  subagentList: { maxHeight: 460 },
+  subagentRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 52, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  subagentRunning: { ...type.smallStrong, color: colors.success },
+  subagentIdle: { ...type.small, color: colors.muted },
+  stopButtonSmall: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center', marginRight: spacing.xs },
+  resendRowDisabled: { opacity: 0.5 },
+  resendTextMuted: { color: colors.muted },
+  resendTextFailed: { color: colors.danger },
+  questionCustom: { borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, color: colors.ink, marginBottom: spacing.xs, minHeight: 40 },
   questionDetail: { ...type.small, color: colors.muted },
   optionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
   optionChosen: { borderColor: colors.accent, backgroundColor: colors.accentSoft },

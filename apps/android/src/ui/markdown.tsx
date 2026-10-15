@@ -1,4 +1,4 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
+import { createContext, memo, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import MarkdownIt, { type Token } from 'markdown-it'
 import { radius, spacing, type } from './theme'
@@ -41,23 +41,104 @@ interface MarkdownNode {
   children: MarkdownNode[]
 }
 
-export function NativeMarkdown({ text }: { text: string }) {
+/**
+ * One message's markdown render: memoized per text and parsed incrementally
+ * while the text only grows (streaming appends). Mirrors the DSH web client's
+ * keying-by-closed-block strategy — already-closed blocks keep both their parse
+ * result and their rendered element, so per-chunk work is O(tail) instead of
+ * O(whole message).
+ */
+export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
   const onLinkPress = useContext(markdownLinkContext)
   const styles = useThemedStyles(createStyles)
-  const nodes = useMemo(() => markdownTree(parser.parse(text, {})), [text])
-  return <View style={styles.container}>{nodes.map(node => renderBlock(node, styles, onLinkPress))}</View>
+  const cacheRef = useRef<BlockParseCache | undefined>(undefined)
+  // markdown-it treats `\r\n?` as a line break; a lone CR would desync the
+  // incremental offsets and silently drop paragraphs. Normalize first.
+  const nodes = useMemo(() => parseBlocks(cacheRef, text.replace(/\r\n?/gu, '\n')), [text])
+  return <View style={styles.container}>{nodes.map(node => renderBlockCached(node, styles, onLinkPress))}</View>
+})
+
+interface BlockParseCache {
+  text: string
+  nodes: MarkdownNode[]
+  /** Char offset of the last top-level block's first line inside `text` (-1 when unknown). */
+  tailStart: number
+  /** Key of the last top-level block; suffix re-parses continue numbering from it. */
+  tailKey: number
 }
 
-function markdownTree(tokens: Token[]): MarkdownNode[] {
+/** Link reference definitions live in the parse env; a suffix parse would lose them. */
+const LINK_REF_DEFINITION = /^\[[^\]]+\]:/mu
+
+function lineStartsOf(text: string): number[] {
+  const starts = [0]
+  for (let index = 0; index < text.length; index += 1) {
+    if (text.charCodeAt(index) === 10) starts.push(index + 1)
+  }
+  return starts
+}
+
+function tailStartOf(source: string, nodes: MarkdownNode[], base: number): number {
+  const last = nodes.at(-1)
+  const line = last?.token.map?.[0]
+  if (last === undefined || line === undefined) return -1
+  return base + (lineStartsOf(source)[line] ?? -1)
+}
+
+/**
+ * Block-parse `text`, reusing the previous parse when the change is a pure
+ * append. Block parsing is line-deterministic, so every top-level block before
+ * the last one is already closed and byte-identical; only the last block (which
+ * the append may extend) plus the new tail are re-parsed, with keys identical
+ * to what a full parse would produce. Edits, shrunken text, or prefixes with
+ * link reference definitions fall back to a full parse.
+ */
+function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: string): MarkdownNode[] {
+  const cache = cacheRef.current
+  if (cache !== undefined && cache.tailStart >= 0 && cache.tailKey >= 0
+    && text.length > cache.text.length && text.startsWith(cache.text)
+    && !LINK_REF_DEFINITION.test(cache.text)) {
+    const suffix = text.slice(cache.tailStart)
+    const suffixNodes = markdownTree(parser.parse(suffix, {}), cache.tailKey)
+    const nodes = [...cache.nodes.slice(0, -1), ...suffixNodes]
+    cacheRef.current = {
+      text,
+      nodes,
+      tailStart: tailStartOf(suffix, suffixNodes, cache.tailStart),
+      tailKey: suffixNodes.at(-1)?.key ?? cache.tailKey,
+    }
+    return nodes
+  }
+  const nodes = markdownTree(parser.parse(text, {}))
+  cacheRef.current = { text, nodes, tailStart: tailStartOf(text, nodes, 0), tailKey: nodes.at(-1)?.key ?? -1 }
+  return nodes
+}
+
+/**
+ * Rendered-element cache keyed by block node: block objects carried over from
+ * the incremental parse return their previous element, so React bails out of
+ * the whole closed-block subtree instead of re-rendering it per chunk.
+ */
+const renderedBlocks = new WeakMap<MarkdownNode, { styles: MarkdownStyles; onLinkPress: MarkdownLinkHandler | undefined; element: ReactNode }>()
+
+function renderBlockCached(node: MarkdownNode, styles: MarkdownStyles, onLinkPress: MarkdownLinkHandler | undefined): ReactNode {
+  const cached = renderedBlocks.get(node)
+  if (cached !== undefined && cached.styles === styles && cached.onLinkPress === onLinkPress) return cached.element
+  const element = renderBlock(node, styles, onLinkPress)
+  renderedBlocks.set(node, { styles, onLinkPress, element })
+  return element
+}
+
+function markdownTree(tokens: Token[], keyOffset = 0): MarkdownNode[] {
   if (tokens.length === 0) return []
-  const root: MarkdownNode = { key: -1, token: tokens[0]!, children: [] }
+  const root: MarkdownNode = { key: keyOffset - 1, token: tokens[0]!, children: [] }
   const stack = [root]
   tokens.forEach((token, key) => {
     if (token.nesting === -1) {
       if (stack.length > 1) stack.pop()
       return
     }
-    const node = { key, token, children: [] } satisfies MarkdownNode
+    const node = { key: keyOffset + key, token, children: [] } satisfies MarkdownNode
     stack.at(-1)!.children.push(node)
     if (token.nesting === 1) stack.push(node)
   })

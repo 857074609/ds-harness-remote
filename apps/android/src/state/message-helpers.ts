@@ -42,6 +42,75 @@ function mapItems(
   return Object.fromEntries(Object.entries(messages).map(([sessionId, items]) => [sessionId, items.map(map)]))
 }
 
+/** One queued prompt as rendered in the queue dock. */
+export interface InboxQueuedItem {
+  /** Host queue item id — the target of `session.updateQueue` actions. */
+  id?: string
+  rpcId?: string
+  preview: string
+}
+
+/**
+ * Queued prompts from the Host `inbox` projection. Only `next-turn` entries are
+ * user-visible queue items; `next-step` is the agent's internal continuation
+ * input (mirrors the official QueueDock, which renders `next-turn` only).
+ */
+export function inboxQueuedItems(inbox: unknown): InboxQueuedItem[] {
+  const record = typeof inbox === 'object' && inbox !== null ? inbox as Record<string, unknown> : {}
+  const rows = Array.isArray(record['next-turn']) ? record['next-turn'] : []
+  const items: InboxQueuedItem[] = []
+  for (const row of rows) {
+    if (typeof row !== 'object' || row === null) { items.push({ preview: '' }); continue }
+    const source = (row as Record<string, unknown>).source
+    const rpcId = typeof source === 'object' && source !== null ? (source as Record<string, unknown>).rpcId : undefined
+    const id = (row as Record<string, unknown>).id
+    const content = (row as Record<string, unknown>).content
+    const preview = Array.isArray(content)
+      ? content.flatMap(block => typeof block === 'object' && block !== null
+        && (block as Record<string, unknown>).type === 'text'
+        && typeof (block as Record<string, unknown>).text === 'string'
+        ? [(block as Record<string, unknown>).text as string] : []).join(' ')
+      : ''
+    items.push({
+      ...(typeof id === 'string' && id.length > 0 ? { id } : {}),
+      ...(typeof rpcId === 'string' && rpcId.length > 0 ? { rpcId } : {}),
+      preview,
+    })
+  }
+  return items
+}
+
+/** Extract queued-prompt rpcIds from the Host `inbox` projection (`next-turn`). */
+export function inboxRpcIds(inbox: unknown): Set<string> {
+  const ids = new Set<string>()
+  for (const item of inboxQueuedItems(inbox)) {
+    if (item.rpcId !== undefined) ids.add(item.rpcId)
+  }
+  return ids
+}
+
+/**
+ * Delivery-state reconciliation against Host truth (no timers, no deletions):
+ * after a fresh history load plus an `inbox` snapshot, an optimistic row whose
+ * prompt is in neither source and that predates the current connection is
+ * judged — `queued` becomes `canceled` (removed remotely / claimed and later
+ * healed by its echo) and `unconfirmed` becomes `failed` (retryable). Rows are
+ * always kept: a late `user/message` echo still replaces them by requestRpcId.
+ */
+export function reconcileDeliveryStates(
+  items: ChatItem[],
+  queuedRpcIds: ReadonlySet<string>,
+  historyRpcIds: ReadonlySet<string>,
+  sentBefore: number,
+): ChatItem[] {
+  return items.map(item => {
+    if (item.kind !== 'message' || item.sendState === undefined || item.sendState === 'failed') return item
+    if (item.requestRpcId === undefined || item.createdAt >= sentBefore) return item
+    if (historyRpcIds.has(item.requestRpcId) || queuedRpcIds.has(item.requestRpcId)) return item
+    return { ...item, sendState: item.sendState === 'queued' ? 'canceled' as const : 'failed' as const }
+  })
+}
+
 export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throughSeq?: number): ChatItem[] {
   const liveById = new Map(live.map(item => [item.id, item]))
   const historyIds = new Set(history.map(item => item.id))

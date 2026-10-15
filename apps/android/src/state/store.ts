@@ -106,6 +106,7 @@ import type {
   PromptImage,
   RemoteDevice,
   RemoteSession,
+  SendMessageResult,
   ServerConfig,
   SessionModels,
   TransportPreference,
@@ -113,7 +114,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame, settleTurnItems } from './event-reducer'
-import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
+import { inboxRpcIds, reconcileDeliveryStates, findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
 
 function applyFeedback(items: ChatItem[], ratings?: Map<string, ChatMessage['feedback']>): ChatItem[] {
   return ratings === undefined ? items : items.map(item => item.kind === 'message'
@@ -196,12 +197,14 @@ interface AppState {
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
-  sendMessage(text: string, images?: PromptImage[]): Promise<boolean>
+  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string): Promise<SendMessageResult>
+  retrySendMessage(itemId: string): Promise<boolean>
+  updateQueueItem(itemId: string, action: 'remove' | 'steer'): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
-  respondQuestion(itemId: string, selected: Record<string, string[]>): Promise<void>
+  respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string): Promise<boolean>
   archiveSession(sessionId: string): Promise<boolean>
   selectModel(selection: ModelSelection): Promise<boolean>
@@ -246,6 +249,57 @@ let activeCodexTimeline: CodexTimelineState | undefined
 let activeCursorStream: AcpStream | undefined
 const codexModelSelections = new Map<string, ModelSelection>()
 let connectionGeneration = 0
+/** Rows created before this instant predate the current connection (reconcile scope). */
+let connectionStartedAt = 0
+
+/**
+ * Event coalescing at the transport boundary. A streaming turn delivers tens
+ * of mux frames per second and each one triggered a full store update + React
+ * render pass, which on long conversations saturated the JS thread until taps
+ * and even the back button stopped responding. Frames are drained in one
+ * synchronous turn every ~100ms so React renders once per window (auto
+ * batching), with a hard cap so backlogs cannot grow unbounded.
+ * `handleMuxFrame` itself stays synchronous — only the transport callback
+ * enqueues, so state-machine tests keep their direct-call semantics.
+ */
+const MUX_FLUSH_MS = 100
+const MUX_FLUSH_MAX = 250
+let pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
+let muxFlushTimer: ReturnType<typeof setTimeout> | undefined
+
+function enqueueMuxFrame(generation: number, frame: MuxStreamFrame): void {
+  pendingMuxFrames.push({ generation, frame })
+  if (pendingMuxFrames.length >= MUX_FLUSH_MAX) {
+    flushPendingMuxFrames()
+    return
+  }
+  if (muxFlushTimer === undefined) {
+    muxFlushTimer = setTimeout(flushPendingMuxFrames, MUX_FLUSH_MS)
+  }
+}
+
+/** Drain queued frames now. Call before any store read that must observe them. */
+function flushPendingMuxFrames(): void {
+  if (muxFlushTimer !== undefined) {
+    clearTimeout(muxFlushTimer)
+    muxFlushTimer = undefined
+  }
+  if (pendingMuxFrames.length === 0) return
+  const queued = pendingMuxFrames
+  pendingMuxFrames = []
+  for (const entry of queued) {
+    if (entry.generation !== connectionGeneration) continue
+    useAppStore.getState().handleMuxFrame(entry.frame)
+  }
+}
+
+function clearPendingMuxFrames(): void {
+  if (muxFlushTimer !== undefined) {
+    clearTimeout(muxFlushTimer)
+    muxFlushTimer = undefined
+  }
+  pendingMuxFrames = []
+}
 let sessionLoadGeneration = 0
 let reconnectFlight: Promise<boolean> | undefined
 
@@ -559,7 +613,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         identity,
         device,
         credentials.accessToken,
-        frame => { if (generation === connectionGeneration) get().handleMuxFrame(frame) },
+        frame => enqueueMuxFrame(generation, frame),
         {
           fetchIceServers: async connectionId => api.turnCredentials(connectionId),
           preferredTransports: [...preferredTransports],
@@ -648,6 +702,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
         }
       })
+      connectionStartedAt = Date.now()
       await saveLastConnectedDeviceId(device.deviceId)
       return true
     } catch (error) {
@@ -707,6 +762,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     ++connectionGeneration
     ++sessionLoadGeneration
     reconnectFlight = undefined
+    clearPendingMuxFrames()
     await closeActiveCodexStream(false)
     await closeActiveCursorStream(false)
     await connection.close()
@@ -735,9 +791,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSession(session) {
+    flushPendingMuxFrames()
     let loadGeneration = ++sessionLoadGeneration
     const current = () => loadGeneration === sessionLoadGeneration
-    set({ busyAction: `session:${session.sessionId}`, error: undefined })
+    // Reset per-session view state up front: `historyLoadingOlder` and the
+    // model catalog belong to the previous session and must not leak into the
+    // new one (stuck pagination spinners, codex prompts sent with the previous
+    // session's model).
+    set({
+      busyAction: `session:${session.sessionId}`,
+      error: undefined,
+      historyLoadingOlder: false,
+      sessionModels: undefined,
+    })
     const load = async () => {
       if (session.backend === 'codex') {
         await closeActiveCodexStream()
@@ -831,7 +897,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       await closeActiveCodexStream()
       await closeActiveCursorStream()
       const [history, feedback] = await Promise.all([
-        connection.requireProxy().sessionHistory(session.sessionId),
+        connection.requireProxy().sessionHistory(session.sessionId, undefined, 60, session.parentSessionId),
         // Older carriers may not expose feedback; history must remain usable.
         connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
       ])
@@ -846,9 +912,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         const authoritativeLifecycle = liveLifecycle !== undefined && liveLifecycle.seq > (history.throughSeq ?? lifecycle?.seq ?? -1)
           ? liveLifecycle : lifecycle
         const nextSession = { ...latest, running: authoritativeLifecycle?.running ?? latest.running }
+        // Reconcile local delivery states against Host truth — only when a real
+        // `inbox` snapshot exists (the key itself, not merely the projection
+        // channel), and only for rows created before this connection. The
+        // reconciliation marks, never deletes: a late `user/message` echo still
+        // replaces the row by requestRpcId, so a misjudgment self-heals.
+        const inboxSnapshot = latest.projections?.values?.inbox
         const merged = applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? [], history.throughSeq), ratings)
-        const restored = nextSession.running === false ? settleTurnItems(merged)
-          : authoritativeLifecycle?.turn === undefined ? merged : settleTurnItems(merged, undefined, authoritativeLifecycle.turn)
+        const reconciled = inboxSnapshot === undefined ? merged : reconcileDeliveryStates(
+          merged,
+          inboxRpcIds(inboxSnapshot),
+          new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
+          connectionStartedAt,
+        )
+        const restored = nextSession.running === false ? settleTurnItems(reconciled)
+          : authoritativeLifecycle?.turn === undefined ? reconciled : settleTurnItems(reconciled, undefined, authoritativeLifecycle.turn)
         return {
           selectedSession: nextSession,
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
@@ -1379,6 +1457,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async loadOlderHistory() {
+    flushPendingMuxFrames()
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
@@ -1390,7 +1469,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const page = session.backend === 'codex'
         ? await readCodexHistoryPage(connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
-        : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60)
+        : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, session.parentSessionId)
       const items = foldHistory(page.events, session.sessionId, true)
       const older = oldestSeq(page.events)
       set(state => ({
@@ -1469,11 +1548,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async sendMessage(input, images = []) {
+  async sendMessage(input, images = [], reuseRpcId) {
+    flushPendingMuxFrames()
     set({ commandResult: undefined })
     const session = get().selectedSession
     const text = input.trim()
-    if (session === undefined || (text.length === 0 && images.length === 0)) return false
+    if (session === undefined || (text.length === 0 && images.length === 0)) return 'rejected'
     if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
       set({ busyAction: 'command', error: undefined })
       try {
@@ -1483,25 +1563,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (result.kind === 'error') throw new Error(result.text ?? zhCN.messageActions.failed)
         set({ busyAction: undefined, commandResult: result.text?.trim()
           ? { sessionId: session.sessionId, text: result.text } : undefined })
-        return true
+        return 'sent'
       } catch (error) {
         set({ busyAction: undefined, error: friendlyError(error) })
-        return false
+        return 'rejected'
       }
     }
-    const requestRpcId = createNativeRpcId()
+    const requestRpcId = reuseRpcId ?? createNativeRpcId()
+    // DSH semantics (`ui-conversation.busyEnter`): while a turn is active a
+    // prompt is queued (`mode:'queue'`), not merged into the running turn.
+    const queuedAtSend = session.running === true || get().busyAction === 'send-message'
     const optimistic: ChatItem = {
       kind: 'message',
-      id: `local:${Date.now()}`,
+      // `local:` prefix is load-bearing for mergeCodexLive's optimistic matching;
+      // the rpcId suffix keeps the id unique when several prompts are queued in
+      // the same millisecond (duplicate keys corrupt the merged timeline).
+      id: `local:${requestRpcId}`,
       sessionId: session.sessionId,
       role: 'user',
       text,
       ...(images.length === 0 ? {} : { images: images.map(image => ({ uri: image.uri, name: image.name })) }),
       createdAt: Date.now(),
       requestRpcId,
+      // Retry material travels with the row (not a module map) so image rows
+      // stay resendable across reconnects and cannot leak after cleanup.
+      promptImages: images,
     }
     set(state => ({
-      messages: { ...state.messages, [session.sessionId]: [...(state.messages[session.sessionId] ?? []), optimistic] },
+      messages: { ...state.messages, [session.sessionId]: [
+        ...(state.messages[session.sessionId] ?? []).filter(item => item.id !== optimistic.id),
+        optimistic,
+      ] },
       busyAction: 'send-message',
       error: undefined,
     }))
@@ -1596,31 +1688,74 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
-        // Keep the sending state until the Host event stream confirms that
-        // execution has actually started. `session.prompt` only acknowledges
-        // receipt, so clearing busyAction here briefly re-enables the quick
-        // actions before the first assistant/tool event arrives.
+        // `session.prompt` acknowledges receipt only; keep busyAction until the
+        // event stream shows the turn starting. When a turn was already active
+        // the Host queued the prompt (`inbox` projection is authoritative), so
+        // the row leaves the timeline and appears in the queue dock.
+        set(state => ({
+          messages: {
+            ...state.messages,
+            [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+              item.id === optimistic.id && item.kind === 'message'
+                ? { ...item, sendState: queuedAtSend ? 'queued' : undefined }
+                : item),
+          },
+        }))
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-        return true
+        return 'sent'
       }
       set({ busyAction: undefined })
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-      return true
+      return 'sent'
     } catch (error) {
+      // Keep the row as the single error surface (inline state + retry). A
+      // deleted row plus a Host that already accepted the prompt is exactly the
+      // "message vanished / reappears after reload" mismatch; timeout/transport
+      // errors leave the outcome unknown and must never be judged by timers.
+      const unconfirmed = isRpcTimeoutError(error) || isRecoverableTransportError(error)
       set(state => ({
         messages: {
           ...state.messages,
-          [session.sessionId]: (state.messages[session.sessionId] ?? []).filter(item => item.id !== optimistic.id),
+          [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+            item.id === optimistic.id && item.kind === 'message'
+              ? { ...item, sendState: unconfirmed ? 'unconfirmed' : 'failed', sendError: friendlyError(error) }
+              : item),
         },
-        ...(session.backend === 'cursor' || session.backend === 'antigravity' ? {
+        // Only a deterministic failure may claim the agent is idle again; an
+        // unconfirmed outcome leaves `running` untouched (the prompt may have
+        // started on the Host).
+        ...((session.backend === 'cursor' || session.backend === 'antigravity') && !unconfirmed ? {
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
         } : {}),
         busyAction: undefined,
-        error: friendlyError(error),
       }))
+      return 'kept'
+    }
+  },
+
+  async updateQueueItem(itemId, action) {
+    const session = get().selectedSession
+    if (session === undefined || session.backend !== 'harness' || get().connection.phase !== 'connected') return false
+    try {
+      await connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
+      return true
+    } catch (error) {
+      set({ error: friendlyError(error) })
       return false
     }
+  },
+
+  async retrySendMessage(itemId) {
+    const state = get()
+    if (state.busyAction !== undefined) return false
+    const session = state.selectedSession
+    if (session === undefined) return false
+    const row = (state.messages[session.sessionId] ?? []).find(item => item.id === itemId)
+    if (row?.kind !== 'message' || row.sendState === undefined || row.requestRpcId === undefined) return false
+    // Reuse the original request rpcId: a prompt the Host already accepted
+    // (unconfirmed outcome) must not be executed twice where the Host dedupes.
+    return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'
   },
 
   async stopSession() {
@@ -1698,7 +1833,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async respondQuestion(itemId, selected) {
+  async respondQuestion(itemId, selected, custom) {
     set({ busyAction: `question:${itemId}`, error: undefined })
     try {
       const proxy = connection.requireProxy()
@@ -1706,10 +1841,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (item === undefined || item.frameRpcId === undefined) {
         throw new Error(zhCN.runtime.openSessionFirst)
       }
-      const answers = item.questions.map(question => ({
-        id: question.id,
-        selected: selected[question.id] ?? [],
-      }))
+      const answers = item.questions.map(question => {
+        const freeText = custom?.[question.id]?.trim()
+        return {
+          id: question.id,
+          selected: selected[question.id] ?? [],
+          // Official answer shape carries `custom`; keep it out when empty.
+          ...(freeText === undefined || freeText.length === 0 ? {} : { custom: freeText }),
+        }
+      })
       await proxy.respondQuestion(item.frameRpcId, item.sessionId, { answers })
       set(state => ({
         messages: item.callId === undefined ? mapQuestionAnswered(state.messages, itemId) : state.messages,
@@ -1864,6 +2004,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   setOffline() {
     if (get().connection.phase !== 'disconnected') {
       ++sessionLoadGeneration
+      clearPendingMuxFrames()
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,

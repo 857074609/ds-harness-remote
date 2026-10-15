@@ -2,7 +2,7 @@ import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../src/types'
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
-import { mergeHistoryAndLive, prependHistory } from '../src/state/message-helpers'
+import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 
 const { proxy, transport, storage, authenticate, acp } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
@@ -66,6 +66,52 @@ const prepareScenario1 = () => {
 beforeEach(prepareScenario1)
 
 describe('ordered history recovery', () => {
+  it('reconciles local delivery states by marking, never by deleting', async () => {
+    const row = (id: string, requestRpcId: string, sendState: 'queued' | 'failed' | 'unconfirmed', createdAt = 1): ChatItem => ({
+      kind: 'message', id, sessionId: 's1', role: 'user', text: 'hello', createdAt, requestRpcId, sendState,
+    })
+    await runScenarios([
+      {
+        name: 'marks pre-connection queued orphans canceled and unconfirmed orphans failed',
+        run: () => {
+          const merged = reconcileDeliveryStates(
+            [row('local:a', 'rpc-a', 'queued'), row('local:b', 'rpc-b', 'unconfirmed')],
+            new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled', 'failed'])
+          expect(merged.map(item => item.id)).toEqual(['local:a', 'local:b'])
+        },
+      },
+      {
+        name: 'keeps rows still sitting in the Host inbox',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:a', 'rpc-a', 'queued')], new Set(['rpc-a']), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['queued'])
+        },
+      },
+      {
+        name: 'keeps failed rows as user retry material',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:c', 'rpc-c', 'failed')], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['failed'])
+        },
+      },
+      {
+        name: 'keeps rows sent during the current connection for live-frame reconciliation',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:d', 'rpc-d', 'unconfirmed', 200)], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['unconfirmed'])
+        },
+      },
+      {
+        name: 'keeps rows whose prompt is echoed in the loaded history',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:e', 'rpc-e', 'queued')], new Set<string>(), new Set(['rpc-e']), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['queued'])
+        },
+      },
+    ])
+  })
+
   it('merges cached tool results using snapshot and live ordering', async () => {
     await runScenarios(
       [
@@ -362,7 +408,7 @@ describe('session restore state machine', () => {
             ).toBe(true)
             const close = vi.fn(async () => undefined)
             finish({ streamId: 'old-prompt-stream', close })
-            expect(await sending).toBe(true)
+            expect(await sending).toBe('sent')
             expect(close).toHaveBeenCalledOnce()
             expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new`)
             expect(acp.prompt).toHaveBeenCalledWith('old', 'hello', undefined, [], backend)

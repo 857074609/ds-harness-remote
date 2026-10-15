@@ -463,11 +463,13 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
   )
 }
 
-export function SwipeableSessionRow({ session, open, locked, busy, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
+export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
   session: RemoteSession
   open: boolean
   locked: boolean
   busy: boolean
+  /** Session history is still loading after the tap (openSession runs before navigation). */
+  opening?: boolean
   compact?: boolean
   title?: string
   meta?: string
@@ -573,7 +575,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
     outputRange: [-(rowWidth * 0.8 - SWIPE_ACTION_WIDTH) / 2, 0, 0],
     extrapolate: 'clamp',
   })
-  const disabled = locked || busy
+  const disabled = locked || busy || opening
 
   const displayTitle = title ?? sessionTitle(session)
   const displayMeta = meta ?? updatedText(session.updatedAt)
@@ -628,7 +630,9 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
                     <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
                   </View>}
             </View>
-            <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />
+            {opening
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />}
           </Pressable>
         </View>
       </Animated.View>
@@ -981,6 +985,7 @@ export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSe
                     open={openSessionId === session.sessionId}
                     locked={busy !== undefined}
                     busy={busy === `archive:${session.sessionId}`}
+                    opening={busy === `session:${session.sessionId}`}
                     onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
                     onArchive={() => useAppStore.getState().archiveSession(session.sessionId)}
                     onPress={() => { setOpenSessionId(undefined); void open(session) }}

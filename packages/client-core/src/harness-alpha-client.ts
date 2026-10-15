@@ -353,12 +353,23 @@ export class HarnessAlphaClient {
     return typeof committed === 'string' && committed.length > 0 ? committed : agentPreset
   }
 
-  async sessionHistory(sessionId: string, beforeSeq?: number, maxMessages = 60): Promise<HarnessSessionHistoryPage> {
+  /**
+   * Official SessionAddress: a subagent session must be addressed through its
+   * durable parent (`{ kind: 'subagent', parentSessionId, childSessionId }`);
+   * the plain session form is rejected with `session/agent-busy`.
+   */
+  private sessionAddress(sessionId: string, parentSessionId?: string) {
+    return parentSessionId === undefined
+      ? { kind: 'session' as const, sessionId }
+      : { kind: 'subagent' as const, parentSessionId, childSessionId: sessionId, mode: 'unknown' as const }
+  }
+
+  async sessionHistory(sessionId: string, beforeSeq?: number, maxMessages = 60, parentSessionId?: string): Promise<HarnessSessionHistoryPage> {
     if (beforeSeq !== undefined) {
       const throughSeq = this.followCursors.get(sessionId) ?? beforeSeq
       const page = await this.callValue<{ records: unknown[]; hasMore: boolean }>('session/page', {
         request: {
-          address: { kind: 'session', sessionId },
+          address: this.sessionAddress(sessionId, parentSessionId),
           throughSeq,
           beforeSeq,
           maxMessages,
@@ -376,15 +387,16 @@ export class HarnessAlphaClient {
     if (generation !== this.followGeneration) throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
     const handle: SessionFollowHandle = { sessionId, controller: new AbortController() }
     this.sessionFollow = handle
-    const source = await this.gateway.open('session/follow', {
+    const opened = this.gateway.open('session/follow', {
       args: {
         request: {
-          address: { kind: 'session', sessionId },
+          address: this.sessionAddress(sessionId, parentSessionId),
           maxMessages,
           ...(this.host.sessionFormat === 3 ? { assistantStream: true as const } : {}),
         },
       },
     }, handle.controller.signal)
+    const source = await this.boundedFollow(opened, handle)
     handle.stream = source
     if (this.sessionFollow !== handle || handle.controller.signal.aborted) {
       await this.closeHandle(handle, false)
@@ -392,7 +404,7 @@ export class HarnessAlphaClient {
     }
     const iterator = source[Symbol.asyncIterator]()
     handle.iterator = iterator
-    const first = await iterator.next()
+    const first = await this.boundedFollow(iterator.next(), handle)
     if (this.sessionFollow !== handle || handle.controller.signal.aborted) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
     }
@@ -438,6 +450,12 @@ export class HarnessAlphaClient {
   async sessionCancel(sessionId: string): Promise<void> {
     const result = await this.callValue<{ accepted: true }>('session/cancel', { request: { sessionId } })
     if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the stop request.')
+  }
+
+  /** Apply one operation to a still-pending queue occurrence (official QueueAction subset). */
+  async sessionUpdateQueue(sessionId: string, itemId: string, action: { kind: 'remove' | 'steer' }): Promise<void> {
+    const result = await this.callValue<{ accepted: true }>('session/updateQueue', { request: { sessionId, itemId, action } })
+    if (result.accepted !== true) throw new RemoteGatewayError('INVALID_MESSAGE', 'The Host did not accept the queue update.')
   }
 
   async hostDescribe(): Promise<HarnessHostDescriptor> {
@@ -759,10 +777,37 @@ export class HarnessAlphaClient {
     await this.closeHandle(follow, true)
   }
 
+  /**
+   * Bound one phase of opening a session follow. An unanswered open (observed
+   * for subagent-parent addresses) must fail loudly instead of hanging the
+   * caller's session switch forever.
+   */
+  private async boundedFollow<T>(work: Promise<T>, handle: SessionFollowHandle): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The session follow did not open in time.')), 15_000)
+    })
+    try {
+      return await Promise.race([work, timeout])
+    } catch (error) {
+      handle.controller.abort()
+      throw error
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }
+
   private async closeHandle(handle: StreamHandle | undefined, notifyRemote: boolean): Promise<void> {
     if (handle === undefined) return
     if (handle.stream !== undefined) {
-      await handle.stream.close(notifyRemote).catch(() => undefined)
+      // The close of a live follow can wait on the pump's pending read forever
+      // (observed when switching sessions from inside a live conversation),
+      // which froze the incoming open in `closeSessionFollow`. Bound it: the
+      // abort below is authoritative for local cleanup either way.
+      await Promise.race([
+        handle.stream.close(notifyRemote).catch(() => undefined),
+        new Promise(resolve => setTimeout(resolve, 2_000)),
+      ])
       handle.controller.abort()
       return
     }

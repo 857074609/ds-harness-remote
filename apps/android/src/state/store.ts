@@ -537,19 +537,26 @@ export const useAppStore = create<AppState>((set, get) => ({
               : { finished: entry?.finished === 'failed' ? 'failed' as const : 'completed' as const }),
           }
         }
+        let changed = false
         const updated = state.sessions.map(row => {
           const fresh = rows.find(item => item.sessionId === row.sessionId)
           if (fresh === undefined || (fresh.running === row.running && fresh.updatedAt === row.updatedAt)) return row
+          changed = true
           return { ...row, running: fresh.running, updatedAt: fresh.updatedAt }
         })
         const added = rows.filter(item => !known.has(item.sessionId))
         const selectedFresh = state.selectedSession === undefined
           ? undefined
           : rows.find(item => item.sessionId === state.selectedSession?.sessionId)
+        // Preserve array identity when nothing moved: the 8s refresh otherwise
+        // hands consumers a fresh `sessions` reference and re-runs their memos.
         return {
           sessionLifecycles: marks,
-          sessions: added.length > 0 ? [...added, ...updated] : updated,
+          ...(changed || added.length > 0
+            ? { sessions: added.length > 0 ? [...added, ...updated] : updated }
+            : {}),
           ...(state.selectedSession !== undefined && selectedFresh !== undefined
+            && (selectedFresh.running !== state.selectedSession.running || selectedFresh.updatedAt !== state.selectedSession.updatedAt)
             ? { selectedSession: { ...state.selectedSession, running: selectedFresh.running, updatedAt: selectedFresh.updatedAt } }
             : {}),
         }
@@ -2138,10 +2145,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             adopted.add(rpcId)
             vanishing.delete(rpcId)
           }
-          for (const rpcId of adopted) {
+          for (const rpcId of [...adopted]) {
             if (current.has(rpcId)) continue
-            if (vanishing.has(rpcId)) retire.add(rpcId)
-            else vanishing.add(rpcId)
+            if (vanishing.has(rpcId)) {
+              // Retired: the row is settled (or already replaced by its echo) —
+              // forget the rpcId so it stops re-entering the retire path on
+              // every following projection update.
+              retire.add(rpcId)
+              adopted.delete(rpcId)
+              vanishing.delete(rpcId)
+            } else vanishing.add(rpcId)
           }
           adoptedQueueRpcIds.set(sessionId, adopted)
           vanishingQueueRpcIds.set(sessionId, vanishing)

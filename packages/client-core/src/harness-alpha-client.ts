@@ -783,6 +783,9 @@ export class HarnessAlphaClient {
    * caller's session switch forever.
    */
   private async boundedFollow<T>(work: Promise<T>, handle: SessionFollowHandle): Promise<T> {
+    // The raced work keeps running after a timeout: attach a sink so its late
+    // rejection is never an unhandled promise rejection.
+    void work.catch(() => undefined)
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The session follow did not open in time.')), 15_000)

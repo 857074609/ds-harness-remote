@@ -16,6 +16,7 @@ import { BlurTargetView, BlurView } from 'expo-blur'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 import { AlertCircle, ArrowLeft, ChevronRight, CircleCheck, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react-native'
 import { radius, spacing, type } from './theme'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
@@ -75,10 +76,11 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
   children: ReactNode | ((headerHeight: number) => ReactNode)
   inset?: boolean
 }) {
+  const insets = useSafeAreaInsets()
   const styles = useThemedStyles(createStyles)
   const blurTarget = useRef<View>(null)
   // Seeded with the single-line TopBar minimum until the header measures.
-  const [height, setHeight] = useState(60)
+  const [height, setHeight] = useState(56 + insets.top)
   const contentInset = inset ? 0 : height
   return (
     <View style={styles.screen}>
@@ -92,8 +94,6 @@ export function BlurHeaderFrame({ header, children, inset = false }: {
       </BlurTargetView>
       <View style={styles.frameHeader} onLayout={event => setHeight(event.nativeEvent.layout.height)}>
         <HeaderBlurTargetContext.Provider value={blurTarget}>{header}</HeaderBlurTargetContext.Provider>
-        {/* Feathers the frosted bar into the content instead of ending on a hard edge. */}
-        <VerticalFade from={0.15} to={0} style={styles.frameFade} />
       </View>
     </View>
   )
@@ -138,6 +138,7 @@ export function TopBar({
   /** Set above 1 when the title carries structured text that may not fit one line. */
   titleLines?: number
 }) {
+  const insets = useSafeAreaInsets()
   const { colors, scheme } = useTheme()
   // Inside a BlurHeaderFrame the bar frosts the content beneath it instead of painting a surface.
   const blurTarget = useContext(HeaderBlurTargetContext)
@@ -145,17 +146,30 @@ export function TopBar({
   const hasSubtitle = subtitle !== undefined && subtitle.length > 0
   const tallerBar = hasSubtitle || titleLines > 1
   return (
-    <View style={[styles.topBar, tallerBar && styles.topBarWithSubtitle, blurTarget !== undefined && styles.topBarBlurred]}>
+    <View
+      style={[
+        styles.topBar,
+        { paddingTop: insets.top + spacing.xs, minHeight: 56 + insets.top },
+        tallerBar && styles.topBarWithSubtitle,
+        blurTarget !== undefined && styles.topBarBlurred,
+      ]}
+    >
       {blurTarget !== undefined && (
-        <BlurView blurTarget={blurTarget} blurMethod="dimezisBlurViewSdk31Plus" intensity={35}
-          tint={scheme === 'dark' ? 'dark' : 'light'} style={StyleSheet.absoluteFill} pointerEvents="none" />
+        <BlurView
+          blurTarget={blurTarget}
+          blurMethod="dimezisBlurViewSdk31Plus"
+          intensity={50}
+          tint={scheme === 'dark' ? 'dark' : 'light'}
+          style={[StyleSheet.absoluteFill, { overflow: 'hidden' }]}
+          pointerEvents="none"
+        />
       )}
-      {/* Frosted translucent backdrop (80% opacity) matching modern iOS/assistant styling */}
+      {/* Frosted translucent backdrop (~60% opacity) matching modern iOS/assistant styling */}
       {blurTarget !== undefined && (
         <View
           style={[
             StyleSheet.absoluteFill,
-            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.80)' : 'rgba(255, 255, 255, 0.80)' }
+            { backgroundColor: scheme === 'dark' ? 'rgba(20, 20, 24, 0.65)' : 'rgba(255, 255, 255, 0.60)' }
           ]}
           pointerEvents="none"
         />
@@ -451,7 +465,7 @@ function createStyles(colors: ThemeColors) {
     frameContent: { flex: 1 },
     frameFade: { position: 'absolute', top: '100%', left: 0, right: 0, height: spacing.lg },
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
-    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0, overflow: 'hidden' },
+    topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0 },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
     topBarSide: { flexDirection: 'row', alignItems: 'center' },
     topBarTrailing: { justifyContent: 'flex-end' },
@@ -464,6 +478,11 @@ function createStyles(colors: ThemeColors) {
       borderColor: colors.separator,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1.5 },
+      shadowOpacity: 0.08,
+      shadowRadius: 4,
+      elevation: 2,
     },
     topBarPillGroup: {
       height: 40,
@@ -474,6 +493,11 @@ function createStyles(colors: ThemeColors) {
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: colors.separator,
       paddingHorizontal: 2,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1.5 },
+      shadowOpacity: 0.08,
+      shadowRadius: 4,
+      elevation: 2,
     },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
     topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink, fontWeight: '700' },

@@ -1205,7 +1205,7 @@ function createStyles(colors: ThemeColors) {
   connectionError: { padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.dangerSoft, gap: spacing.sm },
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },
-  group: { borderRadius: radius.lg, backgroundColor: colors.surface, paddingHorizontal: spacing.md },
+  group: { borderRadius: radius.lg, backgroundColor: colors.surface, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
   primaryArea: { marginTop: spacing.xxl },
   secondaryArea: { marginTop: spacing.sm },
   contentCounts: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md },

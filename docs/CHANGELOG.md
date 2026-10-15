@@ -1,5 +1,10 @@
-## Unreleased
+## 0.5.8 - 2026-10-16
 
+- Refreshes Android with frosted floating headers, pill actions, a rounded floating composer, and a white light theme with subtle card outlines (#111, #112, #113).
+- Keeps Remote login method tabs on one row.
+- Moves the cloud Host image build inputs and bootstrap into `apps/cloud-host`, with pinned dependencies, persistent device credentials, and an image changelog; image releases remain separately versioned.
+- Advances the Plugin and Android app to `0.5.8` (Android `versionCode 46`).
+- Thanks @dreamfarer-space for the Android interface improvements and Host compatibility/lifecycle fixes in #111, #112, #113, #116, and #117.
 - Adds Android's locally saved default permissions for new Harness and CodeX chats: backend default, workspace write, or full access. Backend default preserves Harness computer settings and CodeX workspace write. Existing chats keep their permissions; new Harness chats require Host confirmation, and CodeX remembers the returned policy per Host and Thread.
 - Cancels Host Server HTTP requests, including authentication and response body consumption, when the runtime closes; keeps the request deadline active through body reads. The TUI lifecycle test uses an abortable local fixture instead of a live Server.
 - Loads Node's SQLite builtin natively so AGY session discovery remains usable with older Vite test runners when the optional `sqlite3` CLI is absent.
@@ -12,6 +17,11 @@
 
 ### 中文
 
+- Android 更新毛玻璃悬浮顶栏、胶囊操作按钮和圆角悬浮输入框；浅色主题统一为白色，并增加精细卡片轮廓（#111、#112、#113）。
+- Remote 登录方式选项保持单行显示。
+- 云 Host 镜像构建输入和 bootstrap 收入 `apps/cloud-host`，固定依赖、持久化设备凭据并维护镜像变更记录；镜像仍独立管理版本。
+- Plugin 与 Android App 升级到 `0.5.8`（Android `versionCode 46`）。
+- 感谢 @dreamfarer-space 在 #111、#112、#113、#116、#117 中贡献 Android 界面改进及 Host 兼容性和生命周期修复。
 - Android 设置新增「新对话默认权限」并保存在手机本地，可选择使用默认权限、工作区内修改或完全权限，自动用于新建 Harness / CodeX 对话。「默认」保留 Harness 电脑端设置与 CodeX 工作区内修改行为。已有对话不变；Harness 读取 Host 确认后的权限，CodeX 按 Host / Thread 保存实际返回的权限。
 - Host 关闭时取消 Server HTTP 请求（包括鉴权和响应体读取），请求超时覆盖完整响应读取阶段；TUI 生命周期测试改用可取消的受控请求，隔离真实 Server。
 - AGY 会话发现通过 Node 原生加载 SQLite 内置模块，兼容旧版 Vite 测试运行器且无需依赖可选的 `sqlite3` 命令。

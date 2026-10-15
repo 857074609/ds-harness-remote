@@ -4,7 +4,11 @@ import { MAX_AGENT_ACP_TRANSFER_BYTES } from '@dsh-remote/protocol'
 import { isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
+import { createRequire } from 'node:module'
 import type { StepLogRecord } from './types.js'
+
+// Load prefix-only Node builtins natively, including under older Vite runners.
+const nodeRequire = createRequire(import.meta.url)
 
 export interface HydratedSessionEvent {
   type: 'event'
@@ -159,7 +163,7 @@ export interface DiscoveredSession {
 
 async function querySqliteJson<T = unknown>(dbPath: string, sql: string, params: Array<string | number> = []): Promise<T[]> {
   try {
-    const { DatabaseSync } = await import('node:sqlite')
+    const { DatabaseSync } = nodeRequire('node:sqlite') as typeof import('node:sqlite')
     const db = new DatabaseSync(dbPath, { readOnly: true })
     try {
       const stmt = db.prepare(sql)

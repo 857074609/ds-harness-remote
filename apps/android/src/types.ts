@@ -299,6 +299,8 @@ export interface ChatMessage extends ChatItemBase {
   /** Human-readable delivery failure reason kept on the row (single error surface). */
   sendError?: string
   /** Original prompt image payloads kept for retries (the row's `images` are display-only). */
+  /** The Host inbox adopted this queued prompt — it must never re-enter the local queue fallback. */
+  queuedAdopted?: boolean
   promptImages?: PromptImage[]
   context?: boolean
   feedback?: 'positive' | 'negative'

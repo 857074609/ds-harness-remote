@@ -263,6 +263,11 @@ let connectionStartedAt = 0
  * `handleMuxFrame` itself stays synchronous — only the transport callback
  * enqueues, so state-machine tests keep their direct-call semantics.
  */
+/** Queue-adoption bookkeeping: rpcIds the Host inbox has ever adopted, per session. */
+const adoptedQueueRpcIds = new Map<string, Set<string>>()
+/** Adopted rpcIds absent from the latest projection update — one update of grace for the echo. */
+const vanishingQueueRpcIds = new Map<string, Set<string>>()
+
 const MUX_FLUSH_MS = 100
 const MUX_FLUSH_MAX = 250
 let pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
@@ -300,6 +305,11 @@ function clearPendingMuxFrames(): void {
     muxFlushTimer = undefined
   }
   pendingMuxFrames = []
+}
+
+function clearQueueAdoption(): void {
+  adoptedQueueRpcIds.clear()
+  vanishingQueueRpcIds.clear()
 }
 let sessionLoadGeneration = 0
 let reconnectFlight: Promise<boolean> | undefined
@@ -815,6 +825,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     ++sessionLoadGeneration
     reconnectFlight = undefined
     clearPendingMuxFrames()
+    clearQueueAdoption()
     await closeActiveCodexStream(false)
     await closeActiveCursorStream(false)
     await connection.close()
@@ -2084,6 +2095,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (get().connection.phase !== 'disconnected') {
       ++sessionLoadGeneration
       clearPendingMuxFrames()
+      clearQueueAdoption()
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,
@@ -2109,9 +2121,51 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...session,
           projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
         }
+        // Distinguish "never received" from "received and then dropped": an
+        // rpcId the inbox adopted is marked on its local row and must never
+        // re-enter the queue fallback. If it later vanishes from the inbox
+        // without its echo replacing the row (removed elsewhere), the Host
+        // dropped it — retire the row after one update of grace so a consumed
+        // prompt's echo can land first.
+        const settle = key === 'inbox' ? (() => {
+          const current = new Set(inboxRpcIds(value))
+          const adopted = adoptedQueueRpcIds.get(sessionId) ?? new Set<string>()
+          const vanishing = vanishingQueueRpcIds.get(sessionId) ?? new Set<string>()
+          const retire = new Set<string>()
+          const mark = new Set<string>()
+          for (const rpcId of current) {
+            if (!adopted.has(rpcId)) mark.add(rpcId)
+            adopted.add(rpcId)
+            vanishing.delete(rpcId)
+          }
+          for (const rpcId of adopted) {
+            if (current.has(rpcId)) continue
+            if (vanishing.has(rpcId)) retire.add(rpcId)
+            else vanishing.add(rpcId)
+          }
+          adoptedQueueRpcIds.set(sessionId, adopted)
+          vanishingQueueRpcIds.set(sessionId, vanishing)
+          if (mark.size === 0 && retire.size === 0) return undefined
+          return (items: ChatItem[]): ChatItem[] => items.map(item =>
+            item.kind === 'message' && item.requestRpcId !== undefined
+            && item.sendState === 'queued'
+            && (mark.has(item.requestRpcId) || retire.has(item.requestRpcId))
+              ? {
+                  ...item,
+                  ...(mark.has(item.requestRpcId) ? { queuedAdopted: true as const } : {}),
+                  ...(retire.has(item.requestRpcId) ? { sendState: 'canceled' as const } : {}),
+                }
+              : item)
+        })() : undefined
         return {
           sessions: state.sessions.map(update),
           selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+          ...(settle === undefined ? {} : {
+            messages: {
+              ...state.messages,
+              [sessionId]: settle(state.messages[sessionId] ?? []),
+            },
+          }),
           ...(seq === undefined ? {} : { sessionProjectionSeqs: {
             ...state.sessionProjectionSeqs,
             [sessionId]: { ...state.sessionProjectionSeqs[sessionId], [key]: seq },

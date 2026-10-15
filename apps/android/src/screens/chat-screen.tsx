@@ -25,6 +25,7 @@ import { Archive, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLe
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
+import { useLiveSessionStatus } from './device-screens'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
 import type { AgentPresetOption, AgentTeamState, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
@@ -54,6 +55,9 @@ const LONG_DRAFT_HINT = 12_000
 const LONG_DRAFT_MAX = 256_000
 
 export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
+  // New subagent children and running-state changes must reach `sessions`
+  // without leaving the chat (the list screens unmount here).
+  useLiveSessionStatus()
   const session = useAppStore(state => state.selectedSession)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
@@ -218,7 +222,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued' && (
       hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
-      || (item.images?.length ?? 0) > 0))), [messages, session?.backend])
+      || (item.images?.length ?? 0) > 0
+      // Output-less failure turns keep an empty assistant row carrying only the
+      // turnEnd reason — it must stay visible so the failure is explainable.
+      || item.turnEnd !== undefined))), [messages, session?.backend])
   const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
   const interleavedTurns = useMemo(() => {
     const seen = new Set<string>()
@@ -237,6 +244,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
     const inboxItems = inboxProjection === undefined ? [] : inboxQueuedItems(inboxProjection)
     const adopted = inboxRpcIds(inboxProjection)
     const pending = messages.flatMap(item => item.kind === 'message' && item.role === 'user' && item.sendState === 'queued'
+      && item.queuedAdopted !== true
       && (item.requestRpcId === undefined || !adopted.has(item.requestRpcId)) ? [{ preview: item.text }] : [])
     // Union (the official QueueDock's pendingQueue behaviour): inbox rows are
     // authoritative and local rows not yet adopted by the projection cover the

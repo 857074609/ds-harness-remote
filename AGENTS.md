@@ -98,7 +98,8 @@ NODE_ENV=production pnpm -r build
 常用命令：
 
 ```bash
-pnpm --filter @dsh-remote/plugin build --watch
+pnpm --filter ds-harness-remote build
+pnpm --filter ds-harness-remote check
 pnpm --filter @dsh-remote/android android
 pnpm --filter @dsh-remote/android start
 DSH_REMOTE_SERVER=ws://127.0.0.1:8080/ws/v1/connect pnpm --filter @dsh-remote/mock-host dev

@@ -8,6 +8,7 @@ import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+import { useLiveSessionStatus } from './device-screens'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { SwipeableSessionRow } from './device-screens'
@@ -23,6 +24,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
+  useLiveSessionStatus()
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
   const codexAvailable = useAppStore(state => state.codexAvailable)

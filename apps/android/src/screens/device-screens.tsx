@@ -463,6 +463,17 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
   )
 }
 
+/** Keep visible session lists honest: refresh execution status while mounted. */
+export function useLiveSessionStatus(): void {
+  const phase = useAppStore(state => state.connection.phase)
+  useEffect(() => {
+    if (phase !== 'connected') return
+    void useAppStore.getState().refreshSessionStatus()
+    const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
+    return () => clearInterval(timer)
+  }, [phase])
+}
+
 export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
   session: RemoteSession
   open: boolean
@@ -480,6 +491,9 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const reduceMotion = useReduceMotion()
+  // Live turn lifecycle beats the session-list snapshot for the running mark.
+  const liveRunning = useAppStore(state => state.sessionLifecycles[session.sessionId]?.running)
+  const running = liveRunning ?? session.running
   const offset = useRef(new Animated.Value(0)).current
   const armed = useRef(new Animated.Value(0)).current
   const [rowWidth, setRowWidth] = useState(360)
@@ -621,10 +635,10 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
             <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
                 <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
-                {!compact && session.running && <StatusBadge status="running" />}
+                {!compact && running && <StatusBadge status="running" />}
               </View>
               {compact
-                ? <Text style={styles.compactSessionMeta}>{session.running ? zhCN.status.running : displayMeta}</Text>
+                ? <Text style={styles.compactSessionMeta}>{running ? zhCN.status.running : displayMeta}</Text>
                 : <View style={styles.rowDetailLine}>
                     <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
                     <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
@@ -939,6 +953,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 }
 
 export function SessionsScreen({ onBack, onSession }: { onBack: () => void; onSession: (session: RemoteSession) => void }) {
+  useLiveSessionStatus()
   const sessions = useAppStore(state => state.sessions)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   const busy = useAppStore(state => state.busyAction)

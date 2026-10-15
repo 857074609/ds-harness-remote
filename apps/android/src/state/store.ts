@@ -189,6 +189,7 @@ interface AppState {
   completeOAuth(token: string): Promise<boolean>
   refreshDevices(): Promise<void>
   refreshWorkspaces(): Promise<void>
+  refreshSessionStatus(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
@@ -493,6 +494,37 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       set({ refreshing: false, error: friendlyError(error) })
     }
+  },
+
+  /**
+   * Lightweight status refresh for visible session lists: pulls the session
+   * rows and merges only `running`/`updatedAt` (plus newly spawned rows such as
+   * subagent children). The list previously showed the connect-time snapshot
+   * forever, so execution status never appeared while browsing sessions.
+   */
+  async refreshSessionStatus() {
+    if (get().connection.phase !== 'connected') return
+    try {
+      const rows = await connection.requireProxy().sessionList()
+      set(state => {
+        const known = new Set(state.sessions.map(item => item.sessionId))
+        const updated = state.sessions.map(row => {
+          const fresh = rows.find(item => item.sessionId === row.sessionId)
+          if (fresh === undefined || (fresh.running === row.running && fresh.updatedAt === row.updatedAt)) return row
+          return { ...row, running: fresh.running, updatedAt: fresh.updatedAt }
+        })
+        const added = rows.filter(item => !known.has(item.sessionId))
+        const selectedFresh = state.selectedSession === undefined
+          ? undefined
+          : rows.find(item => item.sessionId === state.selectedSession?.sessionId)
+        return {
+          sessions: added.length > 0 ? [...added, ...updated] : updated,
+          ...(state.selectedSession !== undefined && selectedFresh !== undefined
+            ? { selectedSession: { ...state.selectedSession, running: selectedFresh.running, updatedAt: selectedFresh.updatedAt } }
+            : {}),
+        }
+      })
+    } catch { /* status refresh is best-effort */ }
   },
 
   async refreshWorkspaces() {

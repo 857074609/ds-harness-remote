@@ -1,5 +1,6 @@
 ## Unreleased
 
+- Adds Android's locally saved default permissions for new Harness and CodeX chats: backend default, workspace write, or full access. Backend default preserves Harness computer settings and CodeX workspace write. Existing chats keep their permissions; new Harness chats require Host confirmation, and CodeX remembers the returned policy per Host and Thread.
 - Cancels Host Server HTTP requests, including authentication and response body consumption, when the runtime closes; keeps the request deadline active through body reads. The TUI lifecycle test uses an abortable local fixture instead of a live Server.
 - Loads Node's SQLite builtin natively so AGY session discovery remains usable with older Vite test runners when the optional `sqlite3` CLI is absent.
 - Preserves the caller's Peer when the gateway switch forwards local RPCs, preventing `gateway/internal` / missing `signal` failures with Harness `0.2.1-alpha.4`. Remote tunnel calls retain their existing three-argument contract.
@@ -11,6 +12,7 @@
 
 ### 中文
 
+- Android 设置新增「新对话默认权限」并保存在手机本地，可选择使用默认权限、工作区内修改或完全权限，自动用于新建 Harness / CodeX 对话。「默认」保留 Harness 电脑端设置与 CodeX 工作区内修改行为。已有对话不变；Harness 读取 Host 确认后的权限，CodeX 按 Host / Thread 保存实际返回的权限。
 - Host 关闭时取消 Server HTTP 请求（包括鉴权和响应体读取），请求超时覆盖完整响应读取阶段；TUI 生命周期测试改用可取消的受控请求，隔离真实 Server。
 - AGY 会话发现通过 Node 原生加载 SQLite 内置模块，兼容旧版 Vite 测试运行器且无需依赖可选的 `sqlite3` 命令。
 - 修复 Gateway 切换器转发本地 RPC 时丢失调用方 Peer，导致 Harness `0.2.1-alpha.4` 返回 `gateway/internal` / 缺少 `signal` 的问题；远程隧道仍保留原有三参数调用契约。

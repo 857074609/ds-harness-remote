@@ -71,6 +71,8 @@ const zhCN = {
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',
+    defaultPermission: '新对话默认权限', defaultPermissionHost: '使用默认权限', defaultPermissionHostDescription: 'DeepSeek Harness 沿用电脑端设置；CodeX 使用工作区内修改。', defaultPermissionNote: '自动应用于此手机新建的 DeepSeek Harness 和 CodeX 对话；已有对话不变。Cursor 和 AGY 不适用。',
+    defaultPermissionFullAccessTitle: '新对话默认开启完全权限？', defaultPermissionFullAccessBody: '此后在手机上新建的 DeepSeek Harness 和 CodeX 对话都可直接修改文件和运行命令，不再逐次确认。你仍可在单个对话中更改权限。', defaultPermissionSaveFailed: '无法保存默认权限', defaultPermissionSaveFailedBody: '本地存储写入失败，请重试。', defaultPermissionNotConfirmed: '电脑端未确认新对话的默认权限，请重新连接后重试。',
     transport: '连接方式', transportNote: '更改后会重新连接。直接连接失败时，将自动改用服务器转发。', identity: '此手机的身份', deviceId: '设备 ID', publicKey: '安全密钥', keyNote: '安全密钥由 Android 系统加密保存，不会离开此手机。',
     about: '关于', aboutLead: '查看当前版本、开源与更新信息', developer: '开发者', developerValue: '知乎@李国宝', appVersion: '当前版本', sourceCodeUrl: '开源地址', updateUrl: '更新地址', linkFailedTitle: '无法打开链接', linkFailedBody: '请检查网络或复制地址后在浏览器中打开。',
     more: '更多', checkUpdates: '检查更新', checkingUpdates: '正在检查更新…', updateFoundTitle: '发现新版本', updateFoundBody: (latest: string, current: string) => `发现新版本 v${latest}，当前版本 ${current}。`, downloadUpdate: '下载更新', openUpdates: '打开更新', downloadingUpdate: '正在下载更新', downloadFailedTitle: '下载失败', downloadFailedBody: '无法下载最新安装包，请检查网络后重试。', installFailedTitle: '无法打开安装程序', installFailedBody: '安装包已下载，但无法打开安装程序。请先允许此应用安装未知应用，再重试。', openInstallSettings: '去设置开启', upToDateTitle: '已是最新版本', upToDateBody: '当前已是最新版本。', checkFailedTitle: '检查更新失败', checkFailedBody: '请检查网络后重试。',

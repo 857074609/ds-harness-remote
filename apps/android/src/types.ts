@@ -209,6 +209,9 @@ export interface PermissionSelect {
 
 export type CodexPermissionPreset = 'workspace-write' | 'danger-full-access'
 
+/** Shared presets supported by both Harness and CodeX; default preserves backend behavior. */
+export type DefaultPermissionPreset = 'default' | CodexPermissionPreset
+
 export interface HistoryEntry {
   event: NativeSessionEvent
   view?: { for: 'call' | 'result'; view: unknown }

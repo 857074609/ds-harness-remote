@@ -147,7 +147,7 @@ interface AppState {
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   messages: Record<string, ChatItem[]>
-  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string }>
+  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string; finished?: 'completed' | 'failed' }>
   sessionProjectionSeqs: Record<string, Record<string, number>>
   feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels
@@ -508,6 +508,22 @@ export const useAppStore = create<AppState>((set, get) => ({
       const rows = await connection.requireProxy().sessionList()
       set(state => {
         const known = new Set(state.sessions.map(item => item.sessionId))
+        const marks: typeof state.sessionLifecycles = { ...state.sessionLifecycles }
+        for (const [id, entry] of Object.entries(marks)) {
+          const fresh = rows.find(item => item.sessionId === id)
+          if (fresh !== undefined && entry.running !== fresh.running) {
+            marks[id] = {
+              ...entry,
+              running: fresh.running,
+              // A run that ended while the list was watching leaves the "done"
+              // reminder; a fresh run clears it. Failure precision needs the
+              // turn/end frame (followed sessions), which keeps `failed` marks.
+              ...(fresh.running
+                ? { finished: undefined }
+                : { finished: entry.finished === 'failed' ? 'failed' as const : 'completed' as const }),
+            }
+          }
+        }
         const updated = state.sessions.map(row => {
           const fresh = rows.find(item => item.sessionId === row.sessionId)
           if (fresh === undefined || (fresh.running === row.running && fresh.updatedAt === row.updatedAt)) return row
@@ -518,6 +534,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ? undefined
           : rows.find(item => item.sessionId === state.selectedSession?.sessionId)
         return {
+          sessionLifecycles: marks,
           sessions: added.length > 0 ? [...added, ...updated] : updated,
           ...(state.selectedSession !== undefined && selectedFresh !== undefined
             ? { selectedSession: { ...state.selectedSession, running: selectedFresh.running, updatedAt: selectedFresh.updatedAt } }
@@ -830,12 +847,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     // model catalog belong to the previous session and must not leak into the
     // new one (stuck pagination spinners, codex prompts sent with the previous
     // session's model).
-    set({
+    set(state => ({
       busyAction: `session:${session.sessionId}`,
       error: undefined,
       historyLoadingOlder: false,
       sessionModels: undefined,
-    })
+      sessionLifecycles: state.sessionLifecycles[session.sessionId] === undefined
+        ? state.sessionLifecycles
+        : {
+            ...state.sessionLifecycles,
+            [session.sessionId]: { ...state.sessionLifecycles[session.sessionId]!, finished: undefined },
+          },
+    }))
     const load = async () => {
       if (session.backend === 'codex') {
         await closeActiveCodexStream()
@@ -1768,7 +1791,12 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async updateQueueItem(itemId, action) {
     const session = get().selectedSession
-    if (session === undefined || session.backend !== 'harness' || get().connection.phase !== 'connected') return false
+    // Harness rows may carry `backend: undefined`; only the explicit non-harness
+    // backends lack queue actions. The previous strict `'harness'` check silently
+    // short-circuited every plain harness session — the queue buttons did
+    // nothing with no error.
+    if (session === undefined || (session.backend !== undefined && session.backend !== 'harness')
+      || get().connection.phase !== 'connected') return false
     try {
       await connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
       return true
@@ -2079,6 +2107,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         && sessionId !== undefined
         && state.selectedSession?.sessionId === sessionId
         && (isHarnessPromptStarted(frame) || running !== undefined)
+      // Row status marks mirror the official session dots: a finished turn
+      // leaves a "done" reminder (green) until the session is opened; a failed
+      // turn leaves the red mark instead.
+      const turnReason = running === false && frame.payload.event?.type === 'turn/end'
+        ? frame.payload.event.data.reason
+        : undefined
+      const finishedMark = running === undefined ? undefined
+        : running ? undefined
+          : isRecord(turnReason) && (turnReason.kind === 'failed' || turnReason.kind === 'error') ? 'failed' as const
+            : turnReason === undefined ? undefined : 'completed' as const
       const updateRunning = (session: RemoteSession): RemoteSession => (
         sessionId !== undefined && running !== undefined && session.sessionId === sessionId
           ? { ...session, running }
@@ -2091,7 +2129,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
           ...(seq === undefined ? {} : { sessionLifecycles: {
             ...state.sessionLifecycles,
-            [sessionId]: { seq, running, ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }) },
+            [sessionId]: {
+              seq,
+              running,
+              ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }),
+              ...(finishedMark === undefined ? {} : { finished: finishedMark }),
+            },
           } }),
         }),
         ...(releasePrompt ? { busyAction: undefined } : {}),

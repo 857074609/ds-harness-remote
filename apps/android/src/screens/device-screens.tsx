@@ -493,7 +493,11 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
   const reduceMotion = useReduceMotion()
   // Live turn lifecycle beats the session-list snapshot for the running mark.
   const liveRunning = useAppStore(state => state.sessionLifecycles[session.sessionId]?.running)
+  const finished = useAppStore(state => state.sessionLifecycles[session.sessionId]?.finished)
   const running = liveRunning ?? session.running
+  // Official-style row status: spinner while running, red for a failed finish,
+  // green for the "done" reminder until the session is opened.
+  const mark = running ? 'running' : finished
   const offset = useRef(new Animated.Value(0)).current
   const armed = useRef(new Animated.Value(0)).current
   const [rowWidth, setRowWidth] = useState(360)
@@ -629,9 +633,21 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
             onPress={onPress}
             style={({ pressed }) => [styles.swipeContentInner, pressed && styles.listRowPressed, disabled && styles.swipeContentBusy]}
           >
-            {compact
-              ? <SessionIcon size={17} color={colors.muted} />
-              : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>}
+            {mark === 'running'
+              ? (compact
+                ? <View style={styles.compactStatusSlot}><ActivityIndicator size="small" color={colors.primary} /></View>
+                : <View style={styles.rowIcon}><ActivityIndicator size="small" color={colors.primary} /></View>)
+              : mark === 'failed'
+                ? (compact
+                  ? <View style={styles.compactStatusSlot}><View style={styles.statusDotFailed} /></View>
+                  : <View style={styles.rowIcon}><View style={styles.statusDotFailedLarge} /></View>)
+                : mark === 'completed'
+                  ? (compact
+                    ? <View style={styles.compactStatusSlot}><View style={styles.statusDotDone} /></View>
+                    : <View style={styles.rowIcon}><View style={styles.statusDotDoneLarge} /></View>)
+                  : (compact
+                    ? <SessionIcon size={17} color={colors.muted} />
+                    : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
             <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
                 <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
@@ -1173,6 +1189,11 @@ function createStyles(colors: ThemeColors) {
   swipeContentBusy: { opacity: 0.55 },
   listRow: { minHeight: 82, paddingVertical: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   listRowPressed: { backgroundColor: colors.surface },
+  compactStatusSlot: { width: 24, alignItems: 'center', justifyContent: 'center' },
+  statusDotFailed: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
+  statusDotFailedLarge: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.danger },
+  statusDotDone: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
+  statusDotDoneLarge: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.success },
   rowIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   rowCopy: { flex: 1, gap: 3 },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },

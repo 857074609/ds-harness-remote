@@ -27,7 +27,7 @@ import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
 import { hasVisibleMessageText } from '../state/event-reducer'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning, type ChatSection } from '../state/message-helpers'
-import type { AgentPresetOption, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, SubagentCatalogEntry, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
+import type { AgentPresetOption, AgentTeamState, ApprovalActivity, ChatImage, ChatItem, ChatMessage, ModelCatalogModel, ModelProviderGroup, PermissionSelect, PromptImage, QuestionActivity, RemoteSession, TeamMemberSnapshot, TeamTaskSnapshot, ToolActivity, ToolDisplayDetail, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { MarkdownLinkProvider, markdownFilePath, NativeMarkdown } from '../ui/markdown'
 import { MentionPopover, detectMention, filterByQuery, fileMentionText, sessionMentionText, maskPersonalPath, splitDraftSegments, type MentionGroup, type MentionItem, type MentionType } from '../ui/mention-popover'
@@ -249,13 +249,19 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const childSessions = useMemo(
     () => sessions.filter(item => item.parentSessionId === session?.sessionId),
     [sessions, session?.sessionId])
-  // Agent-team roster: the parent's `subagentCatalog` projection is the
-  // authoritative direct-child list (including external agents that own no
-  // session). It has always arrived with the projections and was never shown.
-  const teamRoster = useMemo(() => {
-    const raw = (session?.projections?.values as Record<string, unknown> | undefined)?.subagentCatalog
-    return Array.isArray(raw) ? raw.filter((entry): entry is SubagentCatalogEntry =>
+  // Agent team: the `agentTeam` projection carries the durable roster
+  // (member name + role description + phase) and the task board (subject +
+  // status + owning member). This is the team view — distinct from the
+  // subagent child-session list above.
+  const teamState = useMemo(() => {
+    const raw = (session?.projections?.values as Record<string, unknown> | undefined)?.agentTeam
+    if (typeof raw !== 'object' || raw === null) return undefined
+    const record = raw as Record<string, unknown>
+    const members = Array.isArray(record.members) ? record.members.filter((entry): entry is TeamMemberSnapshot =>
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
+    const tasks = Array.isArray(record.tasks) ? record.tasks.filter((entry): entry is TeamTaskSnapshot =>
+      typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
+    return { members, tasks } satisfies { members: TeamMemberSnapshot[]; tasks: TeamTaskSnapshot[] }
   }, [session?.projections?.values])
   const lastItem = visibleMessages.at(-1)
   const lastContentVersion = lastItem?.kind === 'message'
@@ -937,9 +943,10 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
               icon={Layers} dense tint={childSessions.some(item => item.running) ? colors.primary : undefined}
               onPress={() => { Keyboard.dismiss(); setMentionType(null); setSubagentsOpen(true) }} />
           )}
-          {teamRoster.length > 0 && (
-            <IconButton label={zhCN.chat.teamTitle(teamRoster.length)}
-              icon={Users} dense tint={teamRoster.some(item => sessions.find(row => row.sessionId === item.id)?.running === true) ? colors.primary : undefined}
+          {teamState !== undefined && teamState.members.length > 0 && (
+            <IconButton label={zhCN.chat.teamTitle(teamState.members.length)}
+              icon={Users} dense tint={teamState.members.some(item =>
+                item.phase === 'active' && sessions.find(row => row.sessionId === item.id)?.running === true) ? colors.primary : undefined}
               onPress={() => { Keyboard.dismiss(); setMentionType(null); setTeamOpen(true) }} />
           )}
           <IconButton label={zhCN.sessions.archive} icon={Archive} dense onPress={archiveCurrentSession} disabled={busy !== undefined} />
@@ -1279,7 +1286,8 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <ModePicker visible={modePickerOpen} options={agentPresetOptions} current={currentAgentPresetId} loading={agentPresetLoading} selecting={agentPresetSelecting} onClose={() => setModePickerOpen(false)} onPick={pickMode} />
       <ChildAgentPanel visible={subagentsOpen} sessions={childSessions} onClose={() => setSubagentsOpen(false)}
         onOpen={session => { setSubagentsOpen(false); void openSession(session) }} />
-      <TeamAgentPanel visible={teamOpen} roster={teamRoster} sessions={sessions} onClose={() => setTeamOpen(false)}
+      <TeamAgentPanel visible={teamOpen} members={teamState?.members ?? []} tasks={teamState?.tasks ?? []}
+        sessions={sessions} onClose={() => setTeamOpen(false)}
         onOpen={session => { setTeamOpen(false); void openSession(session) }} />
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
@@ -2437,74 +2445,123 @@ function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
-          {sessions.map(item => (
-            <Pressable
-              key={item.sessionId}
-              accessibilityRole="button"
-              accessibilityLabel={resolveSessionDisplayTitle(item) ?? item.title ?? zhCN.sessions.child}
-              onPress={() => onOpen(item)}
-              style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
-            >
-              <Text style={styles.queueDockText} numberOfLines={2}>
-                {resolveSessionDisplayTitle(item) ?? item.title ?? zhCN.sessions.child}
-              </Text>
-              {item.running
-                ? <Text style={styles.subagentRunning}>{zhCN.status.running}</Text>
-                : <Text style={styles.subagentIdle}>{zhCN.sessions.child}</Text>}
-              <ChevronRight size={15} color={colors.subtle} />
-            </Pressable>
-          ))}
+          {sessions.map(item => {
+            const parsed = parseAgentLabel(resolveSessionDisplayTitle(item) ?? item.title)
+            const role = parsed.role ?? item.title ?? zhCN.sessions.child
+            return (
+              <Pressable
+                key={item.sessionId}
+                accessibilityRole="button"
+                accessibilityLabel={`${role} ${parsed.task}`}
+                onPress={() => onOpen(item)}
+                style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
+              >
+                <View style={styles.teamRowCopy}>
+                  <View style={styles.teamRowTitleLine}>
+                    <Text style={styles.teamRowRole} numberOfLines={1}>{role}</Text>
+                    {item.running
+                      ? <Text style={styles.subagentRunning}>{zhCN.status.running}</Text>
+                      : <Text style={styles.subagentIdle}>{zhCN.sessions.child}</Text>}
+                  </View>
+                  {parsed.task.length > 0 && (
+                    <Text style={styles.teamRowTask} numberOfLines={2}>{parsed.task}</Text>
+                  )}
+                </View>
+                <ChevronRight size={15} color={colors.subtle} />
+              </Pressable>
+            )
+          })}
         </ScrollView>
       </ModalSurface>
     </Modal>
   )
 }
 
-/** Agent-team roster popover: the parent's `subagentCatalog` members with live state. */
-function TeamAgentPanel({ visible, roster, sessions, onClose, onOpen }: {
+/** Split a team member label into role and task ("你是X。任务：Y" / "You are X. Task: Y"). */
+function parseAgentLabel(raw: string | undefined): { role?: string; task: string } {
+  const text = (raw ?? '').replace(/\s+/gu, ' ').trim()
+  const zh = /^你是(.+?)(?:。|，|,|：)(?:你的任务|任务)[：:]\s*(.+)$/u.exec(text)
+  if (zh?.[1] !== undefined && zh[2] !== undefined) return { role: zh[1].trim(), task: zh[2].trim() }
+  const en = /^You are (?:an?|the)\s+(.+?)(?:\.|。)\s*(?:Your task|Task)[：:]\s*(.+)$/iu.exec(text)
+  if (en?.[1] !== undefined && en[2] !== undefined) return { role: en[1].trim(), task: en[2].trim() }
+  return { task: text }
+}
+
+/** Agent-team popover: roster (role + claimed tasks per member) over the task board. */
+function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onOpen }: {
   visible: boolean
-  roster: SubagentCatalogEntry[]
+  members: TeamMemberSnapshot[]
+  tasks: TeamTaskSnapshot[]
   sessions: RemoteSession[]
   onClose: () => void
   onOpen: (session: RemoteSession) => void
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const modeLabel = (entry: SubagentCatalogEntry) => entry.mode === 'continuable'
-    ? zhCN.chat.teamModeContinuable
-    : entry.mode === 'external'
-      ? zhCN.chat.teamModeExternal
-      : entry.mode === 'unknown'
-        ? zhCN.chat.teamModeUnknown
-        : zhCN.chat.teamModeOneShot
+  const taskStatusLabel = (status: TeamTaskSnapshot['status']) => status === 'completed'
+    ? zhCN.chat.teamTaskCompleted
+    : status === 'in_progress'
+      ? zhCN.chat.teamTaskInProgress
+      : zhCN.chat.teamTaskPending
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>{zhCN.chat.teamTitle(roster.length)}</Text>
+          <Text style={styles.modalTitle}>{zhCN.chat.teamTitle(members.length)}</Text>
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
-          {roster.map(entry => {
-            const session = sessions.find(item => item.sessionId === entry.id)
-            const title = entry.label ?? session?.title ?? entry.id
+          {members.map(member => {
+            const session = sessions.find(item => item.sessionId === member.id)
+            // Role is the member's description; its open tasks are the board
+            // rows the member owns (deleted rows never surface).
+            const owned = tasks.filter(task => task.ownerId === member.id && task.status !== 'deleted')
+            const active = owned.find(task => task.status === 'in_progress')
+              ?? owned.find(task => task.status === 'pending')
+              ?? owned[0]
+            const stateLabel = member.phase === 'failed'
+              ? zhCN.chat.teamPhaseFailed
+              : member.phase === 'provisioning'
+                ? zhCN.chat.teamPhaseProvisioning
+                : active === undefined
+                  ? zhCN.chat.teamIdle
+                  : taskStatusLabel(active.status)
+            // Wire rows may omit `description` despite the declared type — treat
+            // every member field as possibly absent (this crashed the panel).
+            const description = typeof member.description === 'string' ? member.description.trim() : ''
+            const role = description.length > 0
+              ? description
+              : member.name === 'lead' ? zhCN.chat.teamLead
+                : typeof member.name === 'string' && member.name.length > 0 ? member.name : member.id
             const row = (
-              <>
-                <Text style={styles.queueDockText} numberOfLines={2}>{title}</Text>
-                {session?.running === true
-                  ? <Text style={styles.subagentRunning}>{zhCN.status.running}</Text>
-                  : <Text style={styles.subagentIdle}>{modeLabel(entry)}</Text>}
-              </>
+              <View style={styles.teamRowCopy}>
+                <View style={styles.teamRowTitleLine}>
+                  <Text style={styles.teamRowRole} numberOfLines={1}>{role}</Text>
+                  <Text style={member.phase === 'failed' ? styles.subagentRunningFailed
+                    : session?.running === true || active?.status === 'in_progress' ? styles.subagentRunning : styles.subagentIdle}>
+                    {stateLabel}
+                  </Text>
+                </View>
+                {active !== undefined && typeof active.subject === 'string' && (
+                  <Text style={styles.teamRowTask} numberOfLines={2}>{active.subject}</Text>
+                )}
+                {owned.length > 1 && (
+                  <Text style={styles.teamRowTask}>{zhCN.chat.teamMoreTasks(owned.length)}</Text>
+                )}
+                {member.phase === 'failed' && typeof member.error === 'string' && member.error.length > 0 && (
+                  <Text style={styles.teamRowTask} numberOfLines={2}>{member.error}</Text>
+                )}
+              </View>
             )
             return session === undefined
-              ? <View key={entry.id} style={styles.subagentRow} accessibilityLabel={`${title} ${modeLabel(entry)}`}>
+              ? <View key={member.id} style={styles.subagentRow} accessibilityLabel={`${role} ${active?.subject ?? ''} ${stateLabel}`}>
                   {row}
                   <View style={{ width: 15 }} />
                 </View>
               : <Pressable
-                  key={entry.id}
+                  key={member.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${title} ${modeLabel(entry)}`}
+                  accessibilityLabel={`${role} ${active?.subject ?? ''} ${stateLabel}`}
                   onPress={() => onOpen(session)}
                   style={({ pressed }) => [styles.subagentRow, pressed && styles.resendRowPressed]}
                 >
@@ -2723,8 +2780,13 @@ function createStyles(colors: ThemeColors) {
   resendText: { ...type.small, color: colors.primary },
   canceledText: { ...type.small, color: colors.muted, paddingHorizontal: spacing.xs, minHeight: 44, textAlignVertical: 'center' },
   subagentList: { maxHeight: 460 },
+  teamRowCopy: { flex: 1, gap: spacing.xxs },
+  teamRowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  teamRowRole: { ...type.smallStrong, color: colors.ink, flexShrink: 1 },
+  teamRowTask: { ...type.small, color: colors.muted },
   subagentRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 52, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   subagentRunning: { ...type.smallStrong, color: colors.success },
+  subagentRunningFailed: { ...type.smallStrong, color: colors.danger },
   subagentIdle: { ...type.small, color: colors.muted },
   stopButtonSmall: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center', marginRight: spacing.xs },
   resendRowDisabled: { opacity: 0.5 },

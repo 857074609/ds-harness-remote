@@ -170,13 +170,38 @@ export interface SessionModels {
 }
 
 /** Native ApiProxy session row projection (mirrors @deepseek-ai/dsh-host-apiproxy). */
-/** Direct-child roster row from the parent session's `subagentCatalog` projection. */
-export interface SubagentCatalogEntry {
-  /** Child session id (external-mode entries may have no openable session). */
+/** One durable roster row from the session's `agentTeam` projection. */
+export interface TeamMemberSnapshot {
   id: string
-  createdAt: number
-  mode: 'one-shot' | 'continuable' | 'external' | 'unknown'
-  label?: string
+  /** Present on wire rows for real members; the Lead pseudo-row may omit it. */
+  name?: string
+  /** Role description shown as the member's identity in the team list. */
+  description?: string
+  provider?: string
+  context?: 'fresh' | 'fork'
+  phase?: 'provisioning' | 'active' | 'failed'
+  error?: string
+}
+
+/** One durable task row from the session's `agentTeam` projection. */
+export interface TeamTaskSnapshot {
+  id: string
+  revision: number
+  subject: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
+  /** Owning member's session id; absent = unassigned. */
+  ownerId?: string
+  blockedBy: string[]
+  writeScopes: string[]
+}
+
+/** Team state published through the `agentTeam` session projection. */
+export interface AgentTeamState {
+  id: string
+  members: TeamMemberSnapshot[]
+  tasks: TeamTaskSnapshot[]
+  failure?: string
 }
 
 export interface RemoteSession {

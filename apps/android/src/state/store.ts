@@ -17,7 +17,7 @@ import {
   type AppLanguage,
   type LanguagePreference,
 } from '../locales/i18n'
-import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
+import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError, isStreamTimeoutError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import {
   loginFlow,
@@ -295,7 +295,14 @@ function flushPendingMuxFrames(): void {
   pendingMuxFrames = []
   for (const entry of queued) {
     if (entry.generation !== connectionGeneration) continue
-    useAppStore.getState().handleMuxFrame(entry.frame)
+    try {
+      useAppStore.getState().handleMuxFrame(entry.frame)
+    } catch {
+      // One malformed frame must neither drop the rest of the batch nor escape
+      // the flush (an uncaught throw in the RN runtime is fatal). Frame type
+      // only — never payload contents.
+      console.warn('mux frame dropped:', entry.frame.payload.type)
+    }
   }
 }
 
@@ -308,7 +315,8 @@ function clearPendingMuxFrames(): void {
 }
 
 function clearQueueAdoption(): void {
-  adoptedQueueRpcIds.clear()
+  // `adopted` is a Host-side fact (the durable queue received the prompt) and
+  // survives reconnects; only the grace window restarts.
   vanishingQueueRpcIds.clear()
 }
 let sessionLoadGeneration = 0
@@ -828,6 +836,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async disconnect() {
+    flushPendingMuxFrames()
     ++connectionGeneration
     ++sessionLoadGeneration
     reconnectFlight = undefined
@@ -978,6 +987,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
       ])
       if (!current()) return
+      // The follow snapshot's projections were emitted synchronously inside
+      // sessionHistory — apply queued frames before reading them below, or the
+      // delivery reconcile judges against a stale inbox.
+      flushPendingMuxFrames()
       const ratings = feedback === undefined ? undefined : new Map(feedback.map(row => [row.messageId, row.rating]))
       const items = foldHistory(history.events, session.sessionId, true)
       set(state => {
@@ -1024,7 +1037,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true
     } catch (error) {
       if (!current()) return false
-      if (isRpcTimeoutError(error) || isRecoverableTransportError(error)) {
+      // A subagent address that never answers must not burn a full reconnect
+      // cycle on every open; top-level session stalls still fall back to
+      // forceRelay once (the pre-bounding recovery path).
+      const transportRetry = (isRpcTimeoutError(error) || isRecoverableTransportError(error))
+        && !(isStreamTimeoutError(error) && session.parentSessionId !== undefined)
+      if (transportRetry) {
         if (reconnectFlight !== undefined) {
           set({ busyAction: undefined, error: friendlyError(error) })
           return false
@@ -1773,7 +1791,16 @@ export const useAppStore = create<AppState>((set, get) => ({
             ...state.messages,
             [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
               item.id === optimistic.id && item.kind === 'message'
-                ? { ...item, sendState: queuedAtSend ? 'queued' : undefined }
+                ? {
+                    ...item,
+                    sendState: queuedAtSend ? 'queued' : undefined,
+                    // The inbox may already have adopted this rpcId (retry
+                    // reuse, or the batch landed before this row existed) —
+                    // mark it so the queue fallback can never resurrect it.
+                    ...(queuedAtSend && adoptedQueueRpcIds.get(session.sessionId)?.has(requestRpcId) === true
+                      ? { queuedAdopted: true as const }
+                      : {}),
+                  }
                 : item),
           },
         }))
@@ -1811,6 +1838,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async updateQueueItem(itemId, action, rpcId) {
+    flushPendingMuxFrames()
     const session = get().selectedSession
     // Harness rows may carry `backend: undefined`; only the explicit non-harness
     // backends lack queue actions. The previous strict `'harness'` check silently
@@ -1844,6 +1872,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async retrySendMessage(itemId) {
+    flushPendingMuxFrames()
     const state = get()
     if (state.busyAction !== undefined) return false
     const session = state.selectedSession
@@ -1897,6 +1926,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async respondApproval(itemId, outcome) {
+    flushPendingMuxFrames()
     set({ busyAction: `approval:${itemId}`, error: undefined })
     try {
       const item = findApproval(get().messages, itemId)
@@ -1931,6 +1961,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async respondQuestion(itemId, selected, custom) {
+    flushPendingMuxFrames()
     set({ busyAction: `question:${itemId}`, error: undefined })
     try {
       const proxy = connection.requireProxy()
@@ -2100,6 +2131,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setOffline() {
     if (get().connection.phase !== 'disconnected') {
+      flushPendingMuxFrames()
       ++sessionLoadGeneration
       clearPendingMuxFrames()
       clearQueueAdoption()
@@ -2135,6 +2167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // dropped it — retire the row after one update of grace so a consumed
         // prompt's echo can land first.
         const settle = key === 'inbox' ? (() => {
+          const followed = state.selectedSession?.sessionId === sessionId
           const current = new Set(inboxRpcIds(value))
           const adopted = adoptedQueueRpcIds.get(sessionId) ?? new Set<string>()
           const vanishing = vanishingQueueRpcIds.get(sessionId) ?? new Set<string>()
@@ -2145,7 +2178,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             adopted.add(rpcId)
             vanishing.delete(rpcId)
           }
-          for (const rpcId of [...adopted]) {
+          // Retire only while the session is followed: its echo travels the
+          // follow stream whose ordering against the control projection is not
+          // guaranteed elsewhere — unfollowed sessions are reconciled on open.
+          for (const rpcId of followed ? [...adopted] : []) {
             if (current.has(rpcId)) continue
             if (vanishing.has(rpcId)) {
               // Retired: the row is settled (or already replaced by its echo) —
@@ -2161,8 +2197,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (mark.size === 0 && retire.size === 0) return undefined
           return (items: ChatItem[]): ChatItem[] => items.map(item =>
             item.kind === 'message' && item.requestRpcId !== undefined
-            && item.sendState === 'queued'
-            && (mark.has(item.requestRpcId) || retire.has(item.requestRpcId))
+            && (mark.has(item.requestRpcId) || (retire.has(item.requestRpcId)
+              && (item.sendState === 'queued' || item.sendState === 'unconfirmed' || item.sendState === 'failed')))
               ? {
                   ...item,
                   ...(mark.has(item.requestRpcId) ? { queuedAdopted: true as const } : {}),

@@ -96,6 +96,17 @@ describe('ordered history recovery', () => {
         },
       },
       {
+        name: 'keeps canceled rows terminal — user removal is never re-judged',
+        run: () => {
+          const removed: ChatItem = {
+            kind: 'message', id: 'local:g', sessionId: 's1', role: 'user', text: 'gone',
+            createdAt: 1, requestRpcId: 'rpc-g', sendState: 'canceled',
+          }
+          const merged = reconcileDeliveryStates([removed], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled'])
+        },
+      },
+      {
         name: 'keeps rows sent during the current connection for live-frame reconciliation',
         run: () => {
           const merged = reconcileDeliveryStates([row('local:d', 'rpc-d', 'unconfirmed', 200)], new Set<string>(), new Set<string>(), 100)

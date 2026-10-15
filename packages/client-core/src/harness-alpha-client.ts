@@ -404,7 +404,9 @@ export class HarnessAlphaClient {
     }
     const iterator = source[Symbol.asyncIterator]()
     handle.iterator = iterator
-    const first = await this.boundedFollow(iterator.next(), handle)
+    // The snapshot can legitimately be slow (a 4 MiB first frame over a weak
+    // link): bound it on a separate, generous budget rather than the open RPC's.
+    const first = await this.boundedFollow(iterator.next(), handle, 60_000)
     if (this.sessionFollow !== handle || handle.controller.signal.aborted) {
       throw new RemoteGatewayError('CANCELLED', 'The session follow was superseded.')
     }
@@ -782,13 +784,13 @@ export class HarnessAlphaClient {
    * for subagent-parent addresses) must fail loudly instead of hanging the
    * caller's session switch forever.
    */
-  private async boundedFollow<T>(work: Promise<T>, handle: SessionFollowHandle): Promise<T> {
+  private async boundedFollow<T>(work: Promise<T>, handle: SessionFollowHandle, budgetMs = 15_000): Promise<T> {
     // The raced work keeps running after a timeout: attach a sink so its late
     // rejection is never an unhandled promise rejection.
     void work.catch(() => undefined)
     let timer: ReturnType<typeof setTimeout> | undefined
     const timeout = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The session follow did not open in time.')), 15_000)
+      timer = setTimeout(() => reject(new RemoteGatewayError('STREAM_TIMEOUT', 'The session follow did not open in time.')), budgetMs)
     })
     try {
       return await Promise.race([work, timeout])

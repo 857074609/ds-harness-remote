@@ -73,6 +73,7 @@ export class HostServerApi {
   private credentials?: ServerCredentials
   private credentialsPromise?: Promise<ServerCredentials>
   private harnessVersion?: string
+  private readonly lifetime = new AbortController()
 
   constructor(
     serverUrl: string,
@@ -86,6 +87,11 @@ export class HostServerApi {
   bindIdentity(identity: HostIdentity): void { this.identity = identity }
 
   setHarnessVersion(version: string | undefined): void { this.harnessVersion = version }
+
+  /** End this runtime's HTTP requests, including authentication and response bodies. */
+  close(): void {
+    this.lifetime.abort(new ServerApiError('CONNECTION_CLOSED', 'The Server API has been closed.', false))
+  }
 
   currentAuthorization(): DeviceAuthorization | undefined {
     if (this.credentials === undefined) return undefined
@@ -453,11 +459,16 @@ export class HostServerApi {
   private async publicRequest<TResult>(path: string, init: RequestInit, accessToken?: string): Promise<TResult> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 10_000)
-    let response: Response
+    const signal = AbortSignal.any([
+      this.lifetime.signal,
+      controller.signal,
+      ...(init.signal == null ? [] : [init.signal]),
+    ])
     try {
-      response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
+      signal.throwIfAborted()
+      const response = await this.fetchImplementation(`${this.baseUrl}${path}`, {
         ...init,
-        signal: controller.signal,
+        signal,
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
@@ -465,22 +476,25 @@ export class HostServerApi {
           ...init.headers,
         },
       })
+      const body = await parseBody(response)
+      signal.throwIfAborted()
+      if (!response.ok) {
+        const envelope = (body ?? {}) as ErrorEnvelope
+        throw new ServerApiError(
+          typeof envelope.error?.code === 'string' ? envelope.error.code : mapStatus(response.status),
+          typeof envelope.error?.message === 'string' ? envelope.error.message : 'The Server rejected the request.',
+          envelope.error?.retryable === true || response.status >= 500,
+          response.status,
+        )
+      }
+      return body as TResult
     } catch (error) {
+      if (this.lifetime.signal.aborted) throw this.lifetime.signal.reason
+      if (error instanceof ServerApiError) throw error
       throw new ServerApiError('CONNECTION_FAILED', error instanceof Error ? error.message : 'Server request failed.', true)
     } finally {
       clearTimeout(timer)
     }
-    const body = await parseBody(response)
-    if (!response.ok) {
-      const envelope = (body ?? {}) as ErrorEnvelope
-      throw new ServerApiError(
-        typeof envelope.error?.code === 'string' ? envelope.error.code : mapStatus(response.status),
-        typeof envelope.error?.message === 'string' ? envelope.error.message : 'The Server rejected the request.',
-        envelope.error?.retryable === true || response.status >= 500,
-        response.status,
-      )
-    }
-    return body as TResult
   }
 
   private requireIdentity(): HostIdentity {

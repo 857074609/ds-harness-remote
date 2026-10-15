@@ -16,6 +16,49 @@ const cleanupContract1 = async () => {
 afterEach(cleanupContract1)
 
 describe('HostServerApi', () => {
+  it('cancels runtime-owned HTTP work through response consumption and rejects requests after close', async () => {
+    await runScenarios([
+      { name: 'close before response headers', body: false, timeout: false },
+      { name: 'close during response body', body: true, timeout: false },
+      { name: 'deadline during response body', body: true, timeout: true },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'dsh-server-close-'))
+      directories.push(directory)
+      let started!: () => void
+      const ready = new Promise<void>(resolve => { started = resolve })
+      let requestSignal: AbortSignal | null | undefined
+      const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+        requestSignal = init?.signal
+        if (!scenario.body) return new Promise<Response>((_resolve, reject) => {
+          requestSignal!.addEventListener('abort', () => reject(requestSignal!.reason), { once: true })
+          started()
+        })
+        return new Response(new ReadableStream({ start(controller) {
+          requestSignal!.addEventListener('abort', () => controller.error(requestSignal!.reason), { once: true })
+          started()
+        } }))
+      })
+      const api = new HostServerApi('https://example.invalid', new ServerCredentialStore(directory), fetchMock)
+      if (scenario.timeout) vi.useFakeTimers()
+      try {
+        const rejected = expect(api.oauthProviders()).rejects.toMatchObject({
+          code: scenario.timeout ? 'CONNECTION_FAILED' : 'CONNECTION_CLOSED',
+          retryable: scenario.timeout,
+        })
+        await ready
+        if (scenario.timeout) await vi.advanceTimersByTimeAsync(10_000)
+        else api.close()
+        await rejected
+        expect(requestSignal?.aborted).toBe(true)
+        api.close()
+        await expect(api.oauthProviders()).rejects.toMatchObject({ code: 'CONNECTION_CLOSED', retryable: false })
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+      } finally {
+        api.close()
+        vi.useRealTimers()
+      }
+    } })))
+  })
   it('discovers future providers and uses their advertised QR entry without account credentials', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-oauth-discovery-'))
     directories.push(directory)

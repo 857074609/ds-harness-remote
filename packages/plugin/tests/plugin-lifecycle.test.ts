@@ -10,6 +10,7 @@ const directories: string[] = []
 
 afterEach(async () => {
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })))
 })
 
@@ -90,6 +91,14 @@ describe('Cordis plugin lifecycle', () => {
     const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-alpha-cordis-'))
     directories.push(dshHome)
     vi.stubEnv('DSH_HOME', dshHome)
+    let requestSignal: AbortSignal | null | undefined
+    const fetchMock = vi.fn<typeof fetch>(async (_input, init) => {
+      requestSignal = init?.signal
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal!.addEventListener('abort', () => reject(requestSignal!.reason), { once: true })
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
     const ctx = new Context()
     ctx.provide('commands', { register: vi.fn(() => vi.fn()) })
@@ -107,15 +116,21 @@ describe('Cordis plugin lifecycle', () => {
     } as never)
     const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis alpha host' })
 
-    await vi.waitFor(() => {
-      expect(ctx.dshRemote.currentIdentity()).toMatchObject({ name: 'Cordis alpha host' })
-      expect(ctx.dshRemote.diagnostics()).toMatchObject({ loaded: true, serverConfigured: true })
-    })
-    expect(ctx.get('dshRemoteClient')).toBeUndefined()
+    try {
+      await vi.waitFor(() => {
+        expect(ctx.dshRemote.currentIdentity()).toMatchObject({ name: 'Cordis alpha host' })
+        expect(ctx.dshRemote.diagnostics()).toMatchObject({ loaded: true, serverConfigured: true })
+        expect(fetchMock).toHaveBeenCalledTimes(1)
+      })
+      expect(ctx.get('dshRemoteClient')).toBeUndefined()
 
-    await fiber.dispose()
-    expect(ctx.get('dshRemote')).toBeUndefined()
-    await ctx.fiber.dispose()
+      await fiber.dispose()
+      expect(requestSignal?.aborted).toBe(true)
+      expect(ctx.get('dshRemote')).toBeUndefined()
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
   })
 
   it('waits for a late legacy ApiProxy instead of activating rc.2 without it', async () => {

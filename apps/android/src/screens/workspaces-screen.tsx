@@ -32,6 +32,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
+  const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   const busy = useAppStore(state => state.busyAction)
   const workspaceCreate = useAppStore(state => state.workspaceCreate)
   const workspaceRename = useAppStore(state => state.workspaceRename)
@@ -354,9 +355,12 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                   action={<Button label={zhCN.workspaces.clearSearch} variant="secondary" onPress={() => setSearchQuery('')} />}
                 />
               : <View>{filteredWorkspaces.map(workspace => {
+                const archivedSet = new Set(archivedSessionIds)
                 const workspaceSessions = workspace.sessionIds.flatMap(sessionId => {
                   const session = sessions.find(item => item.sessionId === sessionId)
-                  return session === undefined ? [] : [session]
+                  // Archived conversations stay in the workspace's id list but
+                  // must not surface here (parity with the sessions screen).
+                  return session === undefined || archivedSet.has(sessionId) ? [] : [session]
                 })
                 const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
                 const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)

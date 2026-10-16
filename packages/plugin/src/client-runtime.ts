@@ -1044,7 +1044,15 @@ export class ClientModeRuntime {
         try {
           transport = createTransport(attempt)
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target), 60_000)
-          await client.connect()
+          const attemptClient = client
+          const onAbort = () => { void attemptClient.close() }
+          signal?.addEventListener('abort', onAbort, { once: true })
+          try {
+            signal?.throwIfAborted()
+            await attemptClient.connect()
+          } finally {
+            signal?.removeEventListener('abort', onAbort)
+          }
           signal?.throwIfAborted()
         } finally {
           stopProgressTimer()

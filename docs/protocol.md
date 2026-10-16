@@ -439,6 +439,13 @@ Server 不能返回 Client 未宣告的 capability。Client 后续只能使用�
 
 `webrtcFallbackTimeoutMs` 是可选实现扩展。它必须是正安全整数。
 字段缺失时，Client 使用本地超时。字段存在时，Client 使用 Server 与本地值中的较大值。
+Host 的 WebRTC responder 同样取 Server 与本地等待时间中的较大值，避免在 Client 仍在协商时提前结束。
+
+连接启动的超时按阶段独立计算：Control 授权等待在合法 `connect.accepted` 后结束，
+不覆盖之后的 ICE 配置获取、WebRTC 协商或 Noise 握手。ICE 配置获取必须有界；
+WebRTC 使用上述协商超时，失败时按已协商的 transport 能力回退。选定传输后才开始
+Noise 握手计时，认证完成前禁止发送业务消息。取消或断线必须终止当前启动过程，
+不得由迟到的凭据、信令或握手恢复已结束的连接。该拆分不增加 frame、字段或 capability。
 
 ## 11. 建立 Host/Client Connection
 

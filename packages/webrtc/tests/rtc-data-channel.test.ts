@@ -556,7 +556,7 @@ describe('RtcDataChannelTransport responder', () => {
       onSignal: () => undefined,
       onDiagnostic: event => diagnostics.push(event),
     })
-    void transport.connect()
+    const connecting = expect(transport.connect()).rejects.toThrow('closed')
     const early: RtcIceCandidateInit = {
       candidate: 'candidate:1 1 udp 1694498815 203.0.113.8 5002 typ srflx raddr 192.168.1.20 rport 5000',
       sdpMid: '0',
@@ -585,6 +585,7 @@ describe('RtcDataChannelTransport responder', () => {
       byScope: { public: 1 },
     })
     await transport.close()
+    await connecting
   })
 
   it('is an idempotent close', async () => {

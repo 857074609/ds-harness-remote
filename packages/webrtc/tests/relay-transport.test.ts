@@ -5,6 +5,7 @@ import {
   AdaptiveTransport,
   RelayTransport,
   RtcDataChannelTransport,
+  type AdaptiveTransportOptions,
   type RtcPeerConnectionFactory,
 } from '../src/index.js'
 
@@ -17,7 +18,7 @@ class FakeWebSocket {
   onopen: (() => void) | null = null
   onmessage: ((event: { data: string | ArrayBuffer | Blob }) => void) | null = null
   onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
+  onclose: ((event: { code: number; reason: string }) => void) | null = null
 
   constructor(readonly url: string) {
     FakeWebSocket.latest = this
@@ -180,6 +181,124 @@ describe('RelayTransport control handshake', () => {
 })
 
 describe('AdaptiveTransport capability negotiation', () => {
+  it('separates authorization from RTC timeout while preserving old and new Server budgets', async () => {
+    await runScenarios([
+      { name: 'old Server without timeout', server: undefined, local: undefined, budget: 8000 },
+      { name: 'Server requests twenty seconds', server: 20000, local: undefined, budget: 20000 },
+      { name: 'Server budget exceeds local direct budget', server: 20000, local: 12000, budget: 20000 },
+      { name: 'local budget exceeds Server budget', server: 8000, local: 12000, budget: 12000 },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const rtc = stalledRtc()
+      const fallback = vi.fn()
+      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, negotiateTimeoutMs: row.local, onWebRtcFallback: fallback })
+      let ready = false
+      const connecting = transport.connect().then(() => { ready = true })
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      await vi.advanceTimersByTimeAsync(4000)
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'], webrtcFallbackTimeoutMs: row.server }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await vi.advanceTimersByTimeAsync(row.budget - 1)
+      expect(ready).toBe(false)
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN)
+      await vi.advanceTimersByTimeAsync(301)
+      await connecting
+      expect(fallback).toHaveBeenCalledOnce()
+      expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: 'relay' })
+      expect(rtc.pc.close).toHaveBeenCalled()
+      await transport.close()
+      expect(vi.getTimerCount()).toBe(0)
+    } })), cleanupScenario1)
+  })
+
+  it('bounds ICE discovery separately and ignores credentials arriving after cancellation or timeout', async () => {
+    await runScenarios(['timeout', 'close', 'socket close', 'abort', 'reconnect'].map(action => ({ name: action, run: async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const rtc = stalledRtc()
+      const abort = new AbortController()
+      let deliver!: (servers: []) => void
+      let requestSignal: AbortSignal | undefined
+      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, signal: abort.signal,
+        fetchIceServers: (_id, signal) => { requestSignal = signal; return new Promise(resolve => { deliver = resolve }) },
+      })
+      const outcome = transport.connect().then(() => 'ready', error => error.message as string)
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'], webrtcFallbackTimeoutMs: 20000 }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await vi.advanceTimersByTimeAsync(0)
+      if (action === 'timeout') {
+        await vi.advanceTimersByTimeAsync(10000)
+        expect(requestSignal?.aborted).toBe(true)
+        await vi.advanceTimersByTimeAsync(20300)
+        expect(await outcome).toBe('ready')
+      } else {
+        if (action === 'close' || action === 'reconnect') await transport.close()
+        else if (action === 'abort') abort.abort()
+        else socket.onclose?.({ code: 1006, reason: '' })
+        expect(await outcome).not.toBe('ready')
+        expect(requestSignal?.aborted).toBe(true)
+        expect(rtc.factory.create).not.toHaveBeenCalled()
+      }
+      if (action === 'reconnect') {
+        const reconnecting = transport.connect()
+        const replacement = FakeWebSocket.latest!
+        replacement.open()
+        replacement.receive(helloAck({ capabilities: ['transport.relay'] }))
+        replacement.receive(createControlFrame('connect.accepted', { connectionId: 'connection-2' }))
+        await reconnecting
+        socket.onclose?.({ code: 1006, reason: 'late close' })
+        expect(transport.connectionInfo().connectionId).toBe('connection-2')
+        expect(transport.getStats().connected).toBe(true)
+      }
+      const sent = socket.sent.length
+      deliver([])
+      await vi.advanceTimersByTimeAsync(0)
+      expect(socket.sent).toHaveLength(sent)
+      await transport.close()
+      expect(vi.getTimerCount()).toBe(0)
+    } })), cleanupScenario1)
+  })
+
+  it('settles control and RTC cancellation without allowing stale attempts to select a transport', async () => {
+    await runScenarios(['control timeout', 'control close', 'rtc close', 'rtc abort', 'late RTC success', 'statistics timeout'].map(action => ({ name: action, run: async () => {
+      vi.useFakeTimers()
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const rtc = stalledRtc()
+      const abort = new AbortController()
+      const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, signal: abort.signal })
+      const outcome = transport.connect().then(() => 'ready', error => error.message as string)
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'], webrtcFallbackTimeoutMs: 20000 }))
+      if (!action.startsWith('control')) {
+        socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+        await vi.advanceTimersByTimeAsync(16000)
+      }
+      if (action === 'late RTC success' || action === 'statistics timeout') {
+        if (action === 'statistics timeout') vi.spyOn(rtc.pc, 'getStats').mockImplementation(() => new Promise(() => {}))
+        rtc.channel.readyState = 'open'
+        rtc.channel.onopen?.()
+        await vi.advanceTimersByTimeAsync(300)
+        expect(await outcome).toBe('ready')
+        expect(lastSentPayload(socket, 'transport.selected')).toMatchObject({ transport: 'p2p' })
+      } else {
+        if (action === 'control timeout') await vi.advanceTimersByTimeAsync(15000)
+        else if (action === 'rtc abort') abort.abort()
+        else await transport.close()
+        expect(await outcome).not.toBe('ready')
+        rtc.channel.onopen?.()
+        await vi.advanceTimersByTimeAsync(30000)
+        expect(socket.sent.some(frame => JSON.parse(frame).type === 'transport.selected')).toBe(false)
+      }
+      await transport.close()
+      expect(vi.getTimerCount()).toBe(0)
+    } })), cleanupScenario1)
+  })
+
   it('records heartbeat diagnostics and replies to ping', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-29T01:00:00.000Z'))
@@ -354,19 +473,21 @@ describe('AdaptiveTransport capability negotiation', () => {
   })
 })
 
-function createAdaptiveTransport(): AdaptiveTransport {
+function createAdaptiveTransport(options: Partial<AdaptiveTransportOptions> = {}): AdaptiveTransport {
   return new AdaptiveTransport('wss://remote.example/ws/v1/connect', {
     role: 'client',
     deviceId: 'client-1',
     accessToken: 'access-token',
     targetDeviceId: 'host-1',
     rtcFactory: { create: vi.fn(() => ({})) } as unknown as RtcPeerConnectionFactory,
+    ...options,
   })
 }
 
 function helloAck(overrides: {
   capabilities: string[]
   webrtcEnabled?: boolean
+  webrtcFallbackTimeoutMs?: number
   maxControlFrameBytes?: number
   maxRelayFrameBytes?: number
 }): unknown {
@@ -379,6 +500,24 @@ function helloAck(overrides: {
     maxRelayFrameBytes: 1_048_576,
     ...overrides,
   })
+}
+
+function stalledRtc() {
+  const channel = { label: 'dsh', ordered: true, readyState: 'connecting', bufferedAmount: 0,
+    onopen: null as (() => void) | null, close: vi.fn(), send: vi.fn() }
+  const pc = {
+    connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new',
+    createDataChannel: () => channel,
+    createOffer: async () => ({ type: 'offer', sdp: 'v=0 offer' }),
+    setLocalDescription: async () => {},
+    getStats: async () => [
+      ['lc', { id: 'lc', type: 'local-candidate', candidateType: 'host' }],
+      ['rc', { id: 'rc', type: 'remote-candidate', candidateType: 'srflx' }],
+      ['cp', { type: 'candidate-pair', selected: true, localCandidateId: 'lc', remoteCandidateId: 'rc' }],
+    ],
+    close: vi.fn(),
+  }
+  return { pc, channel, factory: { create: vi.fn(() => pc) } as unknown as RtcPeerConnectionFactory }
 }
 
 function lastSentPayload(socket: FakeWebSocket, type: string): Record<string, unknown> {

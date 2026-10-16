@@ -11,6 +11,7 @@ export class ClientSecureTransport implements RemoteTransport {
   private readonly incoming = new SecureMessageCodec()
   private readonly outgoing = new SecureMessageCodec()
   private closed = false
+  private lifetime?: AbortController
   private readonly sends = new SerialSend()
 
   constructor(
@@ -20,10 +21,13 @@ export class ClientSecureTransport implements RemoteTransport {
   ) {}
 
   async connect(): Promise<void> {
+    const lifetime = new AbortController()
+    this.lifetime = lifetime
     this.closed = false
     this.incoming.reset()
     this.outgoing.reset()
     await this.inner.connect()
+    lifetime.signal.throwIfAborted()
     const info = this.inner.connectionInfo()
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
       await this.inner.close()
@@ -38,11 +42,13 @@ export class ClientSecureTransport implements RemoteTransport {
     })
     this.noise = noise
     try {
-      await waitForResponder(this.inner, noise)
+      await waitForResponder(this.inner, noise, lifetime.signal)
     } catch (error) {
       noise.destroy()
-      this.noise = undefined
-      await this.inner.close()
+      if (this.lifetime === lifetime) {
+        this.noise = undefined
+        await this.inner.close()
+      }
       throw error
     }
   }
@@ -86,6 +92,8 @@ export class ClientSecureTransport implements RemoteTransport {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.lifetime?.abort()
+    this.lifetime = undefined
     this.unsubscribeInner?.()
     this.unsubscribeInner = undefined
     this.incoming.reset()
@@ -105,11 +113,24 @@ export class ClientSecureTransport implements RemoteTransport {
   }
 }
 
-async function waitForResponder(inner: SecureHandshakeTransport, noise: NoiseIkSession): Promise<void> {
+async function waitForResponder(inner: SecureHandshakeTransport, noise: NoiseIkSession, signal: AbortSignal): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let settled = false
+    let unsubscribe = () => {}
+    let unsubscribeClose = () => {}
     const timer = setTimeout(() => finish(new Error('Noise IK handshake timed out.')), 10_000)
-    const unsubscribe = inner.onHandshake((step, data) => {
+    const onAbort = () => finish(new Error('Noise IK handshake was aborted.'))
+    const finish = (error?: Error): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      unsubscribe()
+      unsubscribeClose()
+      signal.removeEventListener('abort', onAbort)
+      if (error === undefined) resolve()
+      else reject(error)
+    }
+    unsubscribe = inner.onHandshake((step, data) => {
       if (settled) return
       try {
         if (step !== 2) throw new Error('Noise IK responder sent an out-of-order handshake message.')
@@ -120,14 +141,9 @@ async function waitForResponder(inner: SecureHandshakeTransport, noise: NoiseIkS
         finish(error instanceof Error ? error : new Error('Noise IK handshake failed.'))
       }
     })
-    const finish = (error?: Error): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      unsubscribe()
-      if (error === undefined) resolve()
-      else reject(error)
-    }
+    unsubscribeClose = inner.onClose?.(() => finish(new Error('Control channel closed during Noise IK handshake.'))) ?? (() => {})
+    signal.addEventListener('abort', onAbort, { once: true })
+    if (signal.aborted) { onAbort(); return }
     void inner.sendHandshake(1, noise.writeHandshake()).catch(error => {
       finish(error instanceof Error ? error : new Error('Noise IK handshake failed.'))
     })

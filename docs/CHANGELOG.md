@@ -1,3 +1,13 @@
+## Unreleased
+
+- Separates Control authorization, ICE discovery, WebRTC negotiation and Noise handshake deadlines. Server-provided WebRTC budgets remain compatible, including 20-second fallback and legacy Servers without the optional field. Cancellation and disconnect settle startup and ignore late results.
+- Applies the Server WebRTC budget to the Host responder as well, preserving its local default for legacy Servers and avoiding early closure while the Client is still negotiating.
+
+### 中文
+
+- 拆分 Control 授权、ICE 配置获取、WebRTC 协商和 Noise 握手超时，兼容 Server 下发的 20 秒等待及不带该可选字段的旧 Server；取消或断线立即结束启动等待，并忽略迟到结果。
+- Host 响应端同样采用 Server 协商等待时间，旧 Server 保留本地默认值，避免 Client 仍在协商时 Host 提前关闭 RTC。
+
 ## 0.5.8 - 2026-10-16
 
 - Refreshes Android with frosted floating headers, pill actions, a rounded floating composer, and a white light theme with subtle card outlines (#111, #112, #113).

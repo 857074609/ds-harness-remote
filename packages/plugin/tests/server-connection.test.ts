@@ -10,6 +10,7 @@ import { ServerApiError, type HostServerApi } from '../src/server-api.js'
 import { HostServerConnection } from '../src/server-connection.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import { PLUGIN_VERSION } from '../src/version.js'
+import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
 
 class FakeWebSocket {
   readyState = 0
@@ -30,6 +31,58 @@ class FakeWebSocket {
 }
 
 describe('HostServerConnection', () => {
+  it('keeps the responder alive for the Server RTC budget and preserves legacy defaults', async () => {
+    await runScenarios([
+      { name: 'twenty-second Server', timeout: 20000, expected: 20000 },
+      { name: 'legacy Server without timeout', timeout: undefined, expected: 12000 },
+      { name: 'shorter Server budget preserves local minimum', timeout: 8000, expected: 12000 },
+    ].map(row => ({ name: row.name, run: async () => {
+      vi.useFakeTimers()
+      const hostKeys = generateKeyPair(new Uint8Array(32).fill(51))
+      const clientKeys = generateKeyPair(new Uint8Array(32).fill(52))
+      const peer = { deviceId: 'client-1', name: 'Client', platform: 'linux', publicKey: clientKeys.publicKey,
+        fingerprint: 'CLIENT', membershipId: 'member', trustedAt: 1 }
+      const socket = new FakeWebSocket()
+      const pc = { connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new',
+        setRemoteDescription: async () => {}, createAnswer: async () => ({ type: 'answer', sdp: 'answer' }),
+        setLocalDescription: async () => {}, getStats: async () => [], close: vi.fn() }
+      const server = new HostServerConnection({ ...config(), forceRelay: false },
+        { schemaVersion: 1, deviceId: 'host-1', name: 'Host', fingerprint: 'HOST', ...hostKeys },
+        { trustedPeer: () => peer } as unknown as IdentityStore,
+        { baseUrl: 'https://remote.test', authenticate: async () => ({ accessToken: 'test-token' }),
+          deviceFor: async () => ({ ...peer, role: 'client', identityKey: clientKeys.publicKey }),
+          turnCredentials: async () => [],
+        } as unknown as HostServerApi,
+        { close: async () => {} } as unknown as ConnectionController, logger(), () => socket,
+        async () => ({ create: () => pc }) as unknown as RtcPeerConnectionFactory)
+      try {
+        server.start()
+        await vi.advanceTimersByTimeAsync(0)
+        socket.open()
+        socket.receive(createControlFrame('hello.ack', { ...helloAck('control-1'),
+          capabilities: ['transport.p2p', 'transport.turn', 'transport.relay'],
+          ...(row.timeout === undefined ? {} : { webrtcFallbackTimeoutMs: row.timeout }),
+        }))
+        socket.receive(createControlFrame('connect.incoming', { connectionId: 'connection-1',
+          clientDeviceId: 'client-1', clientIdentityKey: clientKeys.publicKey,
+          authorization: 'account', preferredTransports: ['p2p', 'turn', 'relay'],
+        }))
+        socket.receive(createControlFrame('signal.offer', { connectionId: 'connection-1', targetDeviceId: 'host-1', sdp: 'offer' }))
+        await vi.advanceTimersByTimeAsync(row.expected - 1)
+        expect(socket.sent.map(frame => JSON.parse(frame).type)).toContain('signal.answer')
+        expect(pc.close).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(1)
+        expect(pc.close).toHaveBeenCalledOnce()
+        expect(socket.readyState).toBe(1)
+      } finally {
+        try {
+          await server.stop()
+          expect(vi.getTimerCount()).toBe(0)
+        } finally { vi.useRealTimers(); vi.restoreAllMocks() }
+      }
+    } })))
+  })
+
   it('matches the deployed Server frames and exposes RPC only after Noise IK', async () => {
     const hostKeys = generateKeyPair(new Uint8Array(32).fill(11))
     const clientKeys = generateKeyPair(new Uint8Array(32).fill(12))

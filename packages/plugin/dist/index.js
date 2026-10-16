@@ -12026,6 +12026,10 @@ var RtcDataChannelTransport = class {
   }
   /** Begin negotiation; resolves when the DataChannel is open. */
   connect(signal) {
+    if (this.closed)
+      return Promise.reject(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed."));
+    if (signal?.aborted)
+      return Promise.reject(new RtcConnectError("RTC_ABORTED", "WebRTC negotiation was aborted."));
     if (this.opened)
       return Promise.resolve();
     if (this.connectPromise !== void 0)
@@ -12134,6 +12138,9 @@ var RtcDataChannelTransport = class {
       return;
     this.closed = true;
     this.clearNegotiation();
+    this.openReject?.(new RtcConnectError("RTC_CLOSED", "WebRTC transport closed during negotiation."));
+    this.openResolve = void 0;
+    this.openReject = void 0;
     this.clearWatchdog();
     const channel = this.channel;
     this.channel = void 0;
@@ -12179,7 +12186,11 @@ var RtcDataChannelTransport = class {
     const channel = this.pc.createDataChannel(this.channelLabel, RTC_DATA_CHANNEL_OPTIONS);
     this.adoptChannel(channel);
     const offer = await this.pc.createOffer();
+    if (this.closed)
+      return;
     await this.pc.setLocalDescription(offer);
+    if (this.closed)
+      return;
     this.onSignal({ type: "offer", sdp: requireSdp(offer) });
   }
   async handleOffer(sdp) {
@@ -12252,7 +12263,13 @@ var RtcDataChannelTransport = class {
       this.opened = true;
       const resolve6 = this.openResolve;
       this.clearNegotiation();
-      void this.resolveSelectedTransport().then(() => resolve6?.());
+      void this.resolveSelectedTransport().then(() => {
+        if (this.closed)
+          return;
+        this.openResolve = void 0;
+        this.openReject = void 0;
+        resolve6?.();
+      });
     };
     channel.onmessage = (event) => {
       if (this.closed || !this.opened)
@@ -12316,10 +12333,7 @@ var RtcDataChannelTransport = class {
     }
   }
   async failOpenAfterStats(error) {
-    await Promise.race([
-      this.refreshStatsDiagnostics().catch(() => void 0),
-      sleep(250)
-    ]);
+    await this.refreshStatsDiagnostics().catch(() => void 0);
     this.failOpen(error);
   }
   failOpen(error) {
@@ -12338,8 +12352,6 @@ var RtcDataChannelTransport = class {
     this.negotiateTimer = void 0;
     this.removeAbort?.();
     this.removeAbort = void 0;
-    this.openResolve = void 0;
-    this.openReject = void 0;
   }
   requireOpenChannel() {
     const channel = this.channel;
@@ -12384,7 +12396,12 @@ var RtcDataChannelTransport = class {
     this.lastBufferedAmount = 0;
   }
   async refreshStatsDiagnostics() {
-    const stats = [...await this.pc.getStats()];
+    const stats = [...await new Promise((resolve6, reject) => {
+      const timer = setTimeout(() => reject(new Error("WebRTC statistics timed out.")), 250);
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve6, reject).finally(() => clearTimeout(timer));
+    })];
+    if (this.closed)
+      return {};
     this.candidatePairTelemetry = inspectCandidatePairs(stats);
     return inspectSelectedPath(stats);
   }
@@ -12671,6 +12688,8 @@ var AdaptiveTransport = class extends BaseTransport {
   readyResolve;
   readyReject;
   handshakeTimer;
+  lifetime;
+  removeAbort;
   webrtcEnabled = true;
   serverNegotiateTimeoutMs;
   negotiatedCapabilities = ["transport.relay"];
@@ -12688,18 +12707,32 @@ var AdaptiveTransport = class extends BaseTransport {
   async connect() {
     if (this.socket !== void 0)
       return;
+    throwIfAborted(this.options.signal);
+    const lifetime = new AbortController();
+    this.lifetime = lifetime;
+    this.webrtcEnabled = true;
+    this.serverNegotiateTimeoutMs = void 0;
+    this.dataMode = "relay";
+    this.selected = void 0;
+    this.connectedAt = void 0;
+    this.relayCounter = 0;
     this.socket = new WebSocket(this.url);
     this.controlFrameLimits = {};
     this.socket.binaryType = "arraybuffer";
     await new Promise((resolve6, reject) => {
       this.readyResolve = resolve6;
       this.readyReject = reject;
+      const onAbort = () => this.failConnection(new Error("Adaptive connection was aborted"));
+      this.options.signal?.addEventListener("abort", onAbort, { once: true });
+      this.removeAbort = () => this.options.signal?.removeEventListener("abort", onAbort);
       this.handshakeTimer = setTimeout(() => this.failConnection(new Error("Adaptive control handshake timed out")), this.options.handshakeTimeoutMs ?? 15e3);
       const socket = this.socket;
       socket.onmessage = (event) => {
-        void this.handleSocketMessage(event.data);
+        void this.handleSocketMessage(event.data, lifetime);
       };
       socket.onopen = () => {
+        if (this.lifetime !== lifetime)
+          return;
         this.sendControl("hello", {
           role: this.options.role,
           deviceId: this.options.deviceId,
@@ -12708,14 +12741,13 @@ var AdaptiveTransport = class extends BaseTransport {
           capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES
         });
       };
-      socket.onerror = () => this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`));
+      socket.onerror = () => {
+        if (this.lifetime === lifetime)
+          this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`));
+      };
       socket.onclose = (event) => {
-        const pending = this.readyReject !== void 0;
-        if (pending)
+        if (this.lifetime === lifetime)
           this.failConnection(adaptiveControlCloseError(event));
-        this.socket = void 0;
-        this.connectionId = void 0;
-        this.emitClose();
       };
     });
   }
@@ -12782,12 +12814,7 @@ var AdaptiveTransport = class extends BaseTransport {
     return () => this.handshakeHandlers.delete(cb);
   }
   async close() {
-    this.clearHandshake();
-    await this.rtc?.close();
-    this.rtc = void 0;
-    this.socket?.close();
-    this.socket = void 0;
-    this.connectionId = void 0;
+    this.failConnection(new Error("Adaptive transport closed"));
   }
   getStats() {
     const webrtcConnected = this.dataMode === "webrtc" && this.rtc?.getStats().connected === true;
@@ -12801,7 +12828,9 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     return { mode: mode2, connected, bytesSent: this.bytesSent, bytesReceived: this.bytesReceived };
   }
-  async handleSocketMessage(raw) {
+  async handleSocketMessage(raw, lifetime) {
+    if (this.lifetime !== lifetime)
+      return;
     try {
       if (typeof raw !== "string")
         throw new Error("Adaptive control frames must be text JSON");
@@ -12834,13 +12863,17 @@ var AdaptiveTransport = class extends BaseTransport {
         return;
       }
       if (frame.type === "connect.accepted") {
+        if (this.connectionId !== void 0)
+          throw new Error("Duplicate connect.accepted");
         const payload = frame.payload;
         if (typeof payload.connectionId !== "string" || payload.connectionId.length === 0) {
           throw new Error("connect.accepted did not include a connectionId");
         }
         this.connectionId = payload.connectionId;
-        void this.negotiate().catch((error) => {
-          this.failConnection(error instanceof Error ? error : new Error("Adaptive transport negotiation failed"));
+        this.clearHandshake();
+        void this.negotiate(lifetime.signal).catch((error) => {
+          if (this.lifetime === lifetime)
+            this.failConnection(error instanceof Error ? error : new Error("Adaptive transport negotiation failed"));
         });
         return;
       }
@@ -12895,7 +12928,7 @@ var AdaptiveTransport = class extends BaseTransport {
     this.bytesReceived += data2.byteLength;
     this.emit(data2);
   }
-  async negotiate() {
+  async negotiate(signal) {
     if (this.connectionId === void 0)
       return;
     const preferred = this.negotiatedTransports();
@@ -12904,10 +12937,12 @@ var AdaptiveTransport = class extends BaseTransport {
     this.lastRtcDiagnostics = void 0;
     if (wantWebRtc) {
       try {
-        const rtcSelected = (await this.tryWebRtc()).transport;
+        const rtcSelected = (await this.tryWebRtc(signal)).transport;
+        throwIfAborted(signal);
         const wireSelected = rtcSelected === "lan" && !preferred.includes("lan") && preferred.includes("p2p") ? "p2p" : rtcSelected;
         if (!preferred.includes(wireSelected)) {
           await this.rtc?.close();
+          throwIfAborted(signal);
           this.rtc = void 0;
           if (!preferred.includes("relay")) {
             throw new Error(`WebRTC selected unnegotiated transport: ${rtcSelected}`);
@@ -12919,12 +12954,14 @@ var AdaptiveTransport = class extends BaseTransport {
           selected = wireSelected;
         }
       } catch (error) {
+        throwIfAborted(signal);
         const reason = error instanceof Error ? error : new Error("WebRTC negotiation failed.");
         try {
           this.options.onWebRtcFallback?.(reason, this.lastRtcDiagnostics);
         } catch {
         }
         await this.rtc?.close();
+        throwIfAborted(signal);
         this.rtc = void 0;
         if (!preferred.includes("relay"))
           throw reason;
@@ -12957,7 +12994,7 @@ var AdaptiveTransport = class extends BaseTransport {
       return this.negotiatedCapabilities.includes(`transport.${transport}`);
     });
   }
-  async tryWebRtc() {
+  async tryWebRtc(signal) {
     const connectionId = this.connectionId;
     if (connectionId === void 0)
       throw new RtcConnectError("RTC_UNAVAILABLE", "No connection id for WebRTC negotiation.");
@@ -12967,15 +13004,16 @@ var AdaptiveTransport = class extends BaseTransport {
     }
     let iceServers = [];
     try {
-      iceServers = await (this.options.fetchIceServers?.(connectionId) ?? []);
+      iceServers = await this.fetchIceServers(connectionId, signal);
     } catch {
       iceServers = [];
     }
+    throwIfAborted(signal);
     const rtc = new RtcDataChannelTransport({
       role: "initiator",
       factory,
       iceServers,
-      onSignal: (signal) => this.sendRtcSignal(signal),
+      onSignal: (signal2) => this.sendRtcSignal(signal2),
       negotiateTimeoutMs: negotiateTimeout(this.serverNegotiateTimeoutMs, this.options.negotiateTimeoutMs),
       label: `client->${this.options.targetDeviceId}`,
       onDiagnostic: (event) => {
@@ -12996,15 +13034,55 @@ var AdaptiveTransport = class extends BaseTransport {
         this.emitClose();
     });
     try {
-      await rtc.connect();
+      await rtc.connect(signal);
     } catch (error) {
+      throwIfAborted(signal);
       this.lastRtcDiagnostics = rtc.diagnostics();
       await rtc.close();
-      this.rtc = void 0;
+      if (this.rtc === rtc)
+        this.rtc = void 0;
+      throwIfAborted(signal);
       throw error;
     }
+    throwIfAborted(signal);
     this.lastRtcDiagnostics = rtc.diagnostics();
     return { transport: rtc.selectedTransport() ?? "p2p", relayUrl: rtc.selectedRelayUrl() };
+  }
+  async fetchIceServers(connectionId, signal) {
+    if (this.options.fetchIceServers === void 0)
+      return [];
+    return new Promise((resolve6, reject) => {
+      const request = new AbortController();
+      let settled = false;
+      const finish = (error, servers = []) => {
+        if (settled)
+          return;
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort);
+        if (error)
+          reject(error);
+        else
+          resolve6(servers);
+      };
+      const onAbort = () => {
+        finish(new Error("ICE configuration request was aborted"));
+        request.abort();
+      };
+      const timer = setTimeout(() => {
+        finish(new Error("ICE configuration request timed out"));
+        request.abort();
+      }, this.options.iceServersTimeoutMs ?? 1e4);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      Promise.resolve().then(() => {
+        throwIfAborted(request.signal);
+        return this.options.fetchIceServers(connectionId, request.signal);
+      }).then((servers) => finish(void 0, servers), (error) => finish(error instanceof Error ? error : new Error("ICE configuration request failed")));
+    });
   }
   sendRtcSignal(signal) {
     if (this.connectionId === void 0)
@@ -13037,6 +13115,8 @@ var AdaptiveTransport = class extends BaseTransport {
   }
   finishConnection() {
     this.clearHandshake();
+    this.removeAbort?.();
+    this.removeAbort = void 0;
     this.connectedAt ??= Date.now();
     this.readyResolve?.();
     this.readyResolve = void 0;
@@ -13047,12 +13127,22 @@ var AdaptiveTransport = class extends BaseTransport {
     const reject = this.readyReject;
     this.readyResolve = void 0;
     this.readyReject = void 0;
-    reject?.(error);
-    void this.rtc?.close();
+    this.removeAbort?.();
+    this.removeAbort = void 0;
+    const lifetime = this.lifetime;
+    this.lifetime = void 0;
+    const rtc = this.rtc;
+    const socket = this.socket;
     this.rtc = void 0;
-    this.socket?.close();
     this.socket = void 0;
     this.connectionId = void 0;
+    this.connectedAt = void 0;
+    lifetime?.abort();
+    reject?.(error);
+    void rtc?.close();
+    socket?.close();
+    if (socket !== void 0)
+      this.emitClose();
   }
   clearHandshake() {
     if (this.handshakeTimer !== void 0)
@@ -13083,6 +13173,10 @@ function negotiateTimeout(serverMs, localMs) {
   if (localMs === void 0)
     return serverMs;
   return Math.max(serverMs, localMs);
+}
+function throwIfAborted(signal) {
+  if (signal?.aborted)
+    throw new Error("Adaptive connection was aborted");
 }
 
 // ../webrtc/dist/serial-send.js
@@ -20226,12 +20320,16 @@ var ClientSecureTransport = class {
   incoming = new SecureMessageCodec();
   outgoing = new SecureMessageCodec();
   closed = false;
+  lifetime;
   sends = new SerialSend();
   async connect() {
+    const lifetime = new AbortController();
+    this.lifetime = lifetime;
     this.closed = false;
     this.incoming.reset();
     this.outgoing.reset();
     await this.inner.connect();
+    lifetime.signal.throwIfAborted();
     const info = this.inner.connectionInfo();
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
       await this.inner.close();
@@ -20246,11 +20344,13 @@ var ClientSecureTransport = class {
     });
     this.noise = noise;
     try {
-      await waitForResponder(this.inner, noise);
+      await waitForResponder(this.inner, noise, lifetime.signal);
     } catch (error) {
       noise.destroy();
-      this.noise = void 0;
-      await this.inner.close();
+      if (this.lifetime === lifetime) {
+        this.noise = void 0;
+        await this.inner.close();
+      }
       throw error;
     }
   }
@@ -20290,6 +20390,8 @@ var ClientSecureTransport = class {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.lifetime?.abort();
+    this.lifetime = void 0;
     this.unsubscribeInner?.();
     this.unsubscribeInner = void 0;
     this.incoming.reset();
@@ -20308,11 +20410,26 @@ var ClientSecureTransport = class {
     return this.noise;
   }
 };
-async function waitForResponder(inner, noise) {
+async function waitForResponder(inner, noise, signal) {
   await new Promise((resolve6, reject) => {
     let settled = false;
+    let unsubscribe = () => {
+    };
+    let unsubscribeClose = () => {
+    };
     const timer = setTimeout(() => finish(new Error("Noise IK handshake timed out.")), 1e4);
-    const unsubscribe = inner.onHandshake((step, data2) => {
+    const onAbort = () => finish(new Error("Noise IK handshake was aborted."));
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      unsubscribe();
+      unsubscribeClose();
+      signal.removeEventListener("abort", onAbort);
+      if (error === void 0) resolve6();
+      else reject(error);
+    };
+    unsubscribe = inner.onHandshake((step, data2) => {
       if (settled) return;
       try {
         if (step !== 2) throw new Error("Noise IK responder sent an out-of-order handshake message.");
@@ -20323,14 +20440,13 @@ async function waitForResponder(inner, noise) {
         finish(error instanceof Error ? error : new Error("Noise IK handshake failed."));
       }
     });
-    const finish = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      unsubscribe();
-      if (error === void 0) resolve6();
-      else reject(error);
-    };
+    unsubscribeClose = inner.onClose?.(() => finish(new Error("Control channel closed during Noise IK handshake."))) ?? (() => {
+    });
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
     void inner.sendHandshake(1, noise.writeHandshake()).catch((error) => {
       finish(error instanceof Error ? error : new Error("Noise IK handshake failed."));
     });
@@ -28306,7 +28422,17 @@ var ClientModeRuntime = class {
         try {
           transport = createTransport(attempt);
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target2), 6e4);
-          await client.connect();
+          const attemptClient = client;
+          const onAbort = () => {
+            void attemptClient.close();
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+          try {
+            signal?.throwIfAborted();
+            await attemptClient.connect();
+          } finally {
+            signal?.removeEventListener("abort", onAbort);
+          }
           signal?.throwIfAborted();
         } finally {
           stopProgressTimer();
@@ -35716,6 +35842,7 @@ var HostServerConnection = class {
   rtcFactory;
   negotiatedCapabilities = ["transport.relay"];
   controlFrameLimits = {};
+  webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS;
   start() {
     if (this.running !== void 0) return;
     this.stopped = false;
@@ -35856,6 +35983,10 @@ var HostServerConnection = class {
           this.lastActiveAt = Date.now();
           if (frame.type === "hello.ack") {
             const payload = requireHelloAck(frame.payload);
+            this.webRtcNegotiateTimeoutMs = Math.max(
+              DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
+              payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
+            );
             this.authRecoveryAttempted = false;
             this.controlFrameLimits = {
               maxControlFrameBytes: payload.maxControlFrameBytes,
@@ -36142,13 +36273,14 @@ var HostServerConnection = class {
         code: errorCode4(error)
       });
     }
+    if (this.stopped || this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.rtc !== void 0 || tunnel.channel !== void 0) return;
     if (!tunnel.preferredTransports.includes("turn")) iceServers = stunOnlyIceServers(iceServers);
     const rtc = new RtcDataChannelTransport({
       role: "responder",
       factory: this.rtcFactory,
       iceServers,
       onSignal: (signal) => this.sendRtcSignal(tunnel, signal),
-      negotiateTimeoutMs: DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
+      negotiateTimeoutMs: this.webRtcNegotiateTimeoutMs,
       label: `host<-${tunnel.peer.deviceId}`,
       onDiagnostic: (event) => {
         if (event.type !== "local-candidate-filtered" && event.type !== "candidate-pair-filtered") return;

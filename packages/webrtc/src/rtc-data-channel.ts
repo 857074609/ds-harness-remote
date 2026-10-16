@@ -224,6 +224,8 @@ export class RtcDataChannelTransport {
 
   /** Begin negotiation; resolves when the DataChannel is open. */
   connect(signal?: AbortSignal): Promise<void> {
+    if (this.closed) return Promise.reject(new RtcConnectError('RTC_CLOSED', 'WebRTC transport closed.'))
+    if (signal?.aborted) return Promise.reject(new RtcConnectError('RTC_ABORTED', 'WebRTC negotiation was aborted.'))
     if (this.opened) return Promise.resolve()
     if (this.connectPromise !== undefined) return this.connectPromise
     this.armAbort(signal)
@@ -339,6 +341,9 @@ export class RtcDataChannelTransport {
     if (this.closed) return
     this.closed = true
     this.clearNegotiation()
+    this.openReject?.(new RtcConnectError('RTC_CLOSED', 'WebRTC transport closed during negotiation.'))
+    this.openResolve = undefined
+    this.openReject = undefined
     this.clearWatchdog()
     const channel = this.channel
     this.channel = undefined
@@ -377,7 +382,9 @@ export class RtcDataChannelTransport {
     const channel = this.pc.createDataChannel(this.channelLabel, RTC_DATA_CHANNEL_OPTIONS)
     this.adoptChannel(channel)
     const offer = await this.pc.createOffer()
+    if (this.closed) return
     await this.pc.setLocalDescription(offer)
+    if (this.closed) return
     this.onSignal({ type: 'offer', sdp: requireSdp(offer) })
   }
 
@@ -450,7 +457,12 @@ export class RtcDataChannelTransport {
       this.opened = true
       const resolve = this.openResolve
       this.clearNegotiation()
-      void this.resolveSelectedTransport().then(() => resolve?.())
+      void this.resolveSelectedTransport().then(() => {
+        if (this.closed) return
+        this.openResolve = undefined
+        this.openReject = undefined
+        resolve?.()
+      })
     }
     channel.onmessage = event => {
       if (this.closed || !this.opened) return
@@ -519,10 +531,7 @@ export class RtcDataChannelTransport {
   }
 
   private async failOpenAfterStats(error: Error): Promise<void> {
-    await Promise.race([
-      this.refreshStatsDiagnostics().catch(() => undefined),
-      sleep(250),
-    ])
+    await this.refreshStatsDiagnostics().catch(() => undefined)
     this.failOpen(error)
   }
 
@@ -541,8 +550,6 @@ export class RtcDataChannelTransport {
     this.negotiateTimer = undefined
     this.removeAbort?.()
     this.removeAbort = undefined
-    this.openResolve = undefined
-    this.openReject = undefined
   }
 
   private requireOpenChannel(): RtcDataChannel {
@@ -588,7 +595,12 @@ export class RtcDataChannelTransport {
   }
 
   private async refreshStatsDiagnostics(): Promise<RtcPathDetails> {
-    const stats = [...await this.pc.getStats()]
+    // Native getStats() must not leave startup waiting after the channel opens.
+    const stats = [...await new Promise<RtcStats>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('WebRTC statistics timed out.')), 250)
+      Promise.resolve().then(() => this.pc.getStats()).then(resolve, reject).finally(() => clearTimeout(timer))
+    })]
+    if (this.closed) return {}
     this.candidatePairTelemetry = inspectCandidatePairs(stats)
     return inspectSelectedPath(stats)
   }

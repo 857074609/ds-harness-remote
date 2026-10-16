@@ -394,13 +394,14 @@ describe('RtcDataChannelTransport chunking integration', () => {
       factory: factoryFor(pc),
       onSignal: () => undefined,
     })
-    void transport.connect()
+    const connecting = transport.connect()
     transport.handleSignal({ type: 'offer', sdp: 'v=0 offer' })
     await flush()
     const channel = new FakeChannel()
     pc.channels.push(channel)
     pc.ondatachannel?.({ channel })
     channel.open()
+    await connecting
 
     const received: Uint8Array[] = []
     transport.onMessage(data => received.push(data))

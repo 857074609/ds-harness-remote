@@ -6,13 +6,17 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { WebSocket } from 'ws'
-import { createControlFrame } from '@dsh-remote/protocol'
+import { MAX_CONTROL_FRAME_BYTES, createControlFrame } from '@dsh-remote/protocol'
 import { NoiseIkSession, createNoisePrologue, generateKeyPair, toBase64Url, fromBase64Url } from '../../../packages/crypto/src/index.js'
+import { RelayTransport } from '../../../packages/webrtc/src/index.js'
+import { ClientSecureTransport } from '../../../packages/plugin/src/client-secure-transport.js'
 import { createRemoteServer } from '../src/server.js'
 
 const account = 'owner@example.com', password = 'local-test-password'
 let app: ReturnType<typeof createRemoteServer>, dir: string, base: string, accountToken: string
 const sockets: WebSocket[] = []
+const secureClients: ClientSecureTransport[] = []
+const noiseSessions: NoiseIkSession[] = []
 async function request(path: string, method = 'GET', body?: unknown, token?: string, headers = {}) {
   const response = await fetch(`${base}/api/v1${path}`, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
   return { status: response.status, data: await response.json(), headers: response.headers }
@@ -66,11 +70,44 @@ async function handshake(ctx: Awaited<ReturnType<typeof connection>>) {
   const prologue = createNoisePrologue(connectionId, h.deviceId, c.deviceId)
   const initiator = new NoiseIkSession({ role: 'initiator', localPrivateKey: c.keys.privateKey, localPublicKey: c.identityKey, remotePublicKey: h.identityKey, prologue })
   const responder = new NoiseIkSession({ role: 'responder', localPrivateKey: h.keys.privateKey, localPublicKey: h.identityKey, remotePublicKey: c.identityKey, prologue })
+  noiseSessions.push(initiator, responder)
   client.send('secure.handshake', { connectionId, targetDeviceId: h.deviceId, step: 1, data: toBase64Url(initiator.writeHandshake()) })
   responder.readHandshake(fromBase64Url((await host.next('secure.handshake')).data))
   host.send('secure.handshake', { connectionId, targetDeviceId: c.deviceId, step: 2, data: toBase64Url(responder.writeHandshake()) })
   initiator.readHandshake(fromBase64Url((await client.next('secure.handshake')).data))
   return { initiator, responder }
+}
+async function secureConnection() {
+  const h = await device('host'), c = await device(), host = await socket(h)
+  await host.next('hello.ack')
+  const relay = new RelayTransport(base.replace('http:', 'ws:') + '/ws/v1/connect', {
+    role: 'client', deviceId: c.deviceId, accessToken: c.accessToken, targetDeviceId: h.deviceId,
+  })
+  const secure = new ClientSecureTransport(relay, {
+    schemaVersion: 1, deviceId: c.deviceId, name: c.name, ...c.keys, fingerprint: 'test-client',
+  }, {
+    deviceId: h.deviceId, name: h.name, platform: h.platform, publicKey: h.identityKey,
+    fingerprint: 'test-host', trustedAt: Date.now(),
+  })
+  secureClients.push(secure)
+  const received: string[] = []
+  secure.onMessage(data => received.push(new TextDecoder().decode(data)))
+  const connecting = secure.connect().then(() => undefined, error => error as Error)
+  const incoming = await host.next('connect.incoming')
+  const connectionId: string = incoming.connectionId
+  host.send('connect.accepted', { connectionId })
+  const responder = new NoiseIkSession({
+    role: 'responder', localPrivateKey: h.keys.privateKey, localPublicKey: h.identityKey,
+    remotePublicKey: c.identityKey, prologue: createNoisePrologue(connectionId, h.deviceId, c.deviceId),
+  })
+  noiseSessions.push(responder)
+  const first = await host.next('secure.handshake')
+  expect(first).toMatchObject({ connectionId, targetDeviceId: h.deviceId, step: 1 })
+  responder.readHandshake(fromBase64Url(first.data))
+  host.send('secure.handshake', { connectionId, targetDeviceId: c.deviceId, step: 2, data: toBase64Url(responder.writeHandshake()) })
+  const error = await connecting
+  if (error) throw error
+  return { h, c, host, secure, responder, connectionId, received }
 }
 const prepareScenario1 = async () => {
   dir = mkdtempSync(join(tmpdir(), 'dsh-server-'))
@@ -79,6 +116,8 @@ const prepareScenario1 = async () => {
 }
 beforeEach(prepareScenario1)
 const cleanupScenario2 = async () => {
+  for (const secure of secureClients.splice(0)) await secure.close()
+  for (const noise of noiseSessions.splice(0)) noise.destroy()
   for (const ws of sockets.splice(0)) ws.terminate()
   await app.close()
   rmSync(dir, { recursive: true, force: true })
@@ -129,6 +168,27 @@ describe('account and device authorization', () => {
   })
 })
 describe('control authorization and encrypted relay', () => {
+  it('rejects invalid Control messages at the WebSocket boundary', async () => {
+    await runScenarios(['unsupported-version', 'binary-control', 'oversized-control', 'unknown-frame-type'].map(reason => ({
+      name: reason,
+      run: async () => {
+        const wire = await socket(await device())
+        await wire.next('hello.ack')
+        const closed = once(wire.ws, 'close')
+        const frame = {
+          ...createControlFrame('ping', { nonce: reason === 'oversized-control' ? 'a'.repeat(MAX_CONTROL_FRAME_BYTES) : 'test' }),
+          ...(reason === 'unsupported-version' ? { v: 2 } : {}),
+          ...(reason === 'unknown-frame-type' ? { type: 'unknown' } : {}),
+        }
+        wire.ws.send(JSON.stringify(frame), { binary: reason === 'binary-control' })
+        expect((await wire.next('error')).code).toBe(reason === 'unsupported-version' ? 'UNSUPPORTED_VERSION' : 'INVALID_MESSAGE')
+        expect((await closed)[0]).toBe(4001)
+      },
+    })), async () => {
+      await cleanupScenario2()
+      await prepareScenario1()
+    })
+  })
   it('relays real Noise IK ciphertext and rejects replay', async () => {
     const ctx = await connection(), { initiator, responder } = await handshake(ctx)
     const ciphertext = toBase64Url(initiator.encrypt(new TextEncoder().encode('private prompt')))
@@ -141,7 +201,7 @@ describe('control authorization and encrypted relay', () => {
     expect((await ctx.client.next('error')).code).toBe('INVALID_MESSAGE')
   })
   it('rejects unauthorized relay routes', async () => {
-    const rows = ['wrong-target', 'third-device', 'before-handshake'] as const
+    const rows = ['wrong-target', 'third-device', 'unknown-connection', 'before-handshake'] as const
     await runScenarios(
       rows.map((row, index) => {
         const reason = row
@@ -149,15 +209,18 @@ describe('control authorization and encrypted relay', () => {
           name: scenarioName('rejects unauthorized relay: %s', row, index),
           run: async () => {
             const ctx = await connection()
+            if (reason !== 'before-handshake') await handshake(ctx)
             const attacker = reason === 'third-device' ? await socket(await device()) : ctx.client
             if (reason === 'third-device') await attacker.next('hello.ack')
             attacker.send('relay', {
-              connectionId: ctx.connectionId,
+              connectionId: reason === 'unknown-connection' ? randomUUID() : ctx.connectionId,
               targetDeviceId: reason === 'wrong-target' ? randomUUID() : ctx.h.deviceId,
               counter: 0,
               ciphertext: 'opaque',
             })
-            expect((await attacker.next('error')).code).toMatch(/CONNECTION_NOT_FOUND|INVALID_MESSAGE/)
+            expect((await attacker.next('error')).code).toBe(reason === 'before-handshake' ? 'INVALID_MESSAGE' : 'CONNECTION_NOT_FOUND')
+            ctx.host.send('ping', { nonce: 'route-check' })
+            await ctx.host.next('pong')
             expect(ctx.host.messages.filter((m) => m.type === 'relay')).toHaveLength(0)
           },
         }
@@ -167,6 +230,75 @@ describe('control authorization and encrypted relay', () => {
         await prepareScenario1()
       },
     )
+  })
+  it('closes the production Client secure channel after relayed tampering or ciphertext replay', async () => {
+    await runScenarios(['tamper', 'replay-with-new-counter'].map(reason => ({
+      name: reason,
+      run: async () => {
+        const ctx = await secureConnection()
+        await ctx.secure.send(new TextEncoder().encode('synthetic request'))
+        const request = await ctx.host.next('relay')
+        expect(new TextDecoder().decode(ctx.responder.decrypt(fromBase64Url(request.ciphertext)))).toBe('synthetic request')
+        const ciphertext = ctx.responder.encrypt(new TextEncoder().encode('synthetic response'))
+        const payload = { connectionId: ctx.connectionId, targetDeviceId: ctx.c.deviceId, counter: 0, ciphertext: toBase64Url(ciphertext) }
+        if (reason === 'replay-with-new-counter') {
+          ctx.host.send('relay', payload)
+          await expect.poll(() => ctx.received).toEqual(['synthetic response'])
+          payload.counter = 1
+        } else {
+          ciphertext[ciphertext.length - 1]! ^= 1
+          payload.ciphertext = toBase64Url(ciphertext)
+        }
+        ctx.host.send('relay', payload)
+        await expect.poll(() => ctx.secure.getStats().connected).toBe(false)
+        expect(ctx.received).toEqual(reason === 'tamper' ? [] : ['synthetic response'])
+        await expect(ctx.secure.send(new Uint8Array([1]))).rejects.toThrow('The authenticated Noise channel is not connected.')
+        // The Host keeps its Control socket after one Client channel fails.
+        ctx.host.send('ping', { nonce: 'host-still-online' })
+        expect(await ctx.host.next('pong')).toEqual({ nonce: 'host-still-online' })
+      },
+    })), async () => {
+      await cleanupScenario2()
+      await prepareScenario1()
+    })
+  })
+  it('rejects a relayed initiator whose static identity or connection prologue differs from local trust', async () => {
+    await runScenarios(['wrong-static-key', 'wrong-prologue'].map(reason => ({
+      name: reason,
+      run: async () => {
+        const ctx = await connection()
+        const prologue = createNoisePrologue(ctx.connectionId, ctx.h.deviceId, ctx.c.deviceId)
+        const initiator = new NoiseIkSession({
+          role: 'initiator', localPrivateKey: ctx.c.keys.privateKey, localPublicKey: ctx.c.identityKey,
+          remotePublicKey: ctx.h.identityKey, prologue,
+        })
+        const responder = new NoiseIkSession({
+          role: 'responder', localPrivateKey: ctx.h.keys.privateKey, localPublicKey: ctx.h.identityKey,
+          remotePublicKey: reason === 'wrong-static-key' ? generateKeyPair().publicKey : ctx.c.identityKey,
+          prologue: reason === 'wrong-prologue' ? createNoisePrologue(randomUUID(), ctx.h.deviceId, ctx.c.deviceId) : prologue,
+        })
+        noiseSessions.push(initiator, responder)
+        ctx.client.send('secure.handshake', {
+          connectionId: ctx.connectionId, targetDeviceId: ctx.h.deviceId, step: 1, data: toBase64Url(initiator.writeHandshake()),
+        })
+        const received = await ctx.host.next('secure.handshake')
+        const read = () => responder.readHandshake(fromBase64Url(received.data))
+        if (reason === 'wrong-static-key') expect(read).toThrow(/static key/)
+        else expect(read).toThrow()
+        expect(responder.complete).toBe(false)
+        expect(() => responder.encrypt(new Uint8Array([1]))).toThrow()
+        ctx.client.send('relay', {
+          connectionId: ctx.connectionId, targetDeviceId: ctx.h.deviceId, counter: 0, ciphertext: 'AQIDBA',
+        })
+        expect((await ctx.client.next('error')).code).toBe('INVALID_MESSAGE')
+        ctx.host.send('ping', { nonce: 'handshake-check' })
+        await ctx.host.next('pong')
+        expect(ctx.host.messages.filter(m => m.type === 'relay')).toHaveLength(0)
+      },
+    })), async () => {
+      await cleanupScenario2()
+      await prepareScenario1()
+    })
   })
   it('rejects account tokens and mismatched device roles in hello', async () => {
     const d = await device()

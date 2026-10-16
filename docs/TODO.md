@@ -131,7 +131,14 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 
 ## P0：协议与安全
 
+2026-10-16 WSL 核对结果见[协议与 Relay 验证报告](protocol-validation-2026-10-16.md)。
+本地集成验证不替代真实跨设备验收。
+
 - [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
+- [ ] 拒绝原始 JSON 中重复的安全字段。分别核对 Control 与 REST 入口。
+- [ ] 对齐 Connect 公钥格式与 Handshake/Relay 的规范 Base64URL 校验。
+- [ ] 明确握手 step、heartbeat 数值与标识符范围。同步 schema 和共享 fixtures。
+- [ ] 清理协议第 22 节的 `connection.ping` 冲突说明。区分 replay/rekey 目标与实现状态。
 - [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
@@ -142,6 +149,8 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
 - [ ] 补齐真实 Relay 链路的篡改、重放和错误 identity 跨层验证
+- [x] WSL 本地 Server/WebSocket 验证密文篡改与提高 counter 后的重放拒绝。
+- [x] WSL 本地 Relay 验证错误静态公钥与连接 prologue 的 Noise 握手拒绝。
 
 ## P1：Transport 与恢复
 

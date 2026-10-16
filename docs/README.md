@@ -25,6 +25,7 @@
 ## 主题说明
 
 - [开发任务与路线图](TODO.md)：跟踪未完成的工作和验证边界。
+- [WSL 协议与 Relay 验证](protocol-validation-2026-10-16.md)：记录本地验证结果、schema 差距与验收边界。
 - [更新记录](CHANGELOG.md)：记录版本变更。
 - [隐私说明](PRIVACY.md)：说明数据处理与隐私边界。
 - [插件安装指南](installation.zh.md)（[English](installation.md)）：已有 Harness 插件安装、Desktop 插件管理、profile 选择与插件卸载。

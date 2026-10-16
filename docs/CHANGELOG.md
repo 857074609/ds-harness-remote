@@ -1,10 +1,14 @@
 ## 0.5.9 - 2026-10-16
 
+- Separates Control authorization, ICE discovery, WebRTC negotiation and Noise handshake deadlines. Server-provided WebRTC budgets remain compatible, including 20-second fallback and legacy Servers without the optional field. Cancellation and disconnect settle startup and ignore late results.
+- Applies the Server WebRTC budget to the Host responder as well, preserving its local default for legacy Servers and avoiding early closure while the Client is still negotiating.
 - Keeps the Remote status strip, and the scrim of its connection panel, clickable in the Windows Desktop caption. The strip is placed in the title bar row, which the shell declares as the window drag region, so without an explicit opt-out every press only started a window drag; both surfaces now exclude themselves from that region with the same marker the shell's own caption controls use.
 - Advances the Plugin and Android app to `0.5.9` (Android `versionCode 47`).
 
 ### 中文
 
+- 拆分 Control 授权、ICE 配置获取、WebRTC 协商和 Noise 握手超时，兼容 Server 下发的 20 秒等待及不带该可选字段的旧 Server；取消或断线立即结束启动等待，并忽略迟到结果。
+- Host 响应端同样采用 Server 协商等待时间，旧 Server 保留本地默认值，避免 Client 仍在协商时 Host 提前关闭 RTC。
 - 修复 Windows Desktop 顶栏中的 Remote 状态条及其连接线路面板遮罩无法点击：状态条位于标题栏行内，而该行被 shell 声明为窗口拖拽区，未显式退出时点击只会变成拖动窗口；两处现使用 shell 自有顶栏控件相同的标记退出拖拽区。
 - Plugin 与 Android App 升级到 `0.5.9`（Android `versionCode 47`）。
 

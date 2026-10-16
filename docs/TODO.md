@@ -1,10 +1,32 @@
 # TODO
 
-本清单按 2026-10-09 的兼容方向维护：Harness `0.2.1-alpha.1` 为开发基线，保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。peer range 接纳后续 `0.2.2` RC，实际发布后仍需 runtime 回归。legacy ApiProxy 不再作为兼容维护目标，已有实现仅保留。完整 Server、Remote Web 和 Admin 在独立 Server 仓库实现；本仓库 `apps/server` 提供最小单账号 Relay Server。
+更新日期：2026-10-16。Plugin 与 Android 当前版本为 `0.5.8`。
+
+Harness `0.2.1-alpha.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
+peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
+legacy ApiProxy 不再作为兼容维护目标，已有实现仅保留。
+完整 Server、Remote Web 和 Admin 在独立 Server 仓库实现。
+本仓库 `apps/server` 提供最小单账号 Relay Server。
+
+状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
+本次仅核对源码和发布记录，不新增测试通过或真机验收结论。
+
+## 当前执行顺序
+
+1. P0：对齐协议 schema，完成安全审查与真实 Relay 拒绝验证。
+2. P0：完成当前 Harness 版本的跨设备问答、Mods 与代理 SSE 验收。
+3. P1：补齐网络切换、stream 与 history 恢复。
+4. P1：完成 `0.5.8` 终端与 Android 文件预览的跨平台验收。
+5. P1：核对 ACP 历史与恢复缺口，完成跨设备继续聊验收。
+6. P2：完善 VS Code、系统安全存储、诊断导出和部署验收。
+
+## P0：当前 Harness 兼容验收
 
 - [ ] `0.2.1-alpha.1`：真实 Desktop / Android 加密跨设备限时问答、补答与 Mods 展示验收。
 - [ ] 后续 `0.2.2` RC：实际发布后验证官方 carrier、依赖和跨版本连接。
 - [ ] 带路径前缀代理：真实反向代理下验证 Remote SSE 断线恢复。
+- [ ] Harness `0.2.1-alpha.4`：跨设备验证 Gateway Peer 转发修复。
+- [ ] 维护支持版本矩阵。分别记录开发依赖、范围接纳、自动化验证与真机验收。
 
 Desktop 已使用独立 Remote 工作区入口：本地选择账号下的 Host 与远端 Workspace，或通过
 只读目录浏览添加 Workspace，随后复用原生 Harness UI。当前实现已跑通真实设备、Web→Host
@@ -45,10 +67,11 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
 - [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval
 - [x] 分别用 `dsh-v0.1.1-rc.2`、`dsh-v0.1.2-alpha.1` 与 `dsh-v0.1.2-alpha.2` 跑通双机 Workspace/Session/Prompt/approval E2E，并验证混合代际在 mutation 前拒绝
-- [ ] 用 `dsh-v0.1.2-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval E2E 与长期稳定性回归
-- [ ] 用 `dsh-v0.1.5-rc.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E 与长期稳定性回归
+- [ ] 核定旧版 Harness 的维护范围。逐项决定以下历史验收是否仍需执行。
+- [ ] 历史待验收 `dsh-v0.1.2-rc.1`：Desktop/dsh-TUI 跨机会话与长期稳定性。
+- [ ] 历史待验收 `dsh-v0.1.5-rc.1`：跨机会话、CodeX replacement/stream 与重连。
 - [x] 用独立 `dsh-v0.1.6-alpha.1` 实例跑通 Web → Host 主链路（Plugin 树加载、Host identity、Codex 域与 client bundle 下发）
-- [ ] 用 `dsh-v0.1.6-alpha.1` 补跑 Desktop/dsh-TUI 跨机 Workspace/Session/Prompt/approval、CodeX replacement/stream、重连 E2E 与长期稳定性回归
+- [ ] 历史待验收 `dsh-v0.1.6-alpha.1`：跨机会话、CodeX replacement/stream 与重连。
 - [x] 用两台真实 Harness + 外部 Server 跑通同账号授权、选择 Remote、创建/继续会话
 - [x] 验证原生 mux/host stream、approval/question respond 与断线关闭行为
 - [x] 用手机 Web 与电脑 Web 同时连接一个真实 Host，验证并发操作、同设备重连和流隔离
@@ -58,9 +81,9 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [ ] 完善账号过期、`DEVICE_OWNERSHIP_REQUIRED` 和 legacy owner 的显式恢复体验
 - [x] transport 关闭后 pending unary/stream 立即返回稳定错误，并清理 timer 和 abort listener
 
-## Agent ACP / Cursor adapter（进行中，实验）
+## P1：Agent ACP / Cursor / Antigravity（实验）
 
-通用 `agent.acp.*` gateway + Cursor `agent acp` adapter。技术说明见
+通用 `agent.acp.*` gateway 已接入 Cursor 与 Antigravity adapter。技术说明见
 [docs/acp-remote.md](acp-remote.md)。**暂不**推进 Codex→ACP adapter。
 
 - [x] Host gateway、capability、allowlist、Cursor stdio adapter
@@ -70,10 +93,10 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] Desktop Virtual Harness 与设置开关（默认关闭）
 - [x] Android 内存 Workspace/Session/Chat 投影与文本 Prompt 流式
 - [x] inbound 订阅生命周期、`prompt_completed` catch-up、多轮气泡分离
-- [ ] 断线重连后 ACP stream 重建与会话 claim
+- [ ] 核对 Desktop 与 Android 的 ACP stream 重建及会话 claim。补齐缺失路径。
 - [x] Android：重连保留 Cursor workspace/session，并自动 `stream.open`
-- [ ] Host 侧会话内可分页 History（不写 SessionStore）与 Android/Desktop 恢复
-- [ ] `session/load` / 会话列表与跨设备继续聊
+- [ ] 按 Cursor / Antigravity 核对 Host History 分页。补齐 Android/Desktop 恢复缺口。
+- [ ] 按后端核对 `session/load` 与会话列表。验证跨设备继续聊。
 - [ ] 审批 / 提问真机矩阵与长工具轮次稳定性
 - [ ] Desktop ↔ 异机 Client 完整 E2E
 
@@ -112,7 +135,9 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 清理仅供冻结 Android 原型使用的旧 Session/Event 类型（PR #54, commit 5304fcd + 8ad988b）
 - [x] 固定 hello/hello.ack 版本拒绝、capability 协商与 Control/Relay frame 上限
 - [x] 拒绝超限 Control/Relay frame 和 binary Control frame
-- [ ] 完成 Noise 实现独立安全审查、长期连接 rekey 与断线密钥清理策略
+- [ ] 完成 Noise 实现的独立安全审查。
+- [ ] 定义并实现长期连接 rekey 与连接最大生命周期。
+- [ ] 核对断线密钥清理。补齐清理策略与核心测试。
 - [ ] 增加剩余协议 golden vectors
 - [x] 增加 Noise IK golden vector
 - [x] 补齐 counter 安全整数边界与 Control/Relay frame limit 测试
@@ -120,11 +145,13 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 
 ## P1：Transport 与恢复
 
-- [ ] 实现 control heartbeat、RTT、最后活动时间和错误分类
+- [x] Host 与 Relay/Adaptive transport 响应 Control ping。Host 状态提供最后活动时间。
+- [ ] 核对各端 heartbeat 超时处理。补齐 RTT 与错误分类。
 - [x] 完成 WebRTC offer/answer/ICE、STUN/TURN、短期 credential 与 Relay fallback 基础链路
 - [ ] 完善 `connecting -> direct -> relay -> reconnecting -> offline` UI 状态机和网络切换恢复
-- [ ] 定义 direct 超时和 Relay fallback，切换中不得重复已提交的 ApiProxy mutation
-- [ ] 重新连接后重开原生 mux/host stream，并由官方 UI 重新获取 history baseline
+- [ ] 核对 direct 超时和 Relay fallback。验证切换不重复提交 Typert mutation。
+- [ ] 核对 Desktop 重连后的官方 stream 与 history baseline 恢复。补齐缺失路径。
+- [ ] 验证休眠唤醒、Wi-Fi/蜂窝切换与高延迟 Relay。检查 Prompt 和审批不重放。
 
 ## P1：跨仓库 Server 联调（已完成）
 
@@ -135,11 +162,12 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 
 ## P2：工程与发布
 
-- [ ] 使用系统 Keychain/Secret Service 保存身份私钥和 refresh token
+- [ ] Plugin 使用系统 Keychain/Secret Service 保存身份私钥和 refresh token。VS Code 已使用 SecretStorage。
 - [ ] 完成多窗口、休眠/唤醒、代理网络和系统浏览器账号授权
-- [ ] 明确版本、License、发布策略与兼容矩阵
+- [x] 根包声明 MIT License。Plugin 与 Android 已使用版本号及发布记录。
+- [ ] 明确发布渠道、实验能力标记与版本维护期限。兼容验收见支持版本矩阵任务。
 - [ ] 提供脱敏日志导出和真实设备长连接性能基线
-- [ ] 修复冻结 Android 原型的 Metro exports fallback 警告（仅在恢复 Android 产品线时）
+- [ ] 修复 Android Metro 对 `@noble/hashes/crypto.js` 的 package exports fallback 警告。
 
 ## VS Code Client
 
@@ -207,14 +235,24 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 ## 最小自部署 Server
 
 - [x] 环境变量单账号、登录/状态页、持久化设备凭据、Control/加密 Relay 转发
+- [ ] 完成 Docker 镜像构建与容器启动验收。记录健康检查和凭据持久化结果。
 - [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
+
+## 云 Host 镜像
+
+- [x] `apps/cloud-host` 提供固定依赖、bootstrap、凭据持久化与独立镜像更新记录。
+- [ ] 验证首次注册、普通重启和凭据复用。
+- [ ] 验证 assignment version 变化与错误实例卷拒绝。
+- [ ] 在独立 Server 仓库完成控制器与镜像联调。本仓库不增加实例生命周期 API。
 
 ## 原生侧栏与开发预览（2026-09-20）
 
 - [x] alpha.2 官方只读文件树/预览 API allowlist、默认开启且可在详细 Remote 设置中关闭的原生终端开关
 - [x] 终端按设备归属、连接 attachment 校验；禁止 Remote 修改插件自身访问设置
 - [x] CodeX / ACP 共用终端控制器：Host 默认交互 shell 与可选 shell、xterm 屏幕恢复、幂等创建、有界订阅和等待进程清理
-- [ ] 本轮 CodeX / ACP 终端的 Desktop / Android 跨设备、Windows 与 Linux PTY、shell 配置与长时间 idle 回收验收
+- [ ] 验证 CodeX / ACP 终端的 Desktop / Android 加密跨设备流程。
+- [ ] 验证 Windows/Linux PTY、shell 配置、resize 与 job control。单独记录 pipe fallback 限制。
+- [ ] 验证无窗口持有者与 follower 时的两小时 idle 回收。验证活跃终端保持运行。
 - [x] 白名单 IPv4 loopback HTTP/WebSocket 通道与独立本机预览 origin
 - [x] Relay 背压、串行加密发送、有界 stream 消费队列
 - [ ] Windows/Linux 真机、跨机高延迟 Relay、大输出终端、多设备回归

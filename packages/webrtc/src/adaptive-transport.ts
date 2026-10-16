@@ -35,10 +35,13 @@ export interface AdaptiveTransportOptions {
   capabilities?: string[]
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   forceRelay?: boolean
+  /** Control authorization only, ending at connect.accepted. */
   handshakeTimeoutMs?: number
   negotiateTimeoutMs?: number
+  iceServersTimeoutMs?: number
+  signal?: AbortSignal
   rtcFactory?: RtcPeerConnectionFactory
-  fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
+  fetchIceServers?: (connectionId: string, signal?: AbortSignal) => Promise<RtcIceServer[]>
   onWebRtcFallback?: (error: Error, diagnostics?: RtcConnectionDiagnostics) => void
   onWebRtcDiagnostic?: (event: RtcDiagnosticEvent) => void
 }
@@ -83,6 +86,8 @@ export class AdaptiveTransport extends BaseTransport {
   private readyResolve?: () => void
   private readyReject?: (error: Error) => void
   private handshakeTimer?: ReturnType<typeof setTimeout>
+  private lifetime?: AbortController
+  private removeAbort?: () => void
   private webrtcEnabled = true
   private serverNegotiateTimeoutMs?: number
   private negotiatedCapabilities: string[] = ['transport.relay']
@@ -102,19 +107,32 @@ export class AdaptiveTransport extends BaseTransport {
 
   async connect(): Promise<void> {
     if (this.socket !== undefined) return
+    throwIfAborted(this.options.signal)
+    const lifetime = new AbortController()
+    this.lifetime = lifetime
+    this.webrtcEnabled = true
+    this.serverNegotiateTimeoutMs = undefined
+    this.dataMode = 'relay'
+    this.selected = undefined
+    this.connectedAt = undefined
+    this.relayCounter = 0
     this.socket = new WebSocket(this.url)
     this.controlFrameLimits = {}
     this.socket.binaryType = 'arraybuffer'
     await new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve
       this.readyReject = reject
+      const onAbort = () => this.failConnection(new Error('Adaptive connection was aborted'))
+      this.options.signal?.addEventListener('abort', onAbort, { once: true })
+      this.removeAbort = () => this.options.signal?.removeEventListener('abort', onAbort)
       this.handshakeTimer = setTimeout(
         () => this.failConnection(new Error('Adaptive control handshake timed out')),
         this.options.handshakeTimeoutMs ?? 15_000,
       )
       const socket = this.socket!
-      socket.onmessage = event => { void this.handleSocketMessage(event.data) }
+      socket.onmessage = event => { void this.handleSocketMessage(event.data, lifetime) }
       socket.onopen = () => {
+        if (this.lifetime !== lifetime) return
         this.sendControl('hello', {
           role: this.options.role,
           deviceId: this.options.deviceId,
@@ -123,13 +141,11 @@ export class AdaptiveTransport extends BaseTransport {
           capabilities: this.options.capabilities ?? DEFAULT_CAPABILITIES,
         })
       }
-      socket.onerror = () => this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`))
+      socket.onerror = () => {
+        if (this.lifetime === lifetime) this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`))
+      }
       socket.onclose = event => {
-        const pending = this.readyReject !== undefined
-        if (pending) this.failConnection(adaptiveControlCloseError(event))
-        this.socket = undefined
-        this.connectionId = undefined
-        this.emitClose()
+        if (this.lifetime === lifetime) this.failConnection(adaptiveControlCloseError(event))
       }
     })
   }
@@ -200,12 +216,7 @@ export class AdaptiveTransport extends BaseTransport {
   }
 
   async close(): Promise<void> {
-    this.clearHandshake()
-    await this.rtc?.close()
-    this.rtc = undefined
-    this.socket?.close()
-    this.socket = undefined
-    this.connectionId = undefined
+    this.failConnection(new Error('Adaptive transport closed'))
   }
 
   getStats(): TransportStats {
@@ -222,7 +233,8 @@ export class AdaptiveTransport extends BaseTransport {
     return { mode, connected, bytesSent: this.bytesSent, bytesReceived: this.bytesReceived }
   }
 
-  private async handleSocketMessage(raw: string | ArrayBuffer | Blob): Promise<void> {
+  private async handleSocketMessage(raw: string | ArrayBuffer | Blob, lifetime: AbortController): Promise<void> {
+    if (this.lifetime !== lifetime) return
     try {
       if (typeof raw !== 'string') throw new Error('Adaptive control frames must be text JSON')
       const frame = decodeControlFrame(raw, this.controlFrameLimits)
@@ -254,13 +266,15 @@ export class AdaptiveTransport extends BaseTransport {
         return
       }
       if (frame.type === 'connect.accepted') {
+        if (this.connectionId !== undefined) throw new Error('Duplicate connect.accepted')
         const payload = frame.payload as Partial<ConnectAcceptedPayload>
         if (typeof payload.connectionId !== 'string' || payload.connectionId.length === 0) {
           throw new Error('connect.accepted did not include a connectionId')
         }
         this.connectionId = payload.connectionId
-        void this.negotiate().catch(error => {
-          this.failConnection(error instanceof Error ? error : new Error('Adaptive transport negotiation failed'))
+        this.clearHandshake()
+        void this.negotiate(lifetime.signal).catch(error => {
+          if (this.lifetime === lifetime) this.failConnection(error instanceof Error ? error : new Error('Adaptive transport negotiation failed'))
         })
         return
       }
@@ -319,7 +333,7 @@ export class AdaptiveTransport extends BaseTransport {
     this.emit(data)
   }
 
-  private async negotiate(): Promise<void> {
+  private async negotiate(signal: AbortSignal): Promise<void> {
     if (this.connectionId === undefined) return
     const preferred = this.negotiatedTransports()
     const wantWebRtc = !this.options.forceRelay && this.webrtcEnabled
@@ -328,12 +342,14 @@ export class AdaptiveTransport extends BaseTransport {
     this.lastRtcDiagnostics = undefined
     if (wantWebRtc) {
       try {
-        const rtcSelected = (await this.tryWebRtc()).transport
+        const rtcSelected = (await this.tryWebRtc(signal)).transport
+        throwIfAborted(signal)
         const wireSelected = rtcSelected === 'lan' && !preferred.includes('lan') && preferred.includes('p2p')
           ? 'p2p'
           : rtcSelected
         if (!preferred.includes(wireSelected)) {
           await this.rtc?.close()
+          throwIfAborted(signal)
           this.rtc = undefined
           if (!preferred.includes('relay')) {
             throw new Error(`WebRTC selected unnegotiated transport: ${rtcSelected}`)
@@ -345,9 +361,11 @@ export class AdaptiveTransport extends BaseTransport {
           selected = wireSelected
         }
       } catch (error) {
+        throwIfAborted(signal)
         const reason = error instanceof Error ? error : new Error('WebRTC negotiation failed.')
         try { this.options.onWebRtcFallback?.(reason, this.lastRtcDiagnostics) } catch { /* diagnostics must not block fallback */ }
         await this.rtc?.close()
+        throwIfAborted(signal)
         this.rtc = undefined
         if (!preferred.includes('relay')) throw reason
         this.dataMode = 'relay'
@@ -380,7 +398,7 @@ export class AdaptiveTransport extends BaseTransport {
     })
   }
 
-  private async tryWebRtc(): Promise<{ transport: RtcSelectedTransport, relayUrl?: string }> {
+  private async tryWebRtc(signal: AbortSignal): Promise<{ transport: RtcSelectedTransport, relayUrl?: string }> {
     const connectionId = this.connectionId
     if (connectionId === undefined) throw new RtcConnectError('RTC_UNAVAILABLE', 'No connection id for WebRTC negotiation.')
     const factory = this.options.rtcFactory
@@ -390,11 +408,12 @@ export class AdaptiveTransport extends BaseTransport {
     }
     let iceServers: RtcIceServer[] = []
     try {
-      iceServers = await (this.options.fetchIceServers?.(connectionId) ?? [])
+      iceServers = await this.fetchIceServers(connectionId, signal)
     } catch {
       // TURN/STUN unavailable: still attempt direct P2P with host candidates.
       iceServers = []
     }
+    throwIfAborted(signal)
     const rtc = new RtcDataChannelTransport({
       role: 'initiator',
       factory,
@@ -419,15 +438,51 @@ export class AdaptiveTransport extends BaseTransport {
       if (this.rtc === rtc && this.dataMode === 'webrtc') this.emitClose()
     })
     try {
-      await rtc.connect()
+      await rtc.connect(signal)
     } catch (error) {
+      throwIfAborted(signal)
       this.lastRtcDiagnostics = rtc.diagnostics()
       await rtc.close()
-      this.rtc = undefined
+      if (this.rtc === rtc) this.rtc = undefined
+      throwIfAborted(signal)
       throw error
     }
+    throwIfAborted(signal)
     this.lastRtcDiagnostics = rtc.diagnostics()
     return { transport: rtc.selectedTransport() ?? 'p2p', relayUrl: rtc.selectedRelayUrl() }
+  }
+
+  private async fetchIceServers(connectionId: string, signal: AbortSignal): Promise<RtcIceServer[]> {
+    if (this.options.fetchIceServers === undefined) return []
+    return new Promise<RtcIceServer[]>((resolve, reject) => {
+      const request = new AbortController()
+      let settled = false
+      const finish = (error?: Error, servers: RtcIceServer[] = []) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        signal.removeEventListener('abort', onAbort)
+        if (error) reject(error)
+        else resolve(servers)
+      }
+      const onAbort = () => {
+        finish(new Error('ICE configuration request was aborted'))
+        request.abort()
+      }
+      const timer = setTimeout(() => {
+        finish(new Error('ICE configuration request timed out'))
+        request.abort()
+      }, this.options.iceServersTimeoutMs ?? 10_000)
+      signal.addEventListener('abort', onAbort, { once: true })
+      if (signal.aborted) { onAbort(); return }
+      Promise.resolve().then(() => {
+        throwIfAborted(request.signal)
+        return this.options.fetchIceServers!(connectionId, request.signal)
+      }).then(
+        servers => finish(undefined, servers),
+        error => finish(error instanceof Error ? error : new Error('ICE configuration request failed')),
+      )
+    })
   }
 
   private sendRtcSignal(signal: RtcSignal): void {
@@ -461,6 +516,8 @@ export class AdaptiveTransport extends BaseTransport {
 
   private finishConnection(): void {
     this.clearHandshake()
+    this.removeAbort?.()
+    this.removeAbort = undefined
     this.connectedAt ??= Date.now()
     this.readyResolve?.()
     this.readyResolve = undefined
@@ -472,12 +529,21 @@ export class AdaptiveTransport extends BaseTransport {
     const reject = this.readyReject
     this.readyResolve = undefined
     this.readyReject = undefined
-    reject?.(error)
-    void this.rtc?.close()
+    this.removeAbort?.()
+    this.removeAbort = undefined
+    const lifetime = this.lifetime
+    this.lifetime = undefined
+    const rtc = this.rtc
+    const socket = this.socket
     this.rtc = undefined
-    this.socket?.close()
     this.socket = undefined
     this.connectionId = undefined
+    this.connectedAt = undefined
+    lifetime?.abort()
+    reject?.(error)
+    void rtc?.close()
+    socket?.close()
+    if (socket !== undefined) this.emitClose()
   }
 
   private clearHandshake(): void {
@@ -509,4 +575,9 @@ function negotiateTimeout(serverMs: number | undefined, localMs: number | undefi
   if (serverMs === undefined) return localMs
   if (localMs === undefined) return serverMs
   return Math.max(serverMs, localMs)
+}
+
+// React Native AbortSignal implementations may omit throwIfAborted().
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw new Error('Adaptive connection was aborted')
 }

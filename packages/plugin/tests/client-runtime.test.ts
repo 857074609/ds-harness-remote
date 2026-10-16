@@ -3,7 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
-import { generateKeyPair } from '@dsh-remote/crypto'
+import { generateKeyPair, NoiseIkSession, createNoisePrologue, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
+import { createControlFrame } from '@dsh-remote/protocol'
+import { RemoteClientCore } from '@dsh-remote/client-core'
+import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   ClientModeRuntime,
@@ -26,6 +29,84 @@ const cleanupScenario1 = async () => {
 afterEach(cleanupScenario1)
 
 describe('ClientModeRuntime Host account control', () => {
+  it('completes direct then TURN then Relay startup with a twenty-second Server budget', async () => {
+    vi.useFakeTimers()
+    const clientKeys = generateKeyPair(new Uint8Array(32).fill(41))
+    const hostKeys = generateKeyPair(new Uint8Array(32).fill(42))
+    const identity = { schemaVersion: 1, deviceId: 'client-1', name: 'Client', fingerprint: 'CLIENT', ...clientKeys }
+    const host = { deviceId: 'host-1', name: 'Host', role: 'host', platform: 'linux', membershipId: 'member', identityKey: hostKeys.publicKey }
+    const sockets: Socket[] = []
+    class Socket {
+      static OPEN = 1
+      readyState = 0
+      binaryType = ''
+      sent: { type: string; payload: Record<string, unknown> }[] = []
+      onopen?: () => void
+      onmessage?: (event: { data: string }) => void
+      onclose?: (event: { code: number; reason: string }) => void
+      readonly id = `connection-${sockets.length + 1}`
+      constructor() { sockets.push(this); queueMicrotask(() => { this.readyState = 1; this.onopen?.() }) }
+      receive(type: Parameters<typeof createControlFrame>[0], payload: unknown) {
+        queueMicrotask(() => this.onmessage?.({ data: JSON.stringify(createControlFrame(type, payload)) }))
+      }
+      send(raw: string) {
+        const frame = JSON.parse(raw)
+        this.sent.push(frame)
+        if (frame.type === 'hello') this.receive('hello.ack', {
+          protocol: 1, serverVersion: 'test', connectionSessionId: this.id, heartbeatIntervalMs: 25000,
+          maxControlFrameBytes: 65536, maxRelayFrameBytes: 1048576,
+          capabilities: ['transport.lan', 'transport.p2p', 'transport.turn', 'transport.relay'], webrtcFallbackTimeoutMs: 20000,
+        })
+        if (frame.type === 'connect.request') this.receive('connect.accepted', { connectionId: this.id })
+        if (frame.type === 'secure.handshake') {
+          const noise = new NoiseIkSession({ role: 'responder', localPrivateKey: hostKeys.privateKey,
+            localPublicKey: hostKeys.publicKey, remotePublicKey: clientKeys.publicKey,
+            prologue: createNoisePrologue(this.id, 'host-1', 'client-1') })
+          noise.readHandshake(fromBase64Url(frame.payload.data))
+          this.receive('secure.handshake', { connectionId: this.id, targetDeviceId: 'client-1', step: 2, data: toBase64Url(noise.writeHandshake()) })
+          noise.destroy()
+        }
+      }
+      close() { this.readyState = 3; this.onclose?.({ code: 1000, reason: '' }) }
+    }
+    vi.stubGlobal('WebSocket', Socket)
+    const create = vi.fn(() => ({
+      connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new',
+      createDataChannel: () => ({ label: 'dsh', ordered: true, readyState: 'connecting', bufferedAmount: 0, close() {} }),
+      createOffer: async () => ({ type: 'offer', sdp: 'offer' }), setLocalDescription: async () => {},
+      getStats: async () => [], close() {},
+    }))
+    const identities = {
+      loadOrCreate: async () => identity, trustedPeer: () => undefined,
+      trustPeer: async (input: unknown) => ({ ...input as object, trustedAt: 1, fingerprint: 'HOST' }),
+    } as unknown as IdentityStore
+    const server = { baseUrl: 'https://remote.test', bindIdentity() {}, listDevices: async () => [host],
+      deviceFor: async () => host, presenceFor: async () => ({ online: true }),
+      authenticate: async () => ({ accessToken: 'test-token' }), turnCredentials: async () => [],
+    } as unknown as ClientServerApi
+    vi.spyOn(RemoteClientCore.prototype, 'rpc').mockResolvedValue({ capabilities: ['harness.remote.v3'] })
+    const runtime = new ClientModeRuntime(config(), identities, server, apiProxy(), gateway(), logger(), undefined,
+      async () => ({ create }) as unknown as RtcPeerConnectionFactory)
+    let connected: { client: RemoteClientCore } | undefined
+    try {
+      await runtime.start()
+      const connecting = (runtime as unknown as { connect(id: string): Promise<{ client: RemoteClientCore }> }).connect('host-1')
+      await vi.advanceTimersByTimeAsync(41000)
+      connected = await connecting
+      expect(sockets).toHaveLength(3)
+      expect(sockets.map(socket => socket.sent.find(frame => frame.type === 'connect.request')?.payload.preferredTransports)).toEqual([
+        ['lan', 'p2p', 'relay'], ['turn', 'relay'], ['relay'],
+      ])
+      expect(create).toHaveBeenCalledTimes(2)
+      expect(sockets.slice(0, 2).every(socket => socket.readyState === 3)).toBe(true)
+      expect(connected.client.getStats().mode).toBe('Relay')
+    } finally {
+      await connected?.client.close()
+      await runtime.close()
+      vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+    }
+  })
+
   it('discovers Host capabilities conservatively without inferring backend readiness', async () => {
     await runScenarios(
       [

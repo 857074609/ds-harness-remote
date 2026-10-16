@@ -86,6 +86,7 @@ export class HostServerConnection {
   private rtcFactory?: RtcPeerConnectionFactory
   private negotiatedCapabilities: string[] = ['transport.relay']
   private controlFrameLimits: ControlFrameByteLimits = {}
+  private webRtcNegotiateTimeoutMs = DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -244,6 +245,10 @@ export class HostServerConnection {
           this.lastActiveAt = Date.now()
           if (frame.type === 'hello.ack') {
             const payload = requireHelloAck(frame.payload)
+            this.webRtcNegotiateTimeoutMs = Math.max(
+              DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
+              payload.webrtcFallbackTimeoutMs ?? DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
+            )
             this.authRecoveryAttempted = false
             this.controlFrameLimits = {
               maxControlFrameBytes: payload.maxControlFrameBytes,
@@ -562,13 +567,15 @@ export class HostServerConnection {
         code: errorCode(error),
       })
     }
+    // Authorization/credentials can finish after this connection was dropped.
+    if (this.stopped || this.tunnels.get(tunnel.connectionId) !== tunnel || tunnel.rtc !== undefined || tunnel.channel !== undefined) return
     if (!tunnel.preferredTransports.includes('turn')) iceServers = stunOnlyIceServers(iceServers)
     const rtc = new RtcDataChannelTransport({
       role: 'responder',
       factory: this.rtcFactory,
       iceServers,
       onSignal: signal => this.sendRtcSignal(tunnel, signal),
-      negotiateTimeoutMs: DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS,
+      negotiateTimeoutMs: this.webRtcNegotiateTimeoutMs,
       label: `host<-${tunnel.peer.deviceId}`,
       onDiagnostic: event => {
         if (event.type !== 'local-candidate-filtered' && event.type !== 'candidate-pair-filtered') return

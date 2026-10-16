@@ -136,6 +136,28 @@ describe('ordered history recovery', () => {
         },
       },
       {
+        name: 'settles adopted rows whose echo never landed (lost-echo hole)',
+        run: () => {
+          const lost: ChatItem = {
+            kind: 'message', id: 'local:lost', sessionId: 's1', role: 'user', text: 'queued then lost',
+            createdAt: 1, requestRpcId: 'rpc-lost', queuedAdopted: true,
+          }
+          const merged = reconcileDeliveryStates([lost], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled'])
+        },
+      },
+      {
+        name: 'keeps adopted rows echoed in history or still queued host-side',
+        run: () => {
+          const echoed: ChatItem = {
+            kind: 'message', id: 'local:echo', sessionId: 's1', role: 'user', text: 'x',
+            createdAt: 1, requestRpcId: 'rpc-echo', queuedAdopted: true,
+          }
+          const merged = reconcileDeliveryStates([echoed], new Set<string>(), new Set(['rpc-echo']), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual([undefined])
+        },
+      },
+      {
         name: 'keeps rows sent during the current connection for live-frame reconciliation',
         run: () => {
           const merged = reconcileDeliveryStates([row('local:d', 'rpc-d', 'unconfirmed', 200)], new Set<string>(), new Set<string>(), 100)

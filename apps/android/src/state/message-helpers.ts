@@ -104,12 +104,16 @@ export function reconcileDeliveryStates(
   sentBefore: number,
 ): ChatItem[] {
   return items.map(item => {
-    // `canceled` is terminal (user removal / authoritative drop) — re-judging
-    // it would resurrect a removed prompt as resendable.
-    if (item.kind !== 'message' || item.sendState === undefined || item.sendState === 'failed' || item.sendState === 'canceled') return item
+    // `failed` keeps its retry material and `canceled` is terminal (user
+    // removal / authoritative drop) — re-judging either would resurrect a
+    // removed prompt as resendable.
+    if (item.kind !== 'message' || item.sendState === 'failed' || item.sendState === 'canceled') return item
     if (item.requestRpcId === undefined || item.createdAt >= sentBefore) return item
     if (historyRpcIds.has(item.requestRpcId) || queuedRpcIds.has(item.requestRpcId)) return item
-    return { ...item, sendState: item.sendState === 'queued' ? 'canceled' as const : 'failed' as const }
+    // A row without a local verdict only needs settling when the inbox adopted
+    // it and its echo never landed (lost-echo hole: it would hide forever).
+    if (item.sendState === undefined && item.queuedAdopted !== true) return item
+    return { ...item, sendState: item.sendState === 'unconfirmed' ? 'failed' as const : 'canceled' as const }
   })
 }
 

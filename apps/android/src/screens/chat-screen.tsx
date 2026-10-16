@@ -219,7 +219,11 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
-    item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued' && (
+    item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued'
+      // An adopted row is in the Host queue regardless of the local sendState
+      // snapshot: it leaves the timeline for the queue dock until its echo
+      // replaces it (or the authoritative drop retires it).
+      && !(item.queuedAdopted === true && item.sendState === undefined) && (
       hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
       || (item.images?.length ?? 0) > 0
@@ -2074,7 +2078,7 @@ function UserRowResend({ item, status }: { item: ChatMessage; status: string }) 
   const disabled = busyAction !== undefined || missingImages
   const retry = () => {
     const state = useAppStore.getState()
-    const backend = state.selectedSession?.backend
+    const backend = state.sessions.find(row => row.sessionId === item.sessionId)?.backend ?? state.selectedSession?.backend
     const resend = () => { void state.retrySendMessage(item.id) }
     // Harness dedupes by request rpcId (official hasPromptRequest), so only
     // the carriers without request ids need the double-execution warning.
@@ -2346,14 +2350,16 @@ function QuestionCard({ item, busy, onRespond }: {
   }
 
   const toggle = (questionId: string, label: string, multi: boolean) => {
-    if (!multi) setCustom(current => (current[questionId] ?? '') === '' ? current : { ...current, [questionId]: '' })
-    setSelected(current => {
-      const values = current[questionId] ?? []
-      const next = multi
-        ? (values.includes(label) ? values.filter(value => value !== label) : [...values, label])
-        : values.includes(label) ? [] : [label]
-      return { ...current, [questionId]: next }
-    })
+    const values = selected[questionId] ?? []
+    const next = multi
+      ? (values.includes(label) ? values.filter(value => value !== label) : [...values, label])
+      : values.includes(label) ? [] : [label]
+    // Custom text is mutually exclusive with a selection: clear it only when an
+    // option becomes selected, never when the user merely deselects.
+    if (!multi && next.length > 0) {
+      setCustom(current => (current[questionId] ?? '') === '' ? current : { ...current, [questionId]: '' })
+    }
+    setSelected(current => ({ ...current, [questionId]: next }))
   }
 
   const allAnswered = item.questions.every(question => (selected[question.id] ?? []).length > 0

@@ -17,7 +17,12 @@ export function MessageActions({ item }: { item: ChatMessage }) {
   const { colors } = useTheme()
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const busy = useAppStore(state => state.busyAction !== undefined)
-  const backend = useAppStore(state => state.selectedSession?.backend)
+  // The row's own session, not whatever happens to be selected afterwards.
+  const backend = useAppStore(state =>
+    state.sessions.find(row => row.sessionId === item.sessionId)?.backend ?? state.selectedSession?.backend)
+  // Undelivered rows never entered the Host log: fork/rate would only ever
+  // answer "unavailable". Keep copy and the clock, drop the noise.
+  const pending = item.sendState !== undefined
   const rate = useAppStore(state => state.rateMessage)
   const fork = useAppStore(state => state.forkChatMessage)
   const [copied, setCopied] = useState(false)
@@ -51,7 +56,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
     <Pressable accessibilityRole="button" accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy} disabled={item.text.length === 0} style={styles.icon} onPress={() => {
       void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
     }}><Copy size={16} color={copied ? colors.primary : colors.muted} /></Pressable>
-    {!user && <>
+    {!user && !pending && <>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.good} accessibilityState={{ selected: item.feedback === 'positive', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('positive')}><ThumbsUp size={16} color={item.feedback === 'positive' ? colors.primary : colors.muted} /></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.bad} accessibilityState={{ selected: item.feedback === 'negative', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('negative')}><ThumbsDown size={16} color={item.feedback === 'negative' ? colors.primary : colors.muted} /></Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>

@@ -363,3 +363,45 @@ Desktop / Android 加密跨设备 E2E、Windows/Linux PTY 或真实两小时闲�
 终端清理失败仍尝试停止所有变化后端；再次保存相同设置可重试，清理成功前相关后端禁止 RPC/启动，
 其余后端保持可用。Plugin check、46 文件 / 299 个测试与 build 通过；新增核心场景覆盖取消提交点、
 attachment ID 跨连接复用、pending follow 断开，以及终端/后端清理失败后同配置重试。
+
+## Claude ACP Host 与单次工具审批（Issue #125）
+
+`claude` 默认关闭，使用 `claude-agent-acp`、空参数；不发送 Cursor 专属认证。仅实现 Host 首批接入，客户端工作区/历史投影仍待完成。真实 `@agentclientprotocol/claude-agent-acp@0.91.0` 使用已有兼容端点、私有 credential command 和 `gpt-6-sol` 在隔离临时目录通过初始化、对话及 Gateway Write 工具审批；这不代表 Anthropic Claude 模型或加密跨设备验收。
+
+ACP permission response 仅允许 `allow-once | reject-once | cancel`，禁止 `allow-always` 和任意 permission `result`。必须按请求 `options.kind` 的单次选项映射真实 `optionId`，Claude 拒绝 ID 为 `reject`，不能硬编码 `reject-once`。句柄绑定连接/session/backend/进程实例；无主/未知请求不广播，上游不能覆盖 Host scope，非法响应不消费合法句柄。真实 Gateway 已验证拒绝不写文件、允许一次成功、同会话下一工具重新审批，以及跨连接/持久授权/result 越权/重放拒绝。断线与重配边界另有核心自动化覆盖；跨设备仍待验收。
+
+Claude Host 中断/history 补齐：标准无 ID 的 `session/cancel`，撤销对应 session/backend 审批并拒绝迟到请求，不影响其他会话。目录/会话通过上游 `session/list` + Host realpath authority 发现，显式 backend 的 load 不接受 Client cwd；Claude 活动回复中 load 拒绝，history 使用独立临时 adapter，不读取私有 transcript。最多 30 个 live/loading Session，一个 history reader；8 MiB / 10,000 更新超限显式失败，重复 load 不重放污染 live。真实 Gateway 验证待审批 Write cancel 后无文件/旧句柄失效、Bash 运行中 history 不打断工具而后 cancel 返回 cancelled，以及整个 Gateway/adapter 重启后 history/上下文继续对话。未知时间为 0、稳定投影 ID，不宣称无损恢复上游未提供的元数据。客户端工作区与历史展示、重连 UI、Windows/APK/真机/加密跨设备仍未完成。
+
+## Pi Agent ACP（Issue #97）
+
+Pi 后端 ID 为 `pi`，默认自动检测并初始化，命令 `pi-acp`、参数 `[]`；`pi` 自身 RPC 不是 ACP。
+未安装或初始化失败时不可用，不影响其他后端；明确的 `enabled: false` 和 ACP 总开关优先。
+使用独立 `agent.acp.pi.v1`、`pi:cwd:` 工作区和 `pi:` 内存会话投影。Host 通过标准
+ACP session/list 获取目录 authority，load/history 使用 Host 验证的真实 cwd。每活动会话
+独立 wrapper，history 临时 wrapper 不得打断当前回复。最多 30 个保留会话，另有 catalog
+和一个 history 槽；历史限 8 MiB / 10,000 更新，超限显式失败。模型/Thinking 来自上游
+models/modes/configOptions；仅使用固定 session/set_config_option（model/thought_level）
+并以响应/通知确认状态，不乐观伪造。首版仅文本，Pi 工具以 Host 用户权限执行。
+
+本机安装 Pi 1.3.0、pi-acp 0.0.34，使用已有 OpenAI 兼容配置验证 CLI 对话、真实 Gateway
+流式工具回复、历史、重启恢复、模型/Thinking、工具执行期间断线继续和中断。全仓 check、
+703 tests、生产 build、DSH bundle 校验及 diff check 通过；Plugin 48 文件 / 315 tests、
+Android 19 文件 / 101 tests。仍未验证 Windows、Android APK/原生真机、独立 Remote Web
+及加密跨设备 E2E。Metro noble/hashes exports fallback 警告保留。
+
+Pi 审批/历史复核：Pi 默认不逐工具审批，Host 扩展的 `tool_call` + `ctx.ui.confirm`
+才映射标准 `session/request_permission`。真实 Gateway + Pi + `gpt-6-sol` 工具调用验证拒绝
+不执行、单次允许仅执行一次且两种决定均自然结束；跨连接抢答不消费句柄，断线不放行且
+旧句柄不能重放。真实 Gateway → ACP Client transfer → Desktop 内存投影验证实时 read/bash
+输出及 write diff、进程重启后的文本/工具历史、分页与继续对话。目录/历史错误不得伪装成功的空结果，
+同会话并发历史读取合并；工具结果保留输出/错误与 diff，Pi bash 实时预览超限明确提示。
+Android 保留 Pi terminal 增量输出、退出失败状态和审批详情，并验证 Host 历史接入恢复，
+不代表原生 UI 或跨设备通过。`pi-acp@0.0.34` load 不提供原始 thinking、工具输入、消息
+ID/时间；使用稳定投影 ID 与未知时间 `0`，不宣称无损历史恢复。
+
+ACP 恢复审查修复：Pi 初次 load 的文本/思考/tool 回放不得进入 live，只合并匹配会话的
+模型/Thinking 配置；load 期间 callback 拒绝，成功提交后才启用 live/审批。Android Pi/AGY
+新订阅隔离旧展示缓存，历史返回后保留本次 live 和完成 catch-up；无共同 cursor 时仅用
+共享 ID/工具调用锚点做边界去重，不因相同短文本误删独立回复。Claude/Pi catalog 与缓存
+cwd 校验捕获后端实例，在异步操作后验证其仍有效，重配/禁用/关闭后的迟到结果明确失败，
+不可重建已清理的 authority。核心测试覆盖这些恢复/代际竞态；不新增真机或跨设备验收声明。

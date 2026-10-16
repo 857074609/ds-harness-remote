@@ -7,7 +7,7 @@ export class AcpWorkspaceTools {
   constructor(private readonly bridge: WorkspaceBridge, private readonly terminal: TerminalPolicy) {}
 
   private payload(sessionId: string, backend: string, args: Record<string, unknown>) {
-    const scopedId = `${backend === 'antigravity' ? 'acp' : 'cursor'}:${sessionId}`
+    const scopedId = `${backend === 'antigravity' ? 'acp' : backend === 'pi' ? 'pi' : 'cursor'}:${sessionId}`
     const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter(id => id !== undefined)
     if (!ids.length || ids.some(id => id !== scopedId)) throw new RpcError('PERMISSION_DENIED', 'The tool scope does not match the ACP session.')
     return { args }

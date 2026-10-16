@@ -598,7 +598,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
   const displayMeta = meta ?? updatedText(session.updatedAt)
   const SessionIcon = session.backend === 'codex'
     ? Code2
-    : session.backend === 'cursor' || session.backend === 'antigravity'
+    : session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi'
       ? Sparkles
       : MessageSquareText
 

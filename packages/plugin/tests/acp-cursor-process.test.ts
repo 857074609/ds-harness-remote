@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
+import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
 import type { SafeLogger } from '../src/logging.js'
 
 describe('CursorAcpClient', () => {
@@ -27,6 +28,7 @@ describe('CursorAcpClient', () => {
 
     await client.start()
     expect(outbound.map(message => message.method)).toEqual(['initialize', 'authenticate'])
+    expect(outbound[1]?.params).toEqual({ methodId: 'cursor_login' })
 
     const pending = client.call('session/new', { cwd: '/tmp', mcpServers: [] })
     await flush()
@@ -68,6 +70,78 @@ describe('CursorAcpClient', () => {
   })
 })
 
+describe('ClaudeAcpClient startup isolation', () => {
+  it('initializes with Host credentials without sending any authenticate request', async () => {
+    const fake = fakeProcess()
+    const methods: unknown[] = []
+    fake.child.stdin.on('data', chunk => {
+      const message = JSON.parse(String(chunk))
+      methods.push(message.method)
+      fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} })}\n`)
+    })
+    const client = new ClaudeAcpClient(undefined, logger(), binary => {
+      expect(binary).toBe('claude-agent-acp')
+      return fake.child
+    })
+    await client.start()
+    expect(client.isReady()).toBe(true)
+    expect(methods).toEqual(['initialize'])
+    await client.close()
+  })
+
+  it('fails closed when initialize rejects and never sends authenticate', async () => {
+    const fake = fakeProcess()
+    const methods: unknown[] = []
+    fake.child.stdin.on('data', chunk => {
+      const message = JSON.parse(String(chunk))
+      methods.push(message.method)
+      fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32000, message: 'login required' } })}\n`)
+    })
+    const client = new ClaudeAcpClient(undefined, logger(), () => fake.child)
+    await expect(client.start()).rejects.toMatchObject({ code: 'CURSOR_UPSTREAM_ERROR' })
+    expect(client.isReady()).toBe(false)
+    await expect(client.call('session/new', {})).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+    expect(methods).toEqual(['initialize'])
+    expect(fake.kill).toHaveBeenCalledWith('SIGTERM')
+    await client.close()
+  })
+
+  it('rejects a pending initialize on close and ignores its late response', async () => {
+    const fake = fakeProcess()
+    let initializeId: unknown
+    fake.child.stdin.on('data', chunk => { initializeId = JSON.parse(String(chunk)).id })
+    const client = new ClaudeAcpClient(undefined, logger(), () => fake.child)
+    const starting = client.start()
+    const rejection = expect(starting).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+    await client.close()
+    fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: initializeId, result: {} })}\n`)
+    await rejection
+    expect(client.isReady()).toBe(false)
+    await expect(client.start()).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+  })
+
+  it('cannot become ready after close races with an already delivered initialize response', async () => {
+    for (const backend of ['cursor', 'claude'] as const) {
+      const fake = fakeProcess()
+      const methods: unknown[] = []
+      fake.child.stdin.on('data', chunk => {
+        const message = JSON.parse(String(chunk))
+        methods.push(message.method)
+        fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} })}\n`)
+      })
+      const client = backend === 'cursor'
+        ? new CursorAcpClient('agent', logger(), () => fake.child)
+        : new ClaudeAcpClient(undefined, logger(), () => fake.child)
+      const starting = client.start()
+      const rejection = expect(starting).rejects.toMatchObject({ code: 'CURSOR_CLOSED' })
+      await client.close()
+      await rejection
+      expect(client.isReady(), backend).toBe(false)
+      expect(methods, backend).toEqual(['initialize'])
+    }
+  })
+})
+
 function fakeProcess(): {
   child: ChildProcessWithoutNullStreams
   stdout: PassThrough
@@ -76,8 +150,11 @@ function fakeProcess(): {
   const stdout = new PassThrough()
   const stderr = new PassThrough()
   const stdin = new PassThrough()
-  const kill = vi.fn()
   const child = new EventEmitter() as ChildProcessWithoutNullStreams
+  const kill = vi.fn(() => {
+    queueMicrotask(() => child.emit('exit', 0, 'SIGTERM'))
+    return true
+  })
   Object.assign(child, {
     stdout,
     stderr,

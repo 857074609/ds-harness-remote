@@ -2,13 +2,14 @@ import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../src/types'
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
+import { mergeAcpHistoryAndLive } from '../src/services/cursor'
 import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn() },
-  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
   authenticate: vi.fn(),
@@ -22,9 +23,11 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   hasCodex() { return false }
   requireCodex() { return codex }
   hasCursor = transport.hasCursor
+  hasPi = transport.hasPi
   hasAntigravity = transport.hasAntigravity
   requireCursor() { return acp }
   requireAntigravity() { return acp }
+  requirePi() { return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -47,6 +50,7 @@ const prepareScenario1 = () => {
   vi.resetAllMocks()
   transport.hasCursor.mockReturnValue(false)
   transport.hasAntigravity.mockReturnValue(false)
+  transport.hasPi.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
   acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })
@@ -352,7 +356,7 @@ describe('session restore state machine', () => {
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
-    const rows = ['cursor', 'antigravity'] as const
+    const rows = ['cursor', 'antigravity', 'pi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -378,16 +382,17 @@ describe('session restore state machine', () => {
             })
             transport.hasCursor.mockReturnValue(backend === 'cursor')
             transport.hasAntigravity.mockReturnValue(backend === 'antigravity')
+            transport.hasPi.mockReturnValue(backend === 'pi')
             const first = useAppStore.getState().reconnect()
             const second = useAppStore.getState().reconnect()
             expect(await first).toBe(true)
             expect(await second).toBe(true)
             expect(transport.connect).toHaveBeenCalledTimes(1)
             expect(acp.openStream).toHaveBeenCalledTimes(1)
-            expect(acp.transferCall).toHaveBeenCalledTimes(backend === 'antigravity' ? 1 : 0)
+            expect(acp.transferCall).toHaveBeenCalledTimes(backend !== 'cursor' ? 1 : 0)
             expect(await useAppStore.getState().reconnect({ restoreSession: false })).toBe(true)
             expect(acp.openStream).toHaveBeenCalledTimes(1)
-            expect(acp.transferCall).toHaveBeenCalledTimes(backend === 'antigravity' ? 1 : 0)
+            expect(acp.transferCall).toHaveBeenCalledTimes(backend !== 'cursor' ? 1 : 0)
           },
         }
       }),
@@ -396,6 +401,94 @@ describe('session restore state machine', () => {
       },
     )
   })
+  it('ignores PI model commits completing after navigation and releases the old selector state', async () => {
+    await runScenarios(['resolve', 'reject'].map(outcome => ({ name: outcome, run: async () => {
+      let finish!: () => void
+      acp.selectModel.mockReturnValueOnce(new Promise((resolve, reject) => {
+        finish = () => outcome === 'resolve' ? resolve({ provider: 'pi', model: 'm', reasoningEffort: 'high' }) : reject(new Error('late rejection'))
+      }))
+      acp.sessionModels.mockResolvedValue({ current: { provider: 'pi', model: 'm', reasoningEffort: 'high' }, groups: [], failures: [], routable: true })
+      const selected = { ...session, backend: 'pi' as const, sessionId: 'pi:old', nativeId: 'old' }
+      useAppStore.setState({ selectedSession: selected, sessions: [selected] })
+      const selecting = useAppStore.getState().selectModel({ provider: 'pi', model: 'm', reasoningEffort: 'high' })
+      expect(useAppStore.getState().modelSelecting).toBe(true)
+      expect(await useAppStore.getState().openSession({ ...session, sessionId: 'new' })).toBe(true)
+      expect(useAppStore.getState().modelSelecting).toBe(false)
+      finish()
+      expect(await selecting).toBe(false)
+      expect(useAppStore.getState().selectedSession?.sessionId).toBe('new')
+      expect(useAppStore.getState().sessionModels).toBeUndefined()
+      expect(useAppStore.getState().error).toBeUndefined()
+    } })), prepareScenario1)
+  })
+
+  it('deduplicates ACP boundary overlap only with an identity anchor', () => {
+    const message = (id: string): ChatItem => ({ kind: 'message', id, sessionId: 'pi:s', role: 'assistant', text: 'OK', createdAt: 0 })
+    expect(mergeAcpHistoryAndLive([message('old')], [message('new')])).toHaveLength(2)
+    const tool: ChatItem = { kind: 'tool', id: 'call-id', sessionId: 'pi:s', toolName: 'bash', state: 'running', createdAt: 0 }
+    const liveTool: ChatItem = { ...tool, id: 'cursor-tool:acp-live:1:call-id', state: 'finished', resultDetail: { text: 'done', format: 'code' } }
+    expect(mergeAcpHistoryAndLive([tool, message('history')], [liveTool, message('live')])).toEqual([liveTool, message('live')])
+    expect(mergeAcpHistoryAndLive([message('prior'), tool], [liveTool, message('tail')])).toEqual([message('prior'), liveTool, message('tail')])
+  })
+
+  it('keeps only new ACP subscription deltas while history is loading', async () => {
+    await runScenarios((['pi', 'antigravity'] as const).flatMap(backend =>
+      ['live', 'completed', 'switch', 'reject'].map(mode => ({ name: `${backend}: ${mode}`, run: async () => {
+        const selected = { ...session, backend, sessionId: `${backend}:old`, nativeId: 'old' }
+        useAppStore.setState({ messages: { [selected.sessionId]: [{ kind: 'message', id: 'cursor-assistant-live',
+          sessionId: selected.sessionId, role: 'assistant', text: 'stale cache', createdAt: 1, streaming: true }] } })
+        let finish!: (value: { events: HistoryEntry[] }) => void
+        let fail!: (error: Error) => void
+        acp.transferCall.mockReturnValueOnce(new Promise((resolve, reject) => { finish = resolve; fail = reject }))
+        const opening = useAppStore.getState().openSession(selected)
+        await vi.waitFor(() => expect(acp.openStream).toHaveBeenCalled())
+        const receive = acp.openStream.mock.calls[0]![1]
+        const update = (value: Record<string, unknown>) => receive({ streamId: 'acp-test',
+          frame: { method: 'session/update', params: { sessionId: 'old', update: value } } })
+        const chunks = [
+          { sessionUpdate: 'tool_call', toolCallId: 'tail-tool', title: 'bash', status: 'in_progress' },
+          { sessionUpdate: 'tool_call_update', toolCallId: 'tail-tool', title: 'bash', status: 'completed', rawOutput: 'tail output' },
+          { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'tail answer' } },
+        ]
+        if (mode === 'completed') update({ sessionUpdate: 'prompt_completed', catchUp: chunks.map(value => ({
+          method: 'session/update', params: { update: value },
+        })) })
+        else chunks.forEach(update)
+        receive({ streamId: 'acp-test', frame: { method: 'session/request_permission', params: {
+          sessionId: 'old', requestHandle: 'current-approval', toolCall: { title: 'Run bash' },
+          options: [{ optionId: 'once', kind: 'allow_once' }],
+        } } })
+        // The catalog explicitly says running:false, but this subscription has
+        // already delivered live content and an actionable approval.
+        expect(selected.running).toBe(false)
+        expect(useAppStore.getState().messages[selected.sessionId]).toEqual(expect.arrayContaining([
+          expect.objectContaining({ kind: 'approval', approvalId: 'current-approval' }),
+        ]))
+        if (mode === 'switch') {
+          expect(await useAppStore.getState().openSession({ ...session, sessionId: 'new' })).toBe(true)
+          update({ sessionUpdate: 'agent_message_chunk', content: { text: 'late old delta' } })
+        }
+        if (mode === 'reject') fail(new Error('history unavailable'))
+        else finish({ events: [entry('assistant/message', 1, { turn: 1, message: { id: 'history',
+          content: [{ type: 'text', text: 'old history' }] } })] })
+        expect(await opening).toBe(mode !== 'switch' && mode !== 'reject')
+        const items = useAppStore.getState().messages[selected.sessionId] ?? []
+        expect(items.some(item => item.kind === 'message' && item.text.includes('stale cache'))).toBe(false)
+        expect(items).toEqual(expect.arrayContaining([
+          expect.objectContaining({ kind: 'tool', state: 'finished', resultDetail: { text: 'tail output', format: 'code' } }),
+          expect.objectContaining({ kind: 'message', text: 'tail answer', streaming: mode !== 'completed' }),
+          expect.objectContaining({ kind: 'approval', approvalId: 'current-approval' }),
+        ]))
+        if (mode === 'completed') expect(useAppStore.getState().selectedSession?.running).toBe(false)
+        if (mode === 'switch') {
+          expect(useAppStore.getState().selectedSession?.sessionId).toBe('new')
+          expect(useAppStore.getState().messages.new).toEqual([])
+          expect(items.some(item => item.kind === 'message' && item.text.includes('late old delta'))).toBe(false)
+        }
+        if (mode === 'reject') expect(useAppStore.getState().error).toContain('history unavailable')
+      } }))), prepareScenario1)
+  })
+
   it('ignores AGY history completing after navigation to another conversation', async () => {
     let finish!: (result: { events: unknown[] }) => void
     acp.transferCall.mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
@@ -409,7 +502,7 @@ describe('session restore state machine', () => {
   })
 
   it('closes late ACP subscriptions after navigation', async () => {
-    const rows = ['cursor', 'antigravity'] as const
+    const rows = ['cursor', 'antigravity', 'pi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -446,7 +539,7 @@ describe('session restore state machine', () => {
   })
 
   it('isolates late ACP prompt subscriptions from the new conversation', async () => {
-    const rows = ['cursor', 'antigravity'] as const
+    const rows = ['cursor', 'antigravity', 'pi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row

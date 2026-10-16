@@ -135,7 +135,7 @@ beforeEach(prepareScenario1)
   })
 
   it('requires independent backend capability and readiness and refreshes Host switches live', async () => {
-    const rows = ['cursor', 'antigravity'] as const
+    const rows = ['cursor', 'antigravity', 'pi'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -152,7 +152,7 @@ beforeEach(prepareScenario1)
             testState.workspaceTypes = [type]
             const connection = new AndroidRemoteConnection()
             const available = () =>
-              backend === 'cursor' ? connection.hasCursor() : connection.hasAntigravity()
+              backend === 'pi' ? connection.hasPi() : backend === 'cursor' ? connection.hasCursor() : connection.hasAntigravity()
             await connection.connect(
               'https://server.example.com',
               identity,

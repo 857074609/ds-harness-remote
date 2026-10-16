@@ -61,6 +61,7 @@ export const MIN_REPLAY_WINDOW_MS = 15 * 60_000
 export const MAX_ALPHA_STREAMS_PER_CONNECTION = 16
 /** Generic Agent Client Protocol capability and bounded gateway limits. */
 export const ACP_CAPABILITY = 'agent.acp.v1' as const
+export const ACP_PI_CAPABILITY = 'agent.acp.pi.v1' as const
 export const ACP_WORKSPACE_FILES_CAPABILITY = 'agent.acp.workspace-files.v1' as const
 export const ACP_TERMINAL_CAPABILITY = 'agent.acp.terminal.v1' as const
 export const ACP_ANTIGRAVITY_MODELS_CAPABILITY = 'agent.acp.antigravity.models.v1' as const
@@ -479,7 +480,7 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | (string & {})
+export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
 export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
 export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
@@ -735,7 +736,7 @@ export interface AgentAcpCallParams {
 
 export interface AgentAcpRespondParams {
   requestHandle: string
-  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel'
+  decision: 'allow-once' | 'reject-once' | 'cancel'
   /** Optional structured answer for backend extension methods (ask_question / create_plan). */
   result?: unknown
 }
@@ -743,13 +744,13 @@ export interface AgentAcpRespondParams {
 export type AcpWorkspaceToolCallEndpoint = 'workspaceFiles/list' | 'workspaceFiles/stat' | 'workspaceFiles/read' | 'workspaceFiles/readBytes' | 'workspaceFiles/readAll'
   | 'terminal/environment' | 'terminal/shells' | 'terminal/list' | 'terminal/create' | 'terminal/write' | 'terminal/resize' | 'terminal/rename' | 'terminal/close'
 export type AcpWorkspaceToolStreamEndpoint = 'workspaceFiles/changes' | 'terminal/follow' | 'terminal/retain'
-export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
-export interface AcpModelParams { sessionId: string; backend: 'antigravity' }
+export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
+export interface AcpModelParams { sessionId: string; backend: 'antigravity' | 'pi' }
 export interface AcpModelSelectionParams extends AcpModelParams { model: string; reasoningEffort?: string }
 export interface AgentAcpStreamOpenParams {
   streamId: string
   sessionId: string
-  tool?: { backend: 'cursor' | 'antigravity'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
+  tool?: { backend: 'cursor' | 'antigravity' | 'pi'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
 }
 
 export interface AgentAcpStreamCloseParams {

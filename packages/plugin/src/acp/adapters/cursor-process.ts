@@ -34,6 +34,13 @@ export type CursorAcpInboundHandler = (message: CursorAcpInbound) => void
 export type CursorAcpUnavailableHandler = (code: string) => void
 export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 
+export interface CursorAcpOptions {
+  args?: string[]
+  cwd?: string
+  /** null uses Host-local pre-authentication; undefined preserves Cursor login. */
+  authenticationMethod?: string | null
+}
+
 export interface CursorAcpLike {
   start(): Promise<void>
   isReady(): boolean
@@ -80,7 +87,7 @@ export class CursorAcpClient implements CursorAcpLike {
       windowsHide: true,
       env: process.env,
     }),
-    options: { args?: string[]; cwd?: string } = {},
+    private readonly options: CursorAcpOptions = {},
   ) {}
 
   start(): Promise<void> {
@@ -94,6 +101,10 @@ export class CursorAcpClient implements CursorAcpLike {
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not ready.')
+    if (method === 'session/cancel' && this.options.authenticationMethod === null) {
+      this.write({ jsonrpc: '2.0', method, params })
+      return {}
+    }
     const budget = timeoutMs
       ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
     return this.request(method, params, budget)
@@ -148,11 +159,16 @@ export class CursorAcpClient implements CursorAcpLike {
     this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
-    child.stdout.on('data', chunk => this.consumeStdout(Buffer.from(chunk as Uint8Array)))
+    child.stdout.on('data', chunk => {
+      if (this.process === child) this.consumeStdout(Buffer.from(chunk as Uint8Array))
+    })
     child.stderr.on('data', chunk => {
+      if (this.process !== child) return
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer.byteLength(chunk))
     })
-    child.on('error', error => this.handleProcessFailure('CURSOR_BINARY_UNAVAILABLE', error))
+    child.on('error', error => {
+      if (this.process === child) this.handleProcessFailure('CURSOR_BINARY_UNAVAILABLE', error)
+    })
     child.on('exit', (code, signal) => {
       if (this.process !== child) return
       this.process = undefined
@@ -180,13 +196,26 @@ export class CursorAcpClient implements CursorAcpLike {
           version: PLUGIN_VERSION,
         },
       }, ACP_START_TIMEOUT_MS)
-      await this.request('authenticate', { methodId: 'cursor_login' }, ACP_START_TIMEOUT_MS)
+      this.assertStarting(child)
+      if (this.options.authenticationMethod !== null) {
+        await this.request('authenticate', { methodId: this.options.authenticationMethod ?? 'cursor_login' }, ACP_START_TIMEOUT_MS)
+      }
+      this.assertStarting(child)
       this.ready = true
       this.logger?.info('Cursor ACP ready')
     } catch (error) {
+      this.ready = false
+      if (this.process === child) this.process = undefined
       child.kill('SIGTERM')
       if (error instanceof CursorAcpError) throw error
       throw new CursorAcpError('CURSOR_INITIALIZE_FAILED', 'Cursor ACP initialization failed.', { cause: error })
+    }
+  }
+
+  private assertStarting(child: ChildProcessWithoutNullStreams): void {
+    if (this.closed) throw new CursorAcpError('CURSOR_CLOSED', 'Cursor ACP was closed.')
+    if (this.process !== child || child.exitCode !== null || child.killed) {
+      throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not available.')
     }
   }
 

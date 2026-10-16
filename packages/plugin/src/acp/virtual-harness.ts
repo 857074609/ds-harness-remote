@@ -1,5 +1,6 @@
 import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS, type AcpSessionModels, type AgentAcpStreamOpenParams } from '@dsh-remote/protocol'
 import { parseAcpImage, acpImageContent, acpImageLimits, type AcpImage } from './image-content.js'
+import { piToolResult } from './pi-tool-result.js'
 import type { ApiProxy, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AgentAcpClient } from '@dsh-remote/client-core'
 import type { AgentAcpFrameData, AgentAcpStreamClosedData } from '@dsh-remote/protocol'
@@ -17,6 +18,24 @@ const CURSOR_PROVIDER = 'cursor'
 const CURSOR_MODEL = 'cursor'
 
 type JsonRecord = Record<string, unknown>
+type PiTurnOutcome = { kind: 'completed' } | { kind: 'max-tokens' }
+  | { kind: 'aborted'; reason: { kind: 'user' | 'disposed' } }
+  | { kind: 'error'; error: { code: string; message: string } }
+
+function piStreamOutcome(reason: AgentAcpStreamClosedData['reason']): PiTurnOutcome {
+  if (reason === 'completed') return { kind: 'completed' }
+  if (reason === 'cancelled' || reason === 'peer-disconnected') return { kind: 'aborted', reason: { kind: reason === 'cancelled' ? 'user' : 'disposed' } }
+  return { kind: 'error', error: { code: 'ACP_STREAM_FAILED', message: 'PI reply stream failed.' } }
+}
+
+function piPromptOutcome(kind: string, update: JsonRecord): PiTurnOutcome {
+  if (update.stopReason === 'cancelled') return { kind: 'aborted', reason: { kind: 'user' } }
+  if (kind === 'prompt_failed' || update.stopReason === 'error') return {
+    kind: 'error', error: { code: 'PI_PROMPT_FAILED', message: 'PI reply failed.' },
+  }
+  if (update.stopReason === 'max_tokens') return { kind: 'max-tokens' }
+  return { kind: 'completed' }
+}
 
 export interface AcpVirtualWorkspaceView {
   workspaceId: string
@@ -70,6 +89,11 @@ interface FollowState {
   assistantAttempt?: AssistantStreamAttempt
   accumulatedText: string
   activeToolCalls: Set<string>
+  piToolOutputs: Map<string, { text: string; overflow: boolean }>
+  piToolCalls: Map<string, { name: string; input?: unknown }>
+  piStep?: number
+  piAfterTools?: boolean
+  piReasoning?: string
   close?: () => Promise<void>
 }
 
@@ -79,16 +103,16 @@ interface PendingApproval {
 }
 
 export interface AcpClientLike {
-  sessionModels?(sessionId: string, backend: 'antigravity', signal?: AbortSignal): Promise<AcpSessionModels>
-  selectModel?(sessionId: string, backend: 'antigravity', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
-  workspaceToolCall?(sessionId: string, backend: 'cursor' | 'antigravity', endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
+  sessionModels?(sessionId: string, backend: 'antigravity' | 'pi', signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: 'antigravity' | 'pi', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  workspaceToolCall?(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi', endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
     mode?: 'agent' | 'plan' | 'ask',
-    backend?: 'cursor' | 'antigravity',
+    backend?: 'cursor' | 'antigravity' | 'pi',
     signal?: AbortSignal,
   ): Promise<{ sessionId: string; cwd?: string }>
-  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: 'cursor' | 'antigravity'): Promise<unknown>
+  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: 'cursor' | 'antigravity' | 'pi'): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
@@ -103,19 +127,19 @@ export interface AcpClientLike {
   ): Promise<{ close(): Promise<void> }>
   respond(
     requestHandle: string,
-    decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel',
+    decision: 'allow-once' | 'reject-once' | 'cancel',
     result?: unknown,
     signal?: AbortSignal,
   ): Promise<unknown>
 }
 
 /** Build a backend-scoped virtual Workspace id for an absolute Host cwd. */
-export function acpCwdWorkspaceId(path: string, backend: 'cursor' | 'antigravity'): string {
-  if (backend !== 'cursor' && backend !== 'antigravity') throw new Error('An explicit ACP workspace backend is required.')
-  return `${backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`
+export function acpCwdWorkspaceId(path: string, backend: 'cursor' | 'antigravity' | 'pi'): string {
+  if (backend !== 'cursor' && backend !== 'antigravity' && backend !== 'pi') throw new Error('An explicit ACP workspace backend is required.')
+  return `${backend === 'pi' ? 'pi:cwd:' : backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`
 }
 
-export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigravity', title?: string): AcpVirtualWorkspaceView {
+export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigravity' | 'pi', title?: string): AcpVirtualWorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
@@ -132,7 +156,7 @@ export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigr
 /** Discover ACP virtual workspaces visible on the Host. */
 export async function discoverAcpVirtualWorkspaces(
   client: AcpClientLike,
-  backend: 'cursor' | 'antigravity',
+  backend: 'cursor' | 'antigravity' | 'pi',
   signal?: AbortSignal,
 ): Promise<AcpVirtualWorkspaceView[]> {
   if (client?.listWorkspaces !== undefined) {
@@ -147,8 +171,9 @@ export async function discoverAcpVirtualWorkspaces(
             return view
           })
       }
-    } catch {
-      // Discovery is optional; an unavailable Host returns no workspaces.
+    } catch (error) {
+      if (backend === 'pi') throw error
+      // Discovery is optional for legacy backends; an unavailable Host returns no workspaces.
     }
   }
   return []
@@ -171,6 +196,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly rcHostStreams = new Set<AsyncValueQueue>()
   private readonly follows = new Set<FollowState>()
   private readonly pendingApprovals = new Map<string, PendingApproval>()
+  private readonly pendingHistory = new Map<string, Promise<void>>()
   private selectedWorkspaceId?: string
   private readonly selectedModels = new Map<string, AcpModelSelection>()
   private lastProjectionSeq = 0
@@ -180,7 +206,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: AcpClientLike,
     private readonly host: { deviceId: string; name: string },
-    readonly backend: 'cursor' | 'antigravity' = 'cursor',
+    readonly backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
     /**
      * Host gateway used for endpoints this virtual Harness does not project
      * (settings, plugins, models, credentials, …). A real Harness workspace
@@ -195,7 +221,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   static remote(
     core: ConstructorParameters<typeof AgentAcpClient>[0],
     host: { deviceId: string; name: string },
-    backend: 'cursor' | 'antigravity' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
     capabilities: readonly string[] = [],
     hostCarrier?: RemoteTypertGatewayTarget,
   ): AcpVirtualHarness {
@@ -207,7 +233,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private backendLabel(): string {
-    return this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+    return this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'
   }
 
   async selectWorkspace(workspaceId: string): Promise<AcpVirtualWorkspaceView> {
@@ -310,14 +336,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/attachment': return business(await this.attachment(requestArg(args)))
         case 'session/modelCatalog': {
           const sessionId = await this.preferredSessionId()
-          if (this.backend !== 'antigravity' || !sessionId) return business(success(modelCatalog(this.backend)))
+          if (this.backend === 'cursor' || !sessionId) return business(success(modelCatalog(this.backend)))
           const models = await this.hostSessionModels(sessionId)
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }))
         }
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
           nativeAcpId(rawId, this.backend)
-          if (this.backend === 'antigravity') return business(success(await this.hostSessionModels(rawId)))
+          if (this.backend !== 'cursor') return business(success(await this.hostSessionModels(rawId)))
           const catalog = modelCatalog(this.backend)
           return business(success({
             current: this.modelSelection(rawId),
@@ -458,7 +484,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       return success({ sessionId: reusable.sessionId })
     }
     const created = await this.client.createSession(cwd, 'agent', this.backend, signal)
-    if (this.backend === 'antigravity' && this.sessions.has(`${ACP_SESSION_PREFIX}${created.sessionId}`)) {
+    if (this.backend !== 'cursor' && this.sessions.has(`${sessionPrefix(this.backend)}${created.sessionId}`)) {
       return failure('session-already-exists', 'The backend returned an existing conversation for a new Session.')
     }
     const session = this.registerSession(created.sessionId, cwd, workspace?.title)
@@ -473,11 +499,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private ensureSessionRegistered(sessionId: string): AcpSessionState | undefined {
     let session = this.sessions.get(sessionId)
     if (session !== undefined) return session
-    if (this.backend === 'antigravity' && sessionId.startsWith(ACP_SESSION_PREFIX)) {
-      const acpSessionId = sessionId.slice(ACP_SESSION_PREFIX.length)
+    if (this.backend !== 'cursor' && sessionId.startsWith(sessionPrefix(this.backend))) {
+      const acpSessionId = sessionId.slice(sessionPrefix(this.backend).length)
       const workspace = this.selectedWorkspaceId !== undefined ? this.workspaceById.get(this.selectedWorkspaceId) : undefined
       const cwd = workspace?.path ?? '/'
-      session = this.registerSession(acpSessionId, cwd, 'Antigravity', Date.now(), Date.now(), false)
+      session = this.registerSession(acpSessionId, cwd, this.backendLabel(), Date.now(), Date.now(), false)
       if (workspace && !workspace.sessionIds.includes(sessionId)) {
         workspace.sessionIds.unshift(sessionId)
         workspace.sessionCount = workspace.sessionIds.length
@@ -535,7 +561,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     session.running = false
     for (const follow of this.follows) {
       if (follow.sessionId === sessionId) {
-        this.closeFollowAfterRemoteStreamClosed(follow)
+        this.closeFollowAfterRemoteStreamClosed(follow, { kind: 'aborted', reason: { kind: 'user' } })
       }
     }
     this.emitRemoteEvent('api-session/status', [sessionId, false])
@@ -576,13 +602,25 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hydrateSession(session: AcpSessionState): Promise<void> {
-    if (this.backend !== 'antigravity' || session.blank || session.events.length > 0) return
+    if (this.backend === 'cursor' || session.blank || session.events.length > 0) return
+    if (this.backend !== 'pi') return this.hydrateSessionOnce(session)
+    const pending = this.pendingHistory.get(session.sessionId)
+    if (pending) return pending
+    const read = this.hydrateSessionOnce(session)
+    this.pendingHistory.set(session.sessionId, read)
+    try { await read } finally { if (this.pendingHistory.get(session.sessionId) === read) this.pendingHistory.delete(session.sessionId) }
+  }
+
+  private async hydrateSessionOnce(session: AcpSessionState): Promise<void> {
     let events: unknown[] = []
     if (this.client.loadSessionHistory !== undefined) {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend)
-      } catch {
-        // Keep the projection empty until remote history is available.
+      } catch (error) {
+        // A failed PI read is not a successful empty baseline; do not continue
+        // a restored conversation until its authoritative history is available.
+        if (this.backend === 'pi') throw error
+        // Preserve legacy AGY history availability behavior.
       }
     }
     if (events.length > 0) {
@@ -608,7 +646,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -771,6 +809,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       assistantStreamRevision: 0,
       accumulatedText: '',
       activeToolCalls: new Set(),
+      piToolOutputs: new Map(),
+      piToolCalls: new Map(),
     }
     this.follows.add(follow)
     queue.push({
@@ -782,7 +822,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -794,10 +834,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       const stream = await this.client.openStream(
         session.acpSessionId,
         frame => this.acceptAcpFrame(follow, frame),
-        () => {
+        closed => {
           session.running = false
           this.emitRemoteEvent('api-session/status', [sessionId, false])
-          this.closeFollowAfterRemoteStreamClosed(follow)
+          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason))
         },
         signal,
       )
@@ -829,12 +869,20 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       assistantStreamRevision: 0,
       accumulatedText: '',
       activeToolCalls: new Set(),
+      piToolOutputs: new Map(),
+      piToolCalls: new Map(),
     }
     this.follows.add(follow)
     const stream = await this.client.openStream(
       session.acpSessionId,
       frame => this.acceptAcpFrame(follow, frame),
-      () => this.closeFollowAfterRemoteStreamClosed(follow),
+      closed => {
+        if (this.backend === 'pi') {
+          session.running = false
+          this.emitRemoteEvent('api-session/status', [session.sessionId, false])
+        }
+        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason))
+      },
     )
     follow.close = async () => {
       controller.abort()
@@ -875,6 +923,52 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       const status = string(update.status)
       const callId = string(update.toolCallId) ?? string(update.callId) ?? toolName
       const terminal = status === 'completed' || status === 'failed'
+      if (this.backend === 'pi') {
+        const call = follow.piToolCalls.get(callId) ?? { name: toolName }
+        if (typeof update.title === 'string') call.name = update.title
+        if (update.rawInput !== undefined) call.input = update.rawInput
+        follow.piToolCalls.set(callId, call)
+        const output = piToolResult(update)
+        const delta = record(record(update._meta).terminal_output).data
+        if (typeof delta === 'string') {
+          const buffered = follow.piToolOutputs.get(callId) ?? { text: '', overflow: false }
+          if (!buffered.overflow) {
+            if (buffered.text.length + delta.length > 1_048_576) { buffered.text = ''; buffered.overflow = true }
+            else buffered.text += delta
+          }
+          follow.piToolOutputs.set(callId, buffered)
+        }
+        // Pi streams partial arguments while pending, then confirms final input
+        // at execution start. Do not freeze a partial/empty call in the transcript.
+        if (!terminal && status !== 'in_progress') return
+        if (!follow.activeToolCalls.has(callId)) {
+          this.ensurePiStep(follow, false)
+          this.finishPiAssistant(follow)
+          follow.piAfterTools = true
+          this.pushEvent(follow, 'tool/call', {
+            turn: follow.turn, step: follow.piStep ?? 1, callId, toolCallId: callId, name: call.name, toolName: call.name,
+            arguments: typeof call.input === 'string' ? call.input
+              : call.input != null ? JSON.stringify(call.input) : '{}',
+            status: terminal ? status === 'failed' ? 'failed' : 'finished' : 'running',
+          })
+          follow.activeToolCalls.add(callId)
+        }
+        if (terminal) {
+          const buffered = follow.piToolOutputs.get(callId)
+          const content = buffered ? [{ type: 'text', text: buffered.overflow
+            ? '[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]' : buffered.text }]
+            : output.content
+          this.pushEvent(follow, 'tool/result', { turn: follow.turn, step: follow.piStep ?? 1, message: {
+            id: `${callId}:result`, role: 'user', content: [{ type: 'tool-result', toolCallId: callId,
+              content, ...(output.isError ? { isError: true } : {}) }], source: { kind: 'tool', callId },
+          } })
+          follow.piToolOutputs.delete(callId)
+          follow.piToolCalls.delete(callId)
+          follow.activeToolCalls.delete(callId)
+        }
+        if (session !== undefined) session.updatedAt = Date.now()
+        return
+      }
       if (kind === 'tool_call_update' && !terminal) return
       if (kind === 'tool_call' && follow.activeToolCalls.has(callId)) return
       this.pushEvent(follow, 'tool/call', {
@@ -917,7 +1011,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
         if (kind === 'prompt_completed') void this.refreshSessionTitle(session)
       }
-      this.closeFollowAfterRemoteStreamClosed(follow)
+      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update))
     }
   }
 
@@ -929,12 +1023,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       ? (string(params.name) ?? 'plan')
       : method === 'cursor/ask_question'
         ? (string(params.title) ?? 'question')
-        : (string(params.toolName) ?? 'permission')
+        : (string(params.toolName) ?? string(record(params.toolCall).title) ?? 'permission')
     const reason = method === 'cursor/create_plan'
       ? string(params.overview) ?? string(params.plan)
       : method === 'cursor/ask_question'
         ? summarizeQuestions(params)
-        : string(params.reason)
+        : string(params.reason) ?? string(record(record(params.toolCall).rawInput).message)
     this.emitApproval({
       eventId: requestHandle,
       agentId: follow.sessionId,
@@ -949,7 +1043,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     let attempt = follow.assistantAttempt
     if (attempt === undefined) {
       attempt = {
-        attemptId: `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
+        attemptId: this.backend === 'pi' ? `pi-attempt:${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}:${follow.nextSeq}`
+            : `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
         startedAfterSeq: follow.nextSeq - 1,
         nextIndex: 0,
         stream: [],
@@ -964,7 +1059,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           revision: follow.assistantStreamRevision,
           startedAfterSeq: attempt.startedAfterSeq,
           turn: follow.turn,
-          step: 1,
+          step: this.backend === 'pi' ? follow.piStep ?? 1 : 1,
         },
       })
     }
@@ -1009,6 +1104,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private appendAssistantDelta(follow: FollowState, delta: string): void {
+    if (this.backend === 'pi') this.ensurePiStep(follow, true)
     if (!follow.stepOpen) {
       follow.turn += 1
       follow.stepOpen = true
@@ -1025,6 +1121,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private appendReasoningDelta(follow: FollowState, delta: string): void {
+    if (this.backend === 'pi') {
+      this.ensurePiStep(follow, true)
+      follow.piReasoning = (follow.piReasoning ?? '') + delta
+    }
     if (!follow.stepOpen) {
       follow.turn += 1
       follow.stepOpen = true
@@ -1039,7 +1139,67 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     this.pushAssistantChunk(follow, { type: 'reasoning-delta', index: follow.reasoningBlockIndex, text: delta })
   }
 
-  private closeFollowAfterRemoteStreamClosed(follow: FollowState): void {
+  /** PI model steps settle before tools; a tool round does not end the turn. */
+  private ensurePiStep(follow: FollowState, advanceAfterTools: boolean): void {
+    if (!follow.stepOpen) {
+      follow.turn++
+      follow.piStep = 1
+      follow.stepOpen = true
+      this.pushEvent(follow, 'turn/start', { turn: follow.turn })
+      this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
+    } else if (advanceAfterTools && follow.piAfterTools) {
+      this.pushEvent(follow, 'step/end', { turn: follow.turn, step: follow.piStep ?? 1 })
+      follow.piStep = (follow.piStep ?? 1) + 1
+      this.pushEvent(follow, 'step/start', { turn: follow.turn, step: follow.piStep })
+    }
+    if (advanceAfterTools) follow.piAfterTools = false
+  }
+
+  private finishPiAssistant(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
+    if (!follow.streamActive) return
+    const blocks = [
+      { index: follow.reasoningBlockIndex, type: 'reasoning', text: follow.piReasoning ?? '' },
+      { index: follow.blockIndex, type: 'text', text: follow.accumulatedText },
+    ].filter((block): block is { index: number; type: string; text: string } => block.index !== undefined)
+      .sort((a, b) => a.index - b.index)
+    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: 'block-end', index, block: { type, text } })
+    const reason = outcome.kind === 'error' ? { kind: 'error', failure: outcome.error }
+      : outcome.kind === 'aborted' ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'PI reply interrupted.' } }
+        : { kind: outcome.kind === 'max-tokens' ? 'max-tokens' : 'stop' }
+    this.pushAssistantChunk(follow, { type: 'finish', reason })
+    const selection = this.modelSelection(follow.sessionId)
+    const seq = this.pushEvent(follow, 'assistant/message', {
+      turn: follow.turn, step: follow.piStep ?? 1,
+      message: {
+        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
+        role: 'assistant', content: blocks.map(({ type, text }) => ({ type, text })),
+        source: { kind: 'model', provider: selection.provider, model: selection.model },
+      },
+      stream: follow.assistantAttempt?.stream ?? [],
+    })
+    this.endAssistantAttempt(follow, { kind: 'committed', eventType: 'assistant/message', seq })
+    follow.streamActive = false
+    follow.blockIndex = undefined
+    follow.reasoningBlockIndex = undefined
+    follow.accumulatedText = ''
+    follow.piReasoning = ''
+  }
+
+  private closeFollowAfterRemoteStreamClosed(follow: FollowState, outcome: PiTurnOutcome = { kind: 'completed' }): void {
+    if (this.backend === 'pi') {
+      this.finishPiAssistant(follow, outcome)
+      if (follow.stepOpen) {
+        this.pushEvent(follow, 'step/end', { turn: follow.turn, step: follow.piStep ?? 1 })
+        this.pushEvent(follow, 'turn/end', { turn: follow.turn, reason: outcome })
+      }
+      follow.stepOpen = false
+      follow.piStep = 1
+      follow.piAfterTools = false
+      follow.piToolOutputs.clear()
+      follow.piToolCalls.clear()
+      follow.activeToolCalls.clear()
+      return
+    }
     if (follow.streamActive) {
       if (follow.reasoningBlockIndex !== undefined) {
         this.pushAssistantChunk(follow, {
@@ -1091,6 +1251,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     follow.blockIndex = undefined
     follow.reasoningBlockIndex = undefined
     follow.accumulatedText = ''
+    follow.piToolOutputs.clear()
+    follow.piToolCalls.clear()
   }
 
   private pushEvent(follow: FollowState, type: string, data: unknown): number {
@@ -1130,7 +1292,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     blank: boolean = true,
   ): AcpSessionState {
     const session: AcpSessionState = {
-      sessionId: `${this.backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX}${acpSessionId}`,
+      sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd,
       ...(title === undefined ? {} : { title }),
@@ -1152,7 +1314,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async refreshSessionTitle(session: AcpSessionState): Promise<void> {
-    if (this.backend !== 'antigravity' || this.closed || session.titleOverridden || this.client.listSessions === undefined) return
+    if (this.backend === 'cursor' || this.closed || session.titleOverridden || this.client.listSessions === undefined) return
     try {
       const items = await this.client.listSessions(session.cwd, this.backend, 30)
       const current = items.find(item => item.conversationId === session.acpSessionId)
@@ -1163,18 +1325,19 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async discoverAndAttachSessions(workspace: AcpVirtualWorkspaceView): Promise<void> {
-    if (this.backend !== 'antigravity') return
+    if (this.backend === 'cursor') return
     try {
       let discovered: Array<{ conversationId: string; title: string; createdAt: number; updatedAt: number }> = []
       if (this.client.listSessions !== undefined) {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30)
-        } catch {
-          // Keep the projection empty until remote history is available.
+        } catch (error) {
+          if (this.backend === 'pi') throw error
+          // Preserve legacy AGY catalog availability behavior.
         }
       }
       for (const item of discovered) {
-        const sessionId = `${ACP_SESSION_PREFIX}${item.conversationId}`
+        const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
         }
@@ -1186,8 +1349,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       }
       workspace.sessionCount = workspace.sessionIds.length
       workspace.updatedAt = new Date().toISOString()
-    } catch {
-      // 容错降级
+    } catch (error) {
+      if (this.backend === 'pi') throw error
+      // Preserve legacy AGY catalog availability behavior.
     }
   }
 
@@ -1249,7 +1413,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         kind: 'sequenced',
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -1268,8 +1432,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
-    if (this.backend !== 'antigravity' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
-    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), 'antigravity')
+    if (this.backend === 'cursor' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
+    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend)
     this.selectedModels.set(sessionId, models.current)
     return models
   }
@@ -1280,7 +1444,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
     const reasoningEffort = string(request.reasoningEffort)
-    const catalog = this.backend === 'antigravity' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
+    const catalog = this.backend !== 'cursor' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
     const group = catalog.groups.find(g => g.id === provider)
     const targetModel = group?.models.find(m => m.id === model)
     if (group === undefined || targetModel === undefined) {
@@ -1295,11 +1459,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       model,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     }
-    if (this.backend === 'antigravity') {
+    if (this.backend !== 'cursor') {
       if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
-      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), 'antigravity', selected)
+      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
       this.selectedModels.set(sessionId, confirmed)
-    } else return failure('model-unavailable', 'Cursor model selection follows Host settings.')
+    } else return failure('model-unavailable', `${this.backendLabel()} model selection follows Host settings.`)
     const seq = this.nextProjectionSeq()
     this.publishProjection(sessionId, 'modelSelection', this.modelSelectionProjection(sessionId), seq)
     return success({ selected: this.modelSelection(sessionId) })
@@ -1466,8 +1630,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 }
 
-function recreateWorkspaceFromId(workspaceId: string, backend: 'cursor' | 'antigravity'): AcpVirtualWorkspaceView | undefined {
-  const prefix = backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
+function recreateWorkspaceFromId(workspaceId: string, backend: 'cursor' | 'antigravity' | 'pi'): AcpVirtualWorkspaceView | undefined {
+  const prefix = backend === 'pi' ? 'pi:cwd:' : backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
   if (!workspaceId.startsWith(prefix)) return undefined
   try {
     const path = decodeURIComponent(workspaceId.slice(prefix.length))
@@ -1514,15 +1678,15 @@ const CURSOR_MODELS: AcpModelView[] = [
   { id: 'deepseek-r1', name: 'DeepSeek R1' },
 ]
 
-export function modelCatalog(backend: 'cursor' | 'antigravity' = 'cursor'): {
+export function modelCatalog(backend: 'cursor' | 'antigravity' | 'pi' = 'cursor'): {
   default: AcpModelSelection
   routableProviders: string[]
   groups: Array<{ id: string; name: string; models: AcpModelView[] }>
   failures: Array<{ id: string; name: string; message: string }>
 } {
-  const provider = backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
-  const name = backend === 'antigravity' ? 'Antigravity' : 'Cursor'
-  const models = backend === 'antigravity' ? [] : CURSOR_MODELS
+  const provider = backend === 'pi' ? 'pi' : backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
+  const name = backend === 'pi' ? 'PI' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  const models = backend === 'cursor' ? CURSOR_MODELS : []
   const defaultModel = models[0]?.id ?? 'host-settings'
   return {
     default: { provider, model: defaultModel },
@@ -1582,8 +1746,12 @@ function extractSessionId(request: JsonRecord): string {
   throw new Error('The sessionId is required.')
 }
 
-function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity'): string {
-  const prefix = backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi'): string {
+  return backend === 'pi' ? 'pi:' : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+}
+
+function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi'): string {
+  const prefix = sessionPrefix(backend)
   if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')
   }

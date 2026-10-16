@@ -169,6 +169,7 @@ Supported backends:
 
 - **Cursor** — connected through the CLI's ACP interface.
 - **Antigravity (AGY)** — its stream-json CLI is adapted to the ACP gateway.
+- **Pi Agent (experimental)** — install `@earendil-works/pi-coding-agent` and `pi-acp` on the Host, configure Pi's provider locally; Remote automatically detects and initializes Pi unless explicitly disabled in Remote settings. The workspace is available only after ACP initialization succeeds. Uses the separate ACP data plane. Tools run with Host-user permissions; per-tool confirmation requires a Pi extension and is not enabled by default.
 - **Codex** — connected through its independent App Server interface, with the same workspace entry.
 
 Setup and adapter development: [Agent workspace integration guide](docs/acp-integration.md).

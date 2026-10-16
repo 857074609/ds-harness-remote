@@ -18,14 +18,14 @@ const imageBlock = z.object({ type: z.literal('image'), mimeType: z.enum(['image
 const promptBlock = z.union([textBlock, imageBlock])
 
 export const acpToolStreamSchema = z.object({
-  backend: z.enum(['cursor', 'antigravity']), endpoint: z.enum(ACP_TOOL_STREAM_ENDPOINTS), args: z.record(z.unknown()),
+  backend: z.enum(['cursor', 'antigravity', 'pi']), endpoint: z.enum(ACP_TOOL_STREAM_ENDPOINTS), args: z.record(z.unknown()),
 }).strict()
 
 const schemas = {
-  'dsh/toolCall': z.object({ sessionId: id, backend: z.enum(['cursor', 'antigravity']),
+  'dsh/toolCall': z.object({ sessionId: id, backend: z.enum(['cursor', 'antigravity', 'pi']),
     endpoint: z.enum(ACP_TOOL_CALL_ENDPOINTS), args: z.record(z.unknown()) }).strict(),
-  'dsh/sessionModels': z.object({ sessionId: id, backend: z.literal('antigravity') }).strict(),
-  'dsh/selectModel': z.object({ sessionId: id, backend: z.literal('antigravity'),
+  'dsh/sessionModels': z.object({ sessionId: id, backend: z.enum(['antigravity', 'pi']) }).strict(),
+  'dsh/selectModel': z.object({ sessionId: id, backend: z.enum(['antigravity', 'pi']),
     model: id, reasoningEffort: id.optional() }).strict(),
   'initialize': z.object({
     protocolVersion: z.number().int().positive().optional(),
@@ -47,7 +47,7 @@ const schemas = {
   }).strict(),
   'session/prompt': z.object({
     sessionId: id,
-    backend: z.enum(['cursor', 'antigravity']).optional(),
+    backend: z.enum(['cursor', 'antigravity', 'pi', 'claude']).optional(),
     prompt: z.array(promptBlock).min(1).max(16).refine(parts => parts.filter(part => part.type === 'image').length <= 4),
   }).strict(),
   'session/cancel': z.object({

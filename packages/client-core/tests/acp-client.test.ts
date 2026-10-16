@@ -3,6 +3,26 @@ import { describe, expect, it, vi } from 'vitest'
 import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
 describe('ACP image transfer', () => {
+  it('preserves PI catalog/history failures instead of returning an empty successful baseline', async () => {
+    await runScenarios(['workspaces', 'catalog', 'history'].flatMap(kind => ['transport', 'malformed', 'empty'].map(outcome => ({
+      name: `${kind}: ${outcome}`,
+      run: async () => {
+        const rpc = vi.fn(async (method: string) => {
+          if ((kind !== 'history' && method === 'agent.acp.call') || method === 'agent.acp.transfer.commit') {
+            if (outcome === 'transport') throw Object.assign(new Error('Disconnected'), { code: 'DISCONNECTED' })
+            const response = outcome === 'empty' ? kind === 'workspaces' ? [] : kind === 'catalog' ? { items: [] } : { events: [] } : { unexpected: [] }
+            return kind !== 'history' ? response : { kind: 'inline', response }
+          }
+          return {}
+        })
+        const client = new AgentAcpClient({ rpc } as never)
+        const read = kind === 'workspaces' ? client.listWorkspaces('pi') : kind === 'catalog' ? client.listSessions('/project', 'pi') : client.loadSessionHistory('pi:saved', 'pi')
+        if (outcome === 'empty') await expect(read).resolves.toEqual([])
+        else await expect(read).rejects.toMatchObject({ code: outcome === 'transport' ? 'DISCONNECTED' : 'INVALID_RESPONSE' })
+        if (kind === 'history') expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
+      },
+    }))))
+  })
   it('model selection loads once when negotiated and keeps the legacy load fallback', async () => {
     for (const atomic of [false, true]) {
       const selected = { provider: 'antigravity', model: 'live-model', reasoningEffort: 'low' }

@@ -38,12 +38,39 @@ export function antigravityWorkspacePath(workspaceId: string): string | undefine
   }
 }
 
+export function piWorkspaceId(path: string): string {
+  return `pi:cwd:${encodeURIComponent(path)}`
+}
+
+export function piWorkspacePath(workspaceId: string): string | undefined {
+  if (!workspaceId.startsWith('pi:cwd:')) return undefined
+  try {
+    return decodeURIComponent(workspaceId.slice('pi:cwd:'.length))
+  } catch {
+    return undefined
+  }
+}
+
 export function createCursorWorkspace(path: string, title?: string): WorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
     workspaceId: cursorWorkspaceId(path),
     backend: 'cursor',
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
+export function createPiWorkspace(path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: piWorkspaceId(path),
+    backend: 'pi',
     path,
     title: label,
     sessionIds: [],
@@ -69,6 +96,7 @@ export function createAntigravityWorkspace(path: string, title?: string): Worksp
 export function cursorNativeId(session: RemoteSession): string {
   if (session.nativeId !== undefined && session.nativeId.length > 0) return session.nativeId
   if (session.sessionId.startsWith('cursor:')) return session.sessionId.slice('cursor:'.length)
+  if (session.sessionId.startsWith('pi:')) return session.sessionId.slice('pi:'.length)
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
   return session.sessionId
 }
@@ -89,6 +117,26 @@ export function createCursorSession(input: {
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
       values: { backend: 'cursor' },
+    },
+  }
+}
+
+export function createPiSession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return {
+    sessionId: `pi:${input.acpSessionId}`,
+    backend: 'pi',
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: { backend: 'pi' },
     },
   }
 }
@@ -186,6 +234,50 @@ export function applyCursorFrame(messages: ChatItem[], sessionId: string, frame:
   return messages
 }
 
+/**
+ * ACP history and live have different synthetic IDs and no shared sequence cursor.
+ * Only reconcile the contiguous history suffix / new-subscription prefix, never
+ * globally dedupe identical answers (which may belong to separate turns).
+ */
+export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): ChatItem[] {
+  const same = (a: ChatItem, b: ChatItem): boolean => {
+    if (a.kind !== b.kind) return false
+    if (a.kind === 'message' && b.kind === 'message') {
+      return a.role === b.role && a.text === b.text && (a.reasoning ?? '') === (b.reasoning ?? '')
+        && a.images === undefined && b.images === undefined
+    }
+    if (a.kind === 'tool' && b.kind === 'tool') {
+      // ACP live tool IDs contain a local turn prefix; history uses the call ID.
+      return b.id.endsWith(`:${a.id}`) && a.toolName === b.toolName
+    }
+    return a.id === b.id
+  }
+  for (let count = Math.min(history.length, live.length); count > 0; count--) {
+    const suffix = history.slice(history.length - count)
+    // Text alone is not identity: two independent turns can say the same thing.
+    // Require a shared ID or a tool call anchor before collapsing an overlap.
+    const anchored = live.slice(0, count).some((item, index) => {
+      const previous = suffix[index]!
+      return previous.id === item.id || (previous.kind === 'tool' && item.kind === 'tool' && same(previous, item))
+    })
+    if (anchored && live.slice(0, count).every((item, index) => same(suffix[index]!, item))) {
+      // Prefer live rows at the boundary: preserve completion/stream state and
+      // keep their IDs so subsequent chunks update rather than duplicate them.
+      const overlap = live.slice(0, count).map((item, index) => {
+        const previous = suffix[index]!
+        return item.kind === 'tool' && previous.kind === 'tool'
+          ? { ...previous, ...item,
+              state: item.state === 'running' && previous.state !== 'running' ? previous.state : item.state,
+              arguments: item.arguments ?? previous.arguments,
+              callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
+          : item
+      })
+      return [...history.slice(0, history.length - count), ...overlap, ...live.slice(count)]
+    }
+  }
+  return [...history, ...live]
+}
+
 /** Fold Host ACP transcript events into the Android chat projection. */
 export function foldAcpHistory(events: unknown[], sessionId: string): ChatItem[] {
   const entries: HistoryEntry[] = []
@@ -264,10 +356,21 @@ function applySessionUpdate(messages: ChatItem[], sessionId: string, params: Rec
     const existing = messages.findIndex(item => item.kind === 'tool' && item.id === id)
     const previous = existing < 0 ? undefined : messages[existing] as ToolActivity
     const toolName = stringValue(update.title) ?? stringValue(update.toolName) ?? stringValue(update.name) ?? previous?.toolName ?? 'tool'
-    const state = stringValue(update.status) === 'failed' ? 'failed'
-      : stringValue(update.status) === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished' : 'running'
+    // Pi streams bash output as deltas in ACP metadata, not rawOutput.
+    // Keep this backend-specific until other adapters declare the same semantics.
+    const meta = sessionId.startsWith('pi:') && isRecord(update._meta) ? update._meta : {}
+    const terminalOutput = isRecord(meta.terminal_output) ? meta.terminal_output : {}
+    const terminalExit = isRecord(meta.terminal_exit) ? meta.terminal_exit : {}
+    const exitCode = typeof terminalExit.exit_code === 'number' && Number.isInteger(terminalExit.exit_code)
+      ? terminalExit.exit_code : undefined
+    const state = stringValue(update.status) === 'failed' || (exitCode !== undefined && exitCode !== 0)
+      || (sessionId.startsWith('pi:') && previous?.state === 'failed') ? 'failed'
+      : exitCode !== undefined || stringValue(update.status) === 'completed' || (kind === 'tool_call_update' && update.output !== undefined) ? 'finished'
+        : sessionId.startsWith('pi:') ? previous?.state ?? 'running' : 'running'
     const argumentsText = boundedDetail(update.rawInput ?? update.parameters)
-    const output = boundedDetail(update.rawOutput ?? update.output ?? update.content)
+    const delta = typeof terminalOutput.data === 'string' ? terminalOutput.data : undefined
+    const output = delta === undefined ? boundedDetail(update.rawOutput ?? update.output ?? update.content)
+      : `${previous?.resultDetail?.text ?? ''}${delta}`.slice(-16_000)
     const next: ToolActivity = {
       ...previous,
       kind: 'tool', id, sessionId, turn, toolName, state,
@@ -295,16 +398,18 @@ function upsertApproval(
   const requestHandle = stringValue(params.requestHandle)
   if (requestHandle === undefined) return messages
   const id = `cursor-approval:${requestHandle}`
+  const toolCall = isRecord(params.toolCall) ? params.toolCall : {}
+  const rawInput = isRecord(toolCall.rawInput) ? toolCall.rawInput : {}
   const toolName = method === 'cursor/create_plan'
     ? (stringValue(params.name) ?? 'plan')
     : method === 'cursor/ask_question'
       ? (stringValue(params.title) ?? 'question')
-      : (stringValue(params.toolName) ?? 'permission')
+      : (stringValue(params.toolName) ?? stringValue(toolCall.title) ?? 'permission')
   const reason = method === 'cursor/create_plan'
     ? stringValue(params.overview) ?? stringValue(params.plan)
     : method === 'cursor/ask_question'
       ? summarizeQuestions(params)
-      : stringValue(params.reason)
+      : boundedDetail(stringValue(params.reason) ?? stringValue(rawInput.message) ?? toolCall.rawInput)
   const item: ApprovalActivity = {
     kind: 'approval',
     id,

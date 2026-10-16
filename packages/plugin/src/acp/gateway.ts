@@ -16,6 +16,8 @@ import {
   type CursorAcpInbound,
   type CursorAcpLike,
 } from './adapters/cursor-process.js'
+import { ClaudeAcpClient } from './adapters/claude-process.js'
+import { PiAcpClient } from './adapters/pi-process.js'
 import { AntigravityAcpClient } from './adapters/antigravity-process.js'
 import {
   ACP_METHOD_ALLOWLIST,
@@ -49,7 +51,9 @@ interface PendingApproval {
   sessionId: string
   method: string
   expiresAt: number
-  backend?: string
+  backend: string
+  client: CursorAcpLike
+  options: Array<{ kind: string; optionId: string }>
 }
 
 interface BufferedAcpFrame {
@@ -106,6 +110,10 @@ export class AcpRemoteGateway {
   /** Catch-up buffer for turns that finish while the Client is reconnecting. */
   private readonly recentFrames = new Map<string, BufferedAcpFrame[]>()
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
+  private readonly promptsInProgress = new Set<string>()
+  private readonly cancelledSessions = new Set<string>()
+  /** Identity fences asynchronous Pi preparation from a later retry of the same session. */
+  private readonly preparingPrompts = new Map<string, { cancelled: boolean }>()
   private readonly turnCatchUp = new Map<string, Array<{ method: string; params: unknown }>>()
 
   private startPromise?: Promise<void>
@@ -120,6 +128,8 @@ export class AcpRemoteGateway {
       if (backend.id === 'antigravity') {
         return new AntigravityAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       }
+      if (backend.id === 'claude') return new ClaudeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+      if (backend.id === 'pi') return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd })
       return new CursorAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
     },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
@@ -130,7 +140,7 @@ export class AcpRemoteGateway {
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends(): string[] {
     if (!this.config.enabled) return []
-    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor'].includes(item.id)).map(item => item.id)
+    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor', 'pi', 'claude'].includes(item.id)).map(item => item.id)
   }
 
   start(): Promise<void> {
@@ -193,16 +203,16 @@ export class AcpRemoteGateway {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     const workspaceBridge = new WorkspaceBridge(async rawId => {
-      const match = rawId.match(/^(acp|cursor):(.+)$/)
+      const match = rawId.match(/^(acp|cursor|pi):(.+)$/)
       const session = match ? this.sessionCwds.get(match[2]!) : undefined
-      const backend = match?.[1] === 'acp' ? 'antigravity' : 'cursor'
+      const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1] === 'pi' ? 'pi' : 'cursor'
       if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
       this.requireAcp(backend)
       this.requireSessionOwner(context.connectionId, match![2]!)
       return session.cwd
     }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
-      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor):/.test(value),
-      parse: value => typeof value === 'string' && /^(acp|cursor):[A-Za-z0-9_-]{1,240}$/.test(value)
+      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor|pi):/.test(value),
+      parse: value => typeof value === 'string' && /^(acp|cursor|pi):[A-Za-z0-9_-]{1,240}$/.test(value)
         ? { sessionId: value, nativeId: value } : undefined,
     })
     this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(workspaceBridge,
@@ -219,8 +229,12 @@ export class AcpRemoteGateway {
     })
 
     if (typeof call.params.backend === 'string') {
+      const prefix = typeof call.params.sessionId === 'string' ? /^(acp|cursor|pi|claude):/.exec(call.params.sessionId)?.[1] : undefined
+      if (prefix && (prefix === 'acp' ? 'antigravity' : prefix) !== call.params.backend) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
+      }
       const sessionId = call.method === 'dsh/sessionHistory'
-        ? String(call.params.sessionId).replace(/^(acp|cursor):/, '')
+        ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude):/, '')
         : sessionIdFromParams(call.method, call.params)
       const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
       if (boundBackend !== undefined && boundBackend !== call.params.backend) {
@@ -240,6 +254,11 @@ export class AcpRemoteGateway {
     }
 
     if (call.method === 'dsh/workspaceList') {
+      const requestedBackend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
+      if (requestedBackend === 'pi' || requestedBackend === 'claude') {
+        const sessions = await this.listCatalogSessions(requestedBackend)
+        return [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
+      }
       const candidates = new Set<string>()
       const cwd = process.cwd()
       if (cwd) candidates.add(cwd)
@@ -301,12 +320,17 @@ export class AcpRemoteGateway {
         this.logger.info('ACP session list fetched', { count: items.length })
         return { items }
       }
+      if (backend === 'pi' || backend === 'claude') {
+        const cwd = path ? await this.requireExistingDirectory(path) : undefined
+        const sessions = await this.listCatalogSessions(backend, cwd)
+        return { items: sessions.slice(0, limit).map(item => ({ conversationId: item.sessionId, title: item.title ?? 'Untitled Session', createdAt: Date.parse(item.updatedAt ?? '') || 0, updatedAt: Date.parse(item.updatedAt ?? '') || 0, cwd: item.cwd })) }
+      }
       return { items: [] }
     }
 
     if (call.method === 'dsh/sessionHistory') {
       const rawSessionId = String(call.params.sessionId)
-      const conversationId = rawSessionId.startsWith('acp:')
+      const conversationId = rawSessionId.startsWith('claude:') ? rawSessionId.slice(7) : rawSessionId.startsWith('pi:') ? rawSessionId.slice(3) : rawSessionId.startsWith('acp:')
         ? rawSessionId.slice('acp:'.length)
         : rawSessionId.startsWith('cursor:')
           ? rawSessionId.slice('cursor:'.length)
@@ -314,11 +338,20 @@ export class AcpRemoteGateway {
       const boundBackend = this.sessionBackends.get(conversationId)
       const backend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend ?? this.defaultBackend()
       if ((boundBackend !== undefined && boundBackend !== backend)
+        || (rawSessionId.startsWith('claude:') && backend !== 'claude')
+        || (rawSessionId.startsWith('pi:') && backend !== 'pi')
         || (rawSessionId.startsWith('cursor:') && backend !== 'cursor')
         || (rawSessionId.startsWith('acp:') && backend !== 'antigravity')) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       this.requireAcp(backend)
+      if (backend === 'pi' || backend === 'claude') {
+        const cwd = await this.catalogSessionCwd(backend, conversationId)
+        this.requireSessionOwner(connectionId, conversationId)
+        const client = this.requireAcp(backend) as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
+        if (!client.history) throw new RpcError('METHOD_NOT_ALLOWED', 'The ACP backend does not support history.')
+        return { events: await client.history(conversationId, cwd) }
+      }
       if (backend !== 'antigravity') return { events: [] }
       const events = await loadTranscriptEvents(conversationId, rawSessionId)
       this.logger.info('ACP session history fetched', {
@@ -341,6 +374,10 @@ export class AcpRemoteGateway {
       })
       const sessionId = readSessionId(result)
       if (sessionId !== undefined) {
+        const bound = this.sessionBackends.get(sessionId)
+        if (this.sessionOwners.has(sessionId) || this.sessionCwds.has(sessionId) || (bound !== undefined && bound !== requestedBackend)) {
+          throw new RpcError('ACP_SESSION_COLLISION', 'The ACP backend returned an existing session identifier.')
+        }
         this.sessionOwners.set(sessionId, connectionId)
         this.sessionBackends.set(sessionId, requestedBackend)
         this.sessionCwds.set(sessionId, { backend: requestedBackend, cwd })
@@ -349,7 +386,7 @@ export class AcpRemoteGateway {
     }
 
     const sessionId = sessionIdFromParams(call.method, call.params)
-    if (sessionId !== undefined) this.requireSessionAccess(connectionId, sessionId, call.method)
+    if (sessionId !== undefined && call.method !== 'session/load') this.requireSessionAccess(connectionId, sessionId, call.method)
 
     if (call.method === 'dsh/toolCall') {
       this.requireSessionOwner(connectionId, sessionId!)
@@ -367,14 +404,21 @@ export class AcpRemoteGateway {
 
     if (call.method === 'session/load') {
       const boundBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
-      const targetBackend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend
+      if (typeof call.params.backend !== 'string') throw new RpcError('INVALID_MESSAGE', 'Session load requires an explicit backend.')
+      const targetBackend = call.params.backend
+      if (targetBackend === 'claude' && this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
       if (boundBackend !== undefined && targetBackend !== boundBackend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
+      if (targetBackend === 'pi' || targetBackend === 'claude') await this.catalogSessionCwd(targetBackend, sessionId!)
+      this.requireSessionOwner(connectionId, sessionId!)
       const acp = this.requireAcp(targetBackend)
-      const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd } : {}) })
+      const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd, mcpServers: [] } : {}) })
       const loadedId = readSessionId(result) ?? sessionId
       if (loadedId !== undefined) {
+        if (loadedId !== sessionId || (this.sessionBackends.has(loadedId) && targetBackend !== undefined && this.sessionBackends.get(loadedId) !== targetBackend)) {
+          throw new RpcError('ACP_SESSION_COLLISION', 'The ACP backend returned a different session identifier.')
+        }
         this.sessionOwners.set(loadedId, connectionId)
         if (targetBackend) this.sessionBackends.set(loadedId, targetBackend)
       }
@@ -383,6 +427,12 @@ export class AcpRemoteGateway {
 
     if (isSessionMutation(call.method) && sessionId !== undefined) {
       this.requireSessionOwner(connectionId, sessionId)
+    }
+
+    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && call.params.backend === 'pi') {
+      this.requireSessionOwner(connectionId, sessionId!)
+      const cwd = await this.piSessionCwd(sessionId!)
+      await this.requireAcp('pi').call('session/load', { sessionId, cwd, mcpServers: [] })
     }
 
     if (call.method === 'dsh/selectModel') {
@@ -402,6 +452,28 @@ export class AcpRemoteGateway {
     // interleaved agent.acp.frame events (Android stays on "正在回复" with no
     // thought/text). Accept immediately and finish via stream updates.
     if (call.method === 'session/prompt' && sessionId !== undefined) {
+      if (this.promptsInProgress.has(sessionId)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
+      this.promptsInProgress.add(sessionId)
+      this.cancelledSessions.delete(sessionId)
+      if (this.sessionBackends.get(sessionId) === 'pi') {
+        const preparation = { cancelled: false }
+        this.preparingPrompts.set(sessionId, preparation)
+        try {
+          const cwd = await this.piSessionCwd(sessionId)
+          if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
+          await this.requireAcp('pi').call('session/load', { sessionId, cwd, mcpServers: [] })
+          if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
+        } catch (error) {
+          if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
+          this.promptsInProgress.delete(sessionId)
+          throw error
+        } finally {
+          if (this.preparingPrompts.get(sessionId) === preparation) {
+            this.preparingPrompts.delete(sessionId)
+            if (preparation.cancelled) this.promptsInProgress.delete(sessionId)
+          }
+        }
+      }
       const ownerPeer = this.peers.get(connectionId)
       if (ownerPeer !== undefined && !ownerPeer.hasStreamFor(sessionId)) {
         this.logger?.warn('Cursor prompt started without an open ACP stream', {
@@ -413,6 +485,27 @@ export class AcpRemoteGateway {
       return { accepted: true, stopReason: 'in_progress' }
     }
 
+    if (call.method === 'session/cancel' && sessionId !== undefined) {
+      this.cancelledSessions.add(sessionId)
+      const preparation = this.preparingPrompts.get(sessionId)
+      if (preparation) {
+        // No turn exists upstream yet. Do not send a late cancel into a retry
+        // sharing this load: cancel only this preparation identity.
+        preparation.cancelled = true
+        this.preparingPrompts.delete(sessionId)
+        this.promptsInProgress.delete(sessionId)
+        return { stopReason: 'cancelled' }
+      }
+      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === this.sessionBackends.get(sessionId))
+      for (const [handle] of pending) this.approvals.delete(handle)
+      // Send cancellation before rejecting approvals: rejecting a blocked tool first
+      // can otherwise complete the turn as end_turn before upstream sees cancel.
+      try {
+        return sanitizeSessionResult(await this.requireAcp(this.sessionBackends.get(sessionId)).call(call.method, call.params))
+      } finally {
+        await Promise.all(pending.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, 'ACP session cancelled.').catch(() => undefined)))
+      }
+    }
     const sessionBackend = sessionId !== undefined ? this.sessionBackends.get(sessionId) : undefined
     return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === 'string' ? call.params.backend : sessionBackend).call(call.method, call.params))
   }
@@ -461,7 +554,7 @@ export class AcpRemoteGateway {
           },
         },
       }).catch(() => undefined)
-    }
+    } finally { this.promptsInProgress.delete(sessionId) }
   }
 
   async respond(connectionId: string, input: unknown): Promise<{ resolved: true }> {
@@ -474,13 +567,18 @@ export class AcpRemoteGateway {
     if (pending.connectionId !== connectionId) {
       throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The Cursor approval is missing, expired, or belongs to another connection.')
     }
+    if (this.sessionOwners.get(pending.sessionId) !== connectionId
+      || this.sessionBackends.get(pending.sessionId) !== pending.backend
+      || this.requireAcp(pending.backend) !== pending.client) {
+      throw new RpcError('CURSOR_APPROVAL_NOT_FOUND', 'The ACP approval scope is no longer active.')
+    }
+    const result = mapPermissionDecision(params, pending)
     this.approvals.delete(params.requestHandle)
-    const acp = this.requireAcp(pending.backend)
+    const acp = pending.client
     if (params.decision === 'cancel') {
       await acp.respondError(pending.upstreamId, -32800, 'Cancelled by Remote client.')
       return { resolved: true }
     }
-    const result = params.result ?? mapPermissionDecision(params.decision, pending.method)
     await acp.respond(pending.upstreamId, result)
     return { resolved: true }
   }
@@ -495,7 +593,7 @@ export class AcpRemoteGateway {
     for (const [handle, approval] of this.approvals) {
       if (approval.connectionId === connectionId) {
         this.approvals.delete(handle)
-        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
+        void approval.client.respondError(approval.upstreamId, -32800, 'Remote peer disconnected.').catch(() => undefined)
       }
     }
   }
@@ -556,7 +654,7 @@ export class AcpRemoteGateway {
     if (this.closed) throw new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.')
     const previous = this.config
     const implemented = (value: ResolvedAcpConfig) => ({ enabled: value.enabled,
-      backends: value.backends.filter(item => ['cursor', 'antigravity'].includes(item.id)) })
+      backends: value.backends.filter(item => ['cursor', 'antigravity', 'pi', 'claude'].includes(item.id)) })
     this.config = config
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
@@ -571,7 +669,7 @@ export class AcpRemoteGateway {
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
-    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : 'cursor'))
+    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : sessionId.startsWith('pi:') ? 'pi' : 'cursor'))
       .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
     for (const id of sessions) {      this.sessionOwners.delete(id)
       this.sessionBackends.delete(id)
@@ -673,7 +771,7 @@ export class AcpRemoteGateway {
     }
     const unsubscribeInbound = acp.onInbound(message => {
       this.inboundChain = this.inboundChain
-        .then(() => this.handleInbound(id, message))
+        .then(() => this.backendInstances.get(id)?.client === acp ? this.handleInbound(id, message) : undefined)
         .catch(error => {
           this.logger.warn('ACP inbound fanout failed', { id, code: errorCode(error) })
         })
@@ -699,6 +797,12 @@ export class AcpRemoteGateway {
   }
 
   private async handleInbound(backend: string, message: CursorAcpInbound): Promise<void> {
+    const incomingId = readSessionId(message.params) ?? readNestedSessionId(message.params)
+    const boundBackend = incomingId === undefined ? undefined : this.sessionBackends.get(incomingId)
+    if (boundBackend !== undefined && boundBackend !== backend) {
+      if (message.kind === 'request') await this.requireAcp(backend).respondError(message.id, -32602, 'The ACP session backend does not match.')
+      return
+    }
     // session/update is a stream notification even if a buggy agent attaches an id.
     if (message.kind === 'notification' || message.method === 'session/update') {
       const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params)
@@ -710,38 +814,41 @@ export class AcpRemoteGateway {
       return
     }
 
-    const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? 'unknown'
-    if (sessionId !== 'unknown' && !this.sessionBackends.has(sessionId)) {
-      this.sessionBackends.set(sessionId, backend)
+    const sessionId = incomingId
+    const owner = sessionId === undefined ? undefined : this.sessionOwners.get(sessionId)
+    const peer = owner === undefined ? undefined : this.peers.get(owner)
+    const client = this.requireAcp(backend)
+    if (sessionId === undefined || this.cancelledSessions.has(sessionId) || owner === undefined || peer === undefined || boundBackend !== backend
+      || !['session/request_permission', 'cursor/create_plan', 'cursor/ask_question'].includes(message.method)
+      || (message.method.startsWith('cursor/') && backend !== 'cursor')) {
+      await client.respondError(message.id, -32602, 'The ACP request has no active owner or supported method.')
+      return
+    }
+    let options: PendingApproval['options'] = []
+    try {
+      if (message.method === 'session/request_permission') options = permissionOptions(message.params)
+    } catch {
+      await client.respondError(message.id, -32602, 'The ACP permission options are invalid.')
+      return
     }
     const requestHandle = randomUUID()
     this.approvals.set(requestHandle, {
-      upstreamId: message.id,
-      connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? 'unknown',
-      sessionId,
-      method: message.method,
-      expiresAt: Date.now() + APPROVAL_TTL_MS,
-      backend,
+      upstreamId: message.id, connectionId: owner, sessionId, method: message.method,
+      expiresAt: Date.now() + APPROVAL_TTL_MS, backend, client, options,
     })
     this.scheduleApprovalExpiry()
-    const owner = this.sessionOwners.get(sessionId)
-    const frame = {
-      method: message.method,
-      params: {
-        requestHandle,
-        sessionId,
-        upstreamMethod: message.method,
-        ...(isRecord(message.params) ? message.params : {}),
-      },
+    try {
+      await peer.publishInbound(sessionId, {
+        method: message.method,
+        params: {
+          ...(isRecord(message.params) ? message.params : {}),
+          requestHandle, sessionId, upstreamMethod: message.method,
+        },
+      })
+    } catch {
+      this.approvals.delete(requestHandle)
+      await client.respondError(message.id, -32800, 'Remote approval delivery failed.')
     }
-    if (owner !== undefined) {
-      const peer = this.peers.get(owner)
-      if (peer !== undefined) {
-        await peer.publishInbound(sessionId, frame)
-        return
-      }
-    }
-    await this.publishToSession(sessionId, frame)
   }
 
   private async publishToSession(sessionId: string, frame: { method: string; params: unknown }): Promise<void> {
@@ -840,7 +947,7 @@ export class AcpRemoteGateway {
       for (const [handle, approval] of this.approvals) {
         if (approval.expiresAt <= now) {
           this.approvals.delete(handle)
-          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
+          void approval.client.respondError(approval.upstreamId, -32800, 'Cursor approval expired.').catch(() => undefined)
         }
       }
       this.scheduleApprovalExpiry()
@@ -887,7 +994,7 @@ export class AcpRemoteGateway {
   }
 
   private requireSessionAccess(connectionId: string, sessionId: string, method: AllowedAcpMethod): void {
-    if (method === 'session/load') return
+    if (method === 'session/load') { this.requireSessionOwner(connectionId, sessionId); return }
     const owner = this.sessionOwners.get(sessionId)
     if (owner === undefined) {
       // Allow reclaim after the owning peer disconnected; the ACP process still
@@ -902,6 +1009,70 @@ export class AcpRemoteGateway {
 
   private requireSessionOwner(connectionId: string, sessionId: string): void {
     this.claimSession(connectionId, sessionId)
+  }
+
+  private captureCatalogClient(backend: 'pi' | 'claude') {
+    const client = this.requireAcp(backend)
+    const instance = this.backendInstances.get(backend)
+    return { client, assertCurrent: () => {
+      if (this.closed || this.backendInstances.get(backend) !== instance || this.requireAcp(backend) !== client) {
+        throw new RpcError('CURSOR_UNAVAILABLE', 'The ACP backend changed while resolving session authority.')
+      }
+    } }
+  }
+
+  private async listCatalogSessions(backend: 'pi' | 'claude', cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
+    const { client, assertCurrent } = this.captureCatalogClient(backend)
+    const items: Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }> = []
+    let cursor: string | undefined
+    const seen = new Set<string>()
+    for (let page = 0; page < 100; page++) {
+      const result = await client.call('session/list', { ...(cwd ? { cwd } : {}), ...(cursor ? { cursor } : {}) })
+      assertCurrent()
+      if (!isRecord(result) || !Array.isArray(result.sessions)
+        || (result.nextCursor != null && (typeof result.nextCursor !== 'string' || result.nextCursor.length === 0))) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session catalog response is invalid.')
+      }
+      for (const item of result.sessions) {
+        if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
+        // Directory I/O can outlive a backend restart/reconfiguration. Only the
+        // directory failure is skippable; a stale generation must reject the RPC.
+        const canonical = await this.requireExistingDirectory(item.cwd).catch(() => undefined)
+        assertCurrent()
+        if (!canonical || (cwd && canonical !== cwd)) continue
+        if (this.sessionBackends.has(item.sessionId) && this.sessionBackends.get(item.sessionId) !== backend) continue
+        const trusted = this.sessionCwds.get(item.sessionId)
+        if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue
+        this.sessionCwds.set(item.sessionId, { backend, cwd: canonical })
+        this.sessionBackends.set(item.sessionId, backend)
+        items.push({ sessionId: item.sessionId, cwd: canonical,
+          ...(typeof item.title === 'string' ? { title: item.title } : {}),
+          ...(typeof item.updatedAt === 'string' ? { updatedAt: item.updatedAt } : {}) })
+      }
+      if (result.nextCursor == null) return items
+      if (seen.has(result.nextCursor) || page === 99) {
+        throw new RpcError('INVALID_MESSAGE', 'The ACP session catalog pagination did not complete.')
+      }
+      cursor = result.nextCursor; seen.add(cursor)
+    }
+    return items
+  }
+
+  private piSessionCwd(sessionId: string): Promise<string> { return this.catalogSessionCwd('pi', sessionId) }
+
+  private async catalogSessionCwd(backend: 'pi' | 'claude', sessionId: string): Promise<string> {
+    const { assertCurrent } = this.captureCatalogClient(backend)
+    if (!this.sessionCwds.has(sessionId)) await this.listCatalogSessions(backend)
+    assertCurrent()
+    const session = this.sessionCwds.get(sessionId)
+    if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
+    const canonical = await this.requireExistingDirectory(session.cwd)
+    assertCurrent()
+    const current = this.sessionCwds.get(sessionId)
+    if (canonical !== session.cwd || current?.backend !== backend || current.cwd !== canonical) {
+      throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session workspace authority changed.')
+    }
+    return canonical
   }
 
   private async requireExistingDirectory(path: string): Promise<string> {
@@ -980,38 +1151,54 @@ function parseCallEnvelope(input: unknown): { method: string; params: unknown } 
 
 function parseRespondEnvelope(input: unknown): {
   requestHandle: string
-  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel'
+  decision: 'allow-once' | 'reject-once' | 'cancel'
   result?: unknown
 } {
-  if (!isRecord(input) || typeof input.requestHandle !== 'string' || typeof input.decision !== 'string') {
-    throw new RpcError('INVALID_MESSAGE', 'The Cursor respond envelope is invalid.')
+  if (!isRecord(input) || typeof input.requestHandle !== 'string' || input.requestHandle.length === 0
+    || Object.keys(input).some(key => !['requestHandle', 'decision', 'result'].includes(key))
+    || typeof input.decision !== 'string' || !['allow-once', 'reject-once', 'cancel'].includes(input.decision)) {
+    throw new RpcError('INVALID_MESSAGE', 'The ACP respond envelope is invalid.')
   }
-  const decision = input.decision
-  if (decision !== 'allow-once' && decision !== 'allow-always' && decision !== 'reject-once' && decision !== 'cancel') {
-    throw new RpcError('INVALID_MESSAGE', 'The Cursor respond envelope is invalid.')
-  }
-  return {
-    requestHandle: input.requestHandle,
-    decision,
-    ...(input.result === undefined ? {} : { result: input.result }),
-  }
+  return input as ReturnType<typeof parseRespondEnvelope>
 }
 
-function mapPermissionDecision(
-  decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel',
-  method: string,
-): unknown {
-  if (method === 'session/request_permission') {
-    return { outcome: { outcome: 'selected', optionId: decision === 'cancel' ? 'reject-once' : decision } }
+function permissionOptions(params: unknown): PendingApproval['options'] {
+  if (!isRecord(params) || !Array.isArray(params.options) || params.options.length === 0) {
+    throw new Error('Missing permission options')
   }
-  if (method === 'cursor/create_plan') {
-    if (decision === 'allow-once' || decision === 'allow-always') return { outcome: { outcome: 'accepted' } }
-    return { outcome: { outcome: decision === 'cancel' ? 'cancelled' : 'rejected' } }
+  const ids = new Set<string>()
+  const options = params.options.map(option => {
+    if (!isRecord(option) || typeof option.optionId !== 'string' || !option.optionId
+      || typeof option.kind !== 'string' || !['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(option.kind)
+      || ids.has(option.optionId)) throw new Error('Invalid permission option')
+    ids.add(option.optionId)
+    return { kind: option.kind, optionId: option.optionId }
+  })
+  for (const kind of ['allow_once', 'reject_once']) {
+    if (options.filter(option => option.kind === kind).length > 1) throw new Error('Ambiguous permission option')
   }
-  if (method === 'cursor/ask_question') {
-    return { outcome: { outcome: 'cancelled' } }
+  return options
+}
+
+function mapPermissionDecision(params: ReturnType<typeof parseRespondEnvelope>, pending: PendingApproval): unknown {
+  const invalid = () => new RpcError('INVALID_MESSAGE', 'The ACP approval result is not allowed.')
+  if (pending.method === 'session/request_permission') {
+    if (params.result !== undefined) throw invalid()
+    if (params.decision === 'cancel') return undefined
+    const kind = params.decision === 'allow-once' ? 'allow_once' : 'reject_once'
+    const option = pending.options.find(item => item.kind === kind)
+    if (!option) throw invalid()
+    return { outcome: { outcome: 'selected', optionId: option.optionId } }
   }
-  return { outcome: { outcome: 'selected', optionId: decision } }
+  const outcome = pending.method === 'cursor/create_plan'
+    ? params.decision === 'allow-once' ? 'accepted' : params.decision === 'cancel' ? 'cancelled' : 'rejected'
+    : 'cancelled'
+  if (params.result !== undefined) {
+    if (!isRecord(params.result) || Object.keys(params.result).length !== 1
+      || !isRecord(params.result.outcome) || Object.keys(params.result.outcome).length !== 1
+      || params.result.outcome.outcome !== outcome) throw invalid()
+  }
+  return { outcome: { outcome } }
 }
 
 function readSessionId(value: unknown): string | undefined {

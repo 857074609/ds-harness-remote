@@ -2,7 +2,8 @@ import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { realpath } from 'node:fs/promises'
 import { describe, expect, it, vi } from 'vitest'
 import { AcpRemoteGateway } from '../src/acp/gateway.js'
-import type { CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
+import { resolveConfig } from '../src/config.js'
+import type { CursorAcpInbound, CursorAcpLike } from '../src/acp/adapters/cursor-process.js'
 import type { SafeLogger } from '../src/logging.js'
 
 function silentLogger(): SafeLogger {
@@ -28,6 +29,353 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('fences cancelled Pi preparation from later retries', async () => {
+    await runScenarios(['session/list', 'session/load'].map(stage => ({ name: stage, run: async () => {
+      const acp = readyAcp(), cwd = await realpath(process.cwd())
+      let release!: (value: unknown) => void, entered!: () => void
+      const blocked = new Promise<void>(resolve => { entered = resolve })
+      let first = true
+      acp.call = vi.fn(async method => {
+        if (first && method === stage) {
+          first = false; entered()
+          return new Promise(resolve => { release = resolve })
+        }
+        if (method === 'session/list') return { sessions: [{ sessionId: 'saved', cwd }] }
+        if (method === 'session/prompt') return new Promise(() => {})
+        return {}
+      })
+      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'pi', enabled: true, command: 'pi-acp', args: [] }] }, silentLogger(), () => acp)
+      await gateway.start()
+      const prompt = { method: 'session/prompt', params: { backend: 'pi', sessionId: 'saved', prompt: [{ type: 'text', text: 'hi' }] } }
+      try {
+        const old = gateway.call('owner', prompt)
+        await blocked
+        await expect(gateway.call('owner', { method: 'session/cancel', params: { sessionId: 'saved' } })).resolves.toMatchObject({ stopReason: 'cancelled' })
+        expect(vi.mocked(acp.call).mock.calls.some(([method]) => method === 'session/prompt' || method === 'session/cancel')).toBe(false)
+        await expect(gateway.call('owner', prompt)).resolves.toMatchObject({ accepted: true })
+        release(stage === 'session/list' ? { sessions: [{ sessionId: 'saved', cwd }] } : {})
+        await expect(old).resolves.toMatchObject({ accepted: false, stopReason: 'cancelled' })
+        expect(vi.mocked(acp.call).mock.calls.filter(([method]) => method === 'session/prompt')).toHaveLength(1)
+        await expect(gateway.call('owner', prompt)).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
+        gateway.dropPeer('owner')
+        expect(vi.mocked(acp.call).mock.calls.some(([method]) => method === 'session/cancel')).toBe(false)
+      } finally { await gateway.close() }
+    } })))
+  })
+  it('maps one-shot permission kinds to real option IDs without accepting result or persistent grants', async () => {
+    await runScenarios(['allow-once', 'reject-once', 'cancel'].map(decision => ({ name: decision, run: async () => {
+      const fixture = await approvalFixture()
+      try {
+        const handle = await fixture.request()
+        for (const invalid of [
+          { decision: 'allow-always' },
+          { decision: ['allow-once'] },
+          { decision: 'allow-once', result: { outcome: { outcome: 'selected', optionId: 'persistent' } } },
+          { decision: 'allow-once', backend: 'cursor' },
+        ]) await expect(fixture.gateway.respond('owner', { requestHandle: handle, ...invalid })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        await expect(fixture.gateway.respond('observer', { requestHandle: handle, decision })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+        expect(fixture.acp.respond).not.toHaveBeenCalled()
+        await fixture.gateway.respond('owner', { requestHandle: handle, decision })
+        if (decision === 'cancel') expect(fixture.acp.respondError).toHaveBeenCalledWith(7, -32800, expect.any(String))
+        else expect(fixture.acp.respond).toHaveBeenCalledWith(7, { outcome: { outcome: 'selected', optionId: decision === 'allow-once' ? 'real-allow' : 'reject' } })
+        await expect(fixture.gateway.respond('owner', { requestHandle: handle, decision })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+      } finally { await fixture.gateway.close() }
+    } })))
+  })
+
+  it('rejects orphan, mismatched and malformed upstream approvals without broadcasting or trusting upstream handles', async () => {
+    const fixture = await approvalFixture()
+    try {
+      for (const params of [
+        { sessionId: 'orphan', options: fixture.options },
+        { sessionId: 'session', options: [] },
+        { sessionId: 'session', options: [{ kind: 'allow_once', optionId: 'x' }, { kind: 'allow_once', optionId: 'y' }] },
+        { sessionId: 'session', options: [{ kind: 'allow_once', optionId: 'x' }, { kind: 'reject_once', optionId: 'x' }] },
+      ]) await fixture.emit({ kind: 'request', id: 8, method: 'session/request_permission', params })
+      expect(fixture.publish).not.toHaveBeenCalled()
+      expect(fixture.observer).not.toHaveBeenCalled()
+      expect(fixture.acp.respondError).toHaveBeenCalledTimes(4)
+      const handle = await fixture.request()
+      expect(handle).not.toBe('forged')
+      expect(fixture.observer).not.toHaveBeenCalled()
+      fixture.gateway.dropPeer('owner')
+      await expect(fixture.gateway.respond('observer', { requestHandle: handle, decision: 'allow-once' })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+      await fixture.emit({ kind: 'request', id: 9, method: 'session/request_permission', params: { sessionId: 'session', options: fixture.options } })
+      expect(fixture.publish).toHaveBeenCalledTimes(1)
+      expect(fixture.observer).not.toHaveBeenCalled()
+      expect(fixture.acp.respond).not.toHaveBeenCalled()
+    } finally { await fixture.gateway.close() }
+  })
+
+  it('keeps unsupported one-shot decisions retryable and invalidates handles when a backend is rebuilt', async () => {
+    const fixture = await approvalFixture()
+    try {
+      const handle = await fixture.request([{ kind: 'reject_once', optionId: 'only-reject' }])
+      await expect(fixture.gateway.respond('owner', { requestHandle: handle, decision: 'allow-once' })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      await fixture.gateway.respond('owner', { requestHandle: handle, decision: 'reject-once' })
+      expect(fixture.acp.respond).toHaveBeenLastCalledWith(7, { outcome: { outcome: 'selected', optionId: 'only-reject' } })
+      const stale = await fixture.request()
+      await fixture.gateway.reconfigure({ enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'new-agent', args: [] }] })
+      await expect(fixture.gateway.respond('owner', { requestHandle: stale, decision: 'allow-once' })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+    } finally { await fixture.gateway.close() }
+  })
+
+  it('rejects approval requests from a different backend than the session binding', async () => {
+    const cursor = readyAcp(), agy = readyAcp()
+    let inbound!: (message: CursorAcpInbound) => void
+    agy.onInbound = listener => { inbound = listener; return () => undefined }
+    cursor.call = vi.fn(async () => ({ sessionId: 'bound-session' }))
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [
+      { id: 'cursor', enabled: true, command: 'agent', args: [] },
+      { id: 'antigravity', enabled: true, command: 'agy', args: [] },
+    ] }, silentLogger(), (_binary, _logger, backend) => backend.id === 'cursor' ? cursor : agy)
+    await gateway.start()
+    try {
+      const publish = vi.fn(async () => undefined)
+      gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd: process.cwd() } })
+      inbound({ kind: 'request', id: 12, method: 'session/request_permission', params: { sessionId: 'bound-session', options: [{ kind: 'allow_once', optionId: 'allow' }] } })
+      await (gateway as unknown as { inboundChain: Promise<void> }).inboundChain
+      expect(agy.respondError).toHaveBeenCalledWith(12, -32602, expect.any(String))
+      expect(cursor.respondError).not.toHaveBeenCalled()
+      expect(publish).not.toHaveBeenCalled()
+    } finally { await gateway.close() }
+  })
+
+  it('retains strict Cursor plan and question outcomes without a generic result bypass', async () => {
+    await runScenarios([
+      { method: 'cursor/create_plan', decision: 'allow-once', outcome: 'accepted' },
+      { method: 'cursor/create_plan', decision: 'reject-once', outcome: 'rejected' },
+      { method: 'cursor/ask_question', decision: 'reject-once', outcome: 'cancelled' },
+    ].map(scenario => ({ name: `${scenario.method} ${scenario.decision}`, run: async () => {
+      const fixture = await approvalFixture()
+      try {
+        await fixture.emit({ kind: 'request', id: 11, method: scenario.method, params: { sessionId: 'session' } })
+        const frame = fixture.publish.mock.calls.at(-1) as unknown as [string, { frame: { params: { requestHandle: string } } }]
+        const requestHandle = frame[1].frame.params.requestHandle
+        await expect(fixture.gateway.respond('owner', { requestHandle, decision: scenario.decision, result: { outcome: { outcome: scenario.outcome, injected: true } } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        await fixture.gateway.respond('owner', { requestHandle, decision: scenario.decision, result: { outcome: { outcome: scenario.outcome } } })
+        expect(fixture.acp.respond).toHaveBeenCalledWith(11, { outcome: { outcome: scenario.outcome } })
+      } finally { await fixture.gateway.close() }
+    } })))
+  })
+
+  it('auto-initializes PI, respects explicit disable and isolates unavailable PI startup', async () => {
+    await runScenarios([
+      { name: 'default PI becomes ready after initialization', input: {}, disabled: false, missing: false },
+      { name: 'explicit backend disable prevents startup', input: { acp: { backends: [{ id: 'pi', enabled: false }] } }, disabled: true, missing: false },
+      { name: 'ACP master disable prevents startup', input: { acp: { enabled: false } }, disabled: true, missing: false },
+      { name: 'missing PI does not prevent Cursor becoming ready', input: { cursor: { enabled: true } }, disabled: false, missing: true },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const pi = readyAcp(), cursor = readyAcp()
+      if (scenario.missing) vi.mocked(pi.start).mockRejectedValue(new Error('PI executable unavailable'))
+      const create = vi.fn((_binary: string, _logger: SafeLogger, backend: { id: string }) => backend.id === 'pi' ? pi : cursor)
+      const gateway = new AcpRemoteGateway(resolveConfig(scenario.input).acp!, silentLogger(), create)
+      try {
+        await gateway.start()
+        expect(gateway.availableBackends().includes('pi')).toBe(!scenario.disabled && !scenario.missing)
+        expect(pi.start).toHaveBeenCalledTimes(scenario.disabled ? 0 : 1)
+        if (scenario.missing) expect(gateway.availableBackends()).toContain('cursor')
+      } finally { await gateway.close() }
+    } })))
+  })
+  it('keeps Claude explicitly selected and unavailable after disabling without falling back to Cursor', async () => {
+    const claude = readyAcp()
+    const cursor = readyAcp()
+    const config = { enabled: true, backends: [
+      { id: 'claude', enabled: true, command: 'claude-agent-acp', args: [] },
+      { id: 'cursor', enabled: true, command: 'agent', args: ['acp'] },
+    ] }
+    const gateway = new AcpRemoteGateway(config, silentLogger(), (_binary, _logger, backend) => backend.id === 'claude' ? claude : cursor)
+    await gateway.start()
+    try {
+      expect(gateway.availableBackends()).toContain('claude')
+      await expect(gateway.call('client', { method: 'initialize', params: { backend: 'claude' } })).resolves.toMatchObject({ backend: 'claude' })
+      await gateway.reconfigure({ ...config, backends: config.backends.map(item => ({ ...item, enabled: item.id !== 'claude' })) })
+      expect(claude.close).toHaveBeenCalledTimes(1)
+      expect(cursor.close).not.toHaveBeenCalled()
+      await expect(gateway.call('client', { method: 'initialize', params: { backend: 'claude' } })).rejects.toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+    } finally { await gateway.close() }
+  })
+  it('uses PI catalog cwd authority and prevents another connection from stealing loaded sessions', async () => {
+    const acp = readyAcp()
+    const cwd = await realpath(process.cwd())
+    acp.call = vi.fn(async (method) => method === 'session/list'
+      ? { sessions: [{ sessionId: 'pi-saved', cwd, title: 'Saved', updatedAt: new Date(0).toISOString() }] }
+      : {})
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'pi', enabled: true, command: 'pi-acp', args: [] }] }, silentLogger(), () => acp)
+    await gateway.start()
+    try {
+      await expect(gateway.call('one', { method: 'dsh/sessionList', params: { backend: 'pi', path: cwd } })).resolves.toMatchObject({ items: [{ conversationId: 'pi-saved' }] })
+      await gateway.call('one', { method: 'session/load', params: { backend: 'pi', sessionId: 'pi-saved' } })
+      expect(acp.call).toHaveBeenLastCalledWith('session/load', expect.objectContaining({ cwd, mcpServers: [] }))
+      await expect(gateway.call('two', { method: 'session/load', params: { backend: 'pi', sessionId: 'pi-saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      let finish!: (value: unknown) => void
+      vi.mocked(acp.call).mockImplementation(async method => method === 'session/prompt' ? new Promise(resolve => { finish = resolve }) : method === 'session/list' ? { sessions: [] } : {})
+      const prompt = { method: 'session/prompt', params: { backend: 'pi', sessionId: 'pi-saved', prompt: [{ type: 'text', text: 'hello' }] } }
+      await expect(gateway.call('one', prompt)).resolves.toMatchObject({ accepted: true })
+      await expect(gateway.call('one', prompt)).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
+      gateway.dropPeer('one')
+      await expect(gateway.call('two', { method: 'session/load', params: { backend: 'pi', sessionId: 'pi-saved' } })).resolves.toBeDefined()
+      finish({ stopReason: 'end_turn' })
+      await expect(gateway.call('two', { method: 'session/load', params: { backend: 'pi', sessionId: 'unknown' } })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_UNAVAILABLE' })
+    } finally { await gateway.close() }
+  })
+  it('fails closed for malformed or incomplete upstream catalogs while accepting a complete empty catalog', async () => {
+    await runScenarios([
+      { name: 'missing sessions', result: () => ({}), valid: false },
+      { name: 'non-object response', result: () => null, valid: false },
+      { name: 'non-array sessions', result: () => ({ sessions: {} }), valid: false },
+      { name: 'invalid cursor type', result: () => ({ sessions: [], nextCursor: 1 }), valid: false },
+      { name: 'empty cursor', result: () => ({ sessions: [], nextCursor: '' }), valid: false },
+      { name: 'repeated cursor', result: () => ({ sessions: [], nextCursor: 'loop' }), valid: false },
+      { name: 'page budget exhausted', result: (page: number) => ({ sessions: [], nextCursor: String(page) }), valid: false },
+      { name: 'complete empty catalog', result: () => ({ sessions: [] }), valid: true },
+      { name: 'complete empty catalog with null cursor (published Pi ACP)', result: () => ({ sessions: [], nextCursor: null }), valid: true },
+      { name: 'paginated catalog with null final cursor', result: (page: number) => ({ sessions: [], nextCursor: page === 0 ? 'last' : null }), valid: true },
+      { name: 'complete paginated empty catalog', result: (page: number) => ({ sessions: [], ...(page === 0 ? { nextCursor: 'last' } : {}) }), valid: true },
+    ].map(scenario => ({ name: scenario.name, run: async () => {
+      const acp = readyAcp()
+      let page = 0
+      acp.call = vi.fn(async () => scenario.result(page++))
+      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'claude', enabled: true, command: 'claude-agent-acp', args: [] }] }, silentLogger(), () => acp)
+      await gateway.start()
+      try {
+        const result = gateway.call('owner', { method: 'dsh/workspaceList', params: { backend: 'claude' } })
+        if (scenario.valid) await expect(result).resolves.toEqual([])
+        else await expect(result).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      } finally { await gateway.close() }
+    } })))
+  })
+
+  it('restores Claude exclusively from the upstream catalog and isolates history from active prompts', async () => {
+    const cwd = await realpath(process.cwd())
+    const history = vi.fn(async () => [{ method: 'session/update', params: { sessionId: 'saved' } }])
+    const acp = Object.assign(readyAcp(), { history })
+    let finish!: (value: unknown) => void
+    acp.call = vi.fn(async method => method === 'session/list'
+      ? { sessions: [{ sessionId: 'saved', cwd }, { sessionId: 'relative', cwd: '.' }] }
+      : method === 'session/prompt' ? new Promise(resolve => { finish = resolve }) : {})
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'claude', enabled: true, command: 'claude-agent-acp', args: [] }] }, silentLogger(), () => acp)
+    await gateway.start()
+    try {
+      // An unknown history request must not reserve an owner before authority exists.
+      vi.mocked(acp.call).mockResolvedValueOnce({ sessions: [] })
+      await expect(gateway.call('invalid-requester', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_UNAVAILABLE' })
+      // Fresh Host has no in-memory cwd; load must obtain authority from session/list.
+      await gateway.call('owner', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })
+      expect(acp.call).toHaveBeenLastCalledWith('session/load', { backend: 'claude', sessionId: 'saved', cwd, mcpServers: [] })
+      await expect(gateway.call('owner', { method: 'dsh/workspaceList', params: { backend: 'claude' } })).resolves.toEqual([{ path: cwd, title: expect.any(String) }])
+      await expect(gateway.call('owner', { method: 'dsh/sessionList', params: { backend: 'claude', path: cwd } })).resolves.toMatchObject({ items: [{ conversationId: 'saved', cwd }] })
+      for (const params of [
+        { backend: 'claude', sessionId: 'missing' },
+        { backend: 'claude', sessionId: 'relative' },
+      ]) await expect(gateway.call('owner', { method: 'session/load', params })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_UNAVAILABLE' })
+      for (const params of [{ sessionId: 'saved' }, { backend: 'claude', sessionId: 'saved', cwd: '/tmp' }]) {
+        await expect(gateway.call('owner', { method: 'session/load', params })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      }
+      for (const sessionId of ['pi:saved', 'cursor:saved', 'acp:saved']) {
+        await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      }
+      await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      await expect(gateway.call('other', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      expect(history).not.toHaveBeenCalled()
+      await gateway.call('owner', { method: 'session/prompt', params: { backend: 'claude', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } })
+      await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history() })
+      expect(history).toHaveBeenCalledWith('saved', cwd)
+      gateway.dropPeer('owner')
+      await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
+      finish({ stopReason: 'end_turn' })
+    } finally { await gateway.close() }
+  })
+
+  it('rejects stale catalog authority across backend replacement, disable and shutdown', async () => {
+    const cwd = await realpath(process.cwd())
+    const nextCwd = await realpath('..')
+    await runScenarios((['pi', 'claude'] as const).flatMap(backend =>
+      (['catalog response', 'catalog directory', 'cached directory'] as const).flatMap(checkpoint =>
+        (['replace', 'disable', 'close'] as const).map(transition => ({
+          name: `${backend}: ${checkpoint} / ${transition}`,
+          run: async () => {
+            let enter!: () => void, release!: () => void
+            const entered = new Promise<void>(resolve => { enter = resolve })
+            const gate = new Promise<void>(resolve => { release = resolve })
+            let paused = false
+            let armed = false
+            const previous = Object.assign(readyAcp(), { history: vi.fn(async () => []) })
+            const next = Object.assign(readyAcp(), { history: vi.fn(async () => []) })
+            previous.call = vi.fn(async () => {
+              if (armed && checkpoint === 'catalog response' && !paused) {
+                paused = true; enter(); await gate
+              }
+              return { sessions: [{ sessionId: 'saved', cwd }] }
+            })
+            next.call = vi.fn(async () => ({ sessions: [{ sessionId: 'saved', cwd: nextCwd }] }))
+            const initial = { enabled: true, backends: [{ id: backend, enabled: true, command: 'previous', args: [] }] }
+            const gateway = new AcpRemoteGateway(initial, silentLogger(), binary => binary === 'previous' ? previous : next)
+            const directories = gateway as unknown as { requireExistingDirectory(path: string): Promise<string> }
+            const original = directories.requireExistingDirectory.bind(gateway)
+            const directory = vi.spyOn(directories, 'requireExistingDirectory').mockImplementation(async path => {
+              if (armed && checkpoint !== 'catalog response' && !paused) {
+                paused = true; enter(); await gate
+              }
+              return original(path)
+            })
+            try {
+              await gateway.start()
+              if (checkpoint === 'cached directory') {
+                await gateway.call('owner', { method: 'dsh/workspaceList', params: { backend } })
+              }
+              armed = true
+              const request = checkpoint === 'cached directory'
+                ? { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } }
+                : { method: 'dsh/workspaceList', params: { backend } }
+              // Attach rejection handling before retiring the old generation.
+              const pending = gateway.call('owner', request).then(result => ({ result, error: undefined }), error => ({ result: undefined, error }))
+              await entered
+              if (transition === 'close') await gateway.close()
+              else await gateway.reconfigure({ enabled: true, backends: [{ ...initial.backends[0]!, command: 'next', enabled: transition !== 'disable' }] })
+              release()
+              expect((await pending).error).toMatchObject({ code: 'CURSOR_UNAVAILABLE' })
+              expect(previous.history).not.toHaveBeenCalled()
+              if (transition === 'replace') {
+                await expect(gateway.call('next-owner', { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } })).resolves.toEqual({ events: [] })
+                expect(next.call).toHaveBeenCalledWith('session/list', {})
+                expect(next.history).toHaveBeenCalledWith('saved', nextCwd)
+              } else expect(next.history).not.toHaveBeenCalled()
+            } finally {
+              release()
+              directory.mockRestore()
+              await gateway.close()
+            }
+          },
+        })))),
+    )
+  })
+
+  it('revokes only cancelled session approvals and rejects late handles and upstream requests', async () => {
+    const fixture = await approvalFixture('claude')
+    try {
+      const handle = await fixture.request()
+      vi.mocked(fixture.acp.call).mockResolvedValueOnce({ sessionId: 'other-session' })
+      await fixture.gateway.call('owner', { method: 'session/new', params: { backend: 'claude', cwd: process.cwd() } })
+      await fixture.peer.openStream({ streamId: 'other-stream', sessionId: 'other-session' })
+      await fixture.emit({ kind: 'request', id: 8, method: 'session/request_permission', params: { sessionId: 'other-session', options: fixture.options } })
+      const otherFrame = fixture.publish.mock.calls.at(-1) as unknown as [string, { frame: { params: { requestHandle: string } } }]
+      const otherHandle = otherFrame[1].frame.params.requestHandle
+      await fixture.gateway.call('owner', { method: 'session/cancel', params: { sessionId: 'session' } })
+      expect(fixture.acp.call).toHaveBeenLastCalledWith('session/cancel', { sessionId: 'session' })
+      expect(fixture.acp.respondError).toHaveBeenCalledWith(7, -32800, expect.any(String))
+      await expect(fixture.gateway.respond('owner', { requestHandle: handle, decision: 'allow-once' })).rejects.toMatchObject({ code: 'CURSOR_APPROVAL_NOT_FOUND' })
+      await fixture.emit({ kind: 'request', id: 99, method: 'session/request_permission', params: { sessionId: 'session', options: fixture.options } })
+      expect(fixture.acp.respondError).toHaveBeenLastCalledWith(99, -32602, expect.any(String))
+      expect(fixture.publish).toHaveBeenCalledTimes(2)
+      await fixture.gateway.respond('owner', { requestHandle: otherHandle, decision: 'allow-once' })
+      expect(fixture.acp.respond).toHaveBeenCalledWith(8, { outcome: { outcome: 'selected', optionId: 'real-allow' } })
+      expect(vi.mocked(fixture.acp.call).mock.invocationCallOrder.at(-1)!).toBeLessThan(vi.mocked(fixture.acp.respondError).mock.invocationCallOrder[0]!)
+    } finally { await fixture.gateway.close() }
+  })
+
   it('isolates backend startup, hot updates and shutdown', async () => {
     await runScenarios([
       {
@@ -540,3 +888,30 @@ describe('AcpRemoteGateway', () => {
     expect(init.availableBackends).toEqual(['antigravity'])
   })
 })
+
+async function approvalFixture(backend = 'cursor') {
+  const acp = readyAcp()
+  let inbound!: (message: CursorAcpInbound) => void
+  acp.onInbound = listener => { inbound = listener; return () => undefined }
+  acp.call = vi.fn(async () => ({ sessionId: 'session' }))
+  const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'agent', args: [] }] }, silentLogger(), () => acp)
+  await gateway.start()
+  const publish = vi.fn(async () => undefined), observer = vi.fn(async () => undefined)
+  const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)!
+  gateway.createPeer({ connectionId: 'observer', peerDeviceId: 'other' } as never, observer)
+  await gateway.call('owner', { method: 'session/new', params: { backend, cwd: process.cwd() } })
+  await peer.openStream({ streamId: 'stream', sessionId: 'session' })
+  const options = [{ kind: 'allow_once', optionId: 'real-allow' }, { kind: 'reject_once', optionId: 'reject' }, { kind: 'allow_always', optionId: 'persistent' }]
+  const emit = async (message: CursorAcpInbound) => {
+    inbound(message)
+    await (gateway as unknown as { inboundChain: Promise<void> }).inboundChain
+  }
+  return { acp, gateway, peer, publish, observer, options, emit,
+    request: async (requestOptions = options) => {
+      await emit({ kind: 'request', id: 7, method: 'session/request_permission', params: { sessionId: 'session', options: requestOptions, requestHandle: 'forged', upstreamMethod: 'forged' } })
+      const frame = publish.mock.calls.at(-1) as unknown as [string, { frame: { params: { requestHandle: string; upstreamMethod: string } } }]
+      expect(frame[1].frame.params.upstreamMethod).toBe('session/request_permission')
+      return frame[1].frame.params.requestHandle
+    },
+  }
+}

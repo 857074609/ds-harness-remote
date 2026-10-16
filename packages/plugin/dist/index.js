@@ -11214,7 +11214,7 @@ var AgentAcpClient = class {
   async selectModel(sessionId, backend, selection, signal) {
     if (selection.provider !== backend)
       throw new RemoteGatewayError("INVALID_MESSAGE", "The model provider does not match the ACP backend.");
-    if (!this.capabilities.includes("agent.acp.antigravity.model-load.v1")) {
+    if (backend === "antigravity" && !this.capabilities.includes("agent.acp.antigravity.model-load.v1")) {
       await this.call("session/load", { sessionId, backend }, signal);
     }
     const result = await this.call("dsh/selectModel", {
@@ -11234,7 +11234,14 @@ var AgentAcpClient = class {
   async listWorkspaces(backend, signal) {
     const result = await this.call("dsh/workspaceList", {
       ...backend === void 0 ? {} : { backend }
-    }, signal).catch(() => []);
+    }, signal).catch((error) => {
+      if (backend === "pi")
+        throw error;
+      return [];
+    });
+    if (backend === "pi" && !Array.isArray(result)) {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace catalog is invalid.");
+    }
     return Array.isArray(result) ? result : [];
   }
   async listSessions(path, backend, limit, signal) {
@@ -11242,14 +11249,28 @@ var AgentAcpClient = class {
       path,
       ...backend === void 0 ? {} : { backend },
       ...limit === void 0 ? {} : { limit }
-    }, signal).catch(() => ({ items: [] }));
+    }, signal).catch((error) => {
+      if (backend === "pi")
+        throw error;
+      return { items: [] };
+    });
+    if (backend === "pi" && (!isRecord2(result) || !Array.isArray(result.items))) {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session catalog is invalid.");
+    }
     return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
   }
   async loadSessionHistory(sessionId, backend, signal) {
     const result = await this.transferCall("dsh/sessionHistory", {
       sessionId,
       ...backend === void 0 ? {} : { backend }
-    }, signal).catch(() => ({ events: [] }));
+    }, signal).catch((error) => {
+      if (backend === "pi")
+        throw error;
+      return { events: [] };
+    });
+    if (backend === "pi" && (!isRecord2(result) || !Array.isArray(result.events))) {
+      throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
+    }
     return isRecord2(result) && Array.isArray(result.events) ? result.events : [];
   }
   async createSession(cwd2, mode2, backend, signal) {
@@ -24238,15 +24259,48 @@ function acpImageLimits(backend) {
   return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
 }
 
+// src/acp/pi-tool-result.ts
+function piToolResult(update) {
+  let content = Array.isArray(update.content) ? update.content.flatMap((item) => {
+    if (item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string") return [{ type: "text", text: item.content.text }];
+    if (item?.type === "diff" && typeof item.path === "string" && typeof item.newText === "string" && (item.oldText === null || typeof item.oldText === "string")) {
+      return [{ type: "text", text: `File: ${item.path}
+--- before
+${item.oldText ?? ""}
++++ after
+${item.newText}` }];
+    }
+    return [];
+  }) : [];
+  if (!content.length && Array.isArray(update.rawOutput?.content)) content = update.rawOutput.content.filter((item) => item?.type === "text" && typeof item.text === "string").map((item) => ({ type: "text", text: item.text }));
+  const output = update._meta?.terminal_output?.data;
+  if (typeof output === "string") content.push({ type: "text", text: output });
+  return { content, isError: update.status === "failed" || update.rawOutput?.isError === true };
+}
+
 // src/acp/virtual-harness.ts
 var CURSOR_SESSION_PREFIX = "cursor:";
 var ACP_SESSION_PREFIX = "acp:";
 var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
 var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
 var CURSOR_PROVIDER = "cursor";
+function piStreamOutcome(reason) {
+  if (reason === "completed") return { kind: "completed" };
+  if (reason === "cancelled" || reason === "peer-disconnected") return { kind: "aborted", reason: { kind: reason === "cancelled" ? "user" : "disposed" } };
+  return { kind: "error", error: { code: "ACP_STREAM_FAILED", message: "PI reply stream failed." } };
+}
+function piPromptOutcome(kind, update) {
+  if (update.stopReason === "cancelled") return { kind: "aborted", reason: { kind: "user" } };
+  if (kind === "prompt_failed" || update.stopReason === "error") return {
+    kind: "error",
+    error: { code: "PI_PROMPT_FAILED", message: "PI reply failed." }
+  };
+  if (update.stopReason === "max_tokens") return { kind: "max-tokens" };
+  return { kind: "completed" };
+}
 function acpCwdWorkspaceId(path, backend) {
-  if (backend !== "cursor" && backend !== "antigravity") throw new Error("An explicit ACP workspace backend is required.");
-  return `${backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
+  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi") throw new Error("An explicit ACP workspace backend is required.");
+  return `${backend === "pi" ? "pi:cwd:" : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`;
 }
 function createAcpWorkspaceView(path, backend, title) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -24272,7 +24326,8 @@ async function discoverAcpVirtualWorkspaces(client, backend, signal) {
           return view;
         });
       }
-    } catch {
+    } catch (error) {
+      if (backend === "pi") throw error;
     }
   }
   return [];
@@ -24295,6 +24350,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   rcHostStreams = /* @__PURE__ */ new Set();
   follows = /* @__PURE__ */ new Set();
   pendingApprovals = /* @__PURE__ */ new Map();
+  pendingHistory = /* @__PURE__ */ new Map();
   selectedWorkspaceId;
   selectedModels = /* @__PURE__ */ new Map();
   lastProjectionSeq = 0;
@@ -24307,7 +24363,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return [...this.workspaceById.values()];
   }
   backendLabel() {
-    return this.backend === "antigravity" ? "Antigravity" : "Cursor";
+    return this.backend === "pi" ? "PI" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
   }
   async selectWorkspace(workspaceId) {
     const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
@@ -24422,14 +24478,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business2(await this.attachment(requestArg2(args)));
         case "session/modelCatalog": {
           const sessionId = await this.preferredSessionId();
-          if (this.backend !== "antigravity" || !sessionId) return business2(success2(modelCatalog2(this.backend)));
+          if (this.backend === "cursor" || !sessionId) return business2(success2(modelCatalog2(this.backend)));
           const models = await this.hostSessionModels(sessionId);
           return business2(success2({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
           const rawId = extractSessionId(requestArg2(args));
           nativeAcpId(rawId, this.backend);
-          if (this.backend === "antigravity") return business2(success2(await this.hostSessionModels(rawId)));
+          if (this.backend !== "cursor") return business2(success2(await this.hostSessionModels(rawId)));
           const catalog = modelCatalog2(this.backend);
           return business2(success2({
             current: this.modelSelection(rawId),
@@ -24568,7 +24624,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       return success2({ sessionId: reusable.sessionId });
     }
     const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
-    if (this.backend === "antigravity" && this.sessions.has(`${ACP_SESSION_PREFIX}${created.sessionId}`)) {
+    if (this.backend !== "cursor" && this.sessions.has(`${sessionPrefix(this.backend)}${created.sessionId}`)) {
       return failure2("session-already-exists", "The backend returned an existing conversation for a new Session.");
     }
     const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
@@ -24582,11 +24638,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   ensureSessionRegistered(sessionId) {
     let session = this.sessions.get(sessionId);
     if (session !== void 0) return session;
-    if (this.backend === "antigravity" && sessionId.startsWith(ACP_SESSION_PREFIX)) {
-      const acpSessionId = sessionId.slice(ACP_SESSION_PREFIX.length);
+    if (this.backend !== "cursor" && sessionId.startsWith(sessionPrefix(this.backend))) {
+      const acpSessionId = sessionId.slice(sessionPrefix(this.backend).length);
       const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
       const cwd2 = workspace?.path ?? "/";
-      session = this.registerSession(acpSessionId, cwd2, "Antigravity", Date.now(), Date.now(), false);
+      session = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
       if (workspace && !workspace.sessionIds.includes(sessionId)) {
         workspace.sessionIds.unshift(sessionId);
         workspace.sessionCount = workspace.sessionIds.length;
@@ -24642,7 +24698,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     session.running = false;
     for (const follow of this.follows) {
       if (follow.sessionId === sessionId) {
-        this.closeFollowAfterRemoteStreamClosed(follow);
+        this.closeFollowAfterRemoteStreamClosed(follow, { kind: "aborted", reason: { kind: "user" } });
       }
     }
     this.emitRemoteEvent("api-session/status", [sessionId, false]);
@@ -24679,12 +24735,25 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return cached?.sessionId === sessionId ? success2({ attachment: cached.attachment, data: cached.data }) : failure2("attachment-error", "The AGY image is unavailable or expired.");
   }
   async hydrateSession(session) {
-    if (this.backend !== "antigravity" || session.blank || session.events.length > 0) return;
+    if (this.backend === "cursor" || session.blank || session.events.length > 0) return;
+    if (this.backend !== "pi") return this.hydrateSessionOnce(session);
+    const pending = this.pendingHistory.get(session.sessionId);
+    if (pending) return pending;
+    const read = this.hydrateSessionOnce(session);
+    this.pendingHistory.set(session.sessionId, read);
+    try {
+      await read;
+    } finally {
+      if (this.pendingHistory.get(session.sessionId) === read) this.pendingHistory.delete(session.sessionId);
+    }
+  }
+  async hydrateSessionOnce(session) {
     let events = [];
     if (this.client.loadSessionHistory !== void 0) {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend);
-      } catch {
+      } catch (error) {
+        if (this.backend === "pi") throw error;
       }
     }
     if (events.length > 0) {
@@ -24709,7 +24778,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -24844,7 +24913,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: "",
-      activeToolCalls: /* @__PURE__ */ new Set()
+      activeToolCalls: /* @__PURE__ */ new Set(),
+      piToolOutputs: /* @__PURE__ */ new Map(),
+      piToolCalls: /* @__PURE__ */ new Map()
     };
     this.follows.add(follow);
     queue.push({
@@ -24856,7 +24927,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -24868,10 +24939,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       const stream = await this.client.openStream(
         session.acpSessionId,
         (frame) => this.acceptAcpFrame(follow, frame),
-        () => {
+        (closed) => {
           session.running = false;
           this.emitRemoteEvent("api-session/status", [sessionId, false]);
-          this.closeFollowAfterRemoteStreamClosed(follow);
+          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
         },
         signal
       );
@@ -24900,13 +24971,21 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       streamActive: false,
       assistantStreamRevision: 0,
       accumulatedText: "",
-      activeToolCalls: /* @__PURE__ */ new Set()
+      activeToolCalls: /* @__PURE__ */ new Set(),
+      piToolOutputs: /* @__PURE__ */ new Map(),
+      piToolCalls: /* @__PURE__ */ new Map()
     };
     this.follows.add(follow);
     const stream = await this.client.openStream(
       session.acpSessionId,
       (frame) => this.acceptAcpFrame(follow, frame),
-      () => this.closeFollowAfterRemoteStreamClosed(follow)
+      (closed) => {
+        if (this.backend === "pi") {
+          session.running = false;
+          this.emitRemoteEvent("api-session/status", [session.sessionId, false]);
+        }
+        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
+      }
     );
     follow.close = async () => {
       controller.abort();
@@ -24944,6 +25023,61 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       const status2 = string3(update.status);
       const callId = string3(update.toolCallId) ?? string3(update.callId) ?? toolName;
       const terminal = status2 === "completed" || status2 === "failed";
+      if (this.backend === "pi") {
+        const call = follow.piToolCalls.get(callId) ?? { name: toolName };
+        if (typeof update.title === "string") call.name = update.title;
+        if (update.rawInput !== void 0) call.input = update.rawInput;
+        follow.piToolCalls.set(callId, call);
+        const output = piToolResult(update);
+        const delta = record4(record4(update._meta).terminal_output).data;
+        if (typeof delta === "string") {
+          const buffered = follow.piToolOutputs.get(callId) ?? { text: "", overflow: false };
+          if (!buffered.overflow) {
+            if (buffered.text.length + delta.length > 1048576) {
+              buffered.text = "";
+              buffered.overflow = true;
+            } else buffered.text += delta;
+          }
+          follow.piToolOutputs.set(callId, buffered);
+        }
+        if (!terminal && status2 !== "in_progress") return;
+        if (!follow.activeToolCalls.has(callId)) {
+          this.ensurePiStep(follow, false);
+          this.finishPiAssistant(follow);
+          follow.piAfterTools = true;
+          this.pushEvent(follow, "tool/call", {
+            turn: follow.turn,
+            step: follow.piStep ?? 1,
+            callId,
+            toolCallId: callId,
+            name: call.name,
+            toolName: call.name,
+            arguments: typeof call.input === "string" ? call.input : call.input != null ? JSON.stringify(call.input) : "{}",
+            status: terminal ? status2 === "failed" ? "failed" : "finished" : "running"
+          });
+          follow.activeToolCalls.add(callId);
+        }
+        if (terminal) {
+          const buffered = follow.piToolOutputs.get(callId);
+          const content = buffered ? [{ type: "text", text: buffered.overflow ? "[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text }] : output.content;
+          this.pushEvent(follow, "tool/result", { turn: follow.turn, step: follow.piStep ?? 1, message: {
+            id: `${callId}:result`,
+            role: "user",
+            content: [{
+              type: "tool-result",
+              toolCallId: callId,
+              content,
+              ...output.isError ? { isError: true } : {}
+            }],
+            source: { kind: "tool", callId }
+          } });
+          follow.piToolOutputs.delete(callId);
+          follow.piToolCalls.delete(callId);
+          follow.activeToolCalls.delete(callId);
+        }
+        if (session !== void 0) session.updatedAt = Date.now();
+        return;
+      }
       if (kind === "tool_call_update" && !terminal) return;
       if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
       this.pushEvent(follow, "tool/call", {
@@ -24982,15 +25116,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
         if (kind === "prompt_completed") void this.refreshSessionTitle(session);
       }
-      this.closeFollowAfterRemoteStreamClosed(follow);
+      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update));
     }
   }
   acceptApproval(follow, params, method) {
     const requestHandle = string3(params.requestHandle);
     if (requestHandle === void 0) return;
     this.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
-    const toolName = method === "cursor/create_plan" ? string3(params.name) ?? "plan" : method === "cursor/ask_question" ? string3(params.title) ?? "question" : string3(params.toolName) ?? "permission";
-    const reason = method === "cursor/create_plan" ? string3(params.overview) ?? string3(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string3(params.reason);
+    const toolName = method === "cursor/create_plan" ? string3(params.name) ?? "plan" : method === "cursor/ask_question" ? string3(params.title) ?? "question" : string3(params.toolName) ?? string3(record4(params.toolCall).title) ?? "permission";
+    const reason = method === "cursor/create_plan" ? string3(params.overview) ?? string3(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string3(params.reason) ?? string3(record4(record4(params.toolCall).rawInput).message);
     this.emitApproval({
       eventId: requestHandle,
       agentId: follow.sessionId,
@@ -25004,7 +25138,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     let attempt = follow.assistantAttempt;
     if (attempt === void 0) {
       attempt = {
-        attemptId: `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
+        attemptId: this.backend === "pi" ? `pi-attempt:${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}:${follow.nextSeq}` : `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
         startedAfterSeq: follow.nextSeq - 1,
         nextIndex: 0,
         stream: []
@@ -25019,7 +25153,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           revision: follow.assistantStreamRevision,
           startedAfterSeq: attempt.startedAfterSeq,
           turn: follow.turn,
-          step: 1
+          step: this.backend === "pi" ? follow.piStep ?? 1 : 1
         }
       });
     }
@@ -25056,6 +25190,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     });
   }
   appendAssistantDelta(follow, delta) {
+    if (this.backend === "pi") this.ensurePiStep(follow, true);
     if (!follow.stepOpen) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -25071,6 +25206,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.pushAssistantChunk(follow, { type: "text-delta", index: follow.blockIndex, text: delta });
   }
   appendReasoningDelta(follow, delta) {
+    if (this.backend === "pi") {
+      this.ensurePiStep(follow, true);
+      follow.piReasoning = (follow.piReasoning ?? "") + delta;
+    }
     if (!follow.stepOpen) {
       follow.turn += 1;
       follow.stepOpen = true;
@@ -25084,7 +25223,64 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     this.pushAssistantChunk(follow, { type: "reasoning-delta", index: follow.reasoningBlockIndex, text: delta });
   }
-  closeFollowAfterRemoteStreamClosed(follow) {
+  /** PI model steps settle before tools; a tool round does not end the turn. */
+  ensurePiStep(follow, advanceAfterTools) {
+    if (!follow.stepOpen) {
+      follow.turn++;
+      follow.piStep = 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    } else if (advanceAfterTools && follow.piAfterTools) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
+      follow.piStep = (follow.piStep ?? 1) + 1;
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: follow.piStep });
+    }
+    if (advanceAfterTools) follow.piAfterTools = false;
+  }
+  finishPiAssistant(follow, outcome = { kind: "completed" }) {
+    if (!follow.streamActive) return;
+    const blocks = [
+      { index: follow.reasoningBlockIndex, type: "reasoning", text: follow.piReasoning ?? "" },
+      { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
+    ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
+    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
+    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "PI reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
+    this.pushAssistantChunk(follow, { type: "finish", reason });
+    const selection = this.modelSelection(follow.sessionId);
+    const seq = this.pushEvent(follow, "assistant/message", {
+      turn: follow.turn,
+      step: follow.piStep ?? 1,
+      message: {
+        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
+        role: "assistant",
+        content: blocks.map(({ type, text }) => ({ type, text })),
+        source: { kind: "model", provider: selection.provider, model: selection.model }
+      },
+      stream: follow.assistantAttempt?.stream ?? []
+    });
+    this.endAssistantAttempt(follow, { kind: "committed", eventType: "assistant/message", seq });
+    follow.streamActive = false;
+    follow.blockIndex = void 0;
+    follow.reasoningBlockIndex = void 0;
+    follow.accumulatedText = "";
+    follow.piReasoning = "";
+  }
+  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }) {
+    if (this.backend === "pi") {
+      this.finishPiAssistant(follow, outcome);
+      if (follow.stepOpen) {
+        this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
+        this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
+      }
+      follow.stepOpen = false;
+      follow.piStep = 1;
+      follow.piAfterTools = false;
+      follow.piToolOutputs.clear();
+      follow.piToolCalls.clear();
+      follow.activeToolCalls.clear();
+      return;
+    }
     if (follow.streamActive) {
       if (follow.reasoningBlockIndex !== void 0) {
         this.pushAssistantChunk(follow, {
@@ -25136,6 +25332,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     follow.blockIndex = void 0;
     follow.reasoningBlockIndex = void 0;
     follow.accumulatedText = "";
+    follow.piToolOutputs.clear();
+    follow.piToolCalls.clear();
   }
   pushEvent(follow, type, data2) {
     const session = this.sessions.get(follow.sessionId);
@@ -25165,7 +25363,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
     const session = {
-      sessionId: `${this.backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX}${acpSessionId}`,
+      sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd: cwd2,
       ...title === void 0 ? {} : { title },
@@ -25185,7 +25383,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.publishProjection(session.sessionId, "title", next);
   }
   async refreshSessionTitle(session) {
-    if (this.backend !== "antigravity" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
+    if (this.backend === "cursor" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
     try {
       const items = await this.client.listSessions(session.cwd, this.backend, 30);
       const current = items.find((item) => item.conversationId === session.acpSessionId);
@@ -25194,17 +25392,18 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
   }
   async discoverAndAttachSessions(workspace) {
-    if (this.backend !== "antigravity") return;
+    if (this.backend === "cursor") return;
     try {
       let discovered = [];
       if (this.client.listSessions !== void 0) {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30);
-        } catch {
+        } catch (error) {
+          if (this.backend === "pi") throw error;
         }
       }
       for (const item of discovered) {
-        const sessionId = `${ACP_SESSION_PREFIX}${item.conversationId}`;
+        const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`;
         if (!this.sessions.has(sessionId)) {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
         }
@@ -25216,7 +25415,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       }
       workspace.sessionCount = workspace.sessionIds.length;
       workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    } catch {
+    } catch (error) {
+      if (this.backend === "pi") throw error;
     }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
@@ -25268,7 +25468,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         kind: "sequenced",
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -25284,8 +25484,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return { lastUsed: selection, next: selection };
   }
   async hostSessionModels(sessionId) {
-    if (this.backend !== "antigravity" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
-    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), "antigravity");
+    if (this.backend === "cursor" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
+    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend);
     this.selectedModels.set(sessionId, models.current);
     return models;
   }
@@ -25295,7 +25495,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const provider = requiredString2(request.provider, "provider");
     const model = requiredString2(request.model, "model");
     const reasoningEffort = string3(request.reasoningEffort);
-    const catalog = this.backend === "antigravity" ? await this.hostSessionModels(sessionId) : modelCatalog2(this.backend);
+    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog2(this.backend);
     const group = catalog.groups.find((g) => g.id === provider);
     const targetModel = group?.models.find((m) => m.id === model);
     if (group === void 0 || targetModel === void 0) {
@@ -25310,11 +25510,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       model,
       ...reasoningEffort === void 0 ? {} : { reasoningEffort }
     };
-    if (this.backend === "antigravity") {
+    if (this.backend !== "cursor") {
       if (!this.client.selectModel) return failure2("model-unavailable", "The Host does not support ACP model selection.");
-      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), "antigravity", selected);
+      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
       this.selectedModels.set(sessionId, confirmed);
-    } else return failure2("model-unavailable", "Cursor model selection follows Host settings.");
+    } else return failure2("model-unavailable", `${this.backendLabel()} model selection follows Host settings.`);
     const seq = this.nextProjectionSeq();
     this.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
     return success2({ selected: this.modelSelection(sessionId) });
@@ -25466,7 +25666,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
 };
 function recreateWorkspaceFromId(workspaceId, backend) {
-  const prefix = backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  const prefix = backend === "pi" ? "pi:cwd:" : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
   if (!workspaceId.startsWith(prefix)) return void 0;
   try {
     const path = decodeURIComponent(workspaceId.slice(prefix.length));
@@ -25495,9 +25695,9 @@ var CURSOR_MODELS = [
   { id: "deepseek-r1", name: "DeepSeek R1" }
 ];
 function modelCatalog2(backend = "cursor") {
-  const provider = backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
-  const name2 = backend === "antigravity" ? "Antigravity" : "Cursor";
-  const models = backend === "antigravity" ? [] : CURSOR_MODELS;
+  const provider = backend === "pi" ? "pi" : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
+  const name2 = backend === "pi" ? "PI" : backend === "antigravity" ? "Antigravity" : "Cursor";
+  const models = backend === "cursor" ? CURSOR_MODELS : [];
   const defaultModel = models[0]?.id ?? "host-settings";
   return {
     default: { provider, model: defaultModel },
@@ -25547,8 +25747,11 @@ function extractSessionId(request) {
   if (isRecord8(request.address)) return sessionIdFromAddress2(request.address);
   throw new Error("The sessionId is required.");
 }
+function sessionPrefix(backend) {
+  return backend === "pi" ? "pi:" : backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+}
 function nativeAcpId(sessionId, backend) {
-  const prefix = backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+  const prefix = sessionPrefix(backend);
   if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error("The selected Session does not belong to the virtual harness.");
   }
@@ -25882,17 +26085,17 @@ function resolveConfig(input2 = {}, env = process.env) {
     },
     acp: {
       enabled: acpEnabled,
-      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id5) => {
+      backends: [.../* @__PURE__ */ new Set(["codex", "cursor", "antigravity", "pi", "claude", ...parsed.acp?.backends?.filter((item) => item.id !== "kimi").map((item) => item.id) ?? []])].map((id5) => {
         const configured = parsed.acp?.backends?.find((item) => item.id === id5);
         const legacy = parsed.acp?.backend === id5 ? parsed.acp : void 0;
-        const defaults = { codex: "codex", cursor: "agent", antigravity: "agy" };
+        const defaults = { codex: "codex", cursor: "agent", antigravity: "agy", pi: "pi-acp", claude: "claude-agent-acp" };
         const cursorCommand = id5 === "codex" ? parsed.codex?.binary : id5 === "cursor" ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY : void 0;
         const cwd2 = configured?.cwd ?? legacy?.cwd;
         return {
           id: id5,
-          enabled: configured?.enabled ?? legacy?.enabled ?? (id5 === "codex" ? codexEnabled : id5 === "cursor" ? cursorEnabled : parsed.acp !== void 0),
+          enabled: configured?.enabled ?? legacy?.enabled ?? (id5 === "codex" ? codexEnabled : id5 === "cursor" ? cursorEnabled : id5 === "pi" ? true : id5 === "claude" ? false : parsed.acp !== void 0),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id5] ?? id5,
-          args: id5 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
+          args: id5 === "codex" ? ["app-server"] : configured?.args ?? legacy?.args ?? (id5 === "pi" || id5 === "claude" ? [] : id5 === "antigravity" ? ["--input-format", "stream-json", "--output-format", "stream-json"] : ["acp"]),
           ...cwd2 === void 0 ? {} : { cwd: cwd2 }
         };
       })
@@ -28087,7 +28290,7 @@ var ClientModeRuntime = class {
   async listCursorWorkspaces(targetDeviceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+    if (!remote.features[backend]) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     if (this.cursorVirtual !== void 0 && this.connected?.target.deviceId === targetDeviceId && this.acpVirtualBackend === backend) {
@@ -28100,7 +28303,7 @@ var ClientModeRuntime = class {
   async openCursorWorkspace(targetDeviceId, workspaceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+    if (!remote.features[backend]) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
@@ -28135,7 +28338,7 @@ var ClientModeRuntime = class {
     if (trimmedPath === "") throw new ClientModeError("INVALID_MESSAGE", `A ${backend} project directory is required.`);
     const remote = await this.ensureConnected(targetDeviceId, signal);
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-    if (backend === "antigravity" ? !remote.features.antigravity : !remote.features.cursor) {
+    if (!remote.features[backend]) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", `The selected Host does not provide ${backend} workspaces.`);
     }
     this.assertLocalHarnessCarrierAvailable();
@@ -28724,6 +28927,25 @@ var ClientModeRuntime = class {
         }
         return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "antigravity"));
       }
+      if (endpoint === "pi.workspaces.list") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "pi"));
+      }
+      if (endpoint === "pi.workspace.open") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI Workspace are required.");
+        }
+        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "pi"));
+      }
+      if (endpoint === "pi.workspace.create") {
+        const value = record5(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI project directory are required.");
+        }
+        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "pi"));
+      }
       if (endpoint === "workspace.selection.consume") {
         const value = record5(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
@@ -28732,7 +28954,7 @@ var ClientModeRuntime = class {
         return ok2(this.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" ? { backend: value.backend } : {},
+          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" ? { backend: value.backend } : {},
           ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
         }));
       }
@@ -28987,12 +29209,13 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const codex = available("codex", "codex.appserver.v1");
   const cursor2 = available("cursor", "agent.acp.cursor.v1");
   const antigravity = available("antigravity", "agent.acp.antigravity.v1");
+  const pi = available("pi", "agent.acp.pi.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -29005,6 +29228,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     codex,
     cursor: cursor2,
     antigravity,
+    ...pi ? { pi: true } : {},
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
     pluginRoute: capabilities.has("plugin.route.v1")
@@ -32091,7 +32315,7 @@ var AcpWorkspaceTools = class {
     this.terminal = terminal;
   }
   payload(sessionId, backend, args) {
-    const scopedId = `${backend === "antigravity" ? "acp" : "cursor"}:${sessionId}`;
+    const scopedId = `${backend === "antigravity" ? "acp" : backend === "pi" ? "pi" : "cursor"}:${sessionId}`;
     const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter((id5) => id5 !== void 0);
     if (!ids.length || ids.some((id5) => id5 !== scopedId)) throw new RpcError("PERMISSION_DENIED", "The tool scope does not match the ACP session.");
     return { args };
@@ -32153,6 +32377,7 @@ var CursorAcpClient = class {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
+    this.options = options;
   }
   process;
   nextId = 1;
@@ -32178,6 +32403,10 @@ var CursorAcpClient = class {
   }
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
+    if (method === "session/cancel" && this.options.authenticationMethod === null) {
+      this.write({ jsonrpc: "2.0", method, params });
+      return {};
+    }
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
     return this.request(method, params, budget);
   }
@@ -32225,11 +32454,16 @@ var CursorAcpClient = class {
     this.failureNotified = false;
     this.stdoutBuffer = Buffer4.alloc(0);
     this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer4.from(chunk)));
+    child.stdout.on("data", (chunk) => {
+      if (this.process === child) this.consumeStdout(Buffer4.from(chunk));
+    });
     child.stderr.on("data", (chunk) => {
+      if (this.process !== child) return;
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
     });
-    child.on("error", (error) => this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error));
+    child.on("error", (error) => {
+      if (this.process === child) this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error);
+    });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
       this.process = void 0;
@@ -32256,13 +32490,25 @@ var CursorAcpClient = class {
           version: PLUGIN_VERSION
         }
       }, ACP_START_TIMEOUT_MS);
-      await this.request("authenticate", { methodId: "cursor_login" }, ACP_START_TIMEOUT_MS);
+      this.assertStarting(child);
+      if (this.options.authenticationMethod !== null) {
+        await this.request("authenticate", { methodId: this.options.authenticationMethod ?? "cursor_login" }, ACP_START_TIMEOUT_MS);
+      }
+      this.assertStarting(child);
       this.ready = true;
       this.logger?.info("Cursor ACP ready");
     } catch (error) {
+      this.ready = false;
+      if (this.process === child) this.process = void 0;
       child.kill("SIGTERM");
       if (error instanceof CursorAcpError) throw error;
       throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error });
+    }
+  }
+  assertStarting(child) {
+    if (this.closed) throw new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed.");
+    if (this.process !== child || child.exitCode !== null || child.killed) {
+      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
     }
   }
   request(method, params, timeoutMs) {
@@ -32371,6 +32617,633 @@ function safeUpstreamError2(value) {
 }
 function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/adapters/claude-process.ts
+import { Buffer as Buffer5 } from "node:buffer";
+
+// src/acp/adapters/claude-history.ts
+function claudeHistoryEvents(messages, sessionId) {
+  const events = [];
+  const tools = /* @__PURE__ */ new Map();
+  let turn = 0;
+  let step = 1;
+  let afterTools = false;
+  let pending;
+  const push = (type, data2, surface = false) => events.push({ type: "event", event: {
+    type,
+    seq: events.length,
+    time: 0,
+    data: data2,
+    ...surface ? { surfaceOp: "append" } : {}
+  } });
+  const id5 = () => `claude-history:${sessionId}:${events.length}`;
+  const flushMessage = () => {
+    if (!pending) return;
+    const message = { id: id5(), role: pending.role, content: pending.content };
+    if (pending.role === "user") push("user/message", { ...message, source: { kind: "user" } }, true);
+    else push("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider: "claude", model: "" } }, stream: [] }, true);
+    pending = void 0;
+  };
+  const result = (tool) => {
+    if (tool.emitted || !tool.terminal) return;
+    tool.emitted = true;
+    push("tool/result", { turn, step, message: { id: id5(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
+      type: "tool-result",
+      toolCallId: tool.id,
+      content: tool.output,
+      ...tool.failed ? { isError: true } : {}
+    }] } }, true);
+  };
+  const flushTools = () => {
+    for (const tool of tools.values()) result(tool);
+  };
+  const endTurn = () => {
+    flushMessage();
+    flushTools();
+    if (turn) {
+      push("step/end", { turn, step });
+      push("turn/end", { turn, reason: { kind: "completed" } });
+    }
+    tools.clear();
+    afterTools = false;
+  };
+  for (const message of messages) {
+    const params = message.params;
+    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
+    const update = params.update;
+    if (!update) continue;
+    const kind = update.sessionUpdate;
+    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
+      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
+      const role = kind === "user_message_chunk" ? "user" : "assistant";
+      if (role === "user" && pending?.role !== "user") {
+        endTurn();
+        turn++;
+        step = 1;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      } else if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      if (pending && pending.role !== role) flushMessage();
+      flushTools();
+      if (role === "assistant" && afterTools) {
+        push("step/end", { turn, step });
+        step++;
+        push("step/start", { turn, step });
+        afterTools = false;
+      }
+      pending ??= { role, content: [] };
+      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
+      const previous = pending.content.at(-1);
+      if (previous?.type === type) previous.text += update.content.text;
+      else pending.content.push({ type, text: update.content.text });
+    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+      flushMessage();
+      afterTools = true;
+      if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      let tool = tools.get(update.toolCallId);
+      if (!tool) {
+        tool = {
+          id: update.toolCallId,
+          name: typeof update.title === "string" ? update.title : "tool",
+          input: update.rawInput,
+          output: [],
+          failed: false,
+          terminal: false,
+          emitted: false
+        };
+        tools.set(tool.id, tool);
+        push("tool/call", {
+          turn,
+          step,
+          callId: tool.id,
+          name: tool.name,
+          arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
+        });
+      }
+      const decoded = {
+        content: Array.isArray(update.content) ? update.content.flatMap((item) => item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string" ? [{ type: "text", text: item.content.text }] : []) : [],
+        isError: update.status === "failed" || update.rawOutput?.isError === true
+      };
+      if (!decoded.content.length && update.rawOutput !== void 0) decoded.content.push({
+        type: "text",
+        text: typeof update.rawOutput === "string" ? update.rawOutput : JSON.stringify(update.rawOutput)
+      });
+      if (decoded.content.length) tool.output = decoded.content;
+      tool.failed ||= decoded.isError;
+      tool.terminal ||= update.status === "completed" || update.status === "failed";
+      if (kind === "tool_call_update") result(tool);
+    }
+  }
+  endTurn();
+  return events;
+}
+
+// src/acp/adapters/claude-process.ts
+var ClaudeAcpClient = class extends CursorAcpClient {
+  live = /* @__PURE__ */ new Map();
+  loads = /* @__PURE__ */ new Map();
+  pendingNew = 0;
+  historyStop;
+  historyReading = false;
+  shuttingDown = false;
+  makeClient;
+  constructor(binary = "claude-agent-acp", logger, spawnAcp, options = {}) {
+    const config = { ...options, args: options.args ?? [], authenticationMethod: null };
+    super(binary, logger, spawnAcp, config);
+    this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config);
+    super.onUnavailable(() => this.live.clear());
+  }
+  onInbound(handler) {
+    return super.onInbound((message) => {
+      const id5 = message.params?.sessionId;
+      if (message.kind === "notification" && message.method === "session/update" && id5 && this.loads.has(id5)) return;
+      handler(message);
+    });
+  }
+  async call(method, params, timeoutMs) {
+    if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", "Claude ACP is closed.");
+    const id5 = params?.sessionId;
+    if (method === "session/load" && typeof id5 === "string") {
+      if (this.live.has(id5)) return this.live.get(id5);
+      const pending = this.loads.get(id5);
+      if (pending) return pending;
+      this.checkSessionLimit();
+      const load = Promise.resolve().then(() => super.call(method, params, timeoutMs)).then((result) => {
+        this.assertLoaded(result, id5);
+        this.live.set(id5, result);
+        return result;
+      });
+      this.loads.set(id5, load);
+      try {
+        return await load;
+      } finally {
+        this.loads.delete(id5);
+      }
+    }
+    if (method === "session/new") {
+      this.checkSessionLimit();
+      this.pendingNew++;
+      try {
+        const result = await super.call(method, params, timeoutMs);
+        const newId = result?.sessionId;
+        if (typeof newId !== "string" || this.shuttingDown) throw new CursorAcpError("ACP_INVALID_SESSION", "Claude returned an invalid session.");
+        this.live.set(newId, result);
+        return result;
+      } finally {
+        this.pendingNew--;
+      }
+    }
+    return super.call(method, params, timeoutMs);
+  }
+  checkSessionLimit() {
+    if (this.live.size + this.loads.size + this.pendingNew >= 30) throw new CursorAcpError("ACP_PROCESS_LIMIT", "Too many Claude sessions are active.");
+  }
+  assertLoaded(result, sessionId) {
+    const id5 = result?.sessionId;
+    if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", "Claude ACP is closed.");
+    if (id5 !== void 0 && id5 !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "Claude returned an invalid history session.");
+  }
+  /** One temporary process, separate from all live sessions (including active prompts). */
+  async history(sessionId, cwd2) {
+    if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", "Claude ACP is closed.");
+    if (this.historyReading) throw new CursorAcpError("ACP_PROCESS_LIMIT", "A Claude history read is already in progress.");
+    this.historyReading = true;
+    const client = this.makeClient();
+    let stopping;
+    const stop = () => stopping ??= client.close();
+    this.historyStop = stop;
+    const updates = [];
+    let bytes = 0;
+    let count = 0;
+    let overflow = false;
+    client.onInbound((message) => {
+      if (message.kind === "request") {
+        void (message.method === "session/request_permission" ? client.respond(message.id, { outcome: { outcome: "cancelled" } }) : client.respondError(message.id, -32601, "History reader does not support requests.")).catch(() => void 0);
+        return;
+      }
+      if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
+      bytes += Buffer5.byteLength(JSON.stringify(message));
+      count++;
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) {
+        overflow = true;
+        void stop().catch(() => void 0);
+      } else updates.push(message);
+    });
+    try {
+      await client.start();
+      if (this.shuttingDown) throw new CursorAcpError("ACP_CLOSED", "Claude ACP is closed.");
+      const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      this.assertLoaded(result, sessionId);
+      if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "Claude history exceeds the transfer limit.");
+      return claudeHistoryEvents(updates, sessionId);
+    } catch (error) {
+      if (overflow) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "Claude history exceeds the transfer limit.");
+      throw error;
+    } finally {
+      try {
+        await stop();
+      } finally {
+        this.historyStop = void 0;
+        this.historyReading = false;
+      }
+    }
+  }
+  async close() {
+    this.shuttingDown = true;
+    await Promise.all([super.close(), this.historyStop?.()]);
+    this.live.clear();
+  }
+};
+
+// src/acp/adapters/pi-process.ts
+var PiAcpClient = class {
+  constructor(binary, logger, options = {}, factory = () => new CursorAcpClient(
+    binary,
+    logger,
+    void 0,
+    { ...options, args: options.args ?? [], authenticationMethod: null }
+  )) {
+    this.binary = binary;
+    this.logger = logger;
+    this.options = options;
+    this.factory = factory;
+  }
+  catalog;
+  clients = /* @__PURE__ */ new Map();
+  starting = /* @__PURE__ */ new Set();
+  inbound = /* @__PURE__ */ new Set();
+  unavailable = /* @__PURE__ */ new Set();
+  closed = false;
+  all = /* @__PURE__ */ new Set();
+  callbacks = /* @__PURE__ */ new Map();
+  nextCallback = 0;
+  configurations = /* @__PURE__ */ new Map();
+  busy = /* @__PURE__ */ new Set();
+  loading = /* @__PURE__ */ new Map();
+  historyBusy = false;
+  async start() {
+    this.catalog = await this.create();
+    this.catalog.onUnavailable((code) => {
+      for (const handler of this.unavailable) handler(code);
+    });
+  }
+  isReady() {
+    return !this.closed && this.catalog?.isReady() === true;
+  }
+  async create(history = false) {
+    if (this.closed) throw new CursorAcpError("ACP_CLOSED", "PI ACP is closed.");
+    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", "Too many PI ACP sessions are active.");
+    const client = this.factory();
+    this.starting.add(client);
+    this.all.add(client);
+    try {
+      await client.start();
+      if (this.closed) throw new CursorAcpError("ACP_CLOSED", "PI ACP is closed.");
+      return client;
+    } catch (error) {
+      await this.dispose(client);
+      throw error;
+    } finally {
+      this.starting.delete(client);
+    }
+  }
+  async call(method, params, timeoutMs) {
+    const p = params;
+    if (method === "session/load" && typeof p.sessionId === "string") {
+      const previous = this.loading.get(p.sessionId);
+      if (previous) return previous;
+      const promise = this.callOnce(method, params, timeoutMs);
+      this.loading.set(p.sessionId, promise);
+      try {
+        return await promise;
+      } finally {
+        this.loading.delete(p.sessionId);
+      }
+    }
+    return this.callOnce(method, params, timeoutMs);
+  }
+  async callOnce(method, params, timeoutMs) {
+    const p = params;
+    if (method === "session/list") return this.catalog.call(method, params, timeoutMs);
+    if (method === "session/new" || method === "session/load") {
+      const known = typeof p.sessionId === "string" ? this.clients.get(p.sessionId) : void 0;
+      if (known) return { sessionId: p.sessionId };
+      const client2 = await this.create();
+      let boundId = typeof p.sessionId === "string" ? p.sessionId : void 0;
+      const queued = [];
+      let replaying = method === "session/load";
+      const replayConfiguration = {};
+      const receive = (message) => {
+        if (replaying) {
+          if (message.kind === "request") {
+            void client2.respondError(message.id, -32600, "PI session is not loaded.").catch(() => void 0);
+          } else if (message.params?.sessionId === boundId) {
+            this.updateConfiguration(boundId, message, replayConfiguration);
+          }
+          return;
+        }
+        const incomingId = message.params?.sessionId;
+        if (!boundId) {
+          if (queued.length < 200) queued.push(message);
+          return;
+        }
+        if (incomingId !== boundId) return;
+        this.updateConfiguration(boundId, message);
+        if (message.kind === "request") {
+          const id6 = `pi-callback:${++this.nextCallback}`;
+          this.callbacks.set(id6, { client: client2, id: message.id });
+          message = { ...message, id: id6 };
+        }
+        for (const handler of this.inbound) handler(message);
+      };
+      client2.onInbound(receive);
+      client2.onUnavailable(() => {
+        if (boundId && this.clients.get(boundId) === client2) {
+          this.clients.delete(boundId);
+          this.configurations.delete(boundId);
+        }
+        void this.dispose(client2).catch(() => void 0);
+      });
+      try {
+        const result = await client2.call(method, params, timeoutMs);
+        const id6 = method === "session/load" ? p.sessionId : result.sessionId;
+        if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", "PI returned an invalid session.");
+        this.clients.set(id6, client2);
+        const config = { ...result };
+        for (const key of ["models", "modes"]) {
+          if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] };
+        }
+        this.configurations.set(id6, config);
+        boundId = id6;
+        replaying = false;
+        for (const message of queued) receive(message);
+        return { ...result, sessionId: id6 };
+      } catch (error) {
+        await this.dispose(client2);
+        throw error;
+      }
+    }
+    const client = this.clients.get(String(p.sessionId));
+    if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the PI session before using it.");
+    const id5 = String(p.sessionId);
+    if (method === "dsh/sessionModels") return this.models(id5);
+    if (method === "dsh/selectModel") {
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the PI reply before changing its model.");
+      const config = this.configurations.get(id5);
+      if (!config?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
+        throw new CursorAcpError("INVALID_MESSAGE", "The PI model or thinking level is not available.");
+      }
+      this.busy.add(id5);
+      try {
+        const modelResult = await client.call("session/set_config_option", { sessionId: id5, configId: "model", value: p.model });
+        this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
+        if (p.reasoningEffort !== void 0) {
+          if (!this.configurations.get(id5)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
+          const thinkingResult = await client.call("session/set_config_option", { sessionId: id5, configId: "thought_level", value: p.reasoningEffort });
+          this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
+        }
+        return { selected: this.models(id5).current };
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
+    if (method === "session/prompt") {
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The PI session is busy.");
+      this.busy.add(id5);
+      try {
+        return await client.call(method, params, timeoutMs);
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
+    return client.call(method, params, timeoutMs);
+  }
+  updateConfiguration(id5, message, initial) {
+    if (message.method !== "session/update") return;
+    const update = message.params.update;
+    const config = initial ?? this.configurations.get(id5);
+    if (!update || !config) return;
+    if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config.modes = { ...config.modes, currentModeId: update.currentModeId };
+    if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
+      for (const option of update.configOptions) {
+        if (option.type !== "select" || !Array.isArray(option.options)) continue;
+        if (option.id === "model") config.models = {
+          currentModelId: option.currentValue,
+          availableModels: option.options.map((item) => ({ modelId: item.value, name: item.name }))
+        };
+        if (option.id === "thought_level") config.modes = {
+          currentModeId: option.currentValue,
+          availableModes: option.options.map((item) => ({ id: item.value, name: item.name }))
+        };
+      }
+    }
+  }
+  models(id5) {
+    const config = this.configurations.get(id5);
+    const modes = config?.modes;
+    return {
+      current: { provider: "pi", model: config?.models?.currentModelId ?? "", reasoningEffort: modes?.currentModeId },
+      routable: true,
+      failures: [],
+      groups: [{ id: "pi", name: "PI", models: (config?.models?.availableModels ?? []).map((model) => ({
+        id: model.modelId,
+        name: model.name,
+        ...modes?.availableModes?.length ? { reasoning: { efforts: modes.availableModes.map((mode2) => ({ id: mode2.id, name: mode2.name })), defaultEffort: modes.currentModeId } } : {}
+      })) }]
+    };
+  }
+  /** A separate wrapper prevents history reads from interrupting active sessions. */
+  async history(sessionId, cwd2) {
+    if (this.historyBusy) throw new CursorAcpError("ACP_PROCESS_LIMIT", "A PI history read is already in progress.");
+    this.historyBusy = true;
+    let client;
+    try {
+      client = await this.create(true);
+    } catch (error) {
+      this.historyBusy = false;
+      throw error;
+    }
+    const updates = [];
+    let bytes = 0;
+    let count = 0;
+    client.onInbound((message) => {
+      if (message.kind !== "notification" || message.method !== "session/update" || message.params?.sessionId !== sessionId) return;
+      count++;
+      bytes += Buffer.byteLength(JSON.stringify(message));
+      if (bytes <= 8 * 1024 * 1024 && count <= 1e4) updates.push(message);
+    });
+    try {
+      const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      const loadedId = result?.sessionId;
+      if (loadedId !== void 0 && loadedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "PI returned an invalid history session.");
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "PI history exceeds the transfer limit.");
+      return historyEvents(updates, sessionId);
+    } finally {
+      try {
+        await this.dispose(client);
+      } finally {
+        this.historyBusy = false;
+      }
+    }
+  }
+  async respond(id5, result) {
+    const pending = this.callbacks.get(String(id5));
+    if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", "The PI callback is unavailable.");
+    this.callbacks.delete(String(id5));
+    await pending.client.respond(pending.id, result);
+  }
+  async respondError(id5, code, message) {
+    const pending = this.callbacks.get(String(id5));
+    if (!pending) return;
+    this.callbacks.delete(String(id5));
+    await pending.client.respondError(pending.id, code, message);
+  }
+  onInbound(handler) {
+    this.inbound.add(handler);
+    return () => this.inbound.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailable.add(handler);
+    return () => this.unavailable.delete(handler);
+  }
+  async dispose(client) {
+    await client.close();
+    this.all.delete(client);
+    for (const [key, pending] of this.callbacks) if (pending.client === client) this.callbacks.delete(key);
+  }
+  async close() {
+    this.closed = true;
+    const clients = this.all;
+    await Promise.all([...clients].map((client) => this.dispose(client)));
+    this.clients.clear();
+    this.all.clear();
+    this.callbacks.clear();
+  }
+};
+function historyEvents(messages, sessionId) {
+  const events = [];
+  const tools = /* @__PURE__ */ new Map();
+  let turn = 0;
+  let step = 1;
+  let afterTools = false;
+  let pending;
+  const push = (type, data2, surface = false) => events.push({ type: "event", event: {
+    type,
+    seq: events.length,
+    time: 0,
+    data: data2,
+    ...surface ? { surfaceOp: "append" } : {}
+  } });
+  const id5 = () => `pi-history:${sessionId}:${events.length}`;
+  const flushMessage = () => {
+    if (!pending) return;
+    const message = { id: id5(), role: pending.role, content: pending.content };
+    if (pending.role === "user") push("user/message", { ...message, source: { kind: "user" } }, true);
+    else push("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider: "pi", model: "" } }, stream: [] }, true);
+    pending = void 0;
+  };
+  const result = (tool) => {
+    if (tool.emitted || !tool.terminal) return;
+    tool.emitted = true;
+    push("tool/result", { turn, step, message: { id: id5(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
+      type: "tool-result",
+      toolCallId: tool.id,
+      content: tool.output,
+      ...tool.failed ? { isError: true } : {}
+    }] } }, true);
+  };
+  const flushTools = () => {
+    for (const tool of tools.values()) result(tool);
+  };
+  const endTurn = () => {
+    flushMessage();
+    flushTools();
+    if (turn) {
+      push("step/end", { turn, step });
+      push("turn/end", { turn, reason: { kind: "completed" } });
+    }
+    tools.clear();
+    afterTools = false;
+  };
+  for (const message of messages) {
+    const params = message.params;
+    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
+    const update = params.update;
+    if (!update) continue;
+    const kind = update.sessionUpdate;
+    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
+      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
+      const role = kind === "user_message_chunk" ? "user" : "assistant";
+      if (role === "user" && pending?.role !== "user") {
+        endTurn();
+        turn++;
+        step = 1;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      } else if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      if (pending && pending.role !== role) flushMessage();
+      flushTools();
+      if (role === "assistant" && afterTools) {
+        push("step/end", { turn, step });
+        step++;
+        push("step/start", { turn, step });
+        afterTools = false;
+      }
+      pending ??= { role, content: [] };
+      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
+      const previous = pending.content.at(-1);
+      if (previous?.type === type) previous.text += update.content.text;
+      else pending.content.push({ type, text: update.content.text });
+    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+      flushMessage();
+      afterTools = true;
+      if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      let tool = tools.get(update.toolCallId);
+      if (!tool) {
+        tool = {
+          id: update.toolCallId,
+          name: typeof update.title === "string" ? update.title : "tool",
+          input: update.rawInput,
+          output: [],
+          failed: false,
+          terminal: false,
+          emitted: false
+        };
+        tools.set(tool.id, tool);
+        push("tool/call", {
+          turn,
+          step,
+          callId: tool.id,
+          name: tool.name,
+          arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
+        });
+      }
+      const decoded = piToolResult(update);
+      if (decoded.content.length) tool.output = decoded.content;
+      tool.failed ||= decoded.isError;
+      tool.terminal ||= update.status === "completed" || update.status === "failed";
+      if (kind === "tool_call_update") result(tool);
+    }
+  }
+  endTurn();
+  return events;
 }
 
 // src/acp/adapters/antigravity/models.ts
@@ -32535,7 +33408,7 @@ async function readAgyImage(sessionId, path, root = AGY_IMAGE_ROOT) {
 
 // src/acp/adapters/antigravity-process.ts
 import { spawn as spawn5 } from "node:child_process";
-import { Buffer as Buffer5 } from "node:buffer";
+import { Buffer as Buffer6 } from "node:buffer";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/antigravity/transcript-watcher.ts
@@ -32727,7 +33600,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
   inboundHandlers = /* @__PURE__ */ new Set();
   unavailableHandlers = /* @__PURE__ */ new Set();
   watcher;
-  stdoutBuffer = Buffer5.alloc(0);
+  stdoutBuffer = Buffer6.alloc(0);
   stderrBytes = 0;
   ready = false;
   closed = false;
@@ -32950,7 +33823,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     const child = this.process;
     this.process = void 0;
     this.ready = false;
-    this.stdoutBuffer = Buffer5.alloc(0);
+    this.stdoutBuffer = Buffer6.alloc(0);
     if (child !== void 0 && child.exitCode === null && !child.killed) {
       child.stdout.removeAllListeners("data");
       child.stderr.removeAllListeners("data");
@@ -33016,7 +33889,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     }
     const child = this.spawnAcp(bin, args, this.cwd);
     this.process = child;
-    this.stdoutBuffer = Buffer5.alloc(0);
+    this.stdoutBuffer = Buffer6.alloc(0);
     this.stderrBytes = 0;
     let initResolved = false;
     let rejectInit;
@@ -33044,14 +33917,14 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
       };
       child.stdout.on("data", (chunk) => {
         if (!initResolved) {
-          checkInit(Buffer5.from(chunk));
+          checkInit(Buffer6.from(chunk));
         } else {
-          this.consumeStdout(Buffer5.from(chunk));
+          this.consumeStdout(Buffer6.from(chunk));
         }
       });
     });
     child.stderr.on("data", (chunk) => {
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer5.byteLength(chunk));
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES3, this.stderrBytes + Buffer6.byteLength(chunk));
     });
     child.on("error", (error) => {
       if (this.process !== child) return;
@@ -33110,7 +33983,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
         event: "user",
         message: { content: promptText }
       };
-      const data2 = Buffer5.from(`${JSON.stringify(payload)}
+      const data2 = Buffer6.from(`${JSON.stringify(payload)}
 `, "utf8");
       this.process?.stdin.write(data2);
     });
@@ -33142,7 +34015,7 @@ var AntigravityAcpClient = class _AntigravityAcpClient {
     watcher.start();
   }
   consumeStdout(chunk, onRawEvent) {
-    this.stdoutBuffer = Buffer5.concat([this.stdoutBuffer, chunk]);
+    this.stdoutBuffer = Buffer6.concat([this.stdoutBuffer, chunk]);
     while (true) {
       const newlineIndex = this.stdoutBuffer.indexOf(10);
       if (newlineIndex === -1) break;
@@ -33288,21 +34161,21 @@ var imageBlock = external_exports.object({ type: external_exports.literal("image
 });
 var promptBlock = external_exports.union([textBlock, imageBlock]);
 var acpToolStreamSchema = external_exports.object({
-  backend: external_exports.enum(["cursor", "antigravity"]),
+  backend: external_exports.enum(["cursor", "antigravity", "pi"]),
   endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
   args: external_exports.record(external_exports.unknown())
 }).strict();
 var schemas2 = {
   "dsh/toolCall": external_exports.object({
     sessionId: id4,
-    backend: external_exports.enum(["cursor", "antigravity"]),
+    backend: external_exports.enum(["cursor", "antigravity", "pi"]),
     endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
     args: external_exports.record(external_exports.unknown())
   }).strict(),
-  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.literal("antigravity") }).strict(),
+  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.enum(["antigravity", "pi"]) }).strict(),
   "dsh/selectModel": external_exports.object({
     sessionId: id4,
-    backend: external_exports.literal("antigravity"),
+    backend: external_exports.enum(["antigravity", "pi"]),
     model: id4,
     reasoningEffort: id4.optional()
   }).strict(),
@@ -33326,7 +34199,7 @@ var schemas2 = {
   }).strict(),
   "session/prompt": external_exports.object({
     sessionId: id4,
-    backend: external_exports.enum(["cursor", "antigravity"]).optional(),
+    backend: external_exports.enum(["cursor", "antigravity", "pi", "claude"]).optional(),
     prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
   "session/cancel": external_exports.object({
@@ -33679,7 +34552,7 @@ async function transcriptPath(baseDir, conversationId) {
 }
 
 // src/acp/peer-bridge.ts
-import { Buffer as Buffer6 } from "node:buffer";
+import { Buffer as Buffer7 } from "node:buffer";
 var streamOpenSchema2 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   sessionId: external_exports.string().min(1).max(256),
@@ -33776,7 +34649,7 @@ var AcpPeerBridge = class {
       for await (const value of source) {
         if (controller.signal.aborted || this.closed) break;
         const data2 = { streamId, frame: { method: "dsh/workspaceTool", params: { value } } };
-        if (Buffer6.byteLength(JSON.stringify(data2)) > MAX_SECURE_MESSAGE_BYTES) throw new Error("Oversized workspace tool frame");
+        if (Buffer7.byteLength(JSON.stringify(data2)) > MAX_SECURE_MESSAGE_BYTES) throw new Error("Oversized workspace tool frame");
         await this.publish("agent.acp.frame", data2);
       }
     } catch {
@@ -33908,7 +34781,7 @@ var AcpPeerBridge = class {
     return {
       transferId: params.transferId,
       index: params.index,
-      data: Buffer6.from(transfer.bytes.subarray(start, end)).toString("base64")
+      data: Buffer7.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
   closeTransfer(input2) {
@@ -33990,7 +34863,7 @@ function decodeCanonicalBase642(value) {
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
-  const decoded = Buffer6.from(value, "base64");
+  const decoded = Buffer7.from(value, "base64");
   if (decoded.toString("base64") !== value) {
     throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk is not canonical base64.");
   }
@@ -34037,6 +34910,8 @@ var AcpRemoteGateway = class {
     if (backend.id === "antigravity") {
       return new AntigravityAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
     }
+    if (backend.id === "claude") return new ClaudeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+    if (backend.id === "pi") return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd });
     return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
   }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner) {
     this.config = config;
@@ -34067,6 +34942,10 @@ var AcpRemoteGateway = class {
   /** Catch-up buffer for turns that finish while the Client is reconnecting. */
   recentFrames = /* @__PURE__ */ new Map();
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
+  promptsInProgress = /* @__PURE__ */ new Set();
+  cancelledSessions = /* @__PURE__ */ new Set();
+  /** Identity fences asynchronous Pi preparation from a later retry of the same session. */
+  preparingPrompts = /* @__PURE__ */ new Map();
   turnCatchUp = /* @__PURE__ */ new Map();
   startPromise;
   startingClients = /* @__PURE__ */ new Map();
@@ -34075,7 +34954,7 @@ var AcpRemoteGateway = class {
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends() {
     if (!this.config.enabled) return [];
-    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor"].includes(item.id)).map((item) => item.id);
+    return this.config.backends.filter((item) => item.enabled && ["antigravity", "cursor", "pi", "claude"].includes(item.id)).map((item) => item.id);
   }
   start() {
     if (this.closed) return Promise.reject(new RpcError("CURSOR_CLOSED", "The ACP Remote domain is closed."));
@@ -34126,17 +35005,17 @@ var AcpRemoteGateway = class {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger);
     this.peers.set(context.connectionId, bridge);
     const workspaceBridge = new WorkspaceBridge(async (rawId) => {
-      const match = rawId.match(/^(acp|cursor):(.+)$/);
+      const match = rawId.match(/^(acp|cursor|pi):(.+)$/);
       const session = match ? this.sessionCwds.get(match[2]) : void 0;
-      const backend = match?.[1] === "acp" ? "antigravity" : "cursor";
+      const backend = match?.[1] === "acp" ? "antigravity" : match?.[1] === "pi" ? "pi" : "cursor";
       if (!session || session.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
       this.requireAcp(backend);
       this.requireSessionOwner(context.connectionId, match[2]);
       return session.cwd;
     }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
       domain: "ACP",
-      owns: (value) => typeof value === "string" && /^(acp|cursor):/.test(value),
-      parse: (value) => typeof value === "string" && /^(acp|cursor):[A-Za-z0-9_-]{1,240}$/.test(value) ? { sessionId: value, nativeId: value } : void 0
+      owns: (value) => typeof value === "string" && /^(acp|cursor|pi):/.test(value),
+      parse: (value) => typeof value === "string" && /^(acp|cursor|pi):[A-Za-z0-9_-]{1,240}$/.test(value) ? { sessionId: value, nativeId: value } : void 0
     });
     this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(
       workspaceBridge,
@@ -34152,7 +35031,11 @@ var AcpRemoteGateway = class {
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
     });
     if (typeof call.params.backend === "string") {
-      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor):/, "") : sessionIdFromParams(call.method, call.params);
+      const prefix = typeof call.params.sessionId === "string" ? /^(acp|cursor|pi|claude):/.exec(call.params.sessionId)?.[1] : void 0;
+      if (prefix && (prefix === "acp" ? "antigravity" : prefix) !== call.params.backend) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
+      }
+      const sessionId2 = call.method === "dsh/sessionHistory" ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude):/, "") : sessionIdFromParams(call.method, call.params);
       const boundBackend = sessionId2 === void 0 ? void 0 : this.sessionBackends.get(sessionId2);
       if (boundBackend !== void 0 && boundBackend !== call.params.backend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
@@ -34168,6 +35051,11 @@ var AcpRemoteGateway = class {
       return this.listDirectory(String(call.params.path));
     }
     if (call.method === "dsh/workspaceList") {
+      const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
+      if (requestedBackend === "pi" || requestedBackend === "claude") {
+        const sessions = await this.listCatalogSessions(requestedBackend);
+        return [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename4(path) || "workspace" }));
+      }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
       if (cwd2) candidates.add(cwd2);
@@ -34222,17 +35110,29 @@ var AcpRemoteGateway = class {
         this.logger.info("ACP session list fetched", { count: items.length });
         return { items };
       }
+      if (backend === "pi" || backend === "claude") {
+        const cwd2 = path ? await this.requireExistingDirectory(path) : void 0;
+        const sessions = await this.listCatalogSessions(backend, cwd2);
+        return { items: sessions.slice(0, limit).map((item) => ({ conversationId: item.sessionId, title: item.title ?? "Untitled Session", createdAt: Date.parse(item.updatedAt ?? "") || 0, updatedAt: Date.parse(item.updatedAt ?? "") || 0, cwd: item.cwd })) };
+      }
       return { items: [] };
     }
     if (call.method === "dsh/sessionHistory") {
       const rawSessionId = String(call.params.sessionId);
-      const conversationId = rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
+      const conversationId = rawSessionId.startsWith("claude:") ? rawSessionId.slice(7) : rawSessionId.startsWith("pi:") ? rawSessionId.slice(3) : rawSessionId.startsWith("acp:") ? rawSessionId.slice("acp:".length) : rawSessionId.startsWith("cursor:") ? rawSessionId.slice("cursor:".length) : rawSessionId;
       const boundBackend = this.sessionBackends.get(conversationId);
       const backend = typeof call.params.backend === "string" ? call.params.backend : boundBackend ?? this.defaultBackend();
-      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
+      if (boundBackend !== void 0 && boundBackend !== backend || rawSessionId.startsWith("claude:") && backend !== "claude" || rawSessionId.startsWith("pi:") && backend !== "pi" || rawSessionId.startsWith("cursor:") && backend !== "cursor" || rawSessionId.startsWith("acp:") && backend !== "antigravity") {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
       this.requireAcp(backend);
+      if (backend === "pi" || backend === "claude") {
+        const cwd2 = await this.catalogSessionCwd(backend, conversationId);
+        this.requireSessionOwner(connectionId, conversationId);
+        const client = this.requireAcp(backend);
+        if (!client.history) throw new RpcError("METHOD_NOT_ALLOWED", "The ACP backend does not support history.");
+        return { events: await client.history(conversationId, cwd2) };
+      }
       if (backend !== "antigravity") return { events: [] };
       const events = await loadTranscriptEvents(conversationId, rawSessionId);
       this.logger.info("ACP session history fetched", {
@@ -34252,6 +35152,10 @@ var AcpRemoteGateway = class {
       });
       const sessionId2 = readSessionId(result);
       if (sessionId2 !== void 0) {
+        const bound = this.sessionBackends.get(sessionId2);
+        if (this.sessionOwners.has(sessionId2) || this.sessionCwds.has(sessionId2) || bound !== void 0 && bound !== requestedBackend) {
+          throw new RpcError("ACP_SESSION_COLLISION", "The ACP backend returned an existing session identifier.");
+        }
         this.sessionOwners.set(sessionId2, connectionId);
         this.sessionBackends.set(sessionId2, requestedBackend);
         this.sessionCwds.set(sessionId2, { backend: requestedBackend, cwd: cwd2 });
@@ -34259,7 +35163,7 @@ var AcpRemoteGateway = class {
       return sanitizeSessionResult(result);
     }
     const sessionId = sessionIdFromParams(call.method, call.params);
-    if (sessionId !== void 0) this.requireSessionAccess(connectionId, sessionId, call.method);
+    if (sessionId !== void 0 && call.method !== "session/load") this.requireSessionAccess(connectionId, sessionId, call.method);
     if (call.method === "dsh/toolCall") {
       this.requireSessionOwner(connectionId, sessionId);
       return this.tools(connectionId).call(sessionId, String(call.params.backend), String(call.params.endpoint), call.params.args);
@@ -34274,14 +35178,21 @@ var AcpRemoteGateway = class {
     }
     if (call.method === "session/load") {
       const boundBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
-      const targetBackend = typeof call.params.backend === "string" ? call.params.backend : boundBackend;
+      if (typeof call.params.backend !== "string") throw new RpcError("INVALID_MESSAGE", "Session load requires an explicit backend.");
+      const targetBackend = call.params.backend;
+      if (targetBackend === "claude" && this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
       if (boundBackend !== void 0 && targetBackend !== boundBackend) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
+      if (targetBackend === "pi" || targetBackend === "claude") await this.catalogSessionCwd(targetBackend, sessionId);
+      this.requireSessionOwner(connectionId, sessionId);
       const acp = this.requireAcp(targetBackend);
-      const result = await acp.call(call.method, { ...call.params, ...sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId).cwd } : {} });
+      const result = await acp.call(call.method, { ...call.params, ...sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId).cwd, mcpServers: [] } : {} });
       const loadedId = readSessionId(result) ?? sessionId;
       if (loadedId !== void 0) {
+        if (loadedId !== sessionId || this.sessionBackends.has(loadedId) && targetBackend !== void 0 && this.sessionBackends.get(loadedId) !== targetBackend) {
+          throw new RpcError("ACP_SESSION_COLLISION", "The ACP backend returned a different session identifier.");
+        }
         this.sessionOwners.set(loadedId, connectionId);
         if (targetBackend) this.sessionBackends.set(loadedId, targetBackend);
       }
@@ -34289,6 +35200,11 @@ var AcpRemoteGateway = class {
     }
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
+    }
+    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && call.params.backend === "pi") {
+      this.requireSessionOwner(connectionId, sessionId);
+      const cwd2 = await this.piSessionCwd(sessionId);
+      await this.requireAcp("pi").call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
     }
     if (call.method === "dsh/selectModel") {
       const session = this.sessionCwds.get(sessionId);
@@ -34300,6 +35216,28 @@ var AcpRemoteGateway = class {
       return sanitizeSessionResult(result);
     }
     if (call.method === "session/prompt" && sessionId !== void 0) {
+      if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
+      this.promptsInProgress.add(sessionId);
+      this.cancelledSessions.delete(sessionId);
+      if (this.sessionBackends.get(sessionId) === "pi") {
+        const preparation = { cancelled: false };
+        this.preparingPrompts.set(sessionId, preparation);
+        try {
+          const cwd2 = await this.piSessionCwd(sessionId);
+          if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
+          await this.requireAcp("pi").call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+          if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
+        } catch (error) {
+          if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
+          this.promptsInProgress.delete(sessionId);
+          throw error;
+        } finally {
+          if (this.preparingPrompts.get(sessionId) === preparation) {
+            this.preparingPrompts.delete(sessionId);
+            if (preparation.cancelled) this.promptsInProgress.delete(sessionId);
+          }
+        }
+      }
       const ownerPeer = this.peers.get(connectionId);
       if (ownerPeer !== void 0 && !ownerPeer.hasStreamFor(sessionId)) {
         this.logger?.warn("Cursor prompt started without an open ACP stream", {
@@ -34309,6 +35247,23 @@ var AcpRemoteGateway = class {
       this.turnCatchUp.set(sessionId, []);
       void this.runPromptInBackground(sessionId, call.params);
       return { accepted: true, stopReason: "in_progress" };
+    }
+    if (call.method === "session/cancel" && sessionId !== void 0) {
+      this.cancelledSessions.add(sessionId);
+      const preparation = this.preparingPrompts.get(sessionId);
+      if (preparation) {
+        preparation.cancelled = true;
+        this.preparingPrompts.delete(sessionId);
+        this.promptsInProgress.delete(sessionId);
+        return { stopReason: "cancelled" };
+      }
+      const pending = [...this.approvals].filter(([, approval]) => approval.sessionId === sessionId && approval.backend === this.sessionBackends.get(sessionId));
+      for (const [handle] of pending) this.approvals.delete(handle);
+      try {
+        return sanitizeSessionResult(await this.requireAcp(this.sessionBackends.get(sessionId)).call(call.method, call.params));
+      } finally {
+        await Promise.all(pending.map(([, approval]) => approval.client.respondError(approval.upstreamId, -32800, "ACP session cancelled.").catch(() => void 0)));
+      }
     }
     const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
     return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === "string" ? call.params.backend : sessionBackend).call(call.method, call.params));
@@ -34352,6 +35307,8 @@ var AcpRemoteGateway = class {
           }
         }
       }).catch(() => void 0);
+    } finally {
+      this.promptsInProgress.delete(sessionId);
     }
   }
   async respond(connectionId, input2) {
@@ -34364,13 +35321,16 @@ var AcpRemoteGateway = class {
     if (pending.connectionId !== connectionId) {
       throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The Cursor approval is missing, expired, or belongs to another connection.");
     }
+    if (this.sessionOwners.get(pending.sessionId) !== connectionId || this.sessionBackends.get(pending.sessionId) !== pending.backend || this.requireAcp(pending.backend) !== pending.client) {
+      throw new RpcError("CURSOR_APPROVAL_NOT_FOUND", "The ACP approval scope is no longer active.");
+    }
+    const result = mapPermissionDecision(params, pending);
     this.approvals.delete(params.requestHandle);
-    const acp = this.requireAcp(pending.backend);
+    const acp = pending.client;
     if (params.decision === "cancel") {
       await acp.respondError(pending.upstreamId, -32800, "Cancelled by Remote client.");
       return { resolved: true };
     }
-    const result = params.result ?? mapPermissionDecision(params.decision, pending.method);
     await acp.respond(pending.upstreamId, result);
     return { resolved: true };
   }
@@ -34384,7 +35344,7 @@ var AcpRemoteGateway = class {
     for (const [handle, approval] of this.approvals) {
       if (approval.connectionId === connectionId) {
         this.approvals.delete(handle);
-        void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
+        void approval.client.respondError(approval.upstreamId, -32800, "Remote peer disconnected.").catch(() => void 0);
       }
     }
   }
@@ -34440,7 +35400,7 @@ var AcpRemoteGateway = class {
     const previous = this.config;
     const implemented = (value) => ({
       enabled: value.enabled,
-      backends: value.backends.filter((item) => ["cursor", "antigravity"].includes(item.id))
+      backends: value.backends.filter((item) => ["cursor", "antigravity", "pi", "claude"].includes(item.id))
     });
     this.config = config;
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return;
@@ -34456,7 +35416,7 @@ var AcpRemoteGateway = class {
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id5]) => id5));
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map((peer) => peer.failStreams("failed", sessions)));
     for (const [id5, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id5);
-    const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
+    const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : sessionId.startsWith("pi:") ? "pi" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
     for (const id5 of sessions) {
       this.sessionOwners.delete(id5);
       this.sessionBackends.delete(id5);
@@ -34553,7 +35513,7 @@ var AcpRemoteGateway = class {
       this.startingClients.delete(acp);
     }
     const unsubscribeInbound = acp.onInbound((message) => {
-      this.inboundChain = this.inboundChain.then(() => this.handleInbound(id5, message)).catch((error) => {
+      this.inboundChain = this.inboundChain.then(() => this.backendInstances.get(id5)?.client === acp ? this.handleInbound(id5, message) : void 0).catch((error) => {
         this.logger.warn("ACP inbound fanout failed", { id: id5, code: errorCode3(error) });
       });
     });
@@ -34579,6 +35539,12 @@ var AcpRemoteGateway = class {
     });
   }
   async handleInbound(backend, message) {
+    const incomingId = readSessionId(message.params) ?? readNestedSessionId(message.params);
+    const boundBackend = incomingId === void 0 ? void 0 : this.sessionBackends.get(incomingId);
+    if (boundBackend !== void 0 && boundBackend !== backend) {
+      if (message.kind === "request") await this.requireAcp(backend).respondError(message.id, -32602, "The ACP session backend does not match.");
+      return;
+    }
     if (message.kind === "notification" || message.method === "session/update") {
       const sessionId2 = readSessionId(message.params) ?? readNestedSessionId(message.params);
       if (sessionId2 === void 0) return;
@@ -34588,38 +35554,47 @@ var AcpRemoteGateway = class {
       await this.publishToSession(sessionId2, { method: message.method, params: message.params });
       return;
     }
-    const sessionId = readSessionId(message.params) ?? readNestedSessionId(message.params) ?? "unknown";
-    if (sessionId !== "unknown" && !this.sessionBackends.has(sessionId)) {
-      this.sessionBackends.set(sessionId, backend);
+    const sessionId = incomingId;
+    const owner = sessionId === void 0 ? void 0 : this.sessionOwners.get(sessionId);
+    const peer = owner === void 0 ? void 0 : this.peers.get(owner);
+    const client = this.requireAcp(backend);
+    if (sessionId === void 0 || this.cancelledSessions.has(sessionId) || owner === void 0 || peer === void 0 || boundBackend !== backend || !["session/request_permission", "cursor/create_plan", "cursor/ask_question"].includes(message.method) || message.method.startsWith("cursor/") && backend !== "cursor") {
+      await client.respondError(message.id, -32602, "The ACP request has no active owner or supported method.");
+      return;
+    }
+    let options = [];
+    try {
+      if (message.method === "session/request_permission") options = permissionOptions(message.params);
+    } catch {
+      await client.respondError(message.id, -32602, "The ACP permission options are invalid.");
+      return;
     }
     const requestHandle = randomUUID4();
     this.approvals.set(requestHandle, {
       upstreamId: message.id,
-      connectionId: this.sessionOwners.get(sessionId) ?? [...this.peers.keys()][0] ?? "unknown",
+      connectionId: owner,
       sessionId,
       method: message.method,
       expiresAt: Date.now() + APPROVAL_TTL_MS2,
-      backend
+      backend,
+      client,
+      options
     });
     this.scheduleApprovalExpiry();
-    const owner = this.sessionOwners.get(sessionId);
-    const frame = {
-      method: message.method,
-      params: {
-        requestHandle,
-        sessionId,
-        upstreamMethod: message.method,
-        ...isRecord17(message.params) ? message.params : {}
-      }
-    };
-    if (owner !== void 0) {
-      const peer = this.peers.get(owner);
-      if (peer !== void 0) {
-        await peer.publishInbound(sessionId, frame);
-        return;
-      }
+    try {
+      await peer.publishInbound(sessionId, {
+        method: message.method,
+        params: {
+          ...isRecord17(message.params) ? message.params : {},
+          requestHandle,
+          sessionId,
+          upstreamMethod: message.method
+        }
+      });
+    } catch {
+      this.approvals.delete(requestHandle);
+      await client.respondError(message.id, -32800, "Remote approval delivery failed.");
     }
-    await this.publishToSession(sessionId, frame);
   }
   async publishToSession(sessionId, frame) {
     this.recordTurnCatchUp(sessionId, frame);
@@ -34706,7 +35681,7 @@ var AcpRemoteGateway = class {
       for (const [handle, approval] of this.approvals) {
         if (approval.expiresAt <= now) {
           this.approvals.delete(handle);
-          void this.requireAcp(approval.backend).respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
+          void approval.client.respondError(approval.upstreamId, -32800, "Cursor approval expired.").catch(() => void 0);
         }
       }
       this.scheduleApprovalExpiry();
@@ -34749,7 +35724,10 @@ var AcpRemoteGateway = class {
     return this.requireAcp().call(method, params);
   }
   requireSessionAccess(connectionId, sessionId, method) {
-    if (method === "session/load") return;
+    if (method === "session/load") {
+      this.requireSessionOwner(connectionId, sessionId);
+      return;
+    }
     const owner = this.sessionOwners.get(sessionId);
     if (owner === void 0) {
       this.sessionOwners.set(sessionId, connectionId);
@@ -34761,6 +35739,69 @@ var AcpRemoteGateway = class {
   }
   requireSessionOwner(connectionId, sessionId) {
     this.claimSession(connectionId, sessionId);
+  }
+  captureCatalogClient(backend) {
+    const client = this.requireAcp(backend);
+    const instance = this.backendInstances.get(backend);
+    return { client, assertCurrent: () => {
+      if (this.closed || this.backendInstances.get(backend) !== instance || this.requireAcp(backend) !== client) {
+        throw new RpcError("CURSOR_UNAVAILABLE", "The ACP backend changed while resolving session authority.");
+      }
+    } };
+  }
+  async listCatalogSessions(backend, cwd2) {
+    const { client, assertCurrent } = this.captureCatalogClient(backend);
+    const items = [];
+    let cursor2;
+    const seen = /* @__PURE__ */ new Set();
+    for (let page = 0; page < 100; page++) {
+      const result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor2 ? { cursor: cursor2 } : {} });
+      assertCurrent();
+      if (!isRecord17(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
+      }
+      for (const item of result.sessions) {
+        if (!isRecord17(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
+        assertCurrent();
+        if (!canonical || cwd2 && canonical !== cwd2) continue;
+        if (this.sessionBackends.has(item.sessionId) && this.sessionBackends.get(item.sessionId) !== backend) continue;
+        const trusted = this.sessionCwds.get(item.sessionId);
+        if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue;
+        this.sessionCwds.set(item.sessionId, { backend, cwd: canonical });
+        this.sessionBackends.set(item.sessionId, backend);
+        items.push({
+          sessionId: item.sessionId,
+          cwd: canonical,
+          ...typeof item.title === "string" ? { title: item.title } : {},
+          ...typeof item.updatedAt === "string" ? { updatedAt: item.updatedAt } : {}
+        });
+      }
+      if (result.nextCursor == null) return items;
+      if (seen.has(result.nextCursor) || page === 99) {
+        throw new RpcError("INVALID_MESSAGE", "The ACP session catalog pagination did not complete.");
+      }
+      cursor2 = result.nextCursor;
+      seen.add(cursor2);
+    }
+    return items;
+  }
+  piSessionCwd(sessionId) {
+    return this.catalogSessionCwd("pi", sessionId);
+  }
+  async catalogSessionCwd(backend, sessionId) {
+    const { assertCurrent } = this.captureCatalogClient(backend);
+    if (!this.sessionCwds.has(sessionId)) await this.listCatalogSessions(backend);
+    assertCurrent();
+    const session = this.sessionCwds.get(sessionId);
+    if (!session || session.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+    const canonical = await this.requireExistingDirectory(session.cwd);
+    assertCurrent();
+    const current = this.sessionCwds.get(sessionId);
+    if (canonical !== session.cwd || current?.backend !== backend || current.cwd !== canonical) {
+      throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session workspace authority changed.");
+    }
+    return canonical;
   }
   async requireExistingDirectory(path) {
     if (!isAbsolute6(path)) {
@@ -34825,31 +35866,41 @@ function parseCallEnvelope2(input2) {
   return { method: input2.method, params: input2.params ?? {} };
 }
 function parseRespondEnvelope(input2) {
-  if (!isRecord17(input2) || typeof input2.requestHandle !== "string" || typeof input2.decision !== "string") {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
+  if (!isRecord17(input2) || typeof input2.requestHandle !== "string" || input2.requestHandle.length === 0 || Object.keys(input2).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input2.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input2.decision)) {
+    throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
-  const decision = input2.decision;
-  if (decision !== "allow-once" && decision !== "allow-always" && decision !== "reject-once" && decision !== "cancel") {
-    throw new RpcError("INVALID_MESSAGE", "The Cursor respond envelope is invalid.");
-  }
-  return {
-    requestHandle: input2.requestHandle,
-    decision,
-    ...input2.result === void 0 ? {} : { result: input2.result }
-  };
+  return input2;
 }
-function mapPermissionDecision(decision, method) {
-  if (method === "session/request_permission") {
-    return { outcome: { outcome: "selected", optionId: decision === "cancel" ? "reject-once" : decision } };
+function permissionOptions(params) {
+  if (!isRecord17(params) || !Array.isArray(params.options) || params.options.length === 0) {
+    throw new Error("Missing permission options");
   }
-  if (method === "cursor/create_plan") {
-    if (decision === "allow-once" || decision === "allow-always") return { outcome: { outcome: "accepted" } };
-    return { outcome: { outcome: decision === "cancel" ? "cancelled" : "rejected" } };
+  const ids = /* @__PURE__ */ new Set();
+  const options = params.options.map((option) => {
+    if (!isRecord17(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    ids.add(option.optionId);
+    return { kind: option.kind, optionId: option.optionId };
+  });
+  for (const kind of ["allow_once", "reject_once"]) {
+    if (options.filter((option) => option.kind === kind).length > 1) throw new Error("Ambiguous permission option");
   }
-  if (method === "cursor/ask_question") {
-    return { outcome: { outcome: "cancelled" } };
+  return options;
+}
+function mapPermissionDecision(params, pending) {
+  const invalid = () => new RpcError("INVALID_MESSAGE", "The ACP approval result is not allowed.");
+  if (pending.method === "session/request_permission") {
+    if (params.result !== void 0) throw invalid();
+    if (params.decision === "cancel") return void 0;
+    const kind = params.decision === "allow-once" ? "allow_once" : "reject_once";
+    const option = pending.options.find((item) => item.kind === kind);
+    if (!option) throw invalid();
+    return { outcome: { outcome: "selected", optionId: option.optionId } };
   }
-  return { outcome: { outcome: "selected", optionId: decision } };
+  const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
+  if (params.result !== void 0) {
+    if (!isRecord17(params.result) || Object.keys(params.result).length !== 1 || !isRecord17(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+  }
+  return { outcome: { outcome } };
 }
 function readSessionId(value) {
   if (!isRecord17(value)) return void 0;
@@ -35152,7 +36203,7 @@ var PluginControlRuntime = class {
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     const id5 = record6(payload).id;
-    if (typeof id5 !== "string" || ["codex", "cursor", "antigravity"].includes(id5)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
+    if (typeof id5 !== "string" || ["codex", "cursor", "antigravity", "pi"].includes(id5)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
     const current = resolveConfig(this.settings.get());
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id5);
     await this.settings.replace(editableConfig({ ...current, acp: { enabled: current.acp?.enabled ?? true, backends } }));

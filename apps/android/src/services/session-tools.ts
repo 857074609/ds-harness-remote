@@ -202,10 +202,10 @@ export class HarnessSessionTools implements SessionTools {
 
 /** ACP workspace/terminal carrier. The Host keeps the same path and ownership checks. */
 export class AcpSessionTools implements SessionTools {
-  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity') {}
+  constructor(private readonly client: AgentAcpClient, private readonly backend: 'cursor' | 'antigravity' | 'pi') {}
   private call<T>(sessionId: string, endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const nativeId = sessionId.replace(/^\w+:/u, '')
-    const scope = `${this.backend === 'antigravity' ? 'acp' : 'cursor'}:${nativeId}`
+    const scope = `${this.backend === 'antigravity' ? 'acp' : this.backend}:${nativeId}`
     const scopedArgs = endpoint.startsWith('workspaceFiles/')
       ? { workspaceFileScopeId: scope, ...args }
       : endpoint === 'terminal/list' || endpoint === 'terminal/close'
@@ -241,7 +241,7 @@ export class AcpSessionTools implements SessionTools {
     const push = (value: unknown) => { const waiter = waiters.shift(); if (waiter) waiter({ done: false, value }); else values.push(value) }
     const close = () => { done = true; for (const waiter of waiters.splice(0)) waiter({ done: true, value: undefined }) }
     const nativeId = sessionId.replace(/^\w+:/u, '')
-    const scope = `${this.backend === 'antigravity' ? 'acp' : 'cursor'}:${nativeId}`
+    const scope = `${this.backend === 'antigravity' ? 'acp' : this.backend}:${nativeId}`
     const scopedArgs = endpoint === 'terminal/retain' || endpoint === 'terminal/follow'
       ? { sessionId: scope, ...args }
       : { workspaceFileScopeId: scope, ...args }

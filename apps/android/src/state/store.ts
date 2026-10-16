@@ -46,15 +46,19 @@ import {
   updateCodexSession,
   withCodexPermission,
 } from '../services/codex'
+import { loadPiCatalog, mergePiCatalog, readPiHistory, loadPiModels, selectPiModel, type PiCatalog } from '../services/pi'
 import { loadAntigravityCatalog, mergeAntigravityCatalog, readAntigravityHistory, type AntigravityCatalog } from '../services/antigravity'
 import {
   applyCursorFrame,
+  createPiSession,
+  createPiWorkspace,
   createAntigravitySession,
   createAntigravityWorkspace,
   createCursorSession,
   createCursorWorkspace,
   cursorNativeId,
   foldAcpHistory,
+  mergeAcpHistoryAndLive,
 } from '../services/cursor'
 import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { reconcileTrustedDevices } from '../services/device-directory'
@@ -142,6 +146,7 @@ interface AppState {
   codexAvailable: boolean
   cursorAvailable: boolean
   antigravityAvailable: boolean
+  piAvailable: boolean
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
   /** Newest first; the home screen falls back to these when Favorites is empty. */
@@ -217,7 +222,7 @@ interface AppState {
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
-  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity'): Promise<WorkspaceView | undefined>
+  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
@@ -335,6 +340,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   codexAvailable: false,
   cursorAvailable: false,
   antigravityAvailable: false,
+  piAvailable: false,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],
@@ -582,6 +588,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async refreshWorkspaces() {
     if (get().connection.phase !== 'connected') return
+    const generation = connectionGeneration
     try {
       await connection.refreshBackends()
       const proxy = connection.requireProxy()
@@ -604,7 +611,14 @@ export const useAppStore = create<AppState>((set, get) => ({
         try { agyCatalog = await loadAntigravityCatalog(connection.requireAntigravity(), get().workspaces) }
         catch (error) { agyError = friendlyError(error) }
       }
+      let piCatalog: PiCatalog | undefined
+      let piError: string | undefined
+      if (connection.hasPi()) {
+        try { piCatalog = await loadPiCatalog(connection.requirePi(), get().workspaces) }
+        catch (error) { piError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
+      if (generation !== connectionGeneration) return
       set(state => {
         const codexWorkspaces = codexError === undefined
           ? codexCatalog.workspaces
@@ -622,18 +636,22 @@ export const useAppStore = create<AppState>((set, get) => ({
         const antigravityWorkspaces = connection.hasAntigravity() ? agy.workspaces : []
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
         const antigravitySessions = agy.sessions
-        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
+        const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const piWorkspaces = connection.hasPi() ? pi.workspaces : []
+        const piSessions = pi.sessions
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions]
         return {
           codexAvailable: connection.hasCodex(),
           cursorAvailable: connection.hasCursor(),
           antigravityAvailable: connection.hasAntigravity(),
-          workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
+          piAvailable: connection.hasPi(),
+          workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,
           selectedSession: state.selectedSession === undefined
             ? undefined
             : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-          ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
+          ...(codexError === undefined && agyError === undefined && piError === undefined ? {} : { error: codexError ?? agyError ?? piError }),
         }
       })
     } catch (error) {
@@ -674,8 +692,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       codexAvailable: false,
       cursorAvailable: false,
       antigravityAvailable: false,
-      workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity') : [],
-      sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity') : [],
+      piAvailable: false,
+      workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi') : [],
+      sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') : [],
       archivedSessionIds: [],
       sessionModels: undefined,
       error: undefined,
@@ -722,6 +741,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 codexAvailable: false,
                 cursorAvailable: false,
                 antigravityAvailable: false,
+                piAvailable: false,
                 busyAction: undefined,
               })
             }
@@ -751,6 +771,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         try { agyCatalog = await loadAntigravityCatalog(connection.requireAntigravity(), get().workspaces) }
         catch (error) { agyError = friendlyError(error) }
       }
+      let piCatalog: PiCatalog | undefined
+      let piError: string | undefined
+      if (connection.hasPi()) {
+        try { piCatalog = await loadPiCatalog(connection.requirePi(), get().workspaces) }
+        catch (error) { piError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
       const connectionNetworkDetails = await connection.getNetworkDetails().catch(() => undefined)
       if (generation !== connectionGeneration) return false
@@ -765,7 +791,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         const antigravityWorkspaces = agy.workspaces
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
         const antigravitySessions = agy.sessions
-        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions]
+        const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const piWorkspaces = connection.hasPi() ? pi.workspaces : []
+        const piSessions = pi.sessions
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions]
         const selectedSession = state.selectedSession === undefined
           ? undefined
           : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
@@ -775,7 +804,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           codexAvailable: connection.hasCodex(),
           cursorAvailable: connection.hasCursor(),
           antigravityAvailable: connection.hasAntigravity(),
-          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces],
+          piAvailable: connection.hasPi(),
+          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,
           selectedSession,
@@ -784,7 +814,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastConnectedDeviceId: device.deviceId,
           pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: connection.getStats() ?? { mode: 'Relay', connected: true } },
-          ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
+          ...(codexError === undefined && agyError === undefined && piError === undefined ? {} : { error: codexError ?? agyError ?? piError }),
         }
       })
       connectionStartedAt = Date.now()
@@ -803,6 +833,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         codexAvailable: false,
         cursorAvailable: false,
         antigravityAvailable: false,
+        piAvailable: false,
         error: message,
       })
       return false
@@ -864,6 +895,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       codexAvailable: false,
       cursorAvailable: false,
       antigravityAvailable: false,
+      piAvailable: false,
       workspaces: [],
       archivedSessionIds: [],
       sessions: [],
@@ -890,6 +922,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       error: undefined,
       historyLoadingOlder: false,
       sessionModels: undefined,
+      modelSelecting: false,
       sessionLifecycles: state.sessionLifecycles[session.sessionId] === undefined
         ? state.sessionLifecycles
         : {
@@ -953,16 +986,25 @@ export const useAppStore = create<AppState>((set, get) => ({
         void refreshCodexModels(session.sessionId)
         return
       }
-      if (session.backend === 'cursor' || session.backend === 'antigravity') {
+      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
         await closeActiveCodexStream()
         await closeActiveCursorStream()
         if (!current()) return
-        set({ selectedSession: session, sessionModels: undefined, historyHasMore: false })
-        const acpClient = session.backend === 'antigravity'
-          ? connection.requireAntigravity()
-          : connection.requireCursor()
+        const hasHistory = session.backend === 'antigravity' || session.backend === 'pi'
+        // History replaces the previous connection's projection. Start the new
+        // subscription on an empty projection, so only this subscription's
+        // deltas survive the load (and stale bubbles cannot suppress catchUp).
+        set(state => ({ selectedSession: session, sessionModels: undefined, historyHasMore: false,
+          ...(hasHistory && state.messages[session.sessionId] !== undefined
+            ? { messages: { ...state.messages, [session.sessionId]: [] } } : {}),
+        }))
+        const acpClient = session.backend === 'pi'
+          ? connection.requirePi()
+          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         const [history] = await Promise.all([
-          session.backend === 'antigravity'
+          session.backend === 'pi'
+            ? readPiHistory(acpClient, cursorNativeId(session))
+            : session.backend === 'antigravity'
             ? readAntigravityHistory(acpClient, cursorNativeId(session))
             : Promise.resolve([] as unknown[]),
           ensureCursorStream(session, current),
@@ -976,8 +1018,8 @@ export const useAppStore = create<AppState>((set, get) => ({
             : [session, ...state.sessions],
           messages: {
             ...state.messages,
-            [session.sessionId]: session.backend === 'antigravity' && !session.running
-              ? items
+            [session.sessionId]: hasHistory
+              ? mergeAcpHistoryAndLive(items, state.messages[session.sessionId] ?? [])
               : mergeHistoryAndLive(items, state.messages[session.sessionId] ?? []),
           },
           sessionModels: undefined,
@@ -985,6 +1027,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           oldestLoadedSeq: undefined,
           busyAction: undefined,
         }))
+        if (session.backend === 'pi') void refreshPiModels(session, current)
         return
       }
       await closeActiveCodexStream()
@@ -1185,6 +1228,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return get().openSession(session)
       }
+      if (workspace?.backend === 'pi') {
+        const created = await connection.requirePi().createSession(workspace.path, 'agent', 'pi')
+        if (generation !== connectionGeneration) return false
+        const session = createPiSession({
+          acpSessionId: created.sessionId,
+          cwd: workspace.path,
+        })
+        set(state => ({
+          sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? {
+                ...item,
+                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                updatedAt: new Date().toISOString(),
+              }
+            : item),
+          busyAction: undefined,
+        }))
+        return get().openSession(session)
+      }
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
       if (generation !== connectionGeneration) return false
@@ -1238,7 +1301,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return true
       }
-      if (session?.backend === 'cursor' || session?.backend === 'antigravity') {
+      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') {
         if (get().selectedSession?.sessionId === sessionId) await closeActiveCursorStream()
         set(state => ({
           sessions: state.sessions.filter(item => item.sessionId !== sessionId),
@@ -1275,6 +1338,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async selectModel(selection) {
+    const generation = connectionGeneration
     const session = get().selectedSession
     if (session === undefined || get().connection.phase !== 'connected') return false
     set({ modelSelecting: true, error: undefined })
@@ -1288,6 +1352,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return true
       }
+      if (session.backend === 'pi') {
+        const models = await selectPiModel(connection.requirePi(), cursorNativeId(session), selection)
+        if (generation !== connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+        set({ sessionModels: models, modelSelecting: false })
+        return true
+      }
       if (session.backend === 'cursor' || session.backend === 'antigravity') throw new Error(zhCN.messageActions.unavailable)
       const selected = await connection.requireProxy().sessionSelectModel(session.sessionId, selection)
       set(state => ({
@@ -1296,6 +1366,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }))
       return true
     } catch (error) {
+      if (session.backend === 'pi' && (generation !== connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
       set({ modelSelecting: false, error: friendlyError(error) })
       return false
     }
@@ -1303,7 +1374,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectPermission(preset) {
     const session = get().selectedSession
-    if (session?.backend === 'cursor' || session?.backend === 'antigravity') return false
+    if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') return false
     if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
     const generation = connectionGeneration
     set({ permissionSelecting: true, error: undefined })
@@ -1357,7 +1428,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async loadAgentPresets() {
     const backend = get().selectedSession?.backend
-    if (backend === 'cursor' || backend === 'antigravity') return false
+    if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi') return false
     if (get().connection.phase !== 'connected') return false
     if (get().agentPresetLoading) return false
     set({ agentPresetLoading: true, error: undefined })
@@ -1374,7 +1445,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectAgentPreset(preset) {
     const session = get().selectedSession
     if (session === undefined || get().connection.phase !== 'connected') return false
-    if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity') return false
+    if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') return false
     set({ agentPresetSelecting: true, error: undefined })
     try {
       const committed = await connection.requireProxy().agentPresetSelect(session.sessionId, preset)
@@ -1402,7 +1473,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi') {
         const nextTitle = title.trim()
         if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
         set(state => ({
@@ -1434,7 +1505,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi') {
         const sessionIds = new Set(target.sessionIds)
         const selected = get().selectedSession
         if (selected !== undefined && sessionIds.has(selected.sessionId)) {
@@ -1482,7 +1553,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex' || before?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || before?.backend === 'cursor' || before?.backend === 'antigravity') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi') {
         set(state => {
           const items = state.workspaces.slice()
           const from = items.findIndex(item => item.workspaceId === workspaceId)
@@ -1503,7 +1574,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         workspaces: [
           ...workspaceIds.flatMap(id => byId.get(id) === undefined ? [] : [byId.get(id)!]),
-          ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity'),
+          ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi'),
         ],
         busyAction: undefined,
       })
@@ -1584,7 +1655,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
-    if (session.backend === 'cursor' || session.backend === 'antigravity') {
+    if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
       set({ historyHasMore: false, historyLoadingOlder: false })
       return
     }
@@ -1614,11 +1685,13 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async workspaceCreate(path, backend = 'harness') {
     if (get().connection.phase !== 'connected') return undefined
+    const generation = connectionGeneration
     set({
       busyAction: backend === 'codex'
         ? 'create-codex-workspace'
         : backend === 'cursor'
           ? 'create-cursor-workspace'
+          : backend === 'pi' ? 'create-pi-workspace'
           : backend === 'antigravity'
             ? 'create-antigravity-workspace'
             : 'create-workspace',
@@ -1653,6 +1726,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           return {
             workspaces: [...state.workspaces.filter(item => item.backend !== 'antigravity'), ...merged.workspaces],
             sessions: [...state.sessions.filter(item => item.backend !== 'antigravity'), ...merged.sessions],
+            busyAction: undefined,
+          }
+        })
+        return created
+      }
+      if (backend === 'pi') {
+        if (!connection.hasPi()) throw new Error(zhCN.runtime.piUnavailable)
+        const workspace = createPiWorkspace(path)
+        const catalog = await loadPiCatalog(connection.requirePi(), [...get().workspaces, workspace], path)
+        if (generation !== connectionGeneration || !connection.hasPi()) return undefined
+        let created = workspace
+        set(state => {
+          const merged = mergePiCatalog(catalog, state.workspaces, state.sessions)
+          created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+          return {
+            workspaces: [...state.workspaces.filter(item => item.backend !== 'pi'), ...merged.workspaces],
+            sessions: [...state.sessions.filter(item => item.backend !== 'pi'), ...merged.sessions],
             busyAction: undefined,
           }
         })
@@ -1776,8 +1866,9 @@ export const useAppStore = create<AppState>((set, get) => ({
               : state.selectedSession,
           }))
         }
-      } else if (session.backend === 'cursor' || session.backend === 'antigravity') {
+      } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
         if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
+        if (session.backend === 'pi' && images.length > 0) throw new Error(zhCN.runtime.piTextOnly)
         // Always re-bind the ACP stream on the current RemoteClientCore before
         // prompting. After WebRTC flaps / Metro reload the module-level handle
         // can point at a dead core while RPC still works on a new one.
@@ -1792,9 +1883,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         // Host may return immediately with stopReason=in_progress so frames can
         // interleave; keep running until prompt_completed / failure.
-        const acpClient = session.backend === 'antigravity'
-          ? connection.requireAntigravity()
-          : connection.requireCursor()
+        const acpClient = session.backend === 'pi'
+          ? connection.requirePi()
+          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         const promptResult = await acpClient.prompt(cursorNativeId(session), text, undefined, images.map(image => ({
           type: 'image' as const, mimeType: image.mediaType, data: image.data,
         })), session.backend)
@@ -1856,7 +1947,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Only a deterministic failure may claim the agent is idle again; an
         // unconfirmed outcome leaves `running` untouched (the prompt may have
         // started on the Host).
-        ...((session.backend === 'cursor' || session.backend === 'antigravity') && !unconfirmed ? {
+        ...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') && !unconfirmed ? {
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
         } : {}),
@@ -1933,10 +2024,10 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (turnId === undefined) throw new Error(zhCN.runtime.codexTurnUnavailable)
         await client.interrupt(threadId, turnId)
-      } else if (session.backend === 'cursor' || session.backend === 'antigravity') {
-        const acpClient = session.backend === 'antigravity'
-          ? connection.requireAntigravity()
-          : connection.requireCursor()
+      } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
+        const acpClient = session.backend === 'pi'
+          ? connection.requirePi()
+          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         await acpClient.cancel(cursorNativeId(session))
         set(state => ({
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
@@ -1965,10 +2056,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
       if (session?.backend === 'codex') {
         await connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
-      } else if (session?.backend === 'cursor' || session?.backend === 'antigravity') {
-        const acpClient = session.backend === 'antigravity'
-          ? connection.requireAntigravity()
-          : connection.requireCursor()
+      } else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') {
+        const acpClient = session.backend === 'pi'
+          ? connection.requirePi()
+          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         await acpClient.respond(
           item.approvalId,
           outcome === 'allowed-once' ? 'allow-once' : 'reject-once',
@@ -2177,6 +2268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         busyAction: undefined,
         cursorAvailable: false,
         antigravityAvailable: false,
+        piAvailable: false,
       })
     }
   },
@@ -2327,7 +2419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   handleCursorFrame(frame) {
     const session = get().selectedSession
-    if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity')) return
+    if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi')) return
     const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
     if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
     const update = params === undefined
@@ -2352,12 +2444,13 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? { ...state.selectedSession, running: false }
               : state.selectedSession,
             ...(kind === 'prompt_failed'
-              ? { error: session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
+              ? { error: session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
               : {}),
           }
         : {}),
     }))
     if (session.backend === 'antigravity' && kind === 'prompt_completed') void refreshAntigravityCatalog()
+    if (session.backend === 'pi' && kind === 'prompt_completed') void refreshPiCatalog()
   },
 }))
 
@@ -2379,6 +2472,26 @@ async function refreshAntigravityCatalog(): Promise<void> {
       }
     })
   } catch { /* Keep the live projection when AGY is still persisting its summary. */ }
+}
+
+async function refreshPiCatalog(): Promise<void> {
+  if (!connection.hasPi()) return
+  const client = connection.requirePi()
+  const deviceId = useAppStore.getState().selectedDevice?.deviceId
+  try {
+    const catalog = await loadPiCatalog(client, useAppStore.getState().workspaces)
+    if (!connection.hasPi() || connection.requirePi() !== client || useAppStore.getState().selectedDevice?.deviceId !== deviceId) return
+    useAppStore.setState(state => {
+      const merged = mergePiCatalog(catalog, state.workspaces, state.sessions)
+      return {
+        workspaces: [...state.workspaces.filter(item => item.backend !== 'pi'), ...merged.workspaces],
+        sessions: [...state.sessions.filter(item => item.backend !== 'pi'), ...merged.sessions],
+        selectedSession: state.selectedSession?.backend === 'pi'
+          ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
+          : state.selectedSession,
+      }
+    })
+  } catch { /* Keep the live projection when PI is still persisting its summary. */ }
 }
 
 async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
@@ -2409,9 +2522,9 @@ async function closeActiveCursorStream(notifyRemote = true): Promise<void> {
 async function ensureCursorStream(session: RemoteSession, current: () => boolean = () => true): Promise<void> {
   await closeActiveCursorStream()
   if (!current()) return
-  const client = session.backend === 'antigravity'
-    ? connection.requireAntigravity()
-    : connection.requireCursor()
+  const client = session.backend === 'pi'
+    ? connection.requirePi()
+    : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
   const nativeId = cursorNativeId(session)
   const stream = await client.openStream(
     nativeId,
@@ -2426,7 +2539,7 @@ async function ensureCursorStream(session: RemoteSession, current: () => boolean
         selectedSession: state.selectedSession?.sessionId === session.sessionId
           ? { ...state.selectedSession, running: false }
           : state.selectedSession,
-        ...(closed.reason === 'failed' ? { error: session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+        ...(closed.reason === 'failed' ? { error: session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
       }))
       // Transport flaps can close the ACP stream while the secure channel is
       // still up. Re-open so the next prompt does not miss live frames.
@@ -2434,7 +2547,7 @@ async function ensureCursorStream(session: RemoteSession, current: () => boolean
       const phase = useAppStore.getState().connection.phase
       if (phase !== 'connected') return
       const selected = useAppStore.getState().selectedSession
-      if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity')) return
+      if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi')) return
       void ensureCursorStream(selected, current).catch(() => undefined)
     },
   )
@@ -2556,6 +2669,17 @@ function latestWorkspaceSession(sessions: RemoteSession[], workspace: WorkspaceV
   return latest
 }
 
+/** PI model/mode state is session- and connection-scoped, never persisted to Harness. */
+async function refreshPiModels(session: RemoteSession, current: () => boolean): Promise<void> {
+  const generation = connectionGeneration
+  try {
+    const models = await loadPiModels(connection.requirePi(), cursorNativeId(session))
+    if (!current() || generation !== connectionGeneration) return
+    useAppStore.setState(state => state.selectedSession?.sessionId === session.sessionId
+      ? { sessionModels: models } : {})
+  } catch { /* Optional model discovery must not prevent conversation recovery. */ }
+}
+
 /** Best-effort model catalog load; a failure must not block opening the session. */
 async function refreshSessionModels(sessionId: string): Promise<void> {
   try {
@@ -2623,7 +2747,7 @@ async function finalizeLogin(
 }
 
 function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -2639,6 +2763,7 @@ function initialData(): Pick<AppState,
     codexAvailable: false,
     cursorAvailable: false,
     antigravityAvailable: false,
+    piAvailable: false,
     workspaces: [],
     favoriteWorkspaces: [],
     recentWorkspaces: [],

@@ -1,5 +1,24 @@
 ## Unreleased
 
+- Fixes Pi cancellation during initial cwd/session loading: cancelled preparations cannot start a prompt or clear a newer retry. Desktop Pi projection preserves error, cancellation and token-limit outcomes instead of reporting every turn as completed. Android restores Pi/AGY tabs only when their respective backend is available.
+- 修复 Pi 首次 cwd/session 加载期间的取消：已取消的准备任务不能启动 Prompt，也不能清除后续重试状态；Desktop Pi 投影保留失败、中断和 token 上限状态，不再统一显示正常完成。Android 恢复 Pi/AGY 标签时分别检查对应后端可用性。
+
+- Isolates Pi initial-load replay from live streams, preserving confirmed model/thinking configuration while rejecting load-time callbacks. Android Pi/AGY history recovery retains new-subscription live messages and completion catch-up instead of overwriting them with a delayed snapshot. Claude/Pi catalog and cached cwd validation reject retired backend generations after reconfiguration or shutdown.
+- 修复 Pi 初次 load 的历史回放混入实时流：保留上游确认的模型/Thinking 配置，拒绝加载期间的 callback；Android Pi/AGY 历史恢复合并本次订阅的实时消息及完成 catch-up，不再由迟到快照覆盖。Claude/Pi catalog 与缓存 cwd 校验绑定后端实例，重配/关闭后拒绝旧代际结果。
+
+- Preserves Pi history/catalog read failures instead of inventing an empty conversation. Restores native tool results, failures and terminal output, merges text chunks and coalesces concurrent history reads. Real local Pi model/tool-confirmation and restart/history/pagination/continue smoke tests pass; Pi still has no default per-tool approval, and pi-acp 0.0.34 does not replay original thinking, tool arguments, message IDs or timestamps.
+- 修复 Pi 历史/目录失败被当成空对话、工具输出与错误丢失、文本 chunk 拆分及并发历史读取；真实本机模型工具确认、重启历史/分页/继续聊验证通过。Pi 仍无默认逐工具审批，pi-acp 0.0.34 未重放的原始 thinking、工具参数、消息 ID/时间不伪造恢复。
+
+- Adds Claude ACP Host interruption and catalog/load/history recovery (#125), using a bounded, separate replay reader that does not interrupt active tools. Real Gateway tests confirm pending approval cancellation, running-tool interruption, and process restart with restored conversation context; client UI and encrypted cross-device acceptance remain pending.
+- 补齐 Claude ACP Host 中断与 catalog/load/history 恢复（#125），使用有界独立 replay reader，不打断正在运行的工具；真实 Gateway 验证待审批取消、运行中断及进程重启后的上下文继续对话，客户端 UI 与加密跨设备验收待完成。
+- Adds the initial, opt-in Claude ACP Host backend (#125). Local smoke tests use the existing compatible endpoint with `gpt-6-sol` through the real Claude Agent SDK adapter; client workspace/history and encrypted cross-device acceptance remain pending.
+- Hardens ACP tool approvals: maps single-use choices to the upstream option IDs, rejects persistent grants and arbitrary permission results, and binds each handle to its connection/session/backend instance. Real Gateway checks cover deny, allow once, a fresh approval on the next tool call, cross-connection attempts and replay.
+- 新增默认关闭的 Claude ACP Host 首批接入（#125），使用现有兼容端点与 `gpt-6-sol` 完成真实 SDK/ACP 烟测；客户端工作区、历史和加密跨设备验收待完成。
+- 修复 ACP 工具审批：按上游真实选项 ID 映射单次允许/拒绝，禁止持久授权和任意 permission result，句柄绑定连接/会话/后端实例。真实 Gateway 验证拒绝、单次允许、下一工具重新审批，以及跨连接和重放拒绝。
+
+- Adds experimental Pi Agent ACP support (#97), automatically detected and initialized unless explicitly disabled: Host detection, isolated session wrappers, catalog/history, streaming tools, interrupt and Host-confirmed model/thinking selection, with Desktop/Android in-memory workspaces. Local Pi/OpenAI and real Gateway recovery smoke tests pass; encrypted cross-device, Windows and native Android acceptance remain pending.
+- 新增实验性 Pi Agent ACP 后端（#97），默认自动检测并初始化、尊重用户明确关闭：Host 检测、独立会话进程、目录/历史、流式工具、中断及上游确认的模型/Thinking，接入 Desktop/Android 内存工作区。本机 Pi/OpenAI 对话与真实 Gateway 恢复烟测通过；加密跨设备、Windows 与 Android 原生验收待完成。
+
 - Fixes CodeX workspace re-entry after disconnect: restores the last successfully opened Thread from bounded, Host/Workspace-scoped memory, or chooses the latest catalog Thread without busy-read probes. Navigation memory is cleared on account sign-out; no mutations are replayed.
 - Preserves CodeX history read failures instead of returning a successful empty baseline. Busy/timeouts and malformed pages remain errors; older App Server history API fallback is retained.
 

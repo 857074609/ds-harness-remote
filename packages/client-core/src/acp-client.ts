@@ -15,7 +15,7 @@ import {
 import type { RemoteClientCore } from './index.js'
 import { createRemoteId, RemoteGatewayError } from './remote-gateway.js'
 
-export type AcpAgentBackend = 'cursor' | 'antigravity' | (string & {})
+export type AcpAgentBackend = 'cursor' | 'antigravity' | 'pi' | (string & {})
 
 /**
  * `session/prompt` blocks until the upstream turn finishes. Keep this well above
@@ -52,7 +52,7 @@ export class AgentAcpClient {
 
   async respond(
     requestHandle: string,
-    decision: 'allow-once' | 'allow-always' | 'reject-once' | 'cancel',
+    decision: 'allow-once' | 'reject-once' | 'cancel',
     result?: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
@@ -63,13 +63,13 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async sessionModels(sessionId: string, backend: 'antigravity', signal?: AbortSignal): Promise<AcpSessionModels> {
+  async sessionModels(sessionId: string, backend: 'antigravity' | 'pi', signal?: AbortSignal): Promise<AcpSessionModels> {
     return this.call('dsh/sessionModels', { sessionId, backend }, signal) as Promise<AcpSessionModels>
   }
 
-  async selectModel(sessionId: string, backend: 'antigravity', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
+  async selectModel(sessionId: string, backend: 'antigravity' | 'pi', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
     if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
-    if (!this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
+    if (backend === 'antigravity' && !this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
       await this.call('session/load', { sessionId, backend }, signal)
     }
     const result = await this.call('dsh/selectModel', { sessionId, backend, model: selection.model,
@@ -80,7 +80,7 @@ export class AgentAcpClient {
     return result.selected as unknown as AcpModelSelection
   }
 
-  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  async workspaceToolCall(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi', endpoint: AcpWorkspaceToolCallEndpoint, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     return this.call('dsh/toolCall', { sessionId, backend, endpoint, args }, signal)
   }
 
@@ -90,7 +90,13 @@ export class AgentAcpClient {
   ): Promise<Array<{ path: string; title?: string; sessionCount?: number }>> {
     const result = await this.call('dsh/workspaceList', {
       ...(backend === undefined ? {} : { backend }),
-    }, signal).catch(() => [])
+    }, signal).catch(error => {
+      if (backend === 'pi') throw error
+      return []
+    })
+    if (backend === 'pi' && !Array.isArray(result)) {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace catalog is invalid.')
+    }
     return Array.isArray(result) ? result as Array<{ path: string; title?: string; sessionCount?: number }> : []
   }
 
@@ -104,7 +110,13 @@ export class AgentAcpClient {
       path,
       ...(backend === undefined ? {} : { backend }),
       ...(limit === undefined ? {} : { limit }),
-    }, signal).catch(() => ({ items: [] }))
+    }, signal).catch(error => {
+      if (backend === 'pi') throw error
+      return { items: [] }
+    })
+    if (backend === 'pi' && (!isRecord(result) || !Array.isArray(result.items))) {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session catalog is invalid.')
+    }
     return isRecord(result) && Array.isArray(result.items) ? result.items as Array<{
       conversationId: string
       title: string
@@ -121,7 +133,13 @@ export class AgentAcpClient {
     const result = await this.transferCall('dsh/sessionHistory', {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
-    }, signal).catch(() => ({ events: [] }))
+    }, signal).catch(error => {
+      if (backend === 'pi') throw error
+      return { events: [] }
+    })
+    if (backend === 'pi' && (!isRecord(result) || !Array.isArray(result.events))) {
+      throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
+    }
     return isRecord(result) && Array.isArray(result.events) ? result.events : []
   }
 

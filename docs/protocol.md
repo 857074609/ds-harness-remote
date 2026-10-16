@@ -5,6 +5,10 @@
 协议版本：`1`
 实现状态：**当前仓库实现 Client/Plugin 侧协议与最小单账号 Relay Server；完整 Server 由独立项目实现**
 
+### Claude ACP Host 实验性接入（Issue #125）
+
+`claude` 是独立 ACP backend ID，默认关闭，只使用现有加密 `agent.acp.*` 数据面及固定方法 allowlist；`initialize`、`session/new`、`session/prompt` 的 backend 可显式选择 `claude`。不得按命令名称猜测后端或在其不可用时回退到 Cursor。Host 使用本机预授权的 `claude-agent-acp` stdio adapter，不发送 Cursor `authenticate(cursor_login)`。权限响应仍仅允许现有单次允许/拒绝契约。Host 通过固定 `dsh/workspaceList` / `dsh/sessionList` 使用上游 ACP `session/list` 的分页目录与 Session authority；只接受 Host realpath 验证的真实 cwd。Claude `session/load` 必须显式指定 backend，并由 Host catalog 或本机已创建的 Session 确认 cwd，不能接受 Client 自报路径；活动回复期间禁止重新 load，独立 history 读取不受此限制。`dsh/sessionHistory` 可使用 `claude:<native-session-id>`，前缀必须匹配 backend；历史只经独立临时 ACP process 的 `session/load` replay 获取，不读本机 transcript 文件，最多 8 MiB / 10,000 更新，超限显式失败，读取失败不得返回成功的部分历史或伪造空历史。保留最多 30 个 live/loading Session，以及一个临时 history process；重复 load 不重放污染 live stream。`session/cancel` 使用标准无请求 ID 的 notification；Gateway 同步撤销该会话待审批句柄并隔离迟到权限请求，其他会话/后端不受影响，最终完成状态由上游 `cancelled` 确认，不伪造停止成功。不定义 Claude Workspace UI 前缀，不开放 Claude 图片、模型、文件或终端扩展；客户端工作区投影与加密跨设备验收尚待完成，不得将该 Host 接入解释为完整 Client/E2E 支持。
+
 ## 0. 文档地位与仓库边界（规范性）
 
 本文必须保留，是 Host Plugin、所有 Remote Client、共享协议包和外部 Server 的唯一线协议契约。
@@ -1195,7 +1199,7 @@ Host 必须调用 `fileViewerHost` 服务，让被选中的 File Viewer provider
 ### Agent ACP domain
 
 Agent ACP 是现有 Remote Plugin 内部的通用业务面（见 #65），不是第二个 Plugin，也不是
-Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cursor / Antigravity
+Codex 专用 API。Host 通过 `acp.enabled` 和 `acp.backends` 独立配置 Cursor / Antigravity / Pi
 adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.binary` 仅兼容 Cursor。
 `agent.acp.v1`、`agent.acp.transfer.v1` 与 `agent.acp.<backend>.v1` 表示启用且已实现的协议；
 实际就绪状态见 `workspaceTypes.available`，后台初始化不得阻塞 Harness Remote。
@@ -1225,9 +1229,7 @@ AGY 1.3.0 的 stream-json 不接受 image block，Host 将缓存目录加入 AGY
 用 text 内的受限引用让其 `view_file` 读取图片。缓存目录不作为 Workspace 暴露。
 Remote 将图片投影到原生 user/message 与 session/attachment，仅返回所属 Session 引用的图片；
 历史从该 AGY transcript 的引用恢复仍有效的附件，用户文案移除内部缓存引用。
-不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传（`allow-once` / `allow-always` /
-`reject-once` / `cancel`）。有序 `session/update` 与 `session/request_permission` 经
-`agent.acp.frame` 下发。
+不得接受 Client 提交的文件路径，不提供通用文件上传 RPC，不写入项目目录。权限类上游请求经 `agent.acp.respond` 回传，仅允许 `allow-once` / `reject-once` / `cancel`；禁止 `allow-always` 或其他持久授权。Host 按上游 `options[].kind` 的 `allow_once` / `reject_once` 映射本次请求真实 `optionId`（不可假设拒绝 ID 为 `reject-once`），仅接受唯一、有效的单次选项；`cancel` 取消待审批请求而不授权。权限回复不得附带任意 `result` 绕过映射。审批句柄绑定 Host 后端实例、会话与所有者连接，跨连接、重放、断线或重配后的旧句柄必须拒绝；无主或未知上游请求 fail closed，不向其他设备广播。Cursor 专属 plan/question 只保留明确的受限响应形状，不扩展通用 RPC。有序 `session/update` 与 `session/request_permission` 经 `agent.acp.frame` 下发；Host 生成的 requestHandle/sessionId/upstreamMethod 不得被上游字段覆盖。
 
 Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生 Harness UI，
 该投影不改变 Harness Host API，也不写入 DSH SessionStore、Workspace 数据库或日志。
@@ -1240,6 +1242,10 @@ Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生
 `dsh/sessionHistory` 使用有界 ACP transfer 读取含图片或大文本的响应；图片 Prompt 的
 transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
 History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
+
+Pi 使用独立 `agent.acp.pi.v1`，工作区 ID 为 `pi:cwd:<encoded-path>`、展示 Session ID 为 `pi:<native-id>`。Pi 首版仅接收文字 Prompt，不因上游支持 image 而放宽 Remote 图片策略。Host 从 `pi-acp` 的标准 `session/list` 获取目录 authority，所有目录仍须 `realpath` 确认为真实目录；历史经独立 wrapper 的 `session/load` 通知恢复。活动 Session 的 wrapper 不与历史读取共享，Client 断线不取消正在运行的 Prompt。Pi 工具由本机 Pi 执行，默认无逐工具审批；Host Pi 扩展发出的 confirm 经上游 `session/request_permission` 使用同一单次审批契约，Remote 不自动安装扩展或虚构工具沙箱。Pi 目录/历史读取失败必须保留错误，不投影为成功的空结果。历史工具输出使用原生 `tool/result` 事件，并保留 bash terminal 输出及失败状态；`pi-acp@0.0.34` 未重放的原始 thinking、工具输入、消息 ID 和时间不能由 Remote 伪造，未知时间为 `0`，消息 ID 仅为稳定投影标识。后端前缀、归属和工具 scope 校验与其他 ACP 后端相同，不扩大 Harness/Codex API。
+
+Pi 首次 Prompt 的可信 cwd / `session/load` 准备阶段也接受 `session/cancel`；已取消的准备任务不得再向上游提交 Prompt，原 Prompt call 最终返回 `{ accepted: false, stopReason: 'cancelled' }`。旧准备任务完成或失败不能释放后续新 turn 的 reservation，不向新 turn 发送迟到的旧 completion。已提交的 Prompt 仍由上游确认停止；断线不取消 Prompt。Client 投影须区分 `prompt_failed`、`stopReason: 'cancelled'`、`max_tokens` 与正常结束，不得把失败或中断改写为完成。
 
 Cursor adapter 实现细节见 [ACP Remote](acp-remote.md)。
 

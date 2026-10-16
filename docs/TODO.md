@@ -11,6 +11,22 @@ legacy ApiProxy 不再作为兼容维护目标，已有实现仅保留。
 状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
 本次仅核对源码和发布记录，不新增测试通过或真机验收结论。
 
+## Pi Agent ACP（Issue #97）
+
+- [x] 注册默认自动检测、初始化成功才可用且尊重明确关闭的 `pi` 后端（`pi-acp`），独立 capability、Desktop/Android 内存工作区与会话投影。
+- [x] 本机安装 Pi Agent 与 ACP wrapper，使用已有 OpenAI 兼容配置完成真实 CLI 对话及 Gateway 创建会话、流式工具回复、历史读取与归属拒绝验证。
+- [x] Pi 工具审批与历史复核：真实模型触发扩展 confirm，单次拒绝不执行/允许一次；跨连接抢答、断线和重放拒绝。真实 Gateway → ACP Client → Desktop 内存投影验证工具输出、重启历史、分页与继续聊；修复历史失败伪空结果、工具输出/错误丢失及并发历史读取。上游未重放的 thinking、原始输入/ID/时间不宣称无损恢复。
+- [x] 修复首次 load 的历史混入 live、准备阶段取消后仍启动 Prompt、Android 历史覆盖本代 live/审批、Desktop 错误/中断被标记完成，以及后端标签恢复条件；核心代际/恢复矩阵与真实本机重启后首载无重复烟测通过。
+- [ ] Windows、独立 Remote Web、Android APK/原生真机及真实加密跨设备恢复验收。不要把本机 Gateway 烟测视为这些目标已通过。
+
+## Claude Code ACP（Issue #125）
+
+- [x] 创建 [Issue #125](https://github.com/liguobao/ds-harness-remote/issues/125)，开始 Host `claude` 后端与专用 ACP stdio adapter 接入，默认关闭。
+- [ ] 完成 Desktop/Web 与 Android Claude 工作区/会话内存投影、独立后端识别与历史恢复。
+- [x] 复用已有 OpenAI 兼容端点/凭据与 `gpt-6-sol` 完成真实 Claude ACP 初始化、文字对话及本机 Gateway `Write` 工具拒绝/单次允许；同会话第二次工具调用重新审批，真实句柄的跨连接、持久授权、result 越权及重放被拒绝。
+- [x] Claude Host 中断、catalog/load 与独立有界 history：真实待审批 Write 取消后旧句柄失效/无文件；Bash 运行期间 history 不打断 turn，随后返回 cancelled；Gateway/adapter 进程重启后 catalog/load/history 与上下文继续对话通过。
+- [ ] Claude 独立客户端工作区/历史展示、重连 UI、Windows、APK/真机及加密跨设备验收；本机兼容模型测试不代表 Anthropic Claude 模型或完整产品验收。
+
 ## 当前执行顺序
 
 1. P0：对齐协议 schema，完成安全审查与真实 Relay 拒绝验证。

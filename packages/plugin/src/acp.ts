@@ -29,6 +29,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 
 export interface AcpIdeConfig { id: string; command: string; args?: string[]; cwd?: string }
 export const DEFAULT_ACP_IDES: readonly AcpIdeConfig[] = [
+  { id: 'pi', command: 'pi-acp', args: [] },
   { id: 'codex', command: 'codex', args: ['acp'] },
   { id: 'cursor', command: 'agent', args: ['acp'] },
   { id: 'kimi', command: 'kimi', args: ['acp'] },

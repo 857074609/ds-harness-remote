@@ -19,7 +19,7 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{zhCN.chat.subagentsTitle(sessions.length)}</Text>
@@ -85,7 +85,7 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
       ? zhCN.chat.teamTaskInProgress
       : zhCN.chat.teamTaskPending
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{zhCN.chat.teamTitle(members.length)}</Text>

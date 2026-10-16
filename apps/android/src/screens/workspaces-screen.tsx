@@ -538,7 +538,7 @@ function WorkspaceActionsModal({ target, canMoveUp, canMoveDown, busy, onClose, 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <View style={styles.workspaceActionHeading}>
@@ -654,7 +654,7 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
 
   return (
     <>
-      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
         <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
             <View style={styles.sheetHeader}>
               <Text style={styles.sheetTitle}>{zhCN.workspaces.create}</Text>
@@ -824,7 +824,7 @@ function RenameWorkspaceModal({ target, busy, onClose, onRename }: {
   }
 
   return (
-    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={target !== undefined} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.sheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.renameTitle}</Text>
@@ -883,7 +883,7 @@ function DirectoryBrowserModal({ visible, onClose, onChoose }: {
   const entries = listing === undefined ? [] : listing.entries.filter(entry => showHidden || !entry.hidden)
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <WorkspaceModalSurface onClose={onClose} backdropStyle={styles.backdrop} sheetStyle={styles.browserSheet}>
           <View style={styles.sheetHeader}>
             <Text style={styles.sheetTitle}>{zhCN.workspaces.chooseFolder}</Text>

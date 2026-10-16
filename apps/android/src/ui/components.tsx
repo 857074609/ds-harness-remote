@@ -29,14 +29,18 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh,
   scrollRef?: RefObject<ScrollView | null>
 }) {
   const { colors } = useTheme()
+  const insets = useSafeAreaInsets()
   const styles = useThemedStyles(createStyles)
   const inset = useHeaderInset()
-  if (!scroll) return <View style={[styles.screen, { paddingTop: inset }]}>{children}</View>
+  if (!scroll) return <View style={[styles.screen, { paddingTop: inset, paddingBottom: insets.bottom }]}>{children}</View>
   return (
     <ScrollView
       ref={scrollRef}
       style={styles.screen}
-      contentContainerStyle={[styles.screenContent, { paddingTop: inset }]}
+      contentContainerStyle={[
+        styles.screenContent,
+        { paddingTop: inset, paddingBottom: styles.screenContent.paddingBottom + insets.bottom },
+      ]}
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
       refreshControl={onRefresh === undefined

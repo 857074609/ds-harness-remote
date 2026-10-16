@@ -69,6 +69,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
     {listing && <FlatList data={[...listing.entries].sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name))}
       keyExtractor={item => item.name} ListEmptyComponent={<Text style={[styles.notice, { color: colors.muted }]}>{t.tools.empty}</Text>}
       ListFooterComponent={listing.truncated ? <Text style={[styles.notice, { color: colors.muted }]}>{t.tools.truncated}</Text> : null}
+      contentContainerStyle={styles.listContent}
       renderItem={({ item }) => <Pressable accessibilityRole="button" disabled={item.type === 'other'} style={[styles.row, { borderBottomColor: colors.separator }]} onPress={() => {
         const next = [listing.path, item.name].filter(Boolean).join('/')
         if (item.type === 'directory') setPath(next)
@@ -96,6 +97,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
 }
 const styles = StyleSheet.create({
   container: { flex: 1 }, toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, padding: spacing.sm },
+  listContent: { paddingBottom: spacing.lg },
   path: { ...type.body, flex: 1 }, row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
   notice: { padding: spacing.md, gap: spacing.md }, caption: { ...type.caption, paddingHorizontal: spacing.md },
   code: { fontFamily: 'monospace', fontSize: 14, lineHeight: 21, padding: spacing.md },

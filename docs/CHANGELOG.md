@@ -1,3 +1,11 @@
+## Unreleased
+
+- Keeps the Remote status strip, and the scrim of its connection panel, clickable in the Windows Desktop caption. The strip is placed in the title bar row, which the shell declares as the window drag region, so without an explicit opt-out every press only started a window drag; both surfaces now exclude themselves from that region with the same marker the shell's own caption controls use.
+
+### 中文
+
+- 修复 Windows Desktop 顶栏中的 Remote 状态条及其连接线路面板遮罩无法点击：状态条位于标题栏行内，而该行被 shell 声明为窗口拖拽区，未显式退出时点击只会变成拖动窗口；两处现使用 shell 自有顶栏控件相同的标记退出拖拽区。
+
 ## 0.5.8 - 2026-10-16
 
 - Refreshes Android with frosted floating headers, pill actions, a rounded floating composer, and a white light theme with subtle card outlines (#111, #112, #113).

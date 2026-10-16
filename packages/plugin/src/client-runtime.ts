@@ -572,6 +572,7 @@ export class ClientModeRuntime {
       }
       assertCurrent()
       await this.closeCodexVirtual(false)
+      assertCurrent()
       await this.closeCursorVirtual()
       assertCurrent()
       const selectionKey = JSON.stringify([remote.target.deviceId, workspaceId])

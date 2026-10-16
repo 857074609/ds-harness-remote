@@ -17,6 +17,7 @@ import {
 } from '../src/client-runtime.js'
 import type { ResolvedConfig } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
+import { AcpVirtualHarness } from '../src/acp/virtual-harness.js'
 import { CodexVirtualHarness, paginateCodexNativeHistory, projectCodexNativeHistory } from '../src/codex/virtual-harness.js'
 import { IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
@@ -450,6 +451,8 @@ describe('ClientModeRuntime Host account control', () => {
       { name: 'late catalog after sign-out cannot restore old memory', host: 'host-1', workspace: 'repo', race: 'logout', expected: 'codex:latest' },
       { name: 'late old Host connection cannot close the newer Host', host: 'host-new', workspace: 'repo', race: 'connect-newer', expected: 'codex:latest' },
       { name: 'late Host connection after sign-out never regains authority', host: 'host-1', workspace: 'repo', race: 'connect-logout', expected: 'codex:latest' },
+      { name: 'late CodeX teardown preserves the successor Cursor carrier', host: 'host-1', workspace: 'repo', successor: 'cursor' as const, expected: 'codex:older' },
+      { name: 'late CodeX teardown preserves the successor AGY carrier', host: 'host-1', workspace: 'repo', successor: 'antigravity' as const, expected: 'codex:older' },
     ].map(scenario => ({
       name: scenario.name,
       run: async () => {
@@ -468,6 +471,8 @@ describe('ClientModeRuntime Host account control', () => {
         const catalogGate = new Promise<void>(resolve => { releaseCatalog = resolve })
         const catalogWaiting = new Promise<void>(resolve => { catalogStarted = resolve })
         let deferCatalog = false
+        let deferStreamClose = false
+        let acpRemoteSpy: { mockRestore(): void } | undefined
         let missing = false
         const transfers = new Map<string, Buffer[]>()
         const rpc = vi.fn(async (method: string, params: unknown): Promise<unknown> => {
@@ -488,7 +493,9 @@ describe('ClientModeRuntime Host account control', () => {
             transfers.delete((params as { transferId: string }).transferId)
             return { closed: true }
           }
-          if (method === 'harness.transport.describe') return { capabilities: ['harness.remote.v1', 'codex.appserver.v1'] }
+          if (method === 'harness.transport.describe') return { capabilities: ['harness.remote.v1', 'codex.appserver.v1',
+            ...(scenario.successor === undefined ? [] : [`agent.acp.${scenario.successor}.v1`]),
+          ] }
           if (method === 'codex.app.call') {
             const call = params as { method: string; params: Record<string, unknown> }
             if (call.method === 'project/list') return { data: [
@@ -510,7 +517,14 @@ describe('ClientModeRuntime Host account control', () => {
             }
           }
           if (method === 'codex.app.stream.open') return { opened: true }
-          if (method === 'codex.app.stream.close') return { closed: true }
+          if (method === 'codex.app.stream.close') {
+            if (deferStreamClose) {
+              deferStreamClose = false
+              catalogStarted()
+              await catalogGate
+            }
+            return { closed: true }
+          }
           throw new Error(`unexpected method: ${method}`)
         })
         const state = runtime as unknown as { connected: unknown; codexVirtual: CodexVirtualHarness; closeCodexVirtual(): Promise<void> }
@@ -532,7 +546,27 @@ describe('ClientModeRuntime Host account control', () => {
             const otherHistory = await state.codexVirtual.api.sessions.history({ rpcId: 'open-other' as never, payload: { sessionId: 'codex:other-older' as never } })
             expect(otherHistory.result.ok).toBe(true)
           }
-          if (scenario.race?.startsWith('connect-')) {
+          if (scenario.successor !== undefined) {
+            const workspace = { workspaceId: `${scenario.successor}:cwd:/srv/repo`, path: '/srv/repo', title: 'Repo', sessionIds: ['acp-successor'] }
+            const successor = {
+              close: vi.fn(async () => undefined),
+              selectWorkspace: vi.fn(async () => workspace),
+              preferredSessionId: vi.fn(async () => 'acp-successor'),
+            }
+            acpRemoteSpy = vi.spyOn(AcpVirtualHarness, 'remote').mockReturnValue(successor as unknown as AcpVirtualHarness)
+            deferStreamClose = true
+            const lateOpen = runtime.openCodexWorkspace('host-1', repo.workspaceId)
+            const rejected = expect(lateOpen).rejects.toMatchObject({ code: 'CANCELLED' })
+            await catalogWaiting
+            const selection = { targetDeviceId: 'host-1', workspaceId: workspace.workspaceId, backend: scenario.successor, sessionId: 'acp-successor' }
+            await expect(runtime.openCursorWorkspace('host-1', workspace.workspaceId, undefined, scenario.successor)).resolves.toMatchObject({ workspaceSelection: selection })
+            expect(successor.close).not.toHaveBeenCalled()
+            releaseCatalog()
+            await rejected
+            expect(successor.close).not.toHaveBeenCalled()
+            expect((runtime as unknown as { cursorVirtual: unknown }).cursorVirtual).toBe(successor)
+            expect(runtime.status()).toMatchObject({ workspaceSelection: selection })
+          } else if (scenario.race?.startsWith('connect-')) {
             state.connected = undefined
             await state.closeCodexVirtual()
             const staleConnection = makeConnection('host-stale')
@@ -606,7 +640,7 @@ describe('ClientModeRuntime Host account control', () => {
             && ['thread/start', 'thread/resume', 'turn/start'].includes((params as { method: string }).method))).toBe(false)
         } finally {
           releaseCatalog()
-          await runtime.close()
+          try { await runtime.close() } finally { acpRemoteSpy?.mockRestore() }
         }
       },
     })), cleanupScenario1)

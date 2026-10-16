@@ -28042,6 +28042,7 @@ var ClientModeRuntime = class {
       }
       assertCurrent();
       await this.closeCodexVirtual(false);
+      assertCurrent();
       await this.closeCursorVirtual();
       assertCurrent();
       const selectionKey = JSON.stringify([remote.target.deviceId, workspaceId]);

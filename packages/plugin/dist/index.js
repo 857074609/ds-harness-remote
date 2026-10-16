@@ -5605,8 +5605,8 @@ var util;
     return void 0;
   };
   util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
-  function joinValues(array4, separator = " | ") {
-    return array4.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
+  function joinValues(array3, separator = " | ") {
+    return array3.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
   util2.joinValues = joinValues;
   util2.jsonStringifyReplacer = (_, value) => {
@@ -13392,7 +13392,7 @@ function hexToBytes(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new Error("hex string expected, got unpadded hex of length " + hl);
-  const array4 = new Uint8Array(al);
+  const array3 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase16(hex.charCodeAt(hi));
     const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
@@ -13400,9 +13400,9 @@ function hexToBytes(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array4[ai] = n1 * 16 + n2;
+    array3[ai] = n1 * 16 + n2;
   }
-  return array4;
+  return array3;
 }
 function utf8ToBytes(str) {
   if (typeof str !== "string")
@@ -16109,7 +16109,7 @@ function hexToBytes2(hex) {
   const al = hl / 2;
   if (hl % 2)
     throw new RangeError("hex string expected, got unpadded hex of length " + hl);
-  const array4 = new Uint8Array(al);
+  const array3 = new Uint8Array(al);
   for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
     const n1 = asciiToBase162(hex.charCodeAt(hi));
     const n2 = asciiToBase162(hex.charCodeAt(hi + 1));
@@ -16117,9 +16117,9 @@ function hexToBytes2(hex) {
       const char = hex[hi] + hex[hi + 1];
       throw new RangeError('hex string expected, got non-hex character "' + char + '" at index ' + hi);
     }
-    array4[ai] = n1 * 16 + n2;
+    array3[ai] = n1 * 16 + n2;
   }
-  return array4;
+  return array3;
 }
 function concatBytes2(...arrays) {
   let sum = 0;
@@ -21869,6 +21869,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   lastProjectionSeq = 0;
   commandSeq = 0;
   selectedWorkspaceId;
+  lastOpenedSessionId;
+  openedWorkspaceSessions = /* @__PURE__ */ new Map();
   closed = false;
   static remote(core, host, sessionGeneration = "legacy", hostCarrier) {
     return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration, hostCarrier);
@@ -21884,24 +21886,35 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.catalog = catalog;
     return workspace;
   }
-  async preferredSessionId(signal) {
+  get openedSessionId() {
+    return this.lastOpenedSessionId;
+  }
+  get openedSessions() {
+    return new Map(this.openedWorkspaceSessions);
+  }
+  rememberOpenedSession(sessionId) {
+    if (this.closed) return;
+    this.lastOpenedSessionId = sessionId;
+    for (const workspace of this.catalog?.workspaces ?? []) {
+      if (!workspace.sessionIds.includes(sessionId)) continue;
+      this.openedWorkspaceSessions.delete(workspace.workspaceId);
+      this.openedWorkspaceSessions.set(workspace.workspaceId, sessionId);
+      if (this.openedWorkspaceSessions.size > 64) {
+        this.openedWorkspaceSessions.delete(this.openedWorkspaceSessions.keys().next().value);
+      }
+    }
+  }
+  async preferredSessionId(signal, preferredSessionId = this.openedWorkspaceSessions.get(this.selectedWorkspaceId ?? "")) {
+    signal?.throwIfAborted();
     const catalog = this.catalog;
     const selected = catalog?.workspaces.find((workspace) => workspace.workspaceId === this.selectedWorkspaceId);
     const selectedSessionIds = new Set(selected?.sessionIds ?? []);
     const sessions = (catalog?.sessions ?? []).filter((session) => selectedSessionIds.has(session.id));
-    const idleNamed = sessions.filter((session) => session.status !== "running" && session.status !== "waiting" && displayTitle(session) !== null);
-    const idle = sessions.filter((session) => session.status !== "running" && session.status !== "waiting");
-    const preferredNamed = idleNamed.length > 1 ? [...idleNamed.slice(1), idleNamed[0]] : idleNamed;
-    const candidates = [...new Set([...preferredNamed, ...idle, ...sessions].map((session) => session.id))];
-    for (const sessionId of candidates) {
-      const threadId = nativeThreadId(sessionId);
-      try {
-        const thread = await this.fetchThread(threadId, signal);
-        return sessionId;
-      } catch {
-      }
-    }
-    return void 0;
+    if (sessions.some((session) => session.id === preferredSessionId)) return preferredSessionId;
+    return sessions.reduce(
+      (latest, session) => latest === void 0 || session.updatedAt > latest.updatedAt ? session : latest,
+      void 0
+    )?.id;
   }
   async invoke(request) {
     const result = await this.dispatch(
@@ -22325,12 +22338,18 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         signal,
         () => this.closeFollowAfterRemoteStreamClosed(follow)
       );
+      if (this.closed || signal.aborted) {
+        await stream.close().catch(() => void 0);
+        signal.throwIfAborted();
+        throw new Error("The CodeX virtual Harness is closed.");
+      }
       follow.close = () => stream.close();
     } catch (error) {
       this.follows.delete(follow);
       queue.close();
       throw error;
     }
+    this.rememberOpenedSession(sessionId);
     return queue.iterate(() => {
       this.follows.delete(follow);
       void follow.close?.().catch(() => void 0);
@@ -22980,12 +22999,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     for (const follow of this.follows) if (follow.threadId === threadId && follow.stepOpen) return follow.activeTurnId;
     return void 0;
   }
-  async fetchThread(threadId, signal) {
-    const result = record3(await this.client.request("thread/read", { threadId, includeTurns: false }, signal));
-    const thread = record3(result.thread);
-    if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
-    return thread;
-  }
   async readHistoryPage(threadId, page, signal) {
     let value;
     try {
@@ -23033,7 +23046,12 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       maxMessages: optionalPositiveInteger(request.maxMessages)
     }, signal);
     const directory = await this.models(signal).catch(() => void 0);
-    if (beforeSeq === void 0) await this.ensureRcFollow(sessionId, history);
+    if (beforeSeq === void 0) {
+      await this.ensureRcFollow(sessionId, history);
+      signal.throwIfAborted();
+      if (this.closed) throw new Error("The CodeX virtual Harness is closed.");
+      this.rememberOpenedSession(sessionId);
+    }
     return success({
       events: history.records.map((entry) => ({
         event: entry.event,
@@ -23094,6 +23112,10 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         controller.signal,
         () => this.closeFollowAfterRemoteStreamClosed(follow)
       );
+      if (this.closed || !this.follows.has(follow)) {
+        await stream.close().catch(() => void 0);
+        throw new Error("The CodeX follow was closed before it opened.");
+      }
       follow.close = async () => {
         controller.abort();
         await stream.close();
@@ -27703,6 +27725,9 @@ var ClientModeRuntime = class {
   connected;
   pendingWorkspaceSelection;
   codexVirtual;
+  codexVirtualSelection;
+  codexOpenedSessions = /* @__PURE__ */ new Map();
+  codexOpenGeneration = 0;
   cursorVirtual;
   acpVirtualBackend = "cursor";
   proxySwitch;
@@ -27859,6 +27884,7 @@ var ClientModeRuntime = class {
     this.connectionProgress = void 0;
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
+    this.codexOpenedSessions.clear();
     await this.closeCursorVirtual();
     this.proxySwitch?.selectLocal();
     await this.closePreview();
@@ -27987,8 +28013,17 @@ var ClientModeRuntime = class {
     return discoverCodexVirtualWorkspaces(new CodexRemoteClient(remote.client), signal);
   }
   async openCodexWorkspace(targetDeviceId, workspaceId, signal) {
-    const remote = await this.ensureConnected(targetDeviceId, signal);
+    const generation = ++this.codexOpenGeneration;
+    const remote = await this.ensureConnected(targetDeviceId, signal, () => this.codexOpenGeneration === generation);
+    const assertCurrent = () => {
+      signal?.throwIfAborted();
+      if (this.closed || this.connected !== remote || this.codexOpenGeneration !== generation) {
+        throw new ClientModeError("CANCELLED", "The CodeX workspace selection was superseded or disconnected.");
+      }
+    };
+    assertCurrent();
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
+    assertCurrent();
     if (!remote.features.codex) {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
@@ -27997,26 +28032,36 @@ var ClientModeRuntime = class {
       deviceId: remote.target.deviceId,
       name: remote.target.name
     }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway2(remote.client));
-    let workspace;
     try {
-      workspace = await virtual.selectWorkspace(workspaceId, signal);
-    } catch {
+      let workspace;
+      try {
+        workspace = await virtual.selectWorkspace(workspaceId, signal);
+      } catch {
+        assertCurrent();
+        throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
+      }
+      assertCurrent();
+      await this.closeCodexVirtual(false);
+      await this.closeCursorVirtual();
+      assertCurrent();
+      const selectionKey = JSON.stringify([remote.target.deviceId, workspaceId]);
+      const preferredSessionId = await virtual.preferredSessionId(signal, this.codexOpenedSessions.get(selectionKey));
+      assertCurrent();
+      this.codexVirtual = virtual;
+      this.codexVirtualSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
+      this.selectCodexTarget(virtual, remote);
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId,
+        backend: "codex",
+        ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
+      };
+      this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
+      return { ...this.status(), workspace };
+    } catch (error) {
       await virtual.close();
-      throw new ClientModeError("WORKSPACE_NOT_FOUND", "The selected CodeX workspace is no longer available.");
+      throw error;
     }
-    await this.closeCodexVirtual();
-    await this.closeCursorVirtual();
-    this.codexVirtual = virtual;
-    this.selectCodexTarget(virtual, remote);
-    const preferredSessionId = await virtual.preferredSessionId(signal);
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId,
-      backend: "codex",
-      ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
-    };
-    this.logger.info("CodeX virtual workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
-    return { ...this.status(), workspace };
   }
   async createCodexWorkspace(targetDeviceId, path, signal) {
     const trimmedPath = path.trim();
@@ -28316,9 +28361,22 @@ var ClientModeRuntime = class {
     this.proxySwitch.selectRemote(virtual.api, target2);
     this.gatewaySwitch.selectRemote((request) => virtual.invoke(request), { execute: true, list: true }, target2);
   }
-  async closeCodexVirtual() {
+  async closeCodexVirtual(invalidatePending = true) {
+    if (invalidatePending) this.codexOpenGeneration += 1;
     const virtual = this.codexVirtual;
+    const selection = this.codexVirtualSelection;
     this.codexVirtual = void 0;
+    this.codexVirtualSelection = void 0;
+    if (selection !== void 0 && virtual !== void 0) {
+      for (const [workspaceId, sessionId] of virtual.openedSessions) {
+        const key = JSON.stringify([selection.targetDeviceId, workspaceId]);
+        this.codexOpenedSessions.delete(key);
+        this.codexOpenedSessions.set(key, sessionId);
+        if (this.codexOpenedSessions.size > 64) {
+          this.codexOpenedSessions.delete(this.codexOpenedSessions.keys().next().value);
+        }
+      }
+    }
     await virtual?.close();
   }
   async closeCursorVirtual() {
@@ -28505,11 +28563,25 @@ var ClientModeRuntime = class {
       throw error;
     }
   }
-  async ensureConnected(targetDeviceId, signal) {
+  async ensureConnected(targetDeviceId, signal, isCurrent) {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
     const next = await this.connect(targetDeviceId, signal);
+    const assertCurrent = () => {
+      signal?.throwIfAborted();
+      if (this.closed || isCurrent?.() === false) {
+        throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
+      }
+    };
+    try {
+      assertCurrent();
+      await this.closePreview();
+      assertCurrent();
+    } catch (error) {
+      this.clearConnectionProgress(next.progressRunId);
+      await next.client.close().catch(() => void 0);
+      throw error;
+    }
     const previous = this.connected;
-    await this.closePreview();
     this.connected = next;
     this.clearConnectionProgress(next.progressRunId);
     await previous?.client.close().catch(() => void 0);
@@ -30485,31 +30557,34 @@ var CodexRemoteDomain = class {
   async readThreadForHistory(connectionId, threadId) {
     const { thread: metadata } = await this.readKnownThread(threadId);
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
+      return { ...metadata, turns: await this.readThreadTurns(threadId, "full") };
     } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError;
+      if (!isHistoryFormatFallback(fullError)) throw fullError;
       this.logHistoryFallback(connectionId, "turns-full", fullError);
     }
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
+      return { ...metadata, turns: await this.readThreadTurns(threadId, "summary") };
     } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError;
+      if (!isHistoryFormatFallback(summaryError)) throw summaryError;
       this.logHistoryFallback(connectionId, "turns-summary", summaryError);
     }
     try {
       const legacyResult = await this.callUpstream("thread/read", { threadId, includeTurns: true });
       const legacyThread = extractThread(legacyResult);
-      if (legacyThread === void 0 || legacyThread.id !== threadId) {
+      if (legacyThread === void 0 || legacyThread.id !== threadId || !Array.isArray(legacyThread.turns)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
+      }
+      if (legacyThread.turns.some((turn) => !isRecord13(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord13(item)))) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid Thread history content.");
       }
       return legacyThread;
     } catch (legacyError) {
       if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
       this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
-      return { ...metadata, turns: [] };
+      throw legacyError;
     }
   }
-  async readThreadTurns(connectionId, threadId, itemsView) {
+  async readThreadTurns(threadId, itemsView) {
     const turns = [];
     let cursor2;
     for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
@@ -30520,43 +30595,50 @@ var CodexRemoteDomain = class {
         itemsView,
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      const pageResult = isRecord13(result) ? result : {};
-      for (const rawTurn of array3(pageResult.data)) {
-        if (!isRecord13(rawTurn)) continue;
-        const turnId = typeof rawTurn.id === "string" ? rawTurn.id : void 0;
-        const items = rawTurn.itemsView === "full" || turnId === void 0 ? array3(rawTurn.items) : await this.readThreadItems(connectionId, threadId, turnId, array3(rawTurn.items));
+      if (!isRecord13(result) || !Array.isArray(result.data)) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Turn page.");
+      }
+      const pageResult = result;
+      for (const rawTurn of result.data) {
+        if (!isRecord13(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
+          throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Turn.");
+        }
+        const inlineFull = rawTurn.itemsView === "full" || rawTurn.itemsView === void 0 && itemsView === "full" && Array.isArray(rawTurn.items);
+        const items = inlineFull ? rawTurn.items : await this.readThreadItems(threadId, rawTurn.id);
+        if (items.some((item) => !isRecord13(item))) {
+          throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
+        }
         turns.push({ ...rawTurn, items });
       }
-      cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-      if (cursor2 === void 0) break;
+      cursor2 = historyNextCursor(pageResult.nextCursor);
+      if (cursor2 === void 0) return turns;
     }
-    return turns;
+    throw new RpcError("PAYLOAD_TOO_LARGE", "Codex history exceeds the Turn page limit.");
   }
-  async readThreadItems(connectionId, threadId, turnId, fallbackItems) {
+  async readThreadItems(threadId, turnId) {
     const items = [];
     let cursor2;
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream("thread/items/list", {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: "asc",
-          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-        });
-        const pageResult = isRecord13(result) ? result : {};
-        for (const entry of array3(pageResult.data)) {
-          if (isRecord13(entry) && entry.item !== void 0) items.push(entry.item);
-        }
-        cursor2 = typeof pageResult.nextCursor === "string" && pageResult.nextCursor.length > 0 ? pageResult.nextCursor : void 0;
-        if (cursor2 === void 0) break;
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream("thread/items/list", {
+        threadId,
+        turnId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: "asc",
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      });
+      if (!isRecord13(result) || !Array.isArray(result.data)) {
+        throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Item page.");
       }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error;
-      this.logHistoryFallback(connectionId, "items", error);
-      return fallbackItems;
+      for (const entry of result.data) {
+        if (!isRecord13(entry) || !isRecord13(entry.item)) {
+          throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
+        }
+        items.push(entry.item);
+      }
+      cursor2 = historyNextCursor(result.nextCursor);
+      if (cursor2 === void 0) return items;
     }
-    return items;
+    throw new RpcError("PAYLOAD_TOO_LARGE", "Codex history exceeds the Item page limit.");
   }
   logHistoryFallback(connectionId, stage, error) {
     this.logger.warn("Codex history read fallback", {
@@ -31079,6 +31161,16 @@ function errorCode2(error) {
 function isHistoryReadRecoverable(error) {
   return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR", "CODEX_REQUEST_TIMEOUT", "CODEX_THREAD_BUSY"].includes(error.code);
 }
+function historyNextCursor(value) {
+  if (value === void 0 || value === null || value === "") return void 0;
+  if (typeof value !== "string") {
+    throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history cursor.");
+  }
+  return value;
+}
+function isHistoryFormatFallback(error) {
+  return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
+}
 function isProjectListFallbackError(error) {
   return error instanceof RpcError && ["METHOD_NOT_ALLOWED", "METHOD_NOT_FOUND", "CODEX_UPSTREAM_ERROR"].includes(error.code);
 }
@@ -31087,9 +31179,6 @@ function canTryNextBinary(error) {
 }
 function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array3(value) {
-  return Array.isArray(value) ? value : [];
 }
 function maskId(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;

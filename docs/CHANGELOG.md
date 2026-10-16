@@ -1,3 +1,13 @@
+## Unreleased
+
+- Fixes CodeX workspace re-entry after disconnect: restores the last successfully opened Thread from bounded, Host/Workspace-scoped memory, or chooses the latest catalog Thread without busy-read probes. Navigation memory is cleared on account sign-out; no mutations are replayed.
+- Preserves CodeX history read failures instead of returning a successful empty baseline. Busy/timeouts and malformed pages remain errors; older App Server history API fallback is retained.
+
+### 中文
+
+- 修复 CodeX 断线后重新进入工作区的会话选择：从按 Host／工作区隔离且有界的内存中恢复上次成功打开的 Thread；无有效记忆时选择目录中最近更新的 Thread，不再通过 busy-read 探测跳到旧会话。退出账号清除导航记忆，不重放任何写操作。
+- CodeX 历史读取失败不再返回成功的空基线；busy、超时及异常分页响应保留错误，同时继续兼容旧 App Server 的历史读取接口。
+
 ## 0.5.9 - 2026-10-16
 
 - Separates Control authorization, ICE discovery, WebRTC negotiation and Noise handshake deadlines. Server-provided WebRTC budgets remain compatible, including 20-second fallback and legacy Servers without the optional field. Cancellation and disconnect settle startup and ignore late results.

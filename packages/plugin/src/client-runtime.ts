@@ -203,6 +203,9 @@ export class ClientModeRuntime {
   private connected?: ConnectedRemote
   private pendingWorkspaceSelection?: RemoteWorkspaceSelection
   private codexVirtual?: CodexVirtualHarness
+  private codexVirtualSelection?: { targetDeviceId: string; workspaceId: string }
+  private readonly codexOpenedSessions = new Map<string, string>()
+  private codexOpenGeneration = 0
   private cursorVirtual?: AcpVirtualHarness
   private acpVirtualBackend: 'cursor' | 'antigravity' = 'cursor'
   private readonly proxySwitch?: ApiProxySwitch
@@ -400,6 +403,7 @@ export class ClientModeRuntime {
     this.connectionProgress = undefined
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
+    this.codexOpenedSessions.clear()
     await this.closeCursorVirtual()
     this.proxySwitch?.selectLocal()
     await this.closePreview()
@@ -539,8 +543,17 @@ export class ClientModeRuntime {
     workspaceId: string,
     signal?: AbortSignal,
   ): Promise<Record<string, unknown>> {
-    const remote = await this.ensureConnected(targetDeviceId, signal)
+    const generation = ++this.codexOpenGeneration
+    const remote = await this.ensureConnected(targetDeviceId, signal, () => this.codexOpenGeneration === generation)
+    const assertCurrent = (): void => {
+      signal?.throwIfAborted()
+      if (this.closed || this.connected !== remote || this.codexOpenGeneration !== generation) {
+        throw new ClientModeError('CANCELLED', 'The CodeX workspace selection was superseded or disconnected.')
+      }
+    }
+    assertCurrent()
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
+    assertCurrent()
     if (!remote.features.codex) {
       throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The selected Host does not provide CodeX workspaces.')
     }
@@ -549,26 +562,36 @@ export class ClientModeRuntime {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
     }, harnessSessionGeneration(this.host?.localHarnessVersion?.()), new RemoteTypertGateway(remote.client))
-    let workspace: CodexVirtualWorkspaceView
     try {
-      workspace = await virtual.selectWorkspace(workspaceId, signal)
-    } catch {
+      let workspace: CodexVirtualWorkspaceView
+      try {
+        workspace = await virtual.selectWorkspace(workspaceId, signal)
+      } catch {
+        assertCurrent()
+        throw new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected CodeX workspace is no longer available.')
+      }
+      assertCurrent()
+      await this.closeCodexVirtual(false)
+      await this.closeCursorVirtual()
+      assertCurrent()
+      const selectionKey = JSON.stringify([remote.target.deviceId, workspaceId])
+      const preferredSessionId = await virtual.preferredSessionId(signal, this.codexOpenedSessions.get(selectionKey))
+      assertCurrent()
+      this.codexVirtual = virtual
+      this.codexVirtualSelection = { targetDeviceId: remote.target.deviceId, workspaceId }
+      this.selectCodexTarget(virtual, remote)
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId,
+        backend: 'codex',
+        ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
+      }
+      this.logger.info('CodeX virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
+      return { ...this.status(), workspace }
+    } catch (error) {
       await virtual.close()
-      throw new ClientModeError('WORKSPACE_NOT_FOUND', 'The selected CodeX workspace is no longer available.')
+      throw error
     }
-    await this.closeCodexVirtual()
-    await this.closeCursorVirtual()
-    this.codexVirtual = virtual
-    this.selectCodexTarget(virtual, remote)
-    const preferredSessionId = await virtual.preferredSessionId(signal)
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId,
-      backend: 'codex',
-      ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
-    }
-    this.logger.info('CodeX virtual workspace opened', { targetDeviceId: shortId(remote.target.deviceId) })
-    return { ...this.status(), workspace }
   }
 
   async createCodexWorkspace(
@@ -924,9 +947,24 @@ export class ClientModeRuntime {
     this.gatewaySwitch.selectRemote(request => virtual.invoke(request), { execute: true, list: true }, target)
   }
 
-  private async closeCodexVirtual(): Promise<void> {
+  private async closeCodexVirtual(invalidatePending = true): Promise<void> {
+    if (invalidatePending) this.codexOpenGeneration += 1
     const virtual = this.codexVirtual
+    const selection = this.codexVirtualSelection
     this.codexVirtual = undefined
+    this.codexVirtualSelection = undefined
+    // Keep only navigation IDs in memory, scoped to the Host and Workspace.
+    // Capture before the first await: transport close clears `connected` first.
+    if (selection !== undefined && virtual !== undefined) {
+      for (const [workspaceId, sessionId] of virtual.openedSessions) {
+        const key = JSON.stringify([selection.targetDeviceId, workspaceId])
+        this.codexOpenedSessions.delete(key)
+        this.codexOpenedSessions.set(key, sessionId)
+        if (this.codexOpenedSessions.size > 64) {
+          this.codexOpenedSessions.delete(this.codexOpenedSessions.keys().next().value!)
+        }
+      }
+    }
     await virtual?.close()
   }
 
@@ -1126,11 +1164,31 @@ export class ClientModeRuntime {
     }
   }
 
-  private async ensureConnected(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+  private async ensureConnected(
+    targetDeviceId: string,
+    signal?: AbortSignal,
+    isCurrent?: () => boolean,
+  ): Promise<ConnectedRemote> {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
     const next = await this.connect(targetDeviceId, signal)
+    const assertCurrent = (): void => {
+      signal?.throwIfAborted()
+      if (this.closed || isCurrent?.() === false) {
+        throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
+      }
+    }
+    try {
+      // Reject a stale connection before it can detach a newer Host or restore
+      // authority after sign-out. Also fence the preview-close await below.
+      assertCurrent()
+      await this.closePreview()
+      assertCurrent()
+    } catch (error) {
+      this.clearConnectionProgress(next.progressRunId)
+      await next.client.close().catch(() => undefined)
+      throw error
+    }
     const previous = this.connected
-    await this.closePreview()
     this.connected = next
     this.clearConnectionProgress(next.progressRunId)
     await previous?.client.close().catch(() => undefined)

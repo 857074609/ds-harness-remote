@@ -1353,13 +1353,19 @@ transfer 和 2 分钟 idle 清理。重组后的内容必须再次
 App Server 意外退出或 stdio 失效时，Host 立即撤回动态 capability、清空 active-turn lease 与审批
 handle，并以 `failed` 结束全部旧 Codex stream。Host 按 `1s -> 2s -> 4s -> 8s -> 15s` 最多五次
 重启 App Server；重启只重新执行 initialize/account probe，禁止重放任何 call/mutation。Desktop
-Client 必须重新探测 capability，重新打开 stream，并以 `thread/read(includeTurns:true)` 替换本地
-baseline 后继续归并 live event。Android Client 同样必须重新探测 capability、重开 stream，并以
+Client 必须重新探测 capability，重新打开 stream，并以 Host 分页 `dsh/sessionHistory` 替换本地
+baseline 后继续归并 live event；旧 Host 不支持分页扩展时才回退到 `thread/read(includeTurns:true)`。
+Android Client 同样必须重新探测 capability、重开 stream，并以
 Host 分页 `dsh/sessionHistory` 替换移动端 baseline；若分页基线包含仍在运行的 Turn，Host 必须保留
 open step/turn 语义并返回顶层 `activeTurnId`，以便同一连接或同一设备的替换连接可以发起
 `turn/interrupt`。任何一端都不得自动重放不确定的 mutation。
 
-Desktop 打开 Thread 时只用 `thread/read(includeTurns:true)` 建立持久化 baseline，Remote stream
+Desktop 打开 Thread 时使用 Host 分页 `dsh/sessionHistory` 建立持久化 baseline；Host 可通过
+`thread/turns/list` / `thread/items/list` 读取，并兼容旧版 `thread/read(includeTurns:true)`。
+读取失败（包括 busy、超时和异常分页响应）不得被转换为成功的空 baseline；真正为空的成功响应
+仍可展示空会话。Desktop 重新进入 CodeX 工作区时，可在内存中按 Host／工作区记住上次成功打开的
+Thread；仅当它仍属于该工作区的 Host catalog 时恢复，否则选择最近更新的 Thread。
+该记忆不写入 Harness 持久化，退出账号清除，也不得用于重放任何写操作。Remote stream
 只是 Host 侧的事件过滤器，不得因纯查看自动调用 `thread/resume`。用户明确继续发送前才
 resume；如果 App Server 因 Thread 已在本进程加载而拒绝重复 resume，Host 可在已经完成
 `thread/read` 归属校验后把该操作视为幂等成功。不确定结果的 turn、rename 或 archive 不自动重放。

@@ -962,25 +962,86 @@ describe('CodexVirtualHarness', () => {
     ])
   }, 10000)
 
-  it('skips an unreadable latest thread when choosing the initial workspace session', async () => {
-    const client = fakeCodex([codexThread('thr_2', '/workspace/repo', 'Readable fallback')])
-    const originalRequest = client.request.getMockImplementation() as
-      | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
-      | undefined
-    client.request.mockImplementation(async (method: string, params?: Record<string, unknown>) => {
-      if (method === 'thread/list') return {
-        data: [codexThread('thr_1', '/workspace/repo', 'Busy latest'), codexThread('thr_2', '/workspace/repo', 'Readable fallback')],
-      }
-      if (method === 'thread/read' && params?.threadId === 'thr_1') throw new Error('busy')
-      if (method === 'thread/read') return { thread: codexThread('thr_2', '/workspace/repo', 'Readable fallback') }
-      return originalRequest?.(method, params)
-    })
-    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
-    const workspace = (await target.workspaces())[0]!
-    await target.selectWorkspace(workspace.workspaceId)
+  it('restores catalog sessions without busy-read probes or cross-workspace navigation', async () => {
+    await runScenarios([
+      { name: 'restores the most recent running thread even without a title', preferred: undefined, expected: 'codex:latest' },
+      { name: 'retains the previously opened older thread', preferred: 'codex:older', expected: 'codex:older' },
+      { name: 'ignores remembered threads from another workspace', preferred: 'codex:outside', expected: 'codex:latest' },
+      { name: 'falls back to the latest after a remembered thread disappears', preferred: 'codex:missing', expected: 'codex:latest' },
+      { name: 'an empty workspace does not pick another workspace thread', empty: true, expected: undefined },
+      { name: 'an aborted reconnect does not choose a session', aborted: true, expected: undefined },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const client = fakeCodex([
+          { ...codexThread('older', '/workspace/repo', 'Older'), updatedAt: 1_700_000_101 },
+          { ...codexThread('latest', '/workspace/repo', ''), updatedAt: 1_700_000_200, status: { type: 'active' } },
+          { ...codexThread('outside', '/workspace/other', 'Other'), updatedAt: 1_700_000_300 },
+        ], { projects: [
+          codexProject('repo-project', 'repo', ['/workspace/repo'], 0),
+          codexProject('empty-project', 'empty', ['/workspace/empty'], 1),
+          codexProject('outside-project', 'other', ['/workspace/other'], 2),
+        ] })
+        const original = client.request.getMockImplementation()!
+        client.request.mockImplementation(async (method, params) => {
+          if (method === 'thread/read') throw new Error('busy')
+          return original(method, params)
+        })
+        const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+        try {
+          const workspaces = await target.workspaces()
+          await target.selectWorkspace(workspaces.find(workspace => workspace.path === (scenario.empty ? '/workspace/empty' : '/workspace/repo'))!.workspaceId)
+          const controller = new AbortController()
+          if (scenario.aborted) controller.abort()
+          if (scenario.aborted) {
+            await expect(target.preferredSessionId(controller.signal, scenario.preferred)).rejects.toMatchObject({ name: 'AbortError' })
+          } else {
+            await expect(target.preferredSessionId(controller.signal, scenario.preferred)).resolves.toBe(scenario.expected)
+          }
+          expect(client.request.mock.calls.some(([method]) => method === 'thread/read' || method === 'thread/start' || method === 'thread/resume')).toBe(false)
+        } finally {
+          await target.close()
+        }
+      },
+    })))
+  })
 
-    await expect(target.preferredSessionId()).resolves.toBe('codex:thr_2')
-    await target.close()
+  it('remembers only successful initial history or follow opens for session recovery', async () => {
+    await runScenarios(['history', 'follow'].map(mode => ({
+      name: mode,
+      run: async () => {
+        const client = fakeCodex([codexThread('older', '/workspace/repo', 'Older')])
+        const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+        const controller = new AbortController()
+        try {
+          const workspace = (await target.workspaces())[0]!
+          await target.selectWorkspace(workspace.workspaceId)
+          expect(target.openedSessionId).toBeUndefined()
+          if (mode === 'follow') {
+            await target.open('session/follow', { args: { request: { address: { kind: 'session', sessionId: 'codex:older' } } } }, controller.signal)
+          } else {
+            const response = await target.api.sessions.history({ rpcId: 'open' as never, payload: { sessionId: 'codex:older' as never } })
+            expect(response.result.ok).toBe(true)
+          }
+          expect(target.openedSessionId).toBe('codex:older')
+          await expect(target.preferredSessionId()).resolves.toBe('codex:older')
+          const page = await target.api.sessions.history({ rpcId: 'page' as never, payload: { sessionId: 'codex:thr_1' as never, beforeSeq: 3 } })
+          expect(page.result.ok).toBe(true)
+          expect(target.openedSessionId).toBe('codex:older')
+          const original = client.request.getMockImplementation()!
+          client.request.mockImplementation(async (method, params) => {
+            if (method === 'dsh/sessionHistory') throw new Error('history temporarily unavailable')
+            return original(method, params)
+          })
+          const failed = await target.api.sessions.history({ rpcId: 'failed' as never, payload: { sessionId: 'codex:thr_1' as never } })
+          expect(failed.result.ok).toBe(false)
+          expect(target.openedSessionId).toBe('codex:older')
+        } finally {
+          controller.abort()
+          await target.close()
+        }
+      },
+    })))
   })
 })
 

@@ -665,33 +665,38 @@ export class CodexRemoteDomain {
   private async readThreadForHistory(connectionId: string, threadId: string): Promise<Record<string, unknown>> {
     const { thread: metadata } = await this.readKnownThread(threadId)
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'full') }
+      return { ...metadata, turns: await this.readThreadTurns(threadId, 'full') }
     } catch (fullError) {
-      if (!isHistoryReadRecoverable(fullError)) throw fullError
+      if (!isHistoryFormatFallback(fullError)) throw fullError
       this.logHistoryFallback(connectionId, 'turns-full', fullError)
     }
     try {
-      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'summary') }
+      return { ...metadata, turns: await this.readThreadTurns(threadId, 'summary') }
     } catch (summaryError) {
-      if (!isHistoryReadRecoverable(summaryError)) throw summaryError
+      if (!isHistoryFormatFallback(summaryError)) throw summaryError
       this.logHistoryFallback(connectionId, 'turns-summary', summaryError)
     }
     try {
       const legacyResult = await this.callUpstream('thread/read', { threadId, includeTurns: true })
       const legacyThread = extractThread(legacyResult)
-      if (legacyThread === undefined || legacyThread.id !== threadId) {
+      if (legacyThread === undefined || legacyThread.id !== threadId || !Array.isArray(legacyThread.turns)) {
         throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Thread history.')
+      }
+      if (legacyThread.turns.some(turn => !isRecord(turn) || typeof turn.id !== 'string'
+        || !Array.isArray(turn.items) || turn.items.some(item => !isRecord(item)))) {
+        throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned invalid Thread history content.')
       }
       return legacyThread
     } catch (legacyError) {
       if (!isHistoryReadRecoverable(legacyError)) throw legacyError
       this.logHistoryFallback(connectionId, 'thread-read-full', legacyError)
-      return { ...metadata, turns: [] }
+      // A failed read is not an empty conversation. Let clients retry instead
+      // of replacing a previously populated baseline with a successful blank.
+      throw legacyError
     }
   }
 
   private async readThreadTurns(
-    connectionId: string,
     threadId: string,
     itemsView: 'full' | 'summary',
   ): Promise<Record<string, unknown>[]> {
@@ -705,55 +710,55 @@ export class CodexRemoteDomain {
         itemsView,
         ...(cursor === undefined ? {} : { cursor }),
       })
-      const pageResult = isRecord(result) ? result : {}
-      for (const rawTurn of array(pageResult.data)) {
-        if (!isRecord(rawTurn)) continue
-        const turnId = typeof rawTurn.id === 'string' ? rawTurn.id : undefined
-        const items = rawTurn.itemsView === 'full' || turnId === undefined
-          ? array(rawTurn.items)
-          : await this.readThreadItems(connectionId, threadId, turnId, array(rawTurn.items))
+      if (!isRecord(result) || !Array.isArray(result.data)) {
+        throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Turn page.')
+      }
+      const pageResult = result
+      for (const rawTurn of result.data) {
+        if (!isRecord(rawTurn) || typeof rawTurn.id !== 'string' || rawTurn.id.length === 0
+          || rawTurn.itemsView === 'full' && !Array.isArray(rawTurn.items)) {
+          throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history Turn.')
+        }
+        const inlineFull = rawTurn.itemsView === 'full'
+          || rawTurn.itemsView === undefined && itemsView === 'full' && Array.isArray(rawTurn.items)
+        const items = inlineFull ? rawTurn.items as unknown[] : await this.readThreadItems(threadId, rawTurn.id)
+        if (items.some(item => !isRecord(item))) {
+          throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history Item.')
+        }
         turns.push({ ...rawTurn, items })
       }
-      cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
-        ? pageResult.nextCursor
-        : undefined
-      if (cursor === undefined) break
+      cursor = historyNextCursor(pageResult.nextCursor)
+      if (cursor === undefined) return turns
     }
-    return turns
+    throw new RpcError('PAYLOAD_TOO_LARGE', 'Codex history exceeds the Turn page limit.')
   }
 
-  private async readThreadItems(
-    connectionId: string,
-    threadId: string,
-    turnId: string,
-    fallbackItems: unknown[],
-  ): Promise<unknown[]> {
+  private async readThreadItems(threadId: string, turnId: string): Promise<unknown[]> {
     const items: unknown[] = []
     let cursor: string | undefined
-    try {
-      for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-        const result = await this.callUpstream('thread/items/list', {
-          threadId,
-          turnId,
-          limit: CODEX_HISTORY_PAGE_LIMIT,
-          sortDirection: 'asc',
-          ...(cursor === undefined ? {} : { cursor }),
-        })
-        const pageResult = isRecord(result) ? result : {}
-        for (const entry of array(pageResult.data)) {
-          if (isRecord(entry) && entry.item !== undefined) items.push(entry.item)
-        }
-        cursor = typeof pageResult.nextCursor === 'string' && pageResult.nextCursor.length > 0
-          ? pageResult.nextCursor
-          : undefined
-        if (cursor === undefined) break
+    for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
+      const result = await this.callUpstream('thread/items/list', {
+        threadId,
+        turnId,
+        limit: CODEX_HISTORY_PAGE_LIMIT,
+        sortDirection: 'asc',
+        ...(cursor === undefined ? {} : { cursor }),
+      })
+      if (!isRecord(result) || !Array.isArray(result.data)) {
+        throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Item page.')
       }
-    } catch (error) {
-      if (!isHistoryReadRecoverable(error)) throw error
-      this.logHistoryFallback(connectionId, 'items', error)
-      return fallbackItems
+      for (const entry of result.data) {
+        if (!isRecord(entry) || !isRecord(entry.item)) {
+          throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history Item.')
+        }
+        items.push(entry.item)
+      }
+      cursor = historyNextCursor(result.nextCursor)
+      if (cursor === undefined) return items
     }
-    return items
+    // Summary inline Items cannot replace a failed full read: tool output and
+    // message content may be omitted. Never publish a truncated baseline.
+    throw new RpcError('PAYLOAD_TOO_LARGE', 'Codex history exceeds the Item page limit.')
   }
 
   private logHistoryFallback(connectionId: string, stage: string, error: unknown): void {
@@ -1385,6 +1390,21 @@ function errorCode(error: unknown): string {
 function isHistoryReadRecoverable(error: unknown): boolean {
   return error instanceof RpcError
     && ['METHOD_NOT_ALLOWED', 'METHOD_NOT_FOUND', 'CODEX_UPSTREAM_ERROR', 'CODEX_REQUEST_TIMEOUT', 'CODEX_THREAD_BUSY'].includes(error.code)
+}
+
+function historyNextCursor(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === '') return undefined
+  if (typeof value !== 'string') {
+    throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history cursor.')
+  }
+  return value
+}
+
+// Only try another history API for version/format compatibility. Busy and
+// timeout failures must remain errors, not successful empty/partial baselines.
+function isHistoryFormatFallback(error: unknown): boolean {
+  return error instanceof RpcError
+    && ['METHOD_NOT_ALLOWED', 'METHOD_NOT_FOUND', 'CODEX_UPSTREAM_ERROR'].includes(error.code)
 }
 
 function isProjectListFallbackError(error: unknown): boolean {

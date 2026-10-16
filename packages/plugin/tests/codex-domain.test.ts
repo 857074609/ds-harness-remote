@@ -659,6 +659,25 @@ describe('CodexRemoteDomain', () => {
           },
         },
         {
+          name: 'keeps genuine successful empty history distinct from failed reads',
+          run: async () => {
+            const { root } = await directories()
+            const app = new FakeAppServer(root)
+            const original = app.call.bind(app)
+            vi.spyOn(app, 'call').mockImplementation((method, params) => method === 'thread/turns/list'
+              ? Promise.resolve({ data: [], nextCursor: null }) : original(method, params))
+            const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+            try {
+              await domain.start()
+              await expect(domain.call('connection-1', {
+                method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread' },
+              })).resolves.toMatchObject({ cursor: -1, records: [], hasMore: false })
+            } finally {
+              await domain.close()
+            }
+          },
+        },
+        {
           name: 'falls back to legacy full Thread reads when paginated history is unavailable',
           run: async () => {
             const { root } = await directories()
@@ -686,6 +705,83 @@ describe('CodexRemoteDomain', () => {
         await cleanupScenario1()
       },
     )
+  }, 10000)
+
+  it('does not replace a populated reconnect baseline with empty history on read failures', async () => {
+    const scenarios = [
+      { name: 'busy turn read', stage: 'turns', error: new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Thread has an active writer.'), code: 'CODEX_THREAD_BUSY' },
+      { name: 'timed out turn read', stage: 'turns', error: new CodexAppServerError('CODEX_REQUEST_TIMEOUT', 'Request timed out.'), code: 'CODEX_REQUEST_TIMEOUT' },
+      { name: 'timed out item read', stage: 'items', error: new CodexAppServerError('CODEX_REQUEST_TIMEOUT', 'Request timed out.'), code: 'CODEX_REQUEST_TIMEOUT' },
+      { name: 'all history APIs unavailable', stage: 'all', error: new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'History unavailable.'), code: 'CODEX_UPSTREAM_ERROR' },
+      { name: 'malformed turn page', stage: 'invalid-turns', code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'malformed item page', stage: 'invalid-items', code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'malformed turn entry', stage: 'invalid-turn', code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'full turn missing items', stage: 'invalid-full', code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'malformed pagination cursor', stage: 'invalid-cursor', code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'malformed legacy full history', stage: 'invalid-legacy', error: new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Pagination unavailable.'), code: 'CODEX_INVALID_RESPONSE' },
+      { name: 'nonempty summary cannot replace a failed second item page', stage: 'items-late', error: new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'History unavailable.'), code: 'CODEX_UPSTREAM_ERROR' },
+      { name: 'turn pagination budget does not return the oldest prefix', stage: 'turn-limit', code: 'PAYLOAD_TOO_LARGE' },
+      { name: 'item pagination budget does not return a partial turn', stage: 'item-limit', code: 'PAYLOAD_TOO_LARGE' },
+    ]
+    await runScenarios(scenarios.map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const original = app.call.bind(app)
+        let failing = false
+        vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+          const result = await original(method, params)
+          if (!failing) return result
+          if (method === 'thread/turns/list') {
+            if (scenario.stage === 'invalid-turns') return {}
+            if (scenario.stage === 'invalid-turn') return { data: [null], nextCursor: null }
+            if (scenario.stage === 'invalid-full') return { data: [{ id: 'turn-1', itemsView: 'full' }], nextCursor: null }
+            if (scenario.stage === 'turn-limit') return { data: [], nextCursor: 'more' }
+            if (scenario.stage === 'invalid-cursor') return { data: [], nextCursor: 1 }
+            if (['turns', 'all', 'invalid-legacy'].includes(scenario.stage)) throw scenario.error
+            // Summary turns need a separate items read; even a nonempty
+            // summary cannot replace failed full content on a later page.
+            return { data: [{ id: 'turn-1', status: 'completed', itemsView: 'summary', items: [
+              { id: 'summary-user', type: 'userMessage', text: 'Summary only' },
+            ] }], nextCursor: null }
+          }
+          if (method === 'thread/items/list') {
+            if (scenario.stage === 'invalid-items') return { data: [{}], nextCursor: null }
+            if (scenario.stage === 'item-limit') return { data: [], nextCursor: 'more' }
+            if (scenario.stage === 'items-late' && isRecord(params) && params.cursor === undefined) {
+              return { data: [{ item: { id: 'full-user', type: 'userMessage', text: 'Full first page' } }], nextCursor: 'page-2' }
+            }
+            throw scenario.error
+          }
+          if (method === 'thread/read' && isRecord(params) && params.includeTurns === true) {
+            if (scenario.stage === 'invalid-legacy') return { thread: { id: 'allowed-thread', cwd: root, turns: [{}] } }
+            if (['all', 'items-late'].includes(scenario.stage)) throw scenario.error
+          }
+          return result
+        })
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        try {
+          await domain.start()
+          const read = (connectionId: string) => domain.call(connectionId, {
+            method: 'dsh/sessionHistory', params: { threadId: 'allowed-thread', maxMessages: 1 },
+          })
+          const baseline = await read('connection-1')
+          failing = true
+          app.calls.length = 0
+          await expect(read('replacement-connection')).rejects.toMatchObject({ code: scenario.code })
+          if (scenario.code === 'CODEX_THREAD_BUSY' || scenario.code === 'CODEX_REQUEST_TIMEOUT') {
+            expect(app.calls.filter(call => call.method === 'thread/turns/list')).toHaveLength(1)
+            expect(app.calls.some(call => call.method === 'thread/read' && isRecord(call.params) && call.params.includeTurns === true)).toBe(false)
+          }
+          failing = false
+          await expect(read('replacement-connection')).resolves.toEqual(baseline)
+          expect(app.calls.some(call => call.method === 'thread/resume' || call.method === 'turn/start')).toBe(false)
+        } finally {
+          await domain.close()
+        }
+      },
+    })), cleanupScenario1)
   }, 10000)
 
   it('treats resume as idempotent when App Server already has the allowed thread loaded', async () => {

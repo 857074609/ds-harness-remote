@@ -17,6 +17,7 @@ import {
 } from '../src/client-runtime.js'
 import type { ResolvedConfig } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
+import { CodexVirtualHarness, paginateCodexNativeHistory, projectCodexNativeHistory } from '../src/codex/virtual-harness.js'
 import { IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import type { ClientServerApi } from '../src/server-api.js'
@@ -435,6 +436,181 @@ describe('ClientModeRuntime Host account control', () => {
     expect(runtime.status()).not.toHaveProperty('workspaceSelection')
     await runtime.close()
   })
+
+  it('restores Codex navigation across detached connections without leaking Host or workspace memory', async () => {
+    await runScenarios([
+      { name: 'replacement connection on the same Host and workspace', host: 'host-1', workspace: 'repo', expected: 'codex:older' },
+      { name: 'another Host with identical workspace and thread IDs', host: 'host-2', workspace: 'repo', expected: 'codex:latest' },
+      { name: 'another workspace on the same Host', host: 'host-1', workspace: 'other', expected: 'codex:other-latest' },
+      { name: 'remembered thread no longer in the Host catalog', host: 'host-1', workspace: 'repo', missing: true, expected: 'codex:latest' },
+      { name: 'native navigation remembers each actual workspace', host: 'host-1', workspace: 'other', nativeNavigation: true, expected: 'codex:other-older' },
+      { name: 'account sign-out clears all navigation memory', host: 'host-1', workspace: 'repo', signOut: true, expected: 'codex:latest' },
+      { name: 'late catalog cannot overwrite a newer workspace open', host: 'host-1', workspace: 'other', race: 'newer', expected: 'codex:other-latest' },
+      { name: 'late catalog cannot reinstall a disconnected carrier', host: 'host-1', workspace: 'repo', race: 'disconnect', expected: 'codex:older' },
+      { name: 'late catalog after sign-out cannot restore old memory', host: 'host-1', workspace: 'repo', race: 'logout', expected: 'codex:latest' },
+      { name: 'late old Host connection cannot close the newer Host', host: 'host-new', workspace: 'repo', race: 'connect-newer', expected: 'codex:latest' },
+      { name: 'late Host connection after sign-out never regains authority', host: 'host-1', workspace: 'repo', race: 'connect-logout', expected: 'codex:latest' },
+    ].map(scenario => ({
+      name: scenario.name,
+      run: async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'dsh-client-codex-recovery-'))
+        directories.push(directory)
+        const runtime = new ClientModeRuntime(config(), new IdentityStore({ directory }),
+          { bindIdentity: vi.fn(), revokeCurrentDevice: vi.fn(async () => undefined) } as unknown as ClientServerApi, apiProxy(), gatewayWithCarrier(), logger())
+        const threads = [
+          { id: 'latest', cwd: '/srv/repo', name: 'Latest', updatedAt: 30, turns: [] },
+          { id: 'older', cwd: '/srv/repo', name: 'Older', updatedAt: 10, turns: [] },
+          { id: 'other-latest', cwd: '/srv/other', name: 'Other', updatedAt: 40, turns: [] },
+          { id: 'other-older', cwd: '/srv/other', name: 'Older other', updatedAt: 5, turns: [] },
+        ]
+        let releaseCatalog!: () => void
+        let catalogStarted!: () => void
+        const catalogGate = new Promise<void>(resolve => { releaseCatalog = resolve })
+        const catalogWaiting = new Promise<void>(resolve => { catalogStarted = resolve })
+        let deferCatalog = false
+        let missing = false
+        const transfers = new Map<string, Buffer[]>()
+        const rpc = vi.fn(async (method: string, params: unknown): Promise<unknown> => {
+          if (method === 'codex.app.transfer.open') {
+            transfers.set((params as { transferId: string }).transferId, [])
+            return { opened: true }
+          }
+          if (method === 'codex.app.transfer.chunk') {
+            const chunk = params as { transferId: string; data: string }
+            transfers.get(chunk.transferId)!.push(Buffer.from(chunk.data, 'base64'))
+            return { accepted: true }
+          }
+          if (method === 'codex.app.transfer.commit') {
+            const id = (params as { transferId: string }).transferId
+            return { kind: 'inline', response: await rpc('codex.app.call', JSON.parse(Buffer.concat(transfers.get(id)!).toString())) }
+          }
+          if (method === 'codex.app.transfer.close') {
+            transfers.delete((params as { transferId: string }).transferId)
+            return { closed: true }
+          }
+          if (method === 'harness.transport.describe') return { capabilities: ['harness.remote.v1', 'codex.appserver.v1'] }
+          if (method === 'codex.app.call') {
+            const call = params as { method: string; params: Record<string, unknown> }
+            if (call.method === 'project/list') return { data: [
+              { id: 'repo', name: 'Repo', roots: [{ path: '/srv/repo' }] },
+              { id: 'other', name: 'Other', roots: [{ path: '/srv/other' }] },
+            ] }
+            if (call.method === 'thread/list') {
+              if (deferCatalog) {
+                deferCatalog = false
+                catalogStarted()
+                await catalogGate
+              }
+              return { data: threads.filter(thread => !missing || thread.id !== 'older') }
+            }
+            if (call.method === 'model/list') return { data: [] }
+            if (call.method === 'dsh/sessionHistory') {
+              const thread = threads.find(thread => thread.id === call.params.threadId)!
+              return paginateCodexNativeHistory(projectCodexNativeHistory(thread, `codex:${thread.id}`), {})
+            }
+          }
+          if (method === 'codex.app.stream.open') return { opened: true }
+          if (method === 'codex.app.stream.close') return { closed: true }
+          throw new Error(`unexpected method: ${method}`)
+        })
+        const state = runtime as unknown as { connected: unknown; codexVirtual: CodexVirtualHarness; closeCodexVirtual(): Promise<void> }
+        const makeConnection = (host: string) => ({
+          client: { rpc, close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }), onEvent: () => () => undefined },
+          target: { deviceId: host, name: 'Host', platform: 'linux', publicKey: 'peer-key', fingerprint: 'PEER', trustedAt: 1 },
+          transport: {}, features: remoteHostFeatures(),
+        })
+        const connect = (host: string) => { state.connected = makeConnection(host) }
+        try {
+          await runtime.start()
+          connect('host-1')
+          const workspaces = await runtime.listCodexWorkspaces('host-1')
+          const repo = workspaces.find(workspace => workspace.path === '/srv/repo')!
+          await runtime.openCodexWorkspace('host-1', repo.workspaceId)
+          const history = await state.codexVirtual.api.sessions.history({ rpcId: 'open-older' as never, payload: { sessionId: 'codex:older' as never } })
+          expect(history.result.ok).toBe(true)
+          if (scenario.nativeNavigation) {
+            const otherHistory = await state.codexVirtual.api.sessions.history({ rpcId: 'open-other' as never, payload: { sessionId: 'codex:other-older' as never } })
+            expect(otherHistory.result.ok).toBe(true)
+          }
+          if (scenario.race?.startsWith('connect-')) {
+            state.connected = undefined
+            await state.closeCodexVirtual()
+            const staleConnection = makeConnection('host-stale')
+            const newerConnection = makeConnection('host-new')
+            vi.spyOn(runtime as unknown as { connect(host: string): Promise<unknown> }, 'connect').mockImplementation(async host => {
+              if (host === 'host-stale') {
+                catalogStarted()
+                await catalogGate
+                return staleConnection
+              }
+              return newerConnection
+            })
+            const lateOpen = runtime.openCodexWorkspace('host-stale', repo.workspaceId)
+            const rejected = expect(lateOpen).rejects.toMatchObject({ code: 'CANCELLED' })
+            await catalogWaiting
+            if (scenario.race === 'connect-newer') {
+              await runtime.openCodexWorkspace('host-new', repo.workspaceId)
+            } else {
+              await runtime.clearClientAuthorization()
+            }
+            releaseCatalog()
+            await rejected
+            expect(staleConnection.client.close).toHaveBeenCalledTimes(1)
+            if (scenario.race === 'connect-newer') {
+              expect(state.connected).toBe(newerConnection)
+              expect(newerConnection.client.close).not.toHaveBeenCalled()
+              expect(runtime.status()).toMatchObject({ workspaceSelection: { targetDeviceId: 'host-new', sessionId: 'codex:latest' } })
+            } else {
+              expect(state.connected).toBeUndefined()
+              expect(state.codexVirtual).toBeUndefined()
+            }
+          } else if (scenario.race) {
+            deferCatalog = true
+            const lateOpen = runtime.openCodexWorkspace('host-1', repo.workspaceId)
+            const rejected = expect(lateOpen).rejects.toMatchObject({ code: 'CANCELLED' })
+            await catalogWaiting
+            if (scenario.race === 'newer') {
+              const other = workspaces.find(workspace => workspace.path === '/srv/other')!
+              await runtime.openCodexWorkspace('host-1', other.workspaceId)
+            } else if (scenario.race === 'logout') {
+              await runtime.clearClientAuthorization()
+            } else {
+              state.connected = undefined
+              await state.closeCodexVirtual()
+            }
+            releaseCatalog()
+            await rejected
+            if (scenario.race === 'newer') {
+              expect(runtime.status()).toMatchObject({ workspaceSelection: { sessionId: 'codex:other-latest' } })
+            } else {
+              expect(state.codexVirtual).toBeUndefined()
+            }
+          }
+          if (scenario.signOut) await runtime.clearClientAuthorization()
+          // Mirror transport-close ordering: authority is detached before the
+          // virtual carrier closes, so recovery must not depend on connected.
+          state.connected = undefined
+          await state.closeCodexVirtual()
+          missing = scenario.missing === true
+          connect(scenario.host)
+          const workspace = workspaces.find(item => item.path === `/srv/${scenario.workspace}`)!
+          await expect(runtime.openCodexWorkspace(scenario.host, workspace.workspaceId)).resolves.toMatchObject({
+            workspaceSelection: { targetDeviceId: scenario.host, workspaceId: workspace.workspaceId, backend: 'codex', sessionId: scenario.expected },
+          })
+          if (scenario.nativeNavigation) {
+            await expect(runtime.openCodexWorkspace(scenario.host, repo.workspaceId)).resolves.toMatchObject({
+              workspaceSelection: { sessionId: 'codex:older' },
+            })
+          }
+          expect(rpc.mock.calls.some(([method, params]) => method === 'codex.app.call'
+            && ['thread/start', 'thread/resume', 'turn/start'].includes((params as { method: string }).method))).toBe(false)
+        } finally {
+          releaseCatalog()
+          await runtime.close()
+        }
+      },
+    })), cleanupScenario1)
+  }, 10000)
 
   it('exposes the independent Codex domain to Web through bounded loopback calls and event polling', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'dsh-client-codex-loopback-'))

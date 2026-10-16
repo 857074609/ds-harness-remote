@@ -127,6 +127,7 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [x] 用两台真实 DSH Desktop 跑通加密跨机 resume/turn/event/approval/interrupt 与大 History 传输
 - [x] 验证 App Server crash、Host transport 重连和多 Desktop Web Client 同时观察同一 Thread
 - [x] 用 Android 真机跑通 CodeX Workspace→Thread→Prompt/steer/approval/interrupt、大 History、图片分块与断线重连
+- [ ] 用真实 Desktop 与 Android 回归 CodeX 重连历史错误、busy/超时后的重试；Desktop 另验证原会话内存恢复、原生跨工作区导航及断线/退出账号与迟到 open 的交错（本轮核心契约测试不等于跨设备验收）
 - [ ] 用真实 Desktop 与 Android 验证远端 `project/create`、新增后自动选择和空 CodeX 目录首个项目流程
 
 ## P0：协议与安全

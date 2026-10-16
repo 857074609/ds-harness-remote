@@ -264,6 +264,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private lastProjectionSeq = 0
   private commandSeq = 0
   private selectedWorkspaceId?: string
+  private lastOpenedSessionId?: string
+  private readonly openedWorkspaceSessions = new Map<string, string>()
   private closed = false
 
   constructor(
@@ -297,32 +299,47 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     return workspace
   }
 
-  async preferredSessionId(signal?: AbortSignal): Promise<string | undefined> {
+  get openedSessionId(): string | undefined {
+    return this.lastOpenedSessionId
+  }
+
+  get openedSessions(): ReadonlyMap<string, string> {
+    return new Map(this.openedWorkspaceSessions)
+  }
+
+  private rememberOpenedSession(sessionId: string): void {
+    if (this.closed) return
+    this.lastOpenedSessionId = sessionId
+    // Native navigation can open another visible Workspace without replacing
+    // this carrier. Remember the actual catalog membership, not its entry URL.
+    for (const workspace of this.catalog?.workspaces ?? []) {
+      if (!workspace.sessionIds.includes(sessionId)) continue
+      this.openedWorkspaceSessions.delete(workspace.workspaceId)
+      this.openedWorkspaceSessions.set(workspace.workspaceId, sessionId)
+      if (this.openedWorkspaceSessions.size > 64) {
+        this.openedWorkspaceSessions.delete(this.openedWorkspaceSessions.keys().next().value!)
+      }
+    }
+  }
+
+  async preferredSessionId(
+    signal?: AbortSignal,
+    preferredSessionId = this.openedWorkspaceSessions.get(this.selectedWorkspaceId ?? ''),
+  ): Promise<string | undefined> {
+    signal?.throwIfAborted()
     const catalog = this.catalog
     const selected = catalog?.workspaces.find(workspace => workspace.workspaceId === this.selectedWorkspaceId)
     const selectedSessionIds = new Set(selected?.sessionIds ?? [])
     const sessions = (catalog?.sessions ?? []).filter(session => selectedSessionIds.has(session.id))
-    const idleNamed = sessions.filter(session => session.status !== 'running'
-      && session.status !== 'waiting'
-      && displayTitle(session) !== null)
-    const idle = sessions.filter(session => session.status !== 'running' && session.status !== 'waiting')
-    // The most recently updated Thread is often the one still owned by the
-    // interactive Codex process. Prefer the previous named Thread when one is
-    // available, then fall back through the complete catalog.
-    const preferredNamed = idleNamed.length > 1 ? [...idleNamed.slice(1), idleNamed[0]!] : idleNamed
-    const candidates = [...new Set([...preferredNamed, ...idle, ...sessions].map(session => session.id))]
-    for (const sessionId of candidates) {
-      const threadId = nativeThreadId(sessionId)
-      try {
-        const thread = await this.fetchThread(threadId, signal)
-        return sessionId
-      } catch {
-        // A currently active or concurrently changing CodeX Thread may reject
-        // a full history read. Keep looking so the native UI does not remain
-        // on an ungrouped placeholder Session after entering the Workspace.
-      }
-    }
-    return undefined
+    if (sessions.some(session => session.id === preferredSessionId)) return preferredSessionId
+
+    // The Host catalog already validated these IDs. Restore the latest Thread
+    // regardless of title or busy status; transient history-read failures must
+    // not redirect navigation to an older Thread or a new blank Session.
+    // Do not probe Threads here: one busy read can stall workspace recovery.
+    return sessions.reduce<DisplaySession | undefined>((latest, session) =>
+      latest === undefined || session.updatedAt > latest.updatedAt ? session : latest,
+    undefined)?.id
   }
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
@@ -752,12 +769,18 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         signal,
         () => this.closeFollowAfterRemoteStreamClosed(follow),
       )
+      if (this.closed || signal.aborted) {
+        await stream.close().catch(() => undefined)
+        signal.throwIfAborted()
+        throw new Error('The CodeX virtual Harness is closed.')
+      }
       follow.close = () => stream.close()
     } catch (error) {
       this.follows.delete(follow)
       queue.close()
       throw error
     }
+    this.rememberOpenedSession(sessionId)
     return queue.iterate(() => {
       this.follows.delete(follow)
       void follow.close?.().catch(() => undefined)
@@ -1493,13 +1516,6 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     return undefined
   }
 
-  private async fetchThread(threadId: string, signal?: AbortSignal): Promise<JsonRecord> {
-    const result = record(await this.client.request('thread/read', { threadId, includeTurns: false }, signal))
-    const thread = record(result.thread)
-    if (string(thread.id) !== threadId) throw new Error('CodeX returned an invalid Thread history.')
-    return thread
-  }
-
   private async readHistoryPage(
     threadId: string,
     page: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
@@ -1556,7 +1572,12 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     // rc.2 has one global mux rather than the alpha session/follow stream. A
     // history read is the reliable signal that the native client has opened a
     // Session, so attach the CodeX live stream here before returning its tail.
-    if (beforeSeq === undefined) await this.ensureRcFollow(sessionId, history)
+    if (beforeSeq === undefined) {
+      await this.ensureRcFollow(sessionId, history)
+      signal.throwIfAborted()
+      if (this.closed) throw new Error('The CodeX virtual Harness is closed.')
+      this.rememberOpenedSession(sessionId)
+    }
     return success({
       events: history.records.map(entry => ({
         event: entry.event,
@@ -1621,6 +1642,10 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         controller.signal,
         () => this.closeFollowAfterRemoteStreamClosed(follow),
       )
+      if (this.closed || !this.follows.has(follow)) {
+        await stream.close().catch(() => undefined)
+        throw new Error('The CodeX follow was closed before it opened.')
+      }
       follow.close = async () => {
         controller.abort()
         await stream.close()

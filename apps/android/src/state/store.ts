@@ -17,7 +17,7 @@ import {
   type AppLanguage,
   type LanguagePreference,
 } from '../locales/i18n'
-import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError } from '../lib/errors'
+import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError, isStreamTimeoutError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import {
   loginFlow,
@@ -109,6 +109,7 @@ import type {
   PromptImage,
   RemoteDevice,
   RemoteSession,
+  SendMessageResult,
   ServerConfig,
   SessionModels,
   TransportPreference,
@@ -116,7 +117,7 @@ import type {
   WorkspaceView,
 } from '../types'
 import { foldHistory, applyMuxFrameToMessages, sessionRunningForMuxFrame, settleTurnItems } from './event-reducer'
-import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
+import { inboxRpcIds, reconcileDeliveryStates, findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered, mergeHistoryAndLive, oldestSeq, prependHistory } from './message-helpers'
 
 function applyFeedback(items: ChatItem[], ratings?: Map<string, ChatMessage['feedback']>): ChatItem[] {
   return ratings === undefined ? items : items.map(item => item.kind === 'message'
@@ -149,7 +150,7 @@ interface AppState {
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   messages: Record<string, ChatItem[]>
-  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string }>
+  sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string; finished?: 'completed' | 'failed' }>
   sessionProjectionSeqs: Record<string, Record<string, number>>
   feedbackBySession: Record<string, Map<string, ChatMessage['feedback']>>
   sessionModels?: SessionModels
@@ -192,6 +193,7 @@ interface AppState {
   completeOAuth(token: string): Promise<boolean>
   refreshDevices(): Promise<void>
   refreshWorkspaces(): Promise<void>
+  refreshSessionStatus(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
@@ -200,12 +202,14 @@ interface AppState {
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
-  sendMessage(text: string, images?: PromptImage[]): Promise<boolean>
+  sendMessage(text: string, images?: PromptImage[], reuseRpcId?: string): Promise<SendMessageResult>
+  retrySendMessage(itemId: string): Promise<boolean>
+  updateQueueItem(itemId: string, action: 'remove' | 'steer', rpcId?: string): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
-  respondQuestion(itemId: string, selected: Record<string, string[]>): Promise<void>
+  respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
   createSession(workspaceId?: string): Promise<boolean>
   archiveSession(sessionId: string): Promise<boolean>
   selectModel(selection: ModelSelection): Promise<boolean>
@@ -251,6 +255,75 @@ let activeCodexTimeline: CodexTimelineState | undefined
 let activeCursorStream: AcpStream | undefined
 const codexModelSelections = new Map<string, ModelSelection>()
 let connectionGeneration = 0
+/** Rows created before this instant predate the current connection (reconcile scope). */
+let connectionStartedAt = 0
+
+/**
+ * Event coalescing at the transport boundary. A streaming turn delivers tens
+ * of mux frames per second and each one triggered a full store update + React
+ * render pass, which on long conversations saturated the JS thread until taps
+ * and even the back button stopped responding. Frames are drained in one
+ * synchronous turn every ~100ms so React renders once per window (auto
+ * batching), with a hard cap so backlogs cannot grow unbounded.
+ * `handleMuxFrame` itself stays synchronous — only the transport callback
+ * enqueues, so state-machine tests keep their direct-call semantics.
+ */
+/** Queue-adoption bookkeeping: rpcIds the Host inbox has ever adopted, per session. */
+const adoptedQueueRpcIds = new Map<string, Set<string>>()
+/** Adopted rpcIds absent from the latest projection update — one update of grace for the echo. */
+const vanishingQueueRpcIds = new Map<string, Set<string>>()
+
+const MUX_FLUSH_MS = 100
+const MUX_FLUSH_MAX = 250
+let pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
+let muxFlushTimer: ReturnType<typeof setTimeout> | undefined
+
+function enqueueMuxFrame(generation: number, frame: MuxStreamFrame): void {
+  pendingMuxFrames.push({ generation, frame })
+  if (pendingMuxFrames.length >= MUX_FLUSH_MAX) {
+    flushPendingMuxFrames()
+    return
+  }
+  if (muxFlushTimer === undefined) {
+    muxFlushTimer = setTimeout(flushPendingMuxFrames, MUX_FLUSH_MS)
+  }
+}
+
+/** Drain queued frames now. Call before any store read that must observe them. */
+function flushPendingMuxFrames(): void {
+  if (muxFlushTimer !== undefined) {
+    clearTimeout(muxFlushTimer)
+    muxFlushTimer = undefined
+  }
+  if (pendingMuxFrames.length === 0) return
+  const queued = pendingMuxFrames
+  pendingMuxFrames = []
+  for (const entry of queued) {
+    if (entry.generation !== connectionGeneration) continue
+    try {
+      useAppStore.getState().handleMuxFrame(entry.frame)
+    } catch {
+      // One malformed frame must neither drop the rest of the batch nor escape
+      // the flush (an uncaught throw in the RN runtime is fatal). Frame type
+      // only — never payload contents.
+      console.warn('mux frame dropped:', entry.frame.payload.type)
+    }
+  }
+}
+
+function clearPendingMuxFrames(): void {
+  if (muxFlushTimer !== undefined) {
+    clearTimeout(muxFlushTimer)
+    muxFlushTimer = undefined
+  }
+  pendingMuxFrames = []
+}
+
+function clearQueueAdoption(): void {
+  // `adopted` is a Host-side fact (the durable queue received the prompt) and
+  // survives reconnects; only the grace window restarts.
+  vanishingQueueRpcIds.clear()
+}
 let sessionLoadGeneration = 0
 let reconnectFlight: Promise<boolean> | undefined
 
@@ -449,6 +522,64 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
+  /**
+   * Lightweight status refresh for visible session lists: pulls the session
+   * rows and merges only `running`/`updatedAt` (plus newly spawned rows such as
+   * subagent children). The list previously showed the connect-time snapshot
+   * forever, so execution status never appeared while browsing sessions.
+   */
+  async refreshSessionStatus() {
+    if (get().connection.phase !== 'connected') return
+    try {
+      const rows = await connection.requireProxy().sessionList()
+      set(state => {
+        const known = new Set(state.sessions.map(item => item.sessionId))
+        const marks: typeof state.sessionLifecycles = { ...state.sessionLifecycles }
+        for (const row of state.sessions) {
+          const fresh = rows.find(item => item.sessionId === row.sessionId)
+          if (fresh === undefined) continue
+          const entry = marks[row.sessionId]
+          const wasRunning = entry?.running ?? row.running
+          if (wasRunning === fresh.running) continue
+          marks[row.sessionId] = {
+            seq: entry?.seq ?? -1,
+            turn: entry?.turn,
+            running: fresh.running,
+            // A run that ended while the list was watching leaves the "done"
+            // reminder; a fresh run clears it. Failure precision needs the
+            // turn/end frame (followed sessions), which keeps `failed` marks.
+            ...(fresh.running
+              ? { finished: undefined }
+              : { finished: entry?.finished === 'failed' ? 'failed' as const : 'completed' as const }),
+          }
+        }
+        let changed = false
+        const updated = state.sessions.map(row => {
+          const fresh = rows.find(item => item.sessionId === row.sessionId)
+          if (fresh === undefined || (fresh.running === row.running && fresh.updatedAt === row.updatedAt)) return row
+          changed = true
+          return { ...row, running: fresh.running, updatedAt: fresh.updatedAt }
+        })
+        const added = rows.filter(item => !known.has(item.sessionId))
+        const selectedFresh = state.selectedSession === undefined
+          ? undefined
+          : rows.find(item => item.sessionId === state.selectedSession?.sessionId)
+        // Preserve array identity when nothing moved: the 8s refresh otherwise
+        // hands consumers a fresh `sessions` reference and re-runs their memos.
+        return {
+          sessionLifecycles: marks,
+          ...(changed || added.length > 0
+            ? { sessions: added.length > 0 ? [...added, ...updated] : updated }
+            : {}),
+          ...(state.selectedSession !== undefined && selectedFresh !== undefined
+            && (selectedFresh.running !== state.selectedSession.running || selectedFresh.updatedAt !== state.selectedSession.updatedAt)
+            ? { selectedSession: { ...state.selectedSession, running: selectedFresh.running, updatedAt: selectedFresh.updatedAt } }
+            : {}),
+        }
+      })
+    } catch { /* status refresh is best-effort */ }
+  },
+
   async refreshWorkspaces() {
     if (get().connection.phase !== 'connected') return
     try {
@@ -567,7 +698,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         identity,
         device,
         credentials.accessToken,
-        frame => { if (generation === connectionGeneration) get().handleMuxFrame(frame) },
+        frame => enqueueMuxFrame(generation, frame),
         {
           fetchIceServers: async connectionId => api.turnCredentials(connectionId),
           preferredTransports: [...preferredTransports],
@@ -656,6 +787,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...(codexError === undefined && agyError === undefined ? {} : { error: codexError ?? agyError }),
         }
       })
+      connectionStartedAt = Date.now()
       await saveLastConnectedDeviceId(device.deviceId)
       return true
     } catch (error) {
@@ -712,9 +844,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async disconnect() {
+    flushPendingMuxFrames()
     ++connectionGeneration
     ++sessionLoadGeneration
     reconnectFlight = undefined
+    clearPendingMuxFrames()
+    clearQueueAdoption()
     await closeActiveCodexStream(false)
     await closeActiveCursorStream(false)
     await connection.close()
@@ -743,9 +878,25 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async openSession(session) {
+    flushPendingMuxFrames()
     let loadGeneration = ++sessionLoadGeneration
     const current = () => loadGeneration === sessionLoadGeneration
-    set({ busyAction: `session:${session.sessionId}`, error: undefined })
+    // Reset per-session view state up front: `historyLoadingOlder` and the
+    // model catalog belong to the previous session and must not leak into the
+    // new one (stuck pagination spinners, codex prompts sent with the previous
+    // session's model).
+    set(state => ({
+      busyAction: `session:${session.sessionId}`,
+      error: undefined,
+      historyLoadingOlder: false,
+      sessionModels: undefined,
+      sessionLifecycles: state.sessionLifecycles[session.sessionId] === undefined
+        ? state.sessionLifecycles
+        : {
+            ...state.sessionLifecycles,
+            [session.sessionId]: { ...state.sessionLifecycles[session.sessionId]!, finished: undefined },
+          },
+    }))
     const load = async () => {
       if (session.backend === 'codex') {
         await closeActiveCodexStream()
@@ -839,11 +990,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       await closeActiveCodexStream()
       await closeActiveCursorStream()
       const [history, feedback] = await Promise.all([
-        connection.requireProxy().sessionHistory(session.sessionId),
+        connection.requireProxy().sessionHistory(session.sessionId, undefined, 60, session.parentSessionId),
         // Older carriers may not expose feedback; history must remain usable.
         connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
       ])
       if (!current()) return
+      // The follow snapshot's projections were emitted synchronously inside
+      // sessionHistory — apply queued frames before reading them below, or the
+      // delivery reconcile judges against a stale inbox.
+      flushPendingMuxFrames()
       const ratings = feedback === undefined ? undefined : new Map(feedback.map(row => [row.messageId, row.rating]))
       const items = foldHistory(history.events, session.sessionId, true)
       set(state => {
@@ -854,9 +1009,21 @@ export const useAppStore = create<AppState>((set, get) => ({
         const authoritativeLifecycle = liveLifecycle !== undefined && liveLifecycle.seq > (history.throughSeq ?? lifecycle?.seq ?? -1)
           ? liveLifecycle : lifecycle
         const nextSession = { ...latest, running: authoritativeLifecycle?.running ?? latest.running }
+        // Reconcile local delivery states against Host truth — only when a real
+        // `inbox` snapshot exists (the key itself, not merely the projection
+        // channel), and only for rows created before this connection. The
+        // reconciliation marks, never deletes: a late `user/message` echo still
+        // replaces the row by requestRpcId, so a misjudgment self-heals.
+        const inboxSnapshot = latest.projections?.values?.inbox
         const merged = applyFeedback(mergeHistoryAndLive(items, state.messages[session.sessionId] ?? [], history.throughSeq), ratings)
-        const restored = nextSession.running === false ? settleTurnItems(merged)
-          : authoritativeLifecycle?.turn === undefined ? merged : settleTurnItems(merged, undefined, authoritativeLifecycle.turn)
+        const reconciled = inboxSnapshot === undefined ? merged : reconcileDeliveryStates(
+          merged,
+          inboxRpcIds(inboxSnapshot),
+          new Set(items.flatMap(item => item.kind === 'message' && item.requestRpcId !== undefined ? [item.requestRpcId] : [])),
+          connectionStartedAt,
+        )
+        const restored = nextSession.running === false ? settleTurnItems(reconciled)
+          : authoritativeLifecycle?.turn === undefined ? reconciled : settleTurnItems(reconciled, undefined, authoritativeLifecycle.turn)
         return {
           selectedSession: nextSession,
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? nextSession : item),
@@ -878,7 +1045,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       return true
     } catch (error) {
       if (!current()) return false
-      if (isRpcTimeoutError(error) || isRecoverableTransportError(error)) {
+      // A subagent address that never answers must not burn a full reconnect
+      // cycle on every open; top-level session stalls still fall back to
+      // forceRelay once (the pre-bounding recovery path).
+      const transportRetry = (isRpcTimeoutError(error) || isRecoverableTransportError(error))
+        && !(isStreamTimeoutError(error) && session.parentSessionId !== undefined)
+      if (transportRetry) {
         if (reconnectFlight !== undefined) {
           set({ busyAction: undefined, error: friendlyError(error) })
           return false
@@ -1408,6 +1580,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async loadOlderHistory() {
+    flushPendingMuxFrames()
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
@@ -1419,7 +1592,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const page = session.backend === 'codex'
         ? await readCodexHistoryPage(connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
-        : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60)
+        : await connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, session.parentSessionId)
       const items = foldHistory(page.events, session.sessionId, true)
       const older = oldestSeq(page.events)
       set(state => ({
@@ -1498,11 +1671,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async sendMessage(input, images = []) {
+  async sendMessage(input, images = [], reuseRpcId) {
+    flushPendingMuxFrames()
     set({ commandResult: undefined })
     const session = get().selectedSession
     const text = input.trim()
-    if (session === undefined || (text.length === 0 && images.length === 0)) return false
+    if (session === undefined || (text.length === 0 && images.length === 0)) return 'rejected'
     if ((session.backend === undefined || session.backend === 'harness') && /^\/(?:file|goal|plan|feedback|compact|export)(?:\s|$)/u.test(text)) {
       set({ busyAction: 'command', error: undefined })
       try {
@@ -1512,25 +1686,37 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (result.kind === 'error') throw new Error(result.text ?? zhCN.messageActions.failed)
         set({ busyAction: undefined, commandResult: result.text?.trim()
           ? { sessionId: session.sessionId, text: result.text } : undefined })
-        return true
+        return 'sent'
       } catch (error) {
         set({ busyAction: undefined, error: friendlyError(error) })
-        return false
+        return 'rejected'
       }
     }
-    const requestRpcId = createNativeRpcId()
+    const requestRpcId = reuseRpcId ?? createNativeRpcId()
+    // DSH semantics (`ui-conversation.busyEnter`): while a turn is active a
+    // prompt is queued (`mode:'queue'`), not merged into the running turn.
+    const queuedAtSend = session.running === true || get().busyAction === 'send-message'
     const optimistic: ChatItem = {
       kind: 'message',
-      id: `local:${Date.now()}`,
+      // `local:` prefix is load-bearing for mergeCodexLive's optimistic matching;
+      // the rpcId suffix keeps the id unique when several prompts are queued in
+      // the same millisecond (duplicate keys corrupt the merged timeline).
+      id: `local:${requestRpcId}`,
       sessionId: session.sessionId,
       role: 'user',
       text,
       ...(images.length === 0 ? {} : { images: images.map(image => ({ uri: image.uri, name: image.name })) }),
       createdAt: Date.now(),
       requestRpcId,
+      // Retry material travels with the row (not a module map) so image rows
+      // stay resendable across reconnects and cannot leak after cleanup.
+      promptImages: images,
     }
     set(state => ({
-      messages: { ...state.messages, [session.sessionId]: [...(state.messages[session.sessionId] ?? []), optimistic] },
+      messages: { ...state.messages, [session.sessionId]: [
+        ...(state.messages[session.sessionId] ?? []).filter(item => item.id !== optimistic.id),
+        optimistic,
+      ] },
       busyAction: 'send-message',
       error: undefined,
     }))
@@ -1625,31 +1811,106 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
       } else {
         await connection.requireProxy().sessionPrompt(session.sessionId, text, requestRpcId, images)
-        // Keep the sending state until the Host event stream confirms that
-        // execution has actually started. `session.prompt` only acknowledges
-        // receipt, so clearing busyAction here briefly re-enables the quick
-        // actions before the first assistant/tool event arrives.
+        // `session.prompt` acknowledges receipt only; keep busyAction until the
+        // event stream shows the turn starting. When a turn was already active
+        // the Host queued the prompt (`inbox` projection is authoritative), so
+        // the row leaves the timeline and appears in the queue dock.
+        set(state => ({
+          messages: {
+            ...state.messages,
+            [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+              item.id === optimistic.id && item.kind === 'message'
+                ? {
+                    ...item,
+                    sendState: queuedAtSend ? 'queued' : undefined,
+                    // The inbox may already have adopted this rpcId (retry
+                    // reuse, or the batch landed before this row existed) —
+                    // mark it so the queue fallback can never resurrect it.
+                    ...(queuedAtSend && adoptedQueueRpcIds.get(session.sessionId)?.has(requestRpcId) === true
+                      ? { queuedAdopted: true as const }
+                      : {}),
+                  }
+                : item),
+          },
+        }))
         await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-        return true
+        return 'sent'
       }
       set({ busyAction: undefined })
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
-      return true
+      return 'sent'
     } catch (error) {
+      // Keep the row as the single error surface (inline state + retry). A
+      // deleted row plus a Host that already accepted the prompt is exactly the
+      // "message vanished / reappears after reload" mismatch; timeout/transport
+      // errors leave the outcome unknown and must never be judged by timers.
+      const unconfirmed = isRpcTimeoutError(error) || isRecoverableTransportError(error)
       set(state => ({
         messages: {
           ...state.messages,
-          [session.sessionId]: (state.messages[session.sessionId] ?? []).filter(item => item.id !== optimistic.id),
+          [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+            item.id === optimistic.id && item.kind === 'message'
+              ? { ...item, sendState: unconfirmed ? 'unconfirmed' : 'failed', sendError: friendlyError(error) }
+              : item),
         },
-        ...(session.backend === 'cursor' || session.backend === 'antigravity' ? {
+        // Only a deterministic failure may claim the agent is idle again; an
+        // unconfirmed outcome leaves `running` untouched (the prompt may have
+        // started on the Host).
+        ...((session.backend === 'cursor' || session.backend === 'antigravity') && !unconfirmed ? {
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
         } : {}),
         busyAction: undefined,
-        error: friendlyError(error),
       }))
+      return 'kept'
+    }
+  },
+
+  async updateQueueItem(itemId, action, rpcId) {
+    flushPendingMuxFrames()
+    const session = get().selectedSession
+    // Harness rows may carry `backend: undefined`; only the explicit non-harness
+    // backends lack queue actions. The previous strict `'harness'` check silently
+    // short-circuited every plain harness session — the queue buttons did
+    // nothing with no error.
+    if (session === undefined || (session.backend !== undefined && session.backend !== 'harness')
+      || get().connection.phase !== 'connected') return false
+    try {
+      await connection.requireProxy().sessionUpdateQueue(session.sessionId, itemId, { kind: action })
+    } catch (error) {
+      set({ error: friendlyError(error) })
       return false
     }
+    // Settle the matching local optimistic row together with the Host queue:
+    // the dock lists local `queued` rows the inbox has not adopted, so without
+    // this the steered/removed item is immediately re-listed from local state
+    // and the buttons look like no-ops. Steer hands the row back to the
+    // timeline (its echo replaces it); remove retires it quietly.
+    if (rpcId !== undefined) {
+      set(state => ({
+        messages: {
+          ...state.messages,
+          [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+            item.kind === 'message' && item.requestRpcId === rpcId && item.sendState === 'queued'
+              ? { ...item, sendState: action === 'steer' ? undefined : 'canceled' as const }
+              : item),
+        },
+      }))
+    }
+    return true
+  },
+
+  async retrySendMessage(itemId) {
+    flushPendingMuxFrames()
+    const state = get()
+    if (state.busyAction !== undefined) return false
+    const session = state.selectedSession
+    if (session === undefined) return false
+    const row = (state.messages[session.sessionId] ?? []).find(item => item.id === itemId)
+    if (row?.kind !== 'message' || row.sendState === undefined || row.requestRpcId === undefined) return false
+    // Reuse the original request rpcId: a prompt the Host already accepted
+    // (unconfirmed outcome) must not be executed twice where the Host dedupes.
+    return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'
   },
 
   async stopSession() {
@@ -1694,6 +1955,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   async respondApproval(itemId, outcome) {
+    flushPendingMuxFrames()
     set({ busyAction: `approval:${itemId}`, error: undefined })
     try {
       const item = findApproval(get().messages, itemId)
@@ -1727,7 +1989,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  async respondQuestion(itemId, selected) {
+  async respondQuestion(itemId, selected, custom) {
+    flushPendingMuxFrames()
     set({ busyAction: `question:${itemId}`, error: undefined })
     try {
       const proxy = connection.requireProxy()
@@ -1735,10 +1998,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (item === undefined || item.frameRpcId === undefined) {
         throw new Error(zhCN.runtime.openSessionFirst)
       }
-      const answers = item.questions.map(question => ({
-        id: question.id,
-        selected: selected[question.id] ?? [],
-      }))
+      const answers = item.questions.map(question => {
+        const freeText = custom?.[question.id]?.trim()
+        return {
+          id: question.id,
+          selected: selected[question.id] ?? [],
+          // Official answer shape carries `custom`; keep it out when empty.
+          ...(freeText === undefined || freeText.length === 0 ? {} : { custom: freeText }),
+        }
+      })
       await proxy.respondQuestion(item.frameRpcId, item.sessionId, { answers })
       set(state => ({
         messages: item.callId === undefined ? mapQuestionAnswered(state.messages, itemId) : state.messages,
@@ -1899,7 +2167,10 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setOffline() {
     if (get().connection.phase !== 'disconnected') {
+      flushPendingMuxFrames()
       ++sessionLoadGeneration
+      clearPendingMuxFrames()
+      clearQueueAdoption()
       set({
         connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
         codexAvailable: false,
@@ -1925,9 +2196,61 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...session,
           projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
         }
+        // Distinguish "never received" from "received and then dropped": an
+        // rpcId the inbox adopted is marked on its local row and must never
+        // re-enter the queue fallback. If it later vanishes from the inbox
+        // without its echo replacing the row (removed elsewhere), the Host
+        // dropped it — retire the row after one update of grace so a consumed
+        // prompt's echo can land first.
+        const settle = key === 'inbox' ? (() => {
+          const followed = state.selectedSession?.sessionId === sessionId
+          const current = new Set(inboxRpcIds(value))
+          const adopted = adoptedQueueRpcIds.get(sessionId) ?? new Set<string>()
+          const vanishing = vanishingQueueRpcIds.get(sessionId) ?? new Set<string>()
+          const retire = new Set<string>()
+          const mark = new Set<string>()
+          for (const rpcId of current) {
+            if (!adopted.has(rpcId)) mark.add(rpcId)
+            adopted.add(rpcId)
+            vanishing.delete(rpcId)
+          }
+          // Retire only while the session is followed: its echo travels the
+          // follow stream whose ordering against the control projection is not
+          // guaranteed elsewhere — unfollowed sessions are reconciled on open.
+          for (const rpcId of followed ? [...adopted] : []) {
+            if (current.has(rpcId)) continue
+            if (vanishing.has(rpcId)) {
+              // Retired: the row is settled (or already replaced by its echo) —
+              // forget the rpcId so it stops re-entering the retire path on
+              // every following projection update.
+              retire.add(rpcId)
+              adopted.delete(rpcId)
+              vanishing.delete(rpcId)
+            } else vanishing.add(rpcId)
+          }
+          adoptedQueueRpcIds.set(sessionId, adopted)
+          vanishingQueueRpcIds.set(sessionId, vanishing)
+          if (mark.size === 0 && retire.size === 0) return undefined
+          return (items: ChatItem[]): ChatItem[] => items.map(item =>
+            item.kind === 'message' && item.requestRpcId !== undefined
+            && (mark.has(item.requestRpcId) || (retire.has(item.requestRpcId)
+              && (item.sendState === 'queued' || item.sendState === 'unconfirmed' || item.sendState === 'failed')))
+              ? {
+                  ...item,
+                  ...(mark.has(item.requestRpcId) ? { queuedAdopted: true as const } : {}),
+                  ...(retire.has(item.requestRpcId) ? { sendState: 'canceled' as const } : {}),
+                }
+              : item)
+        })() : undefined
         return {
           sessions: state.sessions.map(update),
           selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),
+          ...(settle === undefined ? {} : {
+            messages: {
+              ...state.messages,
+              [sessionId]: settle(state.messages[sessionId] ?? []),
+            },
+          }),
           ...(seq === undefined ? {} : { sessionProjectionSeqs: {
             ...state.sessionProjectionSeqs,
             [sessionId]: { ...state.sessionProjectionSeqs[sessionId], [key]: seq },
@@ -1942,6 +2265,16 @@ export const useAppStore = create<AppState>((set, get) => ({
         && sessionId !== undefined
         && state.selectedSession?.sessionId === sessionId
         && (isHarnessPromptStarted(frame) || running !== undefined)
+      // Row status marks mirror the official session dots: a finished turn
+      // leaves a "done" reminder (green) until the session is opened; a failed
+      // turn leaves the red mark instead.
+      const turnReason = running === false && frame.payload.event?.type === 'turn/end'
+        ? frame.payload.event.data.reason
+        : undefined
+      const finishedMark = running === undefined ? undefined
+        : running ? undefined
+          : isRecord(turnReason) && (turnReason.kind === 'failed' || turnReason.kind === 'error') ? 'failed' as const
+            : turnReason === undefined ? undefined : 'completed' as const
       const updateRunning = (session: RemoteSession): RemoteSession => (
         sessionId !== undefined && running !== undefined && session.sessionId === sessionId
           ? { ...session, running }
@@ -1954,7 +2287,12 @@ export const useAppStore = create<AppState>((set, get) => ({
           selectedSession: state.selectedSession === undefined ? undefined : updateRunning(state.selectedSession),
           ...(seq === undefined ? {} : { sessionLifecycles: {
             ...state.sessionLifecycles,
-            [sessionId]: { seq, running, ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }) },
+            [sessionId]: {
+              seq,
+              running,
+              ...(frame.payload.event?.data.turn === undefined ? {} : { turn: String(frame.payload.event.data.turn) }),
+              ...(finishedMark === undefined ? {} : { finished: finishedMark }),
+            },
           } }),
         }),
         ...(releasePrompt ? { busyAction: undefined } : {}),

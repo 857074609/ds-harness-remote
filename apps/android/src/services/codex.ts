@@ -366,10 +366,21 @@ export function mergeCodexLive(current: ChatItem[], live: ChatItem[]): ChatItem[
     let item = rawItem
     if (item.kind === 'message' && item.role === 'user') {
       const messageText = item.text
-      const optimistic = next.findIndex(value => value.kind === 'message'
+      // Text is the only echo correlation codex offers; prefer the same-text
+      // candidate whose image presence matches so queued same-text sends do
+      // not swap attachments, then fall back to FIFO order.
+      const incomingHasImages = item.images !== undefined
+      const textMatches = next.flatMap((value, index) => value.kind === 'message'
         && value.role === 'user'
         && value.id.startsWith('local:')
-        && value.text === messageText)
+        && value.text === messageText
+        // A failed/canceled row is user-owned retry material; a later echo must
+        // not consume it (it belongs to a different send).
+        && value.sendState !== 'failed' && value.sendState !== 'canceled' ? [index] : [])
+      const optimistic = textMatches.find(index => {
+        const value = next[index]!
+        return value.kind === 'message' && value.role === 'user' && (value.images !== undefined) === incomingHasImages
+      }) ?? textMatches[0] ?? -1
       if (optimistic >= 0) {
         const local = next[optimistic]
         if (local?.kind === 'message' && local.images !== undefined) item = { ...item, images: local.images }

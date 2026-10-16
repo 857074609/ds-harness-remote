@@ -8,6 +8,7 @@ import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+import { useLiveSessionStatus } from './device-screens'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { SwipeableSessionRow } from './device-screens'
@@ -23,6 +24,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
+  useLiveSessionStatus()
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
   const codexAvailable = useAppStore(state => state.codexAvailable)
@@ -30,6 +32,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
   const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
+  const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   const busy = useAppStore(state => state.busyAction)
   const workspaceCreate = useAppStore(state => state.workspaceCreate)
   const workspaceRename = useAppStore(state => state.workspaceRename)
@@ -352,9 +355,12 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                   action={<Button label={zhCN.workspaces.clearSearch} variant="secondary" onPress={() => setSearchQuery('')} />}
                 />
               : <View>{filteredWorkspaces.map(workspace => {
+                const archivedSet = new Set(archivedSessionIds)
                 const workspaceSessions = workspace.sessionIds.flatMap(sessionId => {
                   const session = sessions.find(item => item.sessionId === sessionId)
-                  return session === undefined ? [] : [session]
+                  // Archived conversations stay in the workspace's id list but
+                  // must not surface here (parity with the sessions screen).
+                  return session === undefined || archivedSet.has(sessionId) ? [] : [session]
                 })
                 const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
                 const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
@@ -427,6 +433,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                               open={openSessionId === session.sessionId}
                               locked={busy !== undefined}
                               busy={busy === `archive:${session.sessionId}`}
+                              opening={busy === `session:${session.sessionId}`}
                               onOpenChange={open => setOpenSessionId(open ? session.sessionId : undefined)}
                               onArchive={() => archiveSession(session.sessionId)}
                               onPress={() => { setOpenSessionId(undefined); void open(session) }}

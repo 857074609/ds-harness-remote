@@ -1,13 +1,43 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import type { CodexRemoteClient } from '@dsh-remote/client-core'
+import type { ChatItem } from '../src/types'
 import {
   codexPermissionPresetFromResponse,
   loadCodexCatalog,
+  mergeCodexLive,
   readCodexHistoryPage,
 } from '../src/services/codex'
 
 describe('Android CodeX Remote projection', () => {
+  it('replaces optimistic local user rows with live echoes without duplicates', async () => {
+    const optimistic = (id: string, text: string): ChatItem => ({
+      kind: 'message', id, sessionId: 's1', role: 'user', text, createdAt: 1,
+    })
+    const echo = (id: string, text: string): ChatItem => ({
+      kind: 'message', id, sessionId: 's1', role: 'user', text, createdAt: 2,
+    })
+    await runScenarios([
+      {
+        name: 'a live echo replaces its matching optimistic row',
+        run: () => {
+          const merged = mergeCodexLive([optimistic('local:rpc-1', 'hello')], [echo('native-1', 'hello')])
+          expect(merged).toEqual([echo('native-1', 'hello')])
+        },
+      },
+      {
+        name: 'queued identical-text sends each get replaced exactly once',
+        run: () => {
+          const merged = mergeCodexLive(
+            [optimistic('local:rpc-1', 'go'), optimistic('local:rpc-2', 'go')],
+            [echo('native-1', 'go'), echo('native-2', 'go')],
+          )
+          expect(merged.map(item => item.id)).toEqual(['native-1', 'native-2'])
+        },
+      },
+    ])
+  })
+
   it('prefers project/list workspaces and keeps unprojected Threads hidden', async () => {
     const request = vi.fn(async (method: string) => {
       if (method === 'project/list') return {

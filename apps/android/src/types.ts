@@ -170,6 +170,40 @@ export interface SessionModels {
 }
 
 /** Native ApiProxy session row projection (mirrors @deepseek-ai/dsh-host-apiproxy). */
+/** One durable roster row from the session's `agentTeam` projection. */
+export interface TeamMemberSnapshot {
+  id: string
+  /** Present on wire rows for real members; the Lead pseudo-row may omit it. */
+  name?: string
+  /** Role description shown as the member's identity in the team list. */
+  description?: string
+  provider?: string
+  context?: 'fresh' | 'fork'
+  phase?: 'provisioning' | 'active' | 'failed'
+  error?: string
+}
+
+/** One durable task row from the session's `agentTeam` projection. */
+export interface TeamTaskSnapshot {
+  id: string
+  revision: number
+  subject: string
+  description: string
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
+  /** Owning member's session id; absent = unassigned. */
+  ownerId?: string
+  blockedBy: string[]
+  writeScopes: string[]
+}
+
+/** Team state published through the `agentTeam` session projection. */
+export interface AgentTeamState {
+  id: string
+  members: TeamMemberSnapshot[]
+  tasks: TeamTaskSnapshot[]
+  failure?: string
+}
+
 export interface RemoteSession {
   sessionId: string
   backend?: AgentBackend
@@ -237,7 +271,7 @@ export interface ChatItemBase {
   nativeRevisionSeq?: number
   turn?: string
   /** Authoritative turn/end evidence; no reply sequence is replaced by this event. */
-  turnEnd?: { reason: 'completed' | 'stopped' | 'failed'; time: number }
+  turnEnd?: { reason: 'completed' | 'stopped' | 'failed'; time: number; detail?: string }
 }
 
 export interface ChatMessage extends ChatItemBase {
@@ -252,12 +286,41 @@ export interface ChatMessage extends ChatItemBase {
   streamingPhase?: 'reasoning' | 'text'
   /** Native session.prompt rpcId used to reconcile an optimistic user message. */
   requestRpcId?: string
+  /**
+   * Delivery state of a local optimistic user message.
+   * `queued`: the Host accepted the prompt into its queue (authoritative via
+   * the `inbox` projection) — hidden from the timeline and shown in the queue
+   * dock until the executed `user/message` echo replaces it.
+   * `failed`: the Host rejected the prompt — kept with a retry affordance.
+   * `unconfirmed`: timeout/disconnect left the outcome unknown — kept until a
+   * history/inbox reconciliation decides its fate (never judged by timers).
+   * `canceled`: reconciliation found the queued prompt neither echoed nor in
+   * the inbox (removed remotely); kept quiet in the timeline, and a late echo
+   * still replaces it.
+   */
+  sendState?: 'queued' | 'failed' | 'unconfirmed' | 'canceled'
+  /** Human-readable delivery failure reason kept on the row (single error surface). */
+  sendError?: string
+  /** Original prompt image payloads kept for retries (the row's `images` are display-only). */
+  /** The Host inbox adopted this queued prompt — it must never re-enter the local queue fallback. */
+  queuedAdopted?: boolean
+  promptImages?: PromptImage[]
   context?: boolean
   feedback?: 'positive' | 'negative'
   usage?: { inputTokens: number; outputTokens: number; totalTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
 }
 
 export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
+
+/**
+ * Outcome of one send attempt.
+ * `sent`: the Host accepted the prompt (or the command ran).
+ * `kept`: delivery failed but the message row (and its retry material) is kept
+ * in the timeline with an inline state — the caller must not restore the draft.
+ * `rejected`: nothing was persisted (command failure / empty input) — the
+ * caller should restore the draft.
+ */
+export type SendMessageResult = 'sent' | 'kept' | 'rejected'
 
 /** Temporary image bytes carried only in one native session.prompt request. */
 export interface PromptImage {

@@ -64,6 +64,11 @@ export function isRpcTimeoutError(error: unknown): boolean {
   return error instanceof Error && /timed?\s*out|timeout/i.test(error.message)
 }
 
+/** The bounded session-follow open/snapshot timeout (client-core STREAM_TIMEOUT). */
+export function isStreamTimeoutError(error: unknown): boolean {
+  return error instanceof Error && (error as Error & { code?: unknown }).code === 'STREAM_TIMEOUT'
+}
+
 /** A request can race with the transport closing while Android resumes. */
 export function isRecoverableTransportError(error: unknown): boolean {
   if (!(error instanceof Error)) return false

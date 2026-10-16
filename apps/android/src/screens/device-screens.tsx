@@ -462,11 +462,24 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
   )
 }
 
-export function SwipeableSessionRow({ session, open, locked, busy, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
+/** Keep visible session lists honest: refresh execution status while mounted. */
+export function useLiveSessionStatus(): void {
+  const phase = useAppStore(state => state.connection.phase)
+  useEffect(() => {
+    if (phase !== 'connected') return
+    void useAppStore.getState().refreshSessionStatus()
+    const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
+    return () => clearInterval(timer)
+  }, [phase])
+}
+
+export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
   session: RemoteSession
   open: boolean
   locked: boolean
   busy: boolean
+  /** Session history is still loading after the tap (openSession runs before navigation). */
+  opening?: boolean
   compact?: boolean
   title?: string
   meta?: string
@@ -477,6 +490,13 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const reduceMotion = useReduceMotion()
+  // Live turn lifecycle beats the session-list snapshot for the running mark.
+  const liveRunning = useAppStore(state => state.sessionLifecycles[session.sessionId]?.running)
+  const finished = useAppStore(state => state.sessionLifecycles[session.sessionId]?.finished)
+  const running = liveRunning ?? session.running
+  // Official-style row status: spinner while running, red for a failed finish,
+  // green for the "done" reminder until the session is opened.
+  const mark = running ? 'running' : finished
   const offset = useRef(new Animated.Value(0)).current
   const armed = useRef(new Animated.Value(0)).current
   const [rowWidth, setRowWidth] = useState(360)
@@ -572,7 +592,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
     outputRange: [-(rowWidth * 0.8 - SWIPE_ACTION_WIDTH) / 2, 0, 0],
     extrapolate: 'clamp',
   })
-  const disabled = locked || busy
+  const disabled = locked || busy || opening
 
   const displayTitle = title ?? sessionTitle(session)
   const displayMeta = meta ?? updatedText(session.updatedAt)
@@ -612,22 +632,36 @@ export function SwipeableSessionRow({ session, open, locked, busy, compact = fal
             onPress={onPress}
             style={({ pressed }) => [styles.swipeContentInner, compact && styles.compactSessionPressTarget, pressed && (compact ? styles.compactSessionPressed : styles.listRowPressed), disabled && styles.swipeContentBusy]}
           >
-            {compact
-              ? <SessionIcon size={17} color={colors.muted} />
-              : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>}
+            {mark === 'running'
+              ? (compact
+                ? <View style={styles.compactStatusSlot}><ActivityIndicator size="small" color={colors.primary} /></View>
+                : <View style={styles.rowIcon}><ActivityIndicator size="small" color={colors.primary} /></View>)
+              : mark === 'failed'
+                ? (compact
+                  ? <View style={styles.compactStatusSlot}><View style={styles.statusDotFailed} /></View>
+                  : <View style={styles.rowIcon}><View style={styles.statusDotFailedLarge} /></View>)
+                : mark === 'completed'
+                  ? (compact
+                    ? <View style={styles.compactStatusSlot}><View style={styles.statusDotDone} /></View>
+                    : <View style={styles.rowIcon}><View style={styles.statusDotDoneLarge} /></View>)
+                  : (compact
+                    ? <SessionIcon size={17} color={colors.muted} />
+                    : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
             <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
                 <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
-                {!compact && session.running && <StatusBadge status="running" />}
+                {!compact && running && <StatusBadge status="running" />}
               </View>
               {compact
-                ? <Text style={styles.compactSessionMeta}>{session.running ? zhCN.status.running : displayMeta}</Text>
+                ? <Text style={styles.compactSessionMeta}>{running ? zhCN.status.running : displayMeta}</Text>
                 : <View style={styles.rowDetailLine}>
                     <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
                     <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
                   </View>}
             </View>
-            <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />
+            {opening
+              ? <ActivityIndicator size="small" color={colors.primary} />
+              : <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />}
           </Pressable>
         </View>
       </Animated.View>
@@ -1069,6 +1103,11 @@ function createStyles(colors: ThemeColors) {
   swipeContentBusy: { opacity: 0.55 },
   listRow: { minHeight: 82, paddingVertical: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   listRowPressed: { backgroundColor: colors.surface },
+  compactStatusSlot: { width: 24, alignItems: 'center', justifyContent: 'center' },
+  statusDotFailed: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
+  statusDotFailedLarge: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.danger },
+  statusDotDone: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
+  statusDotDoneLarge: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.success },
   rowIcon: { width: 42, height: 42, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   rowCopy: { flex: 1, gap: 3 },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },

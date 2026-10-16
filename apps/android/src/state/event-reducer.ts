@@ -73,11 +73,35 @@ function applyNativeEvent(
     if (turn === undefined) return current
     const reasonData = event.data.reason
     const kind = isRecord(reasonData) ? reasonData.kind : reasonData
-    const reason = kind === 'completed' ? 'completed'
+    const reason: 'completed' | 'stopped' | 'failed' = kind === 'completed' ? 'completed'
       : kind === 'aborted' || kind === 'interrupted' ? 'stopped'
         : 'failed'
-    return settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
-      ? { ...item, turnEnd: { reason, time: event.time } } : item)
+    // Keep the Host's failure detail (auth errors, rate limits, …): a turn that
+    // fails before any output must still be visible with its reason (F14).
+    // Official shape: `error: { kind: 'error', error: LlmFailure }` and hook
+    // interruptions carry `reason: { reason }` — dig into both.
+    const detail = turnEndDetail(reasonData)
+    const settled: ChatItem[] = settleTurnItems(current, turn).map(item => item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)
+      ? { ...item, turnEnd: { reason, time: event.time, ...(detail === undefined ? {} : { detail }) } } : item)
+    // User bubbles do not render turn-end state, and context is hidden. A turn
+    // with only those rows still needs a process row to carry the failure.
+    const owned = settled.some(item => (item.kind !== 'message' || (item.role === 'assistant' && !item.context))
+      && (item.turn === turn || (item.kind === 'message' && item.replyGroup === turn)))
+    // Only a real failure payload (kind 'failed'/'error') warrants the
+    // synthetic row: a bare/legacy turn/end without `reason` must not be
+    // rendered as a failure, and a stopped turn is user-initiated.
+    if (owned || reason !== 'failed' || !isRecord(reasonData)) return settled
+    const failureRow: ChatMessage = {
+      kind: 'message',
+      id: `turn-failure:${turn}`,
+      sessionId,
+      role: 'assistant',
+      text: '',
+      createdAt: event.time,
+      turn,
+      turnEnd: { reason, time: event.time, ...(detail === undefined ? {} : { detail }) },
+    }
+    return [...settled, failureRow]
   }
   if (event.type === 'turn/start') return reduceNativeEvent(current, event, sessionId, view)
   const contextEvent = event.type === 'system/message' || event.type === 'developer/message' || (event.type === 'user/message' && !isHumanUserMessage(event.data))
@@ -104,6 +128,19 @@ function applyNativeEvent(
       ...(item.kind === 'message' && usage !== undefined ? { usage } : {}),
     }
   })
+}
+
+/** Best-effort Host failure detail from the official turn/end reason shape. */
+function turnEndDetail(reasonData: unknown): string | undefined {
+  if (!isRecord(reasonData)) return stringValue(reasonData)
+  const error = reasonData.error
+  if (isRecord(error)) {
+    const nested = error.error
+    return stringValue(error.message ?? (isRecord(nested) ? nested.message ?? nested.error : nested) ?? error.reason)
+  }
+  const reason = reasonData.reason
+  return stringValue(reasonData.message ?? reasonData.detail
+    ?? (isRecord(reason) ? reason.reason ?? reason.message : reason))
 }
 
 function nativeUsage(data: UnknownRecord): ChatMessage['usage'] {

@@ -210,6 +210,10 @@ export class RemoteTypertGateway {
       activeSignal.removeEventListener('abort', onAbort)
       unsubscribe()
       unsubscribeClose()
+      // The Host registers the stream before the open RPC settles: a failed or
+      // aborted open must still release the slot or it leaks until the
+      // connection drops (every open consumes one of the per-connection limit).
+      void this.client.rpc('harness.remote.stream.close', { streamId }).catch(() => undefined)
       throw error
     }
     return new RemoteGatewayStreamController(this.iterate(

@@ -2,11 +2,11 @@ import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../src/types'
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
-import { mergeHistoryAndLive, prependHistory } from '../src/state/message-helpers'
+import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
-    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn() },
+    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
@@ -68,6 +68,112 @@ const prepareScenario1 = () => {
 beforeEach(prepareScenario1)
 
 describe('ordered history recovery', () => {
+  it('retains queue adoption across either ordering of the inbox and prompt acknowledgement', async () => {
+    await runScenarios(['inbox-first', 'ack-first'].map(order => ({ name: order, run: async () => {
+      prepareScenario1()
+      const running = { ...session, running: true }
+      useAppStore.setState({ selectedSession: running, sessions: [running] })
+      let acknowledge!: () => void
+      proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
+      const rpcId = `adoption-${order}`
+      const sending = useAppStore.getState().sendMessage('queued prompt', [], rpcId)
+      const projectInbox = (value: unknown, seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '',
+        payload: { type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value } } as MuxStreamFrame)
+      const inbox = { 'next-turn': [{ id: 'host-item', source: { kind: 'user', rpcId },
+        content: [{ type: 'text', text: 'queued prompt' }] }] }
+      if (order === 'inbox-first') projectInbox(inbox, 1)
+      acknowledge()
+      expect(await sending).toBe('sent')
+      if (order === 'ack-first') projectInbox(inbox, 1)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ requestRpcId: rpcId,
+        sendState: 'queued', queuedAdopted: true })
+      // Another device removes it; one projection of grace prevents racing its echo.
+      projectInbox({ 'next-turn': [] }, 2)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ queuedAdopted: true })
+      projectInbox({ 'next-turn': [] }, 3)
+      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ sendState: 'canceled', queuedAdopted: true })
+    } })))
+  })
+
+  it('reconciles local delivery states by marking, never by deleting', async () => {
+    const row = (id: string, requestRpcId: string, sendState: 'queued' | 'failed' | 'unconfirmed', createdAt = 1): ChatItem => ({
+      kind: 'message', id, sessionId: 's1', role: 'user', text: 'hello', createdAt, requestRpcId, sendState,
+    })
+    await runScenarios([
+      {
+        name: 'marks pre-connection queued orphans canceled and unconfirmed orphans failed',
+        run: () => {
+          const merged = reconcileDeliveryStates(
+            [row('local:a', 'rpc-a', 'queued'), row('local:b', 'rpc-b', 'unconfirmed')],
+            new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled', 'failed'])
+          expect(merged.map(item => item.id)).toEqual(['local:a', 'local:b'])
+        },
+      },
+      {
+        name: 'keeps rows still sitting in the Host inbox',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:a', 'rpc-a', 'queued')], new Set(['rpc-a']), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['queued'])
+        },
+      },
+      {
+        name: 'keeps failed rows as user retry material',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:c', 'rpc-c', 'failed')], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['failed'])
+        },
+      },
+      {
+        name: 'keeps canceled rows terminal — user removal is never re-judged',
+        run: () => {
+          const removed: ChatItem = {
+            kind: 'message', id: 'local:g', sessionId: 's1', role: 'user', text: 'gone',
+            createdAt: 1, requestRpcId: 'rpc-g', sendState: 'canceled',
+          }
+          const merged = reconcileDeliveryStates([removed], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled'])
+        },
+      },
+      {
+        name: 'settles adopted rows whose echo never landed (lost-echo hole)',
+        run: () => {
+          const lost: ChatItem = {
+            kind: 'message', id: 'local:lost', sessionId: 's1', role: 'user', text: 'queued then lost',
+            createdAt: 1, requestRpcId: 'rpc-lost', queuedAdopted: true,
+          }
+          const merged = reconcileDeliveryStates([lost], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['canceled'])
+        },
+      },
+      {
+        name: 'keeps adopted rows echoed in history or still queued host-side',
+        run: () => {
+          const echoed: ChatItem = {
+            kind: 'message', id: 'local:echo', sessionId: 's1', role: 'user', text: 'x',
+            createdAt: 1, requestRpcId: 'rpc-echo', queuedAdopted: true,
+          }
+          const merged = reconcileDeliveryStates([echoed], new Set<string>(), new Set(['rpc-echo']), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual([undefined])
+        },
+      },
+      {
+        name: 'keeps rows sent during the current connection for live-frame reconciliation',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:d', 'rpc-d', 'unconfirmed', 200)], new Set<string>(), new Set<string>(), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['unconfirmed'])
+        },
+      },
+      {
+        name: 'keeps rows whose prompt is echoed in the loaded history',
+        run: () => {
+          const merged = reconcileDeliveryStates([row('local:e', 'rpc-e', 'queued')], new Set<string>(), new Set(['rpc-e']), 100)
+          expect(merged.map(item => item.kind === 'message' ? item.sendState : undefined)).toEqual(['queued'])
+        },
+      },
+    ])
+  })
+
   it('merges cached tool results using snapshot and live ordering', async () => {
     await runScenarios(
       [
@@ -364,7 +470,7 @@ describe('session restore state machine', () => {
             ).toBe(true)
             const close = vi.fn(async () => undefined)
             finish({ streamId: 'old-prompt-stream', close })
-            expect(await sending).toBe(true)
+            expect(await sending).toBe('sent')
             expect(close).toHaveBeenCalledOnce()
             expect(useAppStore.getState().selectedSession?.sessionId).toBe(`${backend}:new`)
             expect(acp.prompt).toHaveBeenCalledWith('old', 'hello', undefined, [], backend)

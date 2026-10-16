@@ -336,6 +336,11 @@ export class RemoteApiProxy {
     await this.call('session.cancel', { sessionId })
   }
 
+  /** Official QueueAction passthrough: remove or immediately deliver (steer) one queued prompt. */
+  async sessionUpdateQueue(sessionId: string, itemId: string, action: { kind: 'remove' | 'steer' }): Promise<void> {
+    await this.call('session.updateQueue', { sessionId, itemId, action })
+  }
+
   async hostDescribe(): Promise<HostDescriptor> {
     const result = await this.call<HostDescriptor>('host.describe', {})
     if (typeof result.version !== 'string' || typeof result.cwd !== 'string') {

@@ -69,6 +69,9 @@ Plugin 检查缺少 `@xterm/headless` 和 `@xterm/addon-serialize`。
 | 连接绑定 | responder 使用另一 connection prologue | Noise 拒绝握手，不进入 transport 状态 |
 
 密文完整性与重放场景使用生产 `RelayTransport` 和 `ClientSecureTransport`。
+测试先检查接收字节增量，再断言断线状态。
+增量必须等于测试密文长度。
+该断言排除 Server 提前拒绝造成的断线假阳性。
 测试同时验证客户端发送请求与 Host 返回消息。
 通道失败后，Client 不能继续发送消息。
 Host Control socket 仍能响应 ping。

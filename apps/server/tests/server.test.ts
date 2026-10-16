@@ -243,14 +243,17 @@ describe('control authorization and encrypted relay', () => {
         const payload = { connectionId: ctx.connectionId, targetDeviceId: ctx.c.deviceId, counter: 0, ciphertext: toBase64Url(ciphertext) }
         if (reason === 'replay-with-new-counter') {
           ctx.host.send('relay', payload)
-          await expect.poll(() => ctx.received).toEqual(['synthetic response'])
+          await expect.poll(() => ctx.received, { timeout: 3000, interval: 50 }).toEqual(['synthetic response'])
           payload.counter = 1
         } else {
           ciphertext[ciphertext.length - 1]! ^= 1
           payload.ciphertext = toBase64Url(ciphertext)
         }
+        const before = ctx.secure.getStats().bytesReceived ?? 0
         ctx.host.send('relay', payload)
-        await expect.poll(() => ctx.secure.getStats().connected).toBe(false)
+        await expect.poll(() => ctx.secure.getStats().bytesReceived, { timeout: 3000, interval: 50 })
+          .toBe(before + fromBase64Url(payload.ciphertext).byteLength)
+        await expect.poll(() => ctx.secure.getStats().connected, { timeout: 3000, interval: 50 }).toBe(false)
         expect(ctx.received).toEqual(reason === 'tamper' ? [] : ['synthetic response'])
         await expect(ctx.secure.send(new Uint8Array([1]))).rejects.toThrow('The authenticated Noise channel is not connected.')
         // The Host keeps its Control socket after one Client channel fails.
@@ -261,7 +264,7 @@ describe('control authorization and encrypted relay', () => {
       await cleanupScenario2()
       await prepareScenario1()
     })
-  })
+  }, 15000)
   it('rejects a relayed initiator whose static identity or connection prologue differs from local trust', async () => {
     await runScenarios(['wrong-static-key', 'wrong-prologue'].map(reason => ({
       name: reason,

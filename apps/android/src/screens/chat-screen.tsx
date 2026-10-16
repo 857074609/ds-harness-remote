@@ -2529,13 +2529,24 @@ function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onOpen }: 
             const active = owned.find(task => task.status === 'in_progress')
               ?? owned.find(task => task.status === 'pending')
               ?? owned[0]
+            // Official member status (TeamMemberView.status): failed/provisioning
+            // come from the durable phase; otherwise the LIVE agent decides
+            // running vs inactive. Task progress is row content, not state.
+            const liveRunning = session?.running === true
             const stateLabel = member.phase === 'failed'
               ? zhCN.chat.teamPhaseFailed
               : member.phase === 'provisioning'
                 ? zhCN.chat.teamPhaseProvisioning
-                : active === undefined
-                  ? zhCN.chat.teamIdle
-                  : taskStatusLabel(active.status)
+                : liveRunning
+                  ? zhCN.status.running
+                  : zhCN.chat.teamIdle
+            const stateStyle = member.phase === 'failed'
+              ? styles.subagentRunningFailed
+              : member.phase === 'provisioning'
+                ? styles.subagentProvisioning
+                : liveRunning
+                  ? styles.subagentRunning
+                  : styles.subagentIdle
             // Wire rows may omit `description` despite the declared type — treat
             // every member field as possibly absent (this crashed the panel).
             const description = typeof member.description === 'string' ? member.description.trim() : ''
@@ -2547,13 +2558,12 @@ function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onOpen }: 
               <View style={styles.teamRowCopy}>
                 <View style={styles.teamRowTitleLine}>
                   <Text style={styles.teamRowRole} numberOfLines={1}>{role}</Text>
-                  <Text style={member.phase === 'failed' ? styles.subagentRunningFailed
-                    : session?.running === true || active?.status === 'in_progress' ? styles.subagentRunning : styles.subagentIdle}>
-                    {stateLabel}
-                  </Text>
+                  <Text style={stateStyle}>{stateLabel}</Text>
                 </View>
                 {active !== undefined && typeof active.subject === 'string' && (
-                  <Text style={styles.teamRowTask} numberOfLines={2}>{active.subject}</Text>
+                  <Text style={styles.teamRowTask} numberOfLines={2}>
+                    {active.subject} · {taskStatusLabel(active.status)}
+                  </Text>
                 )}
                 {owned.length > 1 && (
                   <Text style={styles.teamRowTask}>{zhCN.chat.teamMoreTasks(owned.length)}</Text>
@@ -2797,6 +2807,7 @@ function createStyles(colors: ThemeColors) {
   subagentRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, minHeight: 52, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   subagentRunning: { ...type.smallStrong, color: colors.success },
   subagentRunningFailed: { ...type.smallStrong, color: colors.danger },
+  subagentProvisioning: { ...type.smallStrong, color: colors.warning },
   subagentIdle: { ...type.small, color: colors.muted },
   stopButtonSmall: { width: 36, height: 36, borderRadius: 18, backgroundColor: colors.ink, alignItems: 'center', justifyContent: 'center', marginRight: spacing.xs },
   resendRowDisabled: { opacity: 0.5 },

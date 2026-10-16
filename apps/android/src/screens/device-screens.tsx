@@ -46,7 +46,6 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   const styles = useThemedStyles(createStyles)
   const isHome = onBack === undefined
   const [openRowId, setOpenRowId] = useState<string>()
-  const [renameTarget, setRenameTarget] = useState<RemoteDevice>()
   // Removed rows stay mounted until their exit animation ends; the store drops them at once.
   const [leaving, setLeaving] = useState<ReadonlyMap<string, LeavingDevice>>(() => new Map())
   const initialDeviceIds = useRef(new Set(devices.map(device => device.deviceId)))
@@ -171,7 +170,6 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                       onDevice(device)
                     }}
                     onRemove={() => removeDevice(device)}
-                    onRename={() => { setOpenRowId(undefined); setRenameTarget(device) }}
                     onExited={() => forgetLeaving(device.deviceId)}
                   />
                 ))}</View>}
@@ -182,7 +180,6 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
           <Text style={styles.homeFooterText}>{zhCN.devices.footer}</Text>
         </View>
       )}
-      {renameTarget !== undefined && <DeviceRenameModal device={renameTarget} onClose={() => setRenameTarget(undefined)} />}
     </View>
   )
 }
@@ -252,7 +249,7 @@ const SWIPE_SPRING = { damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: 
 const nudge = (value: Animated.Value, toValue: number, duration: number) =>
   Animated.timing(value, { toValue, duration, easing: Easing.inOut(Easing.quad), useNativeDriver: true })
 
-function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onRename, onExited }: {
+function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onExited }: {
   device: RemoteDevice
   open: boolean
   exiting: boolean
@@ -261,7 +258,6 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
   onOpenChange: (open: boolean) => void
   onPress: () => void
   onRemove: () => Promise<boolean>
-  onRename: () => void
   onExited: () => void
 }) {
   const { colors } = useTheme()
@@ -445,7 +441,9 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
               <View style={styles.rowCopy}>
                 <View style={styles.rowTitleLine}>
                   <Text style={styles.rowTitle} numberOfLines={1}>{device.name}</Text>
-                  <StatusBadge status={device.online ? 'online' : 'offline'} />
+                  <Text style={[styles.deviceStatus, device.online && styles.deviceStatusOnline]}>
+                    {device.online ? zhCN.status.online : zhCN.status.offline}
+                  </Text>
                 </View>
                 <View style={styles.rowDetailLine}>
                   <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{deviceSubtitle(device)}</Text>
@@ -454,7 +452,6 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
               </View>
               <ChevronRight size={20} color={colors.subtle} />
             </Pressable>
-            <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={onRename} disabled={disabled} />
           </View>
         </Animated.View>
       </Animated.View>
@@ -645,7 +642,7 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
                     ? <View style={styles.compactStatusSlot}><View style={styles.statusDotDone} /></View>
                     : <View style={styles.rowIcon}><View style={styles.statusDotDoneLarge} /></View>)
                   : (compact
-                    ? <SessionIcon size={17} color={colors.muted} />
+                    ? <View style={styles.compactStatusSlot}><SessionIcon size={17} color={colors.muted} /></View>
                     : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
             <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
@@ -784,6 +781,9 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
               {currentStage === 'ready' ? zhCN.devices.connectionReady : zhCN.devices.connecting}
             </Text>
             <Text style={styles.connectionDeviceName} numberOfLines={2}>{device.name}</Text>
+            <Text style={styles.connectionVersions} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
+              {`${zhCN.devices.harnessShort} ${device.harnessVersion ?? zhCN.devices.unknownVersion} | ${zhCN.devices.pluginShort} ${device.clientVersion ?? zhCN.devices.unknownVersion}`}
+            </Text>
           </View>
         </View>
 
@@ -861,14 +861,13 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const refreshNetworkDetails = useAppStore(state => state.refreshConnectionNetworkDetails)
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
-  const [showNetworkDetails, setShowNetworkDetails] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
 
   useEffect(() => {
-    if (isConnected && showNetworkDetails) void refreshNetworkDetails()
-  }, [isConnected, refreshNetworkDetails, showNetworkDetails])
+    if (isConnected) void refreshNetworkDetails()
+  }, [device.deviceId, isConnected, refreshNetworkDetails])
 
   const trustAndContinue = async () => {
     if (await trust(device) && device.online) onConnect()
@@ -884,14 +883,10 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
             <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
             <View style={styles.deviceHeroCopy}>
               <Text style={styles.deviceName}>{device.name}</Text>
-              <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
+              <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
             </View>
-            <StatusBadge
-              status={connectionBadgeStatus(isSelected, connection.phase, connection.stats.mode, device.online)}
-            />
+            <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
           </View>
-
-          <Button label={zhCN.devices.rename} icon={Pencil} variant="quiet" onPress={() => setRenaming(true)} />
 
           {connection.error !== undefined && isSelected && (
             <View style={styles.connectionError}>
@@ -920,7 +915,8 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
               : <>
                   <SectionTitle>{zhCN.devices.info}</SectionTitle>
                   <View style={styles.group}>
-                    <KeyValue label={zhCN.devices.harness} value={descriptor?.version ?? zhCN.devices.unknownVersion} />
+                    <KeyValue label={zhCN.devices.harnessShort} value={descriptor?.version ?? device.harnessVersion ?? zhCN.devices.unknownVersion} />
+                    <KeyValue label={zhCN.devices.plugin} value={device.clientVersion ?? zhCN.devices.unknownVersion} />
                     <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
                     {descriptor?.provider !== undefined && <KeyValue label={zhCN.devices.provider} value={descriptor.provider} />}
                     {descriptor?.model !== undefined && <KeyValue label={zhCN.devices.model} value={descriptor.model} />}
@@ -936,14 +932,12 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                     <KeyValue
                       label={zhCN.devices.path}
                       value={connectionPath(connection.stats.mode)}
-                      onPress={() => setShowNetworkDetails(current => !current)}
-                      expanded={showNetworkDetails}
                     />
                     {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
                     <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
                   </View>
 
-                  {showNetworkDetails && <View style={styles.networkDetails}>
+                  <View style={styles.networkDetails}>
                     <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
                     <View style={styles.group}>
                       <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
@@ -956,7 +950,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                       {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={networkDetails.connectedAt === undefined ? zhCN.common.unavailable : new Date(networkDetails.connectedAt).toLocaleString()} />}
                       {(connection.stats.bytesSent !== undefined || connection.stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(connection.stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(connection.stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
                     </View>
-                  </View>}
+                  </View>
 
                   {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
                 </>}
@@ -1061,22 +1055,6 @@ function probeTransportForMode(mode: string | undefined): ConnectionProbeTranspo
   return undefined
 }
 
-function connectionBadgeStatus(
-  isSelected: boolean,
-  phase: 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'offline',
-  mode: string | undefined,
-  deviceOnline: boolean,
-): 'online' | 'offline' | 'lan' | 'relay' | 'p2p' | 'turn' | 'waiting' {
-  if (!isSelected) return deviceOnline ? 'online' : 'offline'
-  if (phase === 'connecting' || phase === 'reconnecting') return 'waiting'
-  if (phase !== 'connected') return 'offline'
-  if (mode === 'LAN') return 'lan'
-  if (mode === 'P2P' || mode === 'WebRTC') return 'p2p'
-  if (mode === 'TURN') return 'turn'
-  if (mode === 'Relay') return 'relay'
-  return 'online'
-}
-
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
@@ -1112,14 +1090,16 @@ function createStyles(colors: ThemeColors) {
   rowCopy: { flex: 1, gap: 3 },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
   rowTitle: { ...type.bodyStrong, color: colors.ink, flex: 1 },
+  deviceStatus: { ...type.smallStrong, color: colors.muted },
+  deviceStatusOnline: { color: colors.success },
   rowDetailLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   rowSubtitle: { ...type.small, color: colors.muted },
   rowInlineSubtitle: { flex: 1 },
   rowMeta: { ...type.caption, color: colors.subtle },
   compactSessionContent: { backgroundColor: colors.surface },
-  compactSessionPressTarget: { borderRadius: radius.md, overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, marginLeft: -spacing.sm },
+  compactSessionPressTarget: { minHeight: 58, borderRadius: radius.md, overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
   compactSessionPressed: { backgroundColor: colors.surfaceStrong },
-  compactSessionRow: { minHeight: 58, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  compactSessionRow: { paddingVertical: spacing.xxs, flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   compactSessionCopy: { flex: 1 },
   compactSessionTitle: { ...type.smallStrong, color: colors.ink },
   compactSessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
@@ -1129,6 +1109,7 @@ function createStyles(colors: ThemeColors) {
   connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xxs },
   connectionStatus: { ...type.smallStrong, color: colors.muted, textAlign: 'center' },
   connectionDeviceName: { ...type.title, color: colors.ink, textAlign: 'center' },
+  connectionVersions: { ...type.small, color: colors.muted, alignSelf: 'stretch', marginTop: spacing.xs, textAlign: 'center' },
   connectionSteps: { marginTop: spacing.xs },
   connectionStep: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm },
   stepMarker: { width: 30, alignItems: 'center' },
@@ -1151,9 +1132,9 @@ function createStyles(colors: ThemeColors) {
   progressRouteLabelActive: { ...type.smallStrong, color: colors.success },
   deviceHero: { paddingVertical: spacing.xxl, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   deviceIcon: { width: 56, height: 56, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  deviceHeroCopy: { flex: 1 },
-  deviceName: { ...type.title, color: colors.ink },
-  devicePlatform: { ...type.small, color: colors.muted, marginTop: 2 },
+  deviceHeroCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
+  deviceName: { ...type.title, color: colors.ink, flexShrink: 1 },
+  devicePlatform: { ...type.small, color: colors.muted, maxWidth: '30%', flexShrink: 1, textAlign: 'right' },
   connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.surface, gap: spacing.lg },
   connectCopy: { ...type.body, color: colors.muted },
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },

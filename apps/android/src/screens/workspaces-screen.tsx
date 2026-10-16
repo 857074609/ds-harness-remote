@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
-import type { ConnectionPhase, DirectoryListing, RemoteSession, WorkspaceView } from '../types'
+import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
@@ -10,23 +10,23 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useLiveSessionStatus } from './device-screens'
 import { workspaceStableKey } from '../lib/workspace-key'
+import { workspaceParentPath } from '../lib/workspace-path'
+import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { SwipeableSessionRow } from './device-screens'
 import { resolveSessionDisplayTitle } from './session-title'
 
 const FAVORITE_HIGHLIGHT_MS = 2400
 
-export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focusWorkspaceKey }: {
+export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspaceKey }: {
   onBack?: () => void
   onSession: (session: RemoteSession) => void
   onDeviceInfo: () => void
-  onMore?: () => void
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
   useLiveSessionStatus()
   const selectedDevice = useAppStore(state => state.selectedDevice)
-  const connection = useAppStore(state => state.connection)
   const codexAvailable = useAppStore(state => state.codexAvailable)
   const cursorAvailable = useAppStore(state => state.cursorAvailable)
   const piAvailable = useAppStore(state => state.piAvailable)
@@ -242,26 +242,15 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
     void workspaceMove(actionsTarget.workspaceId, beforeWorkspaceId)
   }
 
-  const connectionStatusLabel = workspaceConnectionStatus(connection.phase, connection.stats.mode)
-  const deviceSubtitle = selectedDevice === undefined
-    ? zhCN.workspaces.noDevice
-    : zhCN.workspaces.deviceSubtitle(selectedDevice.name, connectionStatusLabel)
 
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar
-        title={deviceSubtitle}
+        title={selectedDevice?.name ?? zhCN.workspaces.noDevice}
         titleLines={2}
         onTitlePress={onDeviceInfo}
         onBack={onBack}
-        action={(
-          <View style={styles.topBarActions}>
-            <IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />
-            {onMore !== undefined && (
-              <IconButton dense label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />
-            )}
-          </View>
-        )}
+        action={<IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />}
       />}>
         <Screen scrollRef={scrollRef} refreshing={refreshing} onRefresh={() => void refresh()}>
           {showBackendTabs && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">
@@ -370,13 +359,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, onMore, focu
                   action={<Button label={zhCN.workspaces.clearSearch} variant="secondary" onPress={() => setSearchQuery('')} />}
                 />
               : <View>{filteredWorkspaces.map(workspace => {
-                const archivedSet = new Set(archivedSessionIds)
-                const workspaceSessions = workspace.sessionIds.flatMap(sessionId => {
-                  const session = sessions.find(item => item.sessionId === sessionId)
-                  // Archived conversations stay in the workspace's id list but
-                  // must not surface here (parity with the sessions screen).
-                  return session === undefined || archivedSet.has(sessionId) ? [] : [session]
-                })
+                const workspaceSessions = getVisibleWorkspaceSessions(workspace, sessions, archivedSessionIds)
                 const workspaceKey = workspaceStableKey(workspace, selectedDevice?.platform)
                 const showAllSessions = allSessionsWorkspaceKeys.has(workspaceKey)
                 const visibleWorkspaceSessions = showAllSessions ? workspaceSessions : workspaceSessions.slice(0, 3)
@@ -559,14 +542,6 @@ function resolveSessionTitle(session: RemoteSession): string {
   return session.parentSessionId === undefined ? zhCN.sessions.untitled : zhCN.sessions.child
 }
 
-function workspaceParentPath(path: string): string {
-  const normalized = path.replace(/[\\/]+$/, '')
-  const segments = normalized.split(/[\\/]+/).filter(Boolean)
-  const parentSegments = segments.slice(0, -1)
-  if (parentSegments.length === 0) return normalized.startsWith('/') ? '/' : path
-  const rootPrefix = normalized.startsWith('/') ? '/' : ''
-  return `${rootPrefix}${parentSegments.join('/')}`
-}
 
 function relativeTime(timestamp: number): string {
   const delta = Math.max(0, Date.now() - timestamp)
@@ -600,18 +575,6 @@ function initialWorkspaceBackend(
   if (!hasHarnessWorkspace && !hasCodexWorkspace && !hasCursorWorkspace && hasAntigravityWorkspace && antigravityAvailable) return 'antigravity'
   if (!hasHarnessWorkspace && piAvailable && workspaces.some(workspace => workspace.backend === 'pi')) return 'pi'
   return 'harness'
-}
-
-/** Compact connection type for the workspace header: the transport name, not its description. */
-function workspaceConnectionStatus(phase: ConnectionPhase, mode: string | undefined): string {
-  if (phase === 'connecting' || phase === 'reconnecting') return zhCN.status.waiting
-  if (phase === 'offline') return zhCN.status.offline
-  if (phase !== 'connected') return zhCN.status.disconnected
-  if (mode === 'LAN') return zhCN.devices.connectionProbeDetails.lan
-  if (mode === 'P2P' || mode === 'WebRTC') return zhCN.devices.connectionProbeDetails.p2p
-  if (mode === 'TURN') return zhCN.devices.connectionProbeDetails.turn
-  if (mode === 'Relay') return zhCN.devices.connectionProbeDetails.relay
-  return zhCN.status.online
 }
 
 function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
@@ -952,7 +915,6 @@ function WorkspaceModalSurface({ onClose, backdropStyle, sheetStyle, children }:
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
-  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   contentTop: { marginTop: spacing.md },
   backendTabs: { flexDirection: 'row', padding: spacing.xxs, borderRadius: radius.md, backgroundColor: colors.surfaceStrong, marginBottom: spacing.md },
   backendTab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs },
@@ -963,7 +925,7 @@ function createStyles(colors: ThemeColors) {
   searchInput: { flex: 1, ...type.body, color: colors.ink, paddingVertical: spacing.sm },
   clearSearch: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
   workspaceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xxs, paddingVertical: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-  workspaceRowActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  workspaceRowActions: { flexDirection: 'row', alignItems: 'center' },
   workspaceToggle: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   workspaceRowPressed: { opacity: 0.7 },
   disabled: { opacity: 0.55 },
@@ -982,9 +944,9 @@ function createStyles(colors: ThemeColors) {
     borderColor: colors.separator,
   },
   workspaceGroupFocused: { borderColor: colors.primary },
-  noSessions: { minHeight: 48, marginLeft: 50, justifyContent: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  noSessions: { minHeight: 48, paddingHorizontal: spacing.sm, justifyContent: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   noSessionsText: { ...type.small, color: colors.primary },
-  loadAllSessions: { minHeight: 48, marginLeft: 50, paddingVertical: spacing.sm, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  loadAllSessions: { minHeight: 48, paddingVertical: spacing.sm, paddingHorizontal: spacing.sm, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
   loadAllSessionsText: { ...type.smallStrong, color: colors.primary },
   primaryArea: { marginTop: spacing.xxl },
   backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },

@@ -312,13 +312,12 @@ function AppNavigator() {
       {route.name === 'workspaces' && <WorkspacesScreen
         onBack={backFromWorkspaces}
         onSession={() => push({ name: 'chat' })}
-        onMore={openHomeMenu}
         focusWorkspaceKey={route.focusWorkspaceKey}
         onDeviceInfo={() => {
           if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId, source: 'workspaces' })
         }}
       />}
-      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
+      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       <HomeActionsMenu
@@ -356,6 +355,7 @@ function LoadingScreen() {
           accessible={false}
         />
         <Text style={styles.loadingTitle}>DSH Remote</Text>
+        <Text style={styles.loadingCredit}>{zhCN.app.credit}</Text>
       </View>
       <View style={styles.loadingDetails}>
         <Text style={styles.loadingTagline}>{zhCN.app.loadingTagline}</Text>
@@ -402,6 +402,7 @@ function createStyles(colors: ThemeColors) {
   loadingDetails: { width: '100%', alignItems: 'center' },
   logo: { width: 144, height: 144, marginBottom: spacing.md },
   loadingTitle: { ...type.title, color: colors.ink, textAlign: 'center' },
+  loadingCredit: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
   loadingTagline: { ...type.smallStrong, color: colors.ink, textAlign: 'center', alignSelf: 'stretch' },
   loadingStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, alignSelf: 'stretch', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, marginTop: spacing.xl, paddingTop: spacing.lg },
   loadingDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: colors.primary },

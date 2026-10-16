@@ -4,11 +4,12 @@ import type { ChatItem, HistoryEntry, MuxStreamFrame, RemoteSession } from '../s
 import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
 import { mergeAcpHistoryAndLive } from '../src/services/cursor'
 import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
+import { workspaceStableKey } from '../src/lib/workspace-key'
 
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
-    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn() },
+    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
@@ -20,6 +21,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   requireProxy() { return proxy }
   connect = transport.connect
   close = transport.close
+  refreshBackends = transport.refreshBackends
   hasCodex() { return false }
   requireCodex() { return codex }
   hasCursor = transport.hasCursor
@@ -70,6 +72,59 @@ const prepareScenario1 = () => {
   authenticate.mockResolvedValue({ api: {}, credentials: { accessToken: 'synthetic' } })
 }
 beforeEach(prepareScenario1)
+
+describe('Host-confirmed Harness archive recovery', () => {
+  it('keeps archive state across refresh and reconnect without removing catalog membership', async () => {
+    const other = { ...session, sessionId: 's2', updatedAt: 0 }
+    const workspace = { workspaceId: 'w1', title: 'Project', path: '/project',
+      sessionIds: ['s1', 's2'], createdAt: '', updatedAt: '' }
+    const device = { deviceId: 'host', name: 'Host', platform: 'linux', identityKey: 'key', membershipId: 'member', online: true, trusted: true }
+    const openSession = vi.fn(async (_session: RemoteSession) => true)
+    useAppStore.setState({ workspaces: [workspace], sessions: [session, other], selectedDevice: device,
+      config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never, openSession })
+    proxy.workspaceArchiveSession.mockResolvedValue(['s1'])
+    // A successful archive must not depend on another catalog RPC succeeding.
+    proxy.sessionList.mockRejectedValueOnce(new Error('read unavailable'))
+    expect(await useAppStore.getState().archiveSession('s1')).toBe(true)
+    expect(proxy.workspaceArchiveSession).toHaveBeenCalledWith('s1')
+    expect(proxy.sessionList).not.toHaveBeenCalled()
+    expect(useAppStore.getState().workspaces[0]?.sessionIds).toEqual(['s1', 's2'])
+    expect(useAppStore.getState().selectedSession).toBeUndefined()
+    proxy.sessionList.mockReset().mockResolvedValue([session, other])
+    proxy.workspaceList.mockResolvedValue({ items: [workspace], archivedSessionIds: ['s1'] })
+    await useAppStore.getState().refreshWorkspaces()
+    expect(useAppStore.getState().error).toBeUndefined()
+    expect(useAppStore.getState().archivedSessionIds).toEqual(['s1'])
+    expect(await useAppStore.getState().openFavoriteWorkspaceSession(workspaceStableKey(workspace, 'linux'))).toEqual(other)
+    await useAppStore.getState().disconnect()
+    expect(await useAppStore.getState().connectDevice(device)).toBe(true)
+    expect(useAppStore.getState().archivedSessionIds).toEqual(['s1'])
+    expect(await useAppStore.getState().openFavoriteWorkspaceSession(workspaceStableKey(workspace, 'linux'))).toEqual(other)
+    expect(openSession.mock.calls.every(([item]) => item.sessionId === 's2')).toBe(true)
+  })
+
+  it('preserves state on rejection and ignores archive completions from a retired connection', async () => {
+    await runScenarios(['rejected', 'late-success', 'late-error'].map(name => ({ name, run: async () => {
+      let resolve!: (ids: string[]) => void
+      let reject!: (error: Error) => void
+      proxy.workspaceArchiveSession.mockImplementation(() => new Promise<string[]>((yes, no) => { resolve = yes; reject = no }))
+      const pending = useAppStore.getState().archiveSession('s1')
+      if (name !== 'rejected') {
+        await useAppStore.getState().disconnect()
+        useAppStore.setState({ archivedSessionIds: ['other-host'], busyAction: 'other-operation', error: 'other-error' })
+      }
+      if (name === 'late-success') resolve(['s1'])
+      else reject(new Error('archive rejected'))
+      expect(await pending).toBe(false)
+      if (name === 'rejected') {
+        expect(useAppStore.getState().archivedSessionIds).toEqual([])
+        expect(useAppStore.getState().selectedSession).toEqual(session)
+      } else {
+        expect(useAppStore.getState()).toMatchObject({ archivedSessionIds: ['other-host'], busyAction: 'other-operation', error: 'other-error' })
+      }
+    } })), prepareScenario1)
+  })
+})
 
 describe('ordered history recovery', () => {
   it('retains queue adoption across either ordering of the inbox and prompt acknowledgement', async () => {

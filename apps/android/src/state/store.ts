@@ -19,6 +19,7 @@ import {
 } from '../locales/i18n'
 import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isSessionAuthError, isStreamTimeoutError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
+import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import {
   loginFlow,
   oauthLoginChannel,
@@ -1283,12 +1284,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async archiveSession(sessionId) {
     if (get().connection.phase !== 'connected') return false
+    const generation = connectionGeneration
     set({ busyAction: `archive:${sessionId}`, error: undefined })
     try {
       const session = get().sessions.find(item => item.sessionId === sessionId)
       if (session?.backend === 'codex') {
         await connection.requireCodex().request('thread/archive', { threadId: codexThreadId(session) })
+        if (generation !== connectionGeneration) return false
         if (activeCodexTimeline?.session.id === sessionId) await closeActiveCodexStream()
+        if (generation !== connectionGeneration) return false
         set(state => ({
           sessions: state.sessions.filter(item => item.sessionId !== sessionId),
           workspaces: state.workspaces.map(workspace => ({
@@ -1303,6 +1307,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') {
         if (get().selectedSession?.sessionId === sessionId) await closeActiveCursorStream()
+        if (generation !== connectionGeneration) return false
         set(state => ({
           sessions: state.sessions.filter(item => item.sessionId !== sessionId),
           workspaces: state.workspaces.map(workspace => ({
@@ -1318,20 +1323,18 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const proxy = connection.requireProxy()
       const archivedSessionIds = await proxy.workspaceArchiveSession(sessionId)
-      const sessions = await proxy.sessionList()
+      if (generation !== connectionGeneration) return false
+      // The mutation returns the complete Host-confirmed archive set. Preserve
+      // catalog membership, and do not let a second read hide a successful write.
       set(state => ({
         archivedSessionIds,
-        sessions,
         busyAction: undefined,
-        workspaces: state.workspaces.map(workspace => ({
-          ...workspace,
-          sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
-        })),
         selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
         sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
       }))
       return true
     } catch (error) {
+      if (generation !== connectionGeneration) return false
       set({ busyAction: undefined, error: friendlyError(error) })
       return false
     }
@@ -1635,7 +1638,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (state.connection.phase !== 'connected') return undefined
     const workspace = state.workspaces.find(item => workspaceStableKey(item, state.selectedDevice?.platform) === key)
     if (workspace === undefined) return undefined
-    const session = latestWorkspaceSession(state.sessions, workspace)
+    const session = latestWorkspaceSession(state.sessions, workspace, state.archivedSessionIds)
     if (session === undefined) return undefined
     return await state.openSession(session) ? session : undefined
   },
@@ -2659,11 +2662,9 @@ async function rememberRecentWorkspace(session: RemoteSession): Promise<void> {
 }
 
 /** Most recently updated conversation inside a workspace; undefined when it has none yet. */
-function latestWorkspaceSession(sessions: RemoteSession[], workspace: WorkspaceView): RemoteSession | undefined {
+function latestWorkspaceSession(sessions: RemoteSession[], workspace: WorkspaceView, archivedSessionIds: string[]): RemoteSession | undefined {
   let latest: RemoteSession | undefined
-  for (const sessionId of workspace.sessionIds) {
-    const session = sessions.find(item => item.sessionId === sessionId)
-    if (session === undefined) continue
+  for (const session of getVisibleWorkspaceSessions(workspace, sessions, archivedSessionIds)) {
     if (latest === undefined || session.updatedAt > latest.updatedAt) latest = session
   }
   return latest

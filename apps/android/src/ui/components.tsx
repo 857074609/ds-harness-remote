@@ -176,9 +176,7 @@ export function TopBar({
       )}
       <View style={styles.topBarSide}>
         {onBack !== undefined && (
-          <View style={styles.topBarCircleButton}>
-            <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? ArrowLeft} onPress={onBack} dense hitSlop={8} />
-          </View>
+          <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? ArrowLeft} onPress={onBack} hitSlop={8} />
         )}
       </View>
       <View style={styles.topBarTitles}>
@@ -192,7 +190,7 @@ export function TopBar({
               hitSlop={4}
               style={({ pressed }) => [styles.topBarTitleRow, pressed && styles.iconButtonPressed]}
             >
-              <Text style={styles.topBarTitle} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+              <Text style={[styles.topBarTitle, styles.topBarTitleLink]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
             </Pressable>
           )}
         {hasSubtitle && (
@@ -214,7 +212,7 @@ export function TopBar({
       </View>
       <View style={[styles.topBarSide, styles.topBarTrailing]}>
         {action !== undefined && action !== null && (
-          <View style={styles.topBarPillGroup}>{action}</View>
+          <View style={styles.topBarActions}>{action}</View>
         )}
       </View>
     </View>
@@ -467,41 +465,13 @@ function createStyles(colors: ThemeColors) {
     frameHeader: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10 },
     topBarBlurred: { backgroundColor: 'transparent', borderBottomWidth: 0 },
     topBarWithSubtitle: { minHeight: 68, paddingVertical: spacing.sm },
-    topBarSide: { flexDirection: 'row', alignItems: 'center' },
+    topBarSide: { minWidth: 48, flexDirection: 'row', alignItems: 'center' },
     topBarTrailing: { justifyContent: 'flex-end' },
-    topBarCircleButton: {
-      width: 40,
-      height: 40,
-      borderRadius: radius.pill,
-      backgroundColor: colors.surface,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1.5 },
-      shadowOpacity: 0.08,
-      shadowRadius: 4,
-      elevation: 2,
-    },
-    topBarPillGroup: {
-      height: 40,
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderRadius: radius.pill,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.separator,
-      paddingHorizontal: 2,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 1.5 },
-      shadowOpacity: 0.08,
-      shadowRadius: 4,
-      elevation: 2,
-    },
+    topBarActions: { flexDirection: 'row', alignItems: 'center' },
     topBarTitles: { flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, gap: 1 },
     topBarTitle: { ...type.heading, textAlign: 'center', color: colors.ink, fontWeight: '700' },
-    topBarTitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
+    topBarTitleLink: { textDecorationLine: 'underline', flexShrink: 1 },
+    topBarTitleRow: { alignSelf: 'stretch', minHeight: 48, maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitleRow: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 1, paddingHorizontal: spacing.xs, borderRadius: radius.pill },
     topBarSubtitle: { ...type.caption, color: colors.muted, textAlign: 'center', flexShrink: 1 },
     iconButton: { width: 48, height: 48, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center' },
@@ -543,7 +513,7 @@ function createStyles(colors: ThemeColors) {
     sectionTitleRow: { marginTop: spacing.xxl, marginBottom: spacing.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     sectionTitle: { ...type.smallStrong, color: colors.muted },
     keyValue: { paddingVertical: spacing.sm, flexDirection: 'row', gap: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
-    keyLabel: { ...type.small, color: colors.muted, width: 116 },
+    keyLabel: { ...type.small, color: colors.muted, maxWidth: '40%' },
     keyValueText: { ...type.smallStrong, color: colors.ink, flex: 1, textAlign: 'right' },
     keyValueLinkTarget: { flex: 1 },
     keyValueLink: { color: colors.primary },

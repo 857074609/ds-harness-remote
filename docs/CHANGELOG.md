@@ -1,5 +1,14 @@
 ## Unreleased
 
+- Centers Android home/single-action headers and removes raised button backgrounds from toolbar icons. Host details show the platform on the right and separate DSH and Remote plugin version rows.
+- Android 首页及单操作标题栏保持居中，移除工具栏图标外层按钮背景和阴影；主机列表在线/离线改为纯文字，移除列表改名图标；主机信息页在名称后提供重命名图标、右侧显示系统类型，DSH 和 Remote 插件版本分别成行；连接页版本信息以 `DSH 版本号 | Plugin 版本号` 单行居中展示。
+
+- Android connection progress shows Harness and Remote plugin versions. Workspace headers use an underlined, clickable Host name and remove network status and the overflow menu; Host details always expand network diagnostics.
+- Android 连接进度页展示 Harness 和 Remote 插件版本；工作区标题改为带下划线、整段可点击的主机名，移除网络状态和右上角更多菜单；主机信息页直接展开网络详情。
+
+- Android workspace lists and favorite/recent shortcuts consistently exclude Host-archived Harness sessions after refresh or reconnect. Archiving applies the confirmed archive set without a second catalog request; late results from a disconnected Host cannot overwrite the current connection.
+- Android 工作区列表及收藏/最近访问快捷入口统一排除 Host 已归档的 Harness 会话，刷新和重连后仍保持隐藏。归档直接应用 Host 确认结果，不再依赖第二次目录读取；旧连接的迟到结果不能覆盖当前连接状态。
+
 - Fixes Pi cancellation during initial cwd/session loading: cancelled preparations cannot start a prompt or clear a newer retry. Desktop Pi projection preserves error, cancellation and token-limit outcomes instead of reporting every turn as completed. Android restores Pi/AGY tabs only when their respective backend is available.
 - 修复 Pi 首次 cwd/session 加载期间的取消：已取消的准备任务不能启动 Prompt，也不能清除后续重试状态；Desktop Pi 投影保留失败、中断和 token 上限状态，不再统一显示正常完成。Android 恢复 Pi/AGY 标签时分别检查对应后端可用性。
 

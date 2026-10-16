@@ -21,7 +21,7 @@ import {
 } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
-import { Archive, ArrowLeft, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, Menu, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, Users, X } from 'lucide-react-native'
+import { ArrowLeft, ArrowUp, Bot, Camera, Check, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, CircleStop, Code2, Folder, Layers, ListTree, Menu, MessageSquare, Paperclip, Pencil, Plus, Shield, Terminal, Trash2, Images, RefreshCw, ShieldAlert, Sparkles, User, Users, X } from 'lucide-react-native'
 import Svg, { Path } from 'react-native-svg'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
 import { requireSessionTools, useAppStore } from '../state/store'
@@ -44,6 +44,7 @@ import type { SkillEntry } from '../services/session-tools'
 import { SessionToolsPanel } from './session-tools-panel'
 import { MessageActions } from './message-actions'
 import { ChatTrajectory } from './chat-trajectory'
+import { HostSessionsDrawer } from './host-sessions-drawer'
 import { processSegments, processDetail, toolActivity, completedProcessTitle, toolDisplayName, type ProcessActivity } from './chat-process'
 import { resolveSessionDisplayTitle } from './session-title'
 import { promptImageFromBase64, promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
@@ -54,7 +55,7 @@ const LONG_DRAFT_HINT = 12_000
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
 
-export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
+export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
   useLiveSessionStatus()
@@ -91,13 +92,7 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
   const [subagentsOpen, setSubagentsOpen] = useState(false)
   const [teamOpen, setTeamOpen] = useState(false)
 
-  const archiveCurrentSession = () => {
-    if (session === undefined || busy !== undefined) return
-    Alert.alert(zhCN.sessions.archiveTitle, zhCN.sessions.archiveBody, [
-      { text: zhCN.common.cancel, style: 'cancel' },
-      { text: zhCN.sessions.archive, style: 'destructive', onPress: () => { onBack(); void archiveSession(session.sessionId) } },
-    ])
-  }
+  const [sessionsOpen, setSessionsOpen] = useState(false)
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
@@ -945,9 +940,9 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <TopBar
         title={sessionTitle(session)}
         titleLines={1}
-        onBack={handleBack}
+        onBack={trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
         backIcon={trajectory ? ArrowLeft : Menu}
-        backLabel={trajectory ? zhCN.common.back : zhCN.chat.openWorkspaces}
+        backLabel={trajectory ? zhCN.common.back : zhCN.chat.openHostSessions}
         action={<>
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
@@ -963,7 +958,6 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
                 item.phase === 'active' && sessions.find(row => row.sessionId === item.id)?.running === true) ? colors.primary : undefined}
               onPress={() => { Keyboard.dismiss(); setMentionType(null); setTeamOpen(true) }} />
           )}
-          <IconButton label={zhCN.sessions.archive} icon={Archive} dense onPress={archiveCurrentSession} disabled={busy !== undefined} />
           <IconButton label={zhCN.chat.newChat} icon={OfficialMenuIcons.newChat} dense onPress={() => void startNewSession()} disabled={newSessionPending || busy !== undefined} />
           {!connected && <IconButton label={zhCN.chat.reconnect} icon={RefreshCw} dense onPress={() => void reconnectCurrentSession()} disabled={connectionRetrying} />}
         </>}
@@ -1303,6 +1297,21 @@ export function ChatScreen({ onBack, onNewSession, onOpenWorkspaces }: { onBack:
       <TeamAgentPanel visible={teamOpen} members={teamState?.members ?? []} tasks={teamState?.tasks ?? []}
         sessions={sessions} onClose={() => setTeamOpen(false)}
         onOpen={session => { setTeamOpen(false); void openSession(session) }} />
+      {sessionsOpen && <HostSessionsDrawer
+        onBack={() => {
+          Keyboard.dismiss()
+          setSessionsOpen(false)
+          onOpenDevices()
+        }}
+        onClose={() => setSessionsOpen(false)}
+        onSelect={async next => {
+          if (await openSession(next)) {
+            applyDraft('')
+            setImages([])
+            setSessionsOpen(false)
+          }
+        }}
+      />}
       <WorkspacePicker visible={workspacePickerOpen} workspaces={workspaces} currentSessionId={session.sessionId} sessionBackend={session.backend} busy={busy} onClose={() => setWorkspacePickerOpen(false)} onPick={pickWorkspace} onManage={onOpenWorkspaces} />
       <ToolAccessPicker visible={toolPickerOpen} onClose={() => setToolPickerOpen(false)} onPick={pickToolMode} />
       <PromptsPicker

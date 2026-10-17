@@ -20,8 +20,8 @@ export function ModePicker({ visible, options, current, loading, selecting, onCl
   visible: boolean
   options?: AgentPresetOption[]
   current?: string
-  loading: boolean
-  selecting: boolean
+  loading?: boolean
+  selecting?: boolean
   onClose: () => void
   onPick: (preset: string) => void
 }) {
@@ -29,7 +29,7 @@ export function ModePicker({ visible, options, current, loading, selecting, onCl
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
@@ -83,7 +83,7 @@ export function PermissionPicker({ visible, permissions, onClose, onPick, loadin
   const listMaxHeight = usePickerListMaxHeight()
   if (permissions === undefined) return null
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
@@ -124,7 +124,7 @@ export function WorkspacePicker({ visible, workspaces, currentSessionId, session
   const listMaxHeight = usePickerListMaxHeight()
   const options = workspaces.filter(workspace => (workspace.backend ?? 'harness') === (sessionBackend ?? 'harness'))
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectWorkspace}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <Text style={styles.pickerHint}>{zhCN.chat.moveSessionHint}</Text>
@@ -178,7 +178,7 @@ export function ToolAccessPicker({ visible, onClose, onPick }: {
     { id: 'terminal' as const, icon: Terminal, name: zhCN.tools.terminal, description: zhCN.chat.toolTerminalDescription },
   ]
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
@@ -222,7 +222,7 @@ export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <Text style={styles.modalTitle}>{zhCN.chat.toolPrompts}</Text>
@@ -285,7 +285,7 @@ export function PromptsManager({ visible, prompts, promptsLoading, onBack, onClo
   const styles = useThemedStyles(createStyles)
   const listMaxHeight = usePickerListMaxHeight()
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>
@@ -344,7 +344,7 @@ export function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose,
   }, [visible, prompt?.id])
   const canSave = title.trim().length > 0 && text.trim().length > 0 && !promptsLoading
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onBack} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>
@@ -412,7 +412,7 @@ export function ModelPicker({ visible, models, onClose, onPick }: {
   const activeEffort = efforts.find(effort => effort.id === activeEffortId)
   const showEffortRow = !effortView && efforts.length > 0
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}>
           <View style={styles.modalHeaderCopy}>

@@ -35,7 +35,7 @@ export function DeviceRenameModal({ device, onClose }: { device: RemoteDevice; o
   }
 
   return (
-    <Modal visible transparent animationType="fade" onRequestClose={close}>
+    <Modal visible transparent animationType="fade" onRequestClose={close} statusBarTranslucent>
       <KeyboardAvoidingView behavior="padding" style={styles.backdrop}>
         <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={strings.common.close} onPress={close} />
         <View style={styles.sheet} accessibilityViewIsModal>

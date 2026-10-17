@@ -1240,7 +1240,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         </Text>
       </View>
 
-      <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu}>
+      <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu} statusBarTranslucent>
         <ModalSurface onClose={closePlusMenu}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={closePlusMenu} /></View>
             {sessionImageLimits(session) !== undefined && (

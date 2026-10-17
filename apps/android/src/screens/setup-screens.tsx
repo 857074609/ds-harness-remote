@@ -8,6 +8,7 @@ import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, Lo
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
 import { BlurHeaderFrame, Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, LoginMethod } from '../types'
 import { radius, spacing, type } from '../ui/theme'
@@ -305,6 +306,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   onAbout: () => void
   onDevices?: () => void
 }) {
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
@@ -320,7 +322,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={styles.homeMenuCard} pointerEvents="box-none">
+      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: insets.top + 56 }]} pointerEvents="box-none">
         {onDevices !== undefined && (
           <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
         )}

@@ -1,45 +1,39 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Dimensions, Keyboard, useWindowDimensions, View } from 'react-native'
+import { AppState, Keyboard, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { spacing } from './theme'
 
 /**
- * Reserve the band the IME covers so the composer clears it.
+ * Reserve the band the IME covers so the composer/content clears it,
+ * while respecting edge-to-edge system insets without double-counting.
  *
- * Android can drop `keyboardDidHide` (IME closed while the activity was paused,
- * focus moved into a WebView or modal, split-screen resizes) and
- * `Keyboard.metrics()` is fed by those same events, so no keyboard-sourced value
- * can recover from a missed hide. Two rules keep the layout honest:
- *
- * 1. Never close over `windowHeight` in the show handler — `adjustResize` can
- *    shrink the window between subscription and delivery, and a stale height
- *    produced a padding that nothing ever corrected.
- * 2. Treat a window height increase as authoritative: under adjustResize the
- *    window grows back exactly when the IME releases it, which is the only
- *    signal that does not depend on the dropped event.
+ * Android edge-to-edge rules:
+ * 1. Under Android 15 edge-to-edge (and targetSdk 35), the Activity window
+ *    remains full-screen (does not shrink under adjustResize). In this mode,
+ *    the IME overlays the bottom of the window: windowHeight - keyboardScreenY > 0.
+ * 2. On older Android or non-edge-to-edge devices where adjustResize shrinks
+ *    the RN window, windowHeight becomes <= keyboardScreenY (the window already
+ *    resizes to fit above the IME). In this case, windowHeight - keyboardScreenY <= 0,
+ *    so keyboardCover collapses to 0, preventing double padding.
+ * 3. When the keyboard is closed, the bottom padding provides clearance for
+ *    the system navigation bar / gesture navigation handle (insets.bottom).
+ * 4. When the keyboard is open, the IME physically covers the bottom system bar,
+ *    so insets.bottom is replaced by the keyboard cover instead of being added twice.
+ * 5. Window height growth (when IME releases the window under adjustResize)
+ *    and AppState transitions automatically clear any stale state from dropped events.
  */
 export function KeyboardInset({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets()
   const { height: windowHeight } = useWindowDimensions()
-  const [keyboardCover, setKeyboardCover] = useState(0)
+  const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null)
   const heightRef = useRef(windowHeight)
 
-  // Edge-to-edge Android often keeps the RN root full-screen even with
-  // adjustResize, so KeyboardAvoidingView under-pads and the IME toolbar
-  // clips the composer. Measure the real covered band from screenY.
   const measure = useCallback((screenY: number) => {
-    // The cover MUST be computed in screen coordinates: `screenY` is
-    // screen-absolute, while useWindowDimensions() reports the already-shrunk
-    // window under adjustResize. Subtracting the two collapses to 0 exactly
-    // when the IME is up, so the composer stayed covered with no relayout.
-    // Dimensions.get('screen') is the matching frame for `screenY`.
-    const screenHeight = Dimensions.get('screen').height
-    setKeyboardCover(Math.max(0, screenHeight - screenY))
+    setKeyboardScreenY(screenY)
   }, [])
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', event => measure(event.endCoordinates.screenY))
-    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardCover(0))
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardScreenY(null))
     return () => {
       show.remove()
       hide.remove()
@@ -49,19 +43,36 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
   useEffect(() => {
     const previous = heightRef.current
     heightRef.current = windowHeight
-    // The window grows back when the IME released it (adjustResize). Reset a
-    // cover left behind by a dropped hide event — but only when the keyboard
-    // also reports hidden: split-screen and rotation grow the window while the
-    // IME stays up, and must not clear a live cover.
-    if (windowHeight > previous && !Keyboard.isVisible()) setKeyboardCover(0)
+    if (windowHeight > previous && !Keyboard.isVisible()) setKeyboardScreenY(null)
   }, [windowHeight])
 
-  // App shell already reserved insets.bottom below this tree; subtract it so
-  // we clear the IME without double-counting the gesture/nav inset. When
-  // adjustResize already shrank the window, cover≈0 and this is a no-op.
-  const paddingBottom = keyboardCover > 0
-    ? Math.max(0, keyboardCover - insets.bottom) + spacing.sm
-    : 0
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') {
+        // When returning to the foreground, re-sync keyboard coordinates.
+        // If the keyboard remained open without emitting a new show event, restore the coordinate.
+        // If the keyboard closed while in background, clear it so we fall back to insets.bottom.
+        if (Keyboard.isVisible()) {
+          const metrics = Keyboard.metrics()
+          if (metrics && typeof metrics.screenY === 'number') {
+            setKeyboardScreenY(metrics.screenY)
+          }
+        } else {
+          setKeyboardScreenY(null)
+        }
+      }
+    })
+    return () => subscription.remove()
+  }, [])
+
+  // When keyboard is open:
+  // - If window did not shrink (e.g. Android 15 edge-to-edge): windowHeight - keyboardScreenY gives the exact IME overlap.
+  // - If adjustResize already shrunk the window: windowHeight <= keyboardScreenY, cover collapses to 0 (no extra padding).
+  // When keyboard is closed:
+  // - Reserve insets.bottom so controls clear the navigation/gesture bar.
+  const paddingBottom = keyboardScreenY !== null
+    ? Math.max(0, windowHeight - keyboardScreenY)
+    : insets.bottom
 
   return (
     <View style={[{ flex: 1 }, paddingBottom > 0 ? { paddingBottom } : null]}>

@@ -3,7 +3,7 @@ import { AppState, BackHandler, Image, Linking, StyleSheet, Text, View } from 'r
 import NetInfo from '@react-native-community/netinfo'
 import { useLocales } from 'expo-localization'
 import { StatusBar } from 'expo-status-bar'
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context'
+import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
 import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
@@ -56,7 +56,7 @@ function AppShell() {
   return (
     <>
       <ThemedStatusBar />
-      <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+      <SafeAreaView style={styles.safeArea} edges={['left', 'right']}>
         <AppNavigator />
       </SafeAreaView>
     </>
@@ -278,7 +278,7 @@ function AppNavigator() {
 
   return (
     <View style={styles.flex}>
-      {error !== undefined && route.name !== 'connecting' && <ErrorBanner message={error} onDismiss={clearError} />}
+      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && <ErrorBanner message={error} onDismiss={clearError} />}
       {route.name === 'server' && <ServerSetupScreen onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
       {route.name === 'devices' && (
         <DevicesScreen
@@ -343,10 +343,11 @@ function AppNavigator() {
 }
 
 function LoadingScreen() {
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <View style={styles.loadingScreen}>
+    <View style={[styles.loadingScreen, { paddingTop: spacing.xxxl + insets.top, paddingBottom: spacing.xxxl + insets.bottom }]}>
       <View style={styles.loadingBrand}>
         <Image
           source={require('./assets/android-icon-foreground-adaptive.png')}

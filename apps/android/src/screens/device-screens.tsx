@@ -22,6 +22,7 @@ import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { resolveSessionDisplayTitle } from './session-title'
 import { DeviceRenameModal } from './device-rename-modal'
 
@@ -689,6 +690,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
 
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
@@ -769,7 +771,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   return (
     <View style={styles.flex}>
       {showBack && (
-        <View style={styles.connectionBack}>
+        <View style={[styles.connectionBack, { top: insets.top + spacing.xs }]}>
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={cancel} />
         </View>
       )}

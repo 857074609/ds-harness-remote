@@ -19,6 +19,7 @@ import {
 import { ClaudeAcpClient } from './adapters/claude-process.js'
 import { PiAcpClient } from './adapters/pi-process.js'
 import { AntigravityAcpClient } from './adapters/antigravity-process.js'
+import { OpencodeAcpClient, OpencodeAcpError } from './adapters/opencode-process.js'
 import {
   ACP_METHOD_ALLOWLIST,
   isSessionMutation,
@@ -130,6 +131,9 @@ export class AcpRemoteGateway {
       }
       if (backend.id === 'claude') return new ClaudeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       if (backend.id === 'pi') return new PiAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd })
+      if (backend.id === 'opencode') {
+        return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+      }
       return new CursorAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
     },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
@@ -140,7 +144,7 @@ export class AcpRemoteGateway {
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends(): string[] {
     if (!this.config.enabled) return []
-    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor', 'pi', 'claude'].includes(item.id)).map(item => item.id)
+    return this.config.backends.filter(item => item.enabled && ['antigravity', 'cursor', 'pi', 'claude', 'opencode'].includes(item.id)).map(item => item.id)
   }
 
   start(): Promise<void> {
@@ -203,16 +207,16 @@ export class AcpRemoteGateway {
     const bridge = new AcpPeerBridge(this, context, publish, this.logger)
     this.peers.set(context.connectionId, bridge)
     const workspaceBridge = new WorkspaceBridge(async rawId => {
-      const match = rawId.match(/^(acp|cursor|pi):(.+)$/)
+      const match = rawId.match(/^(acp|cursor|pi|opencode):(.+)$/)
       const session = match ? this.sessionCwds.get(match[2]!) : undefined
-      const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1] === 'pi' ? 'pi' : 'cursor'
+      const backend = match?.[1] === 'acp' ? 'antigravity' : match?.[1] === 'pi' ? 'pi' : match?.[1] === 'opencode' ? 'opencode' : 'cursor'
       if (!session || session.backend !== backend) throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
       this.requireAcp(backend)
       this.requireSessionOwner(context.connectionId, match![2]!)
       return session.cwd
     }, this.terminalEnabled, this.workspaceState, this.terminalSpawner, {
-      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor|pi):/.test(value),
-      parse: value => typeof value === 'string' && /^(acp|cursor|pi):[A-Za-z0-9_-]{1,240}$/.test(value)
+      domain: 'ACP', owns: value => typeof value === 'string' && /^(acp|cursor|pi|opencode):/.test(value),
+      parse: value => typeof value === 'string' && /^(acp|cursor|pi|opencode):[A-Za-z0-9_-]{1,240}$/.test(value)
         ? { sessionId: value, nativeId: value } : undefined,
     })
     this.workspaceTools.set(context.connectionId, new AcpWorkspaceTools(workspaceBridge,
@@ -234,7 +238,7 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       const sessionId = call.method === 'dsh/sessionHistory'
-        ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude):/, '')
+        ? String(call.params.sessionId).replace(/^(acp|cursor|pi|claude|opencode):/, '')
         : sessionIdFromParams(call.method, call.params)
       const boundBackend = sessionId === undefined ? undefined : this.sessionBackends.get(sessionId)
       if (boundBackend !== undefined && boundBackend !== call.params.backend) {
@@ -334,13 +338,16 @@ export class AcpRemoteGateway {
         ? rawSessionId.slice('acp:'.length)
         : rawSessionId.startsWith('cursor:')
           ? rawSessionId.slice('cursor:'.length)
-          : rawSessionId
+          : rawSessionId.startsWith('opencode:')
+            ? rawSessionId.slice('opencode:'.length)
+            : rawSessionId
       const boundBackend = this.sessionBackends.get(conversationId)
       const backend = typeof call.params.backend === 'string' ? call.params.backend : boundBackend ?? this.defaultBackend()
       if ((boundBackend !== undefined && boundBackend !== backend)
         || (rawSessionId.startsWith('claude:') && backend !== 'claude')
         || (rawSessionId.startsWith('pi:') && backend !== 'pi')
         || (rawSessionId.startsWith('cursor:') && backend !== 'cursor')
+        || (rawSessionId.startsWith('opencode:') && backend !== 'opencode')
         || (rawSessionId.startsWith('acp:') && backend !== 'antigravity')) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
@@ -654,7 +661,7 @@ export class AcpRemoteGateway {
     if (this.closed) throw new RpcError('CURSOR_CLOSED', 'The ACP Remote domain is closed.')
     const previous = this.config
     const implemented = (value: ResolvedAcpConfig) => ({ enabled: value.enabled,
-      backends: value.backends.filter(item => ['cursor', 'antigravity', 'pi', 'claude'].includes(item.id)) })
+      backends: value.backends.filter(item => ['cursor', 'antigravity', 'pi', 'claude', 'opencode'].includes(item.id)) })
     this.config = config
     if (JSON.stringify(implemented(previous)) === JSON.stringify(implemented(config)) && this.pendingReconfiguration.size === 0) return
     if (this.restartTimer !== undefined) clearTimeout(this.restartTimer)
@@ -669,7 +676,7 @@ export class AcpRemoteGateway {
     const sessions = new Set([...this.sessionBackends].filter(([, backend]) => changed.has(backend)).map(([id]) => id))
     if (sessions.size > 0) await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed', sessions)))
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
-    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : sessionId.startsWith('pi:') ? 'pi' : 'cursor'))
+    const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : sessionId.startsWith('pi:') ? 'pi' : sessionId.startsWith('opencode:') ? 'opencode' : 'cursor'))
       .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
     for (const id of sessions) {      this.sessionOwners.delete(id)
       this.sessionBackends.delete(id)
@@ -1257,11 +1264,17 @@ export function cursorBinaryCandidates(configured: string): string[] {
       'agent',
     ]
   }
+  if (configured === 'opencode') {
+    return [
+      join(userHome, '.local', 'bin', 'opencode'),
+      'opencode',
+    ]
+  }
   return [configured]
 }
 
 function errorCode(error: unknown): string {
-  if (error instanceof CursorAcpError || error instanceof RpcError) return error.code
+  if (error instanceof CursorAcpError || error instanceof OpencodeAcpError || error instanceof RpcError) return error.code
   return 'CURSOR_UNAVAILABLE'
 }
 

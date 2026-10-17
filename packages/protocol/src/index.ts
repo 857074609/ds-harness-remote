@@ -66,6 +66,7 @@ export const ACP_WORKSPACE_FILES_CAPABILITY = 'agent.acp.workspace-files.v1' as 
 export const ACP_TERMINAL_CAPABILITY = 'agent.acp.terminal.v1' as const
 export const ACP_ANTIGRAVITY_MODELS_CAPABILITY = 'agent.acp.antigravity.models.v1' as const
 export const ACP_ANTIGRAVITY_MODEL_LOAD_CAPABILITY = 'agent.acp.antigravity.model-load.v1' as const
+export const ACP_OPENCODE_CAPABILITY = 'agent.acp.opencode.v1' as const
 export const ACP_TOOL_CALL_ENDPOINTS = ['workspaceFiles/list', 'workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes', 'workspaceFiles/readAll',
   'terminal/environment', 'terminal/shells', 'terminal/list', 'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close'] as const
 export const ACP_TOOL_STREAM_ENDPOINTS = ['workspaceFiles/changes', 'terminal/follow', 'terminal/retain'] as const
@@ -480,7 +481,7 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | (string & {})
+export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
 export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
 export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
@@ -744,13 +745,13 @@ export interface AgentAcpRespondParams {
 export type AcpWorkspaceToolCallEndpoint = 'workspaceFiles/list' | 'workspaceFiles/stat' | 'workspaceFiles/read' | 'workspaceFiles/readBytes' | 'workspaceFiles/readAll'
   | 'terminal/environment' | 'terminal/shells' | 'terminal/list' | 'terminal/create' | 'terminal/write' | 'terminal/resize' | 'terminal/rename' | 'terminal/close'
 export type AcpWorkspaceToolStreamEndpoint = 'workspaceFiles/changes' | 'terminal/follow' | 'terminal/retain'
-export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
+export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
 export interface AcpModelParams { sessionId: string; backend: 'antigravity' | 'pi' }
 export interface AcpModelSelectionParams extends AcpModelParams { model: string; reasoningEffort?: string }
 export interface AgentAcpStreamOpenParams {
   streamId: string
   sessionId: string
-  tool?: { backend: 'cursor' | 'antigravity' | 'pi'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
+  tool?: { backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolStreamEndpoint; args: Record<string, unknown> }
 }
 
 export interface AgentAcpStreamCloseParams {

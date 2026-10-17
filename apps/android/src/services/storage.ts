@@ -200,7 +200,7 @@ export function saveCollapsedWorkspaceIds(deviceId: string, workspaceIds: readon
 export async function loadWorkspaceBackend(deviceId: string): Promise<AgentBackend | undefined> {
   const stored = await readJson<{ byDevice?: Record<string, unknown> }>(KEYS.workspaceBackends)
   const value = stored?.byDevice?.[deviceId]
-  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' ? value : undefined
+  return value === 'harness' || value === 'codex' || value === 'cursor' || value === 'antigravity' || value === 'pi' || value === 'opencode' ? value : undefined
 }
 
 let workspaceBackendsWrite = Promise.resolve()

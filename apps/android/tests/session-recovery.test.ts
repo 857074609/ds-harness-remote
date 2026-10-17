@@ -9,7 +9,7 @@ import { workspaceStableKey } from '../src/lib/workspace-key'
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
@@ -27,9 +27,11 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   hasCursor = transport.hasCursor
   hasPi = transport.hasPi
   hasAntigravity = transport.hasAntigravity
+  hasOpencode = transport.hasOpencode
   requireCursor() { return acp }
   requireAntigravity() { return acp }
   requirePi() { return acp }
+  requireOpencode() { return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -53,6 +55,7 @@ const prepareScenario1 = () => {
   transport.hasCursor.mockReturnValue(false)
   transport.hasAntigravity.mockReturnValue(false)
   transport.hasPi.mockReturnValue(false)
+  transport.hasOpencode.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
   acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })
@@ -411,7 +414,7 @@ describe('session restore state machine', () => {
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
-    const rows = ['cursor', 'antigravity', 'pi'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -438,6 +441,7 @@ describe('session restore state machine', () => {
             transport.hasCursor.mockReturnValue(backend === 'cursor')
             transport.hasAntigravity.mockReturnValue(backend === 'antigravity')
             transport.hasPi.mockReturnValue(backend === 'pi')
+            transport.hasOpencode.mockReturnValue(backend === 'opencode')
             const first = useAppStore.getState().reconnect()
             const second = useAppStore.getState().reconnect()
             expect(await first).toBe(true)

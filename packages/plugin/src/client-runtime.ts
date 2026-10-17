@@ -71,6 +71,7 @@ export interface RemoteHostFeatures {
   cursor: boolean
   antigravity: boolean
   pi?: boolean
+  opencode: boolean
   acpModelLoadsSession?: boolean
   workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
   pluginRoute: boolean
@@ -129,7 +130,7 @@ export interface RemoteWorkspaceView {
 interface RemoteWorkspaceSelection {
   targetDeviceId: string
   workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'
+  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'
   sessionId?: string
 }
 
@@ -208,7 +209,7 @@ export class ClientModeRuntime {
   private readonly codexOpenedSessions = new Map<string, string>()
   private codexOpenGeneration = 0
   private cursorVirtual?: AcpVirtualHarness
-  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' = 'cursor'
+  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor'
   private readonly proxySwitch?: ApiProxySwitch
   private readonly gatewaySwitch: TypertGatewaySwitch
   private readonly codexStreams = new Map<string, CodexLoopbackStream>()
@@ -621,7 +622,7 @@ export class ClientModeRuntime {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal)
   }
 
-  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
+  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features[backend]) {
@@ -639,7 +640,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     workspaceId: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
@@ -678,7 +679,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     path: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
     if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', `A ${backend} project directory is required.`)
@@ -1362,6 +1363,25 @@ export class ClientModeRuntime {
         }
         return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'pi'))
       }
+      if (endpoint === 'opencode.workspaces.list') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
+        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'opencode'))
+      }
+      if (endpoint === 'opencode.workspace.open') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and OpenCode Workspace are required.')
+        }
+        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'opencode'))
+      }
+      if (endpoint === 'opencode.workspace.create') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and OpenCode project directory are required.')
+        }
+        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'opencode'))
+      }
       if (endpoint === 'workspace.selection.consume') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
@@ -1370,7 +1390,7 @@ export class ClientModeRuntime {
         return ok(this.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' ? { backend: value.backend } : {}),
+          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' || value.backend === 'opencode' ? { backend: value.backend } : {}),
           ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
         }))
       }
@@ -1634,6 +1654,7 @@ export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
     codex: false,
     cursor: false,
     antigravity: false,
+    opencode: false,
     pluginRoute: false,
   }
 }
@@ -1652,7 +1673,7 @@ export async function probeRemoteHostFeatures(
   }
   if (!isRecord(value) || !Array.isArray(value.capabilities)
     || value.capabilities.some(capability => typeof capability !== 'string')) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned invalid transport capabilities.')
+  throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned invalid transport capabilities.')
   }
   const capabilities = new Set(value.capabilities as string[])
   const apiProxy = capabilities.has('harness.api.v1')
@@ -1665,12 +1686,13 @@ export async function probeRemoteHostFeatures(
   const cursor = available('cursor', 'agent.acp.cursor.v1')
   const antigravity = available('antigravity', 'agent.acp.antigravity.v1')
   const pi = available('pi', 'agent.acp.pi.v1')
+  const opencode = available('opencode', 'agent.acp.opencode.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
   const sessionFormat = remoteV3 ? 3 as const : undefined
   const remoteGateway = remoteV3 || remoteV1
-  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity && !pi) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
@@ -1684,6 +1706,7 @@ export async function probeRemoteHostFeatures(
     cursor,
     antigravity,
     ...(pi ? { pi: true } : {}),
+    opencode,
     ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
     pluginRoute: capabilities.has('plugin.route.v1'),

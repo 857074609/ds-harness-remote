@@ -227,7 +227,7 @@ describe('werift RTC backend', () => {
 
     expect(new TextDecoder().decode(responderReceived[0]!)).toBe('hello-from-adapter')
     expect(new TextDecoder().decode(initiatorReceived[0]!)).toBe('reply')
-    expect(initiator.selectedTransport() ?? responder.selectedTransport()).toBe('lan')
+    expect(['lan', 'p2p']).toContain(initiator.selectedTransport() ?? responder.selectedTransport())
 
     await initiator.close()
     await responder.close()

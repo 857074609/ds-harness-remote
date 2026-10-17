@@ -51,6 +51,19 @@ export function piWorkspacePath(workspaceId: string): string | undefined {
   }
 }
 
+export function opencodeWorkspaceId(path: string): string {
+  return `opencode:cwd:${encodeURIComponent(path)}`
+}
+
+export function opencodeWorkspacePath(workspaceId: string): string | undefined {
+  if (!workspaceId.startsWith('opencode:cwd:')) return undefined
+  try {
+    return decodeURIComponent(workspaceId.slice('opencode:cwd:'.length))
+  } catch {
+    return undefined
+  }
+}
+
 export function createCursorWorkspace(path: string, title?: string): WorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
@@ -93,11 +106,26 @@ export function createAntigravityWorkspace(path: string, title?: string): Worksp
   }
 }
 
+export function createOpencodeWorkspace(path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: opencodeWorkspaceId(path),
+    backend: 'opencode',
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function cursorNativeId(session: RemoteSession): string {
   if (session.nativeId !== undefined && session.nativeId.length > 0) return session.nativeId
   if (session.sessionId.startsWith('cursor:')) return session.sessionId.slice('cursor:'.length)
   if (session.sessionId.startsWith('pi:')) return session.sessionId.slice('pi:'.length)
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
+  if (session.sessionId.startsWith('opencode:')) return session.sessionId.slice('opencode:'.length)
   return session.sessionId
 }
 
@@ -164,6 +192,26 @@ export function createAntigravitySession(input: {
   }
 }
 
+export function createOpencodeSession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return {
+    sessionId: `opencode:${input.acpSessionId}`,
+    backend: 'opencode',
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: { backend: 'opencode' },
+    },
+  }
+}
+
 /** In-flight assistant bubble; must be renamed on prompt_completed so turns do not merge. */
 const CURSOR_ASSISTANT_LIVE_ID = 'cursor-assistant-live'
 let cursorAssistantSeq = 0
@@ -209,6 +257,23 @@ export async function createAntigravityWorkspaceSession(
   const created = await client.createSession(path, mode, 'antigravity')
   const workspace = createAntigravityWorkspace(path)
   const session = createAntigravitySession({
+    acpSessionId: created.sessionId,
+    cwd: path,
+  })
+  return {
+    workspace: { ...workspace, sessionIds: [session.sessionId], updatedAt: new Date().toISOString() },
+    session,
+  }
+}
+
+export async function createOpencodeWorkspaceSession(
+  client: AgentAcpClient,
+  path: string,
+  mode: 'agent' | 'plan' | 'ask' = 'agent',
+): Promise<{ workspace: WorkspaceView; session: RemoteSession }> {
+  const created = await client.createSession(path, mode, 'opencode')
+  const workspace = createOpencodeWorkspace(path)
+  const session = createOpencodeSession({
     acpSessionId: created.sessionId,
     cwd: path,
   })

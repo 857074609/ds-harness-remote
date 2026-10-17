@@ -12,10 +12,14 @@ import type {
 
 const CURSOR_SESSION_PREFIX = 'cursor:'
 const ACP_SESSION_PREFIX = 'acp:'
+const OPENCODE_SESSION_PREFIX = 'opencode:'
 const CURSOR_WORKSPACE_PREFIX = 'cursor:cwd:'
 const AGY_WORKSPACE_PREFIX = 'antigravity:cwd:'
+const OPENCODE_WORKSPACE_PREFIX = 'opencode:cwd:'
 const CURSOR_PROVIDER = 'cursor'
 const CURSOR_MODEL = 'cursor'
+const OPENCODE_PROVIDER = 'opencode'
+const OPENCODE_MODEL = 'opencode'
 
 type JsonRecord = Record<string, unknown>
 type PiTurnOutcome = { kind: 'completed' } | { kind: 'max-tokens' }
@@ -103,16 +107,16 @@ interface PendingApproval {
 }
 
 export interface AcpClientLike {
-  sessionModels?(sessionId: string, backend: 'antigravity' | 'pi', signal?: AbortSignal): Promise<AcpSessionModels>
-  selectModel?(sessionId: string, backend: 'antigravity' | 'pi', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
-  workspaceToolCall?(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi', endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
+  sessionModels?(sessionId: string, backend: "antigravity" | "pi", signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: "antigravity" | "pi", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
-    mode?: 'agent' | 'plan' | 'ask',
-    backend?: 'cursor' | 'antigravity' | 'pi',
+    mode?: "agent" | "plan" | "ask",
+    backend?: "cursor" | "antigravity" | "pi" | "opencode",
     signal?: AbortSignal,
   ): Promise<{ sessionId: string; cwd?: string }>
-  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: 'cursor' | 'antigravity' | 'pi'): Promise<unknown>
+  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: "cursor" | "antigravity" | "pi" | "opencode"): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
@@ -134,12 +138,13 @@ export interface AcpClientLike {
 }
 
 /** Build a backend-scoped virtual Workspace id for an absolute Host cwd. */
-export function acpCwdWorkspaceId(path: string, backend: 'cursor' | 'antigravity' | 'pi'): string {
-  if (backend !== 'cursor' && backend !== 'antigravity' && backend !== 'pi') throw new Error('An explicit ACP workspace backend is required.')
-  return `${backend === 'pi' ? 'pi:cwd:' : backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX}${encodeURIComponent(path)}`
+export function acpCwdWorkspaceId(path: string, backend: "cursor" | "antigravity" | "pi" | "opencode"): string {
+  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode") throw new Error("An explicit ACP workspace backend is required.")
+  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
+  return `${prefix}${encodeURIComponent(path)}`
 }
 
-export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigravity' | 'pi', title?: string): AcpVirtualWorkspaceView {
+export function createAcpWorkspaceView(path: string, backend: "cursor" | "antigravity" | "pi" | "opencode", title?: string): AcpVirtualWorkspaceView {
   const now = new Date().toISOString()
   const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
   return {
@@ -156,7 +161,7 @@ export function createAcpWorkspaceView(path: string, backend: 'cursor' | 'antigr
 /** Discover ACP virtual workspaces visible on the Host. */
 export async function discoverAcpVirtualWorkspaces(
   client: AcpClientLike,
-  backend: 'cursor' | 'antigravity' | 'pi',
+  backend: "cursor" | "antigravity" | "pi" | "opencode",
   signal?: AbortSignal,
 ): Promise<AcpVirtualWorkspaceView[]> {
   if (client?.listWorkspaces !== undefined) {
@@ -206,7 +211,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: AcpClientLike,
     private readonly host: { deviceId: string; name: string },
-    readonly backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
+    readonly backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor",
     /**
      * Host gateway used for endpoints this virtual Harness does not project
      * (settings, plugins, models, credentials, …). A real Harness workspace
@@ -221,7 +226,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   static remote(
     core: ConstructorParameters<typeof AgentAcpClient>[0],
     host: { deviceId: string; name: string },
-    backend: 'cursor' | 'antigravity' | 'pi' = 'cursor',
+    backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor",
     capabilities: readonly string[] = [],
     hostCarrier?: RemoteTypertGatewayTarget,
   ): AcpVirtualHarness {
@@ -233,7 +238,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private backendLabel(): string {
-    return this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+    return this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"
   }
 
   async selectWorkspace(workspaceId: string): Promise<AcpVirtualWorkspaceView> {
@@ -646,7 +651,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -822,7 +827,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -1373,7 +1378,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const cwd = workspace.path
     const created = await this.client.createSession(cwd, 'agent', this.backend)
     const sessionId = created.sessionId
-    const title = this.backend === 'antigravity' ? 'Antigravity' : workspace.title
+    const title = this.backend === 'antigravity' ? 'Antigravity' : this.backend === 'opencode' ? 'OpenCode' : workspace.title
     const session = this.registerSession(sessionId, cwd, title)
     this.attachSessionToWorkspace(cwd, session.sessionId)
     this.emitRemoteEvent('api-session/added', [this.sessionSummary(session, 0)])
@@ -1413,7 +1418,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         kind: 'sequenced',
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === 'pi' ? 'PI' : this.backend === 'antigravity' ? 'Antigravity' : 'Cursor'),
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -1432,7 +1437,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
-    if (this.backend === 'cursor' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
+    if (this.backend === 'cursor' || this.backend === 'opencode' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
     const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend)
     this.selectedModels.set(sessionId, models.current)
     return models
@@ -1459,7 +1464,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       model,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     }
-    if (this.backend !== 'cursor') {
+    if (this.backend !== 'cursor' && this.backend !== 'opencode') {
       if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
       const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
       this.selectedModels.set(sessionId, confirmed)
@@ -1630,8 +1635,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 }
 
-function recreateWorkspaceFromId(workspaceId: string, backend: 'cursor' | 'antigravity' | 'pi'): AcpVirtualWorkspaceView | undefined {
-  const prefix = backend === 'pi' ? 'pi:cwd:' : backend === 'antigravity' ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
+function recreateWorkspaceFromId(workspaceId: string, backend: "cursor" | "antigravity" | "pi" | "opencode"): AcpVirtualWorkspaceView | undefined {
+  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX
   if (!workspaceId.startsWith(prefix)) return undefined
   try {
     const path = decodeURIComponent(workspaceId.slice(prefix.length))
@@ -1678,15 +1683,19 @@ const CURSOR_MODELS: AcpModelView[] = [
   { id: 'deepseek-r1', name: 'DeepSeek R1' },
 ]
 
-export function modelCatalog(backend: 'cursor' | 'antigravity' | 'pi' = 'cursor'): {
+const OPENCODE_MODELS: AcpModelView[] = [
+  { id: "opencode", name: "OpenCode" },
+]
+
+export function modelCatalog(backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor"): {
   default: AcpModelSelection
   routableProviders: string[]
   groups: Array<{ id: string; name: string; models: AcpModelView[] }>
   failures: Array<{ id: string; name: string; message: string }>
 } {
-  const provider = backend === 'pi' ? 'pi' : backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
-  const name = backend === 'pi' ? 'PI' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
-  const models = backend === 'cursor' ? CURSOR_MODELS : []
+  const provider = backend === 'pi' ? 'pi' : backend === 'opencode' ? OPENCODE_PROVIDER : backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
+  const name = backend === 'pi' ? 'PI' : backend === 'opencode' ? 'OpenCode' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  const models = backend === 'cursor' ? CURSOR_MODELS : backend === 'opencode' ? OPENCODE_MODELS : []
   const defaultModel = models[0]?.id ?? 'host-settings'
   return {
     default: { provider, model: defaultModel },
@@ -1746,11 +1755,11 @@ function extractSessionId(request: JsonRecord): string {
   throw new Error('The sessionId is required.')
 }
 
-function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi'): string {
-  return backend === 'pi' ? 'pi:' : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'): string {
+  return backend === 'pi' ? 'pi:' : backend === 'opencode' ? OPENCODE_SESSION_PREFIX : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
 }
 
-function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi'): string {
+function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'): string {
   const prefix = sessionPrefix(backend)
   if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')

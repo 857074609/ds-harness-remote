@@ -183,7 +183,7 @@ export class AndroidRemoteConnection {
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core)
     this.acpBackends.clear()
-    for (const backend of ['cursor', 'antigravity', 'pi'] as const) {
+    for (const backend of ['cursor', 'antigravity', 'pi', 'opencode'] as const) {
       if (remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, backend, `agent.acp.${backend}.v1`)) {
         this.acpBackends.add(backend)
       }
@@ -207,6 +207,7 @@ export class AndroidRemoteConnection {
     if (sessionId?.startsWith('cursor:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'cursor')
     if (sessionId?.startsWith('pi:')) return new AcpSessionTools(this.requirePi(), 'pi')
     if (sessionId?.startsWith('antigravity:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'antigravity')
+    if (sessionId?.startsWith('opencode:') && this.cursor !== undefined) return new AcpSessionTools(this.cursor, 'opencode')
     if (this.sessionTools === undefined) throw Object.assign(new Error('Native session tools require a compatible Host.'), { code: 'FEATURE_NOT_SUPPORTED' })
     return this.sessionTools
   }
@@ -242,6 +243,16 @@ export class AndroidRemoteConnection {
 
   hasPi(): boolean {
     return this.cursor !== undefined && this.acpBackends.has('pi')
+  }
+
+  /** Optional Agent ACP client (OpenCode UI backend); available when the Host advertises agent.acp.opencode.v1. */
+  requireOpencode(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('opencode')) throw new Error(strings.runtime.opencodeUnavailable)
+    return this.cursor
+  }
+
+  hasOpencode(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('opencode')
   }
 
   getStats() {

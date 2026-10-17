@@ -211,10 +211,10 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     },
     acp: {
       enabled: acpEnabled,
-      backends: [...new Set(['codex', 'cursor', 'antigravity', 'pi', 'claude', ...(parsed.acp?.backends?.filter(item => item.id !== 'kimi').map(item => item.id) ?? [])])].map(id => {
+      backends: [...new Set(['codex', 'cursor', 'antigravity', 'pi', 'claude', 'opencode', ...(parsed.acp?.backends?.filter(item => item.id !== 'kimi').map(item => item.id) ?? [])])].map(id => {
         const configured = parsed.acp?.backends?.find(item => item.id === id)
         const legacy = parsed.acp?.backend === id ? parsed.acp : undefined
-        const defaults: Record<string, string> = { codex: 'codex', cursor: 'agent', antigravity: 'agy', pi: 'pi-acp', claude: 'claude-agent-acp' }
+        const defaults: Record<string, string> = { codex: 'codex', cursor: 'agent', antigravity: 'agy', pi: 'pi-acp', claude: 'claude-agent-acp', opencode: 'opencode' }
         const cursorCommand = id === 'codex' ? parsed.codex?.binary : id === 'cursor'
           ? parsed.cursor?.binary ?? env.DSH_REMOTE_CURSOR_BINARY ?? env.DSH_REMOTE_ACP_BINARY
           : undefined
@@ -222,7 +222,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
         return {
           id,
           enabled: configured?.enabled ?? legacy?.enabled
-            ?? (id === 'codex' ? codexEnabled : id === 'cursor' ? cursorEnabled : id === 'pi' ? true : id === 'claude' ? false : parsed.acp !== undefined),
+            ?? (id === 'codex' ? codexEnabled : id === 'cursor' ? cursorEnabled : id === 'pi' ? true : id === 'claude' ? true : id === 'opencode' ? true : parsed.acp !== undefined),
           command: configured?.command ?? legacy?.command ?? cursorCommand ?? defaults[id] ?? id,
           args: id === 'codex' ? ['app-server'] : configured?.args ?? legacy?.args
             ?? (id === 'pi' || id === 'claude' ? [] : id === 'antigravity' ? ['--input-format', 'stream-json', '--output-format', 'stream-json'] : ['acp']),

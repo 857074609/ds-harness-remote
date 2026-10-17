@@ -42,6 +42,8 @@ export class AndroidRemoteRuntime {
   hasAntigravity() { return this.client.hasAntigravity() }
   requirePi() { return this.client.requirePi() }
   hasPi() { return this.client.hasPi() }
+  requireOpencode() { return this.client.requireOpencode() }
+  hasOpencode() { return this.client.hasOpencode() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
 

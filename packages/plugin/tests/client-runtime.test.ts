@@ -125,6 +125,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
             expect(remoteHostFeatures('not-semver')).toEqual({
               commandList: false,
@@ -136,6 +137,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
             expect(remoteHostFeatures('0.3.15')).toEqual({
               commandList: false,
@@ -147,6 +149,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
             expect(remoteHostFeatures('0.3.16')).toEqual({
               commandList: true,
@@ -158,6 +161,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
             expect(remoteHostFeatures('v0.3.17')).toEqual({
               commandList: true,
@@ -169,6 +173,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
             expect(remoteHostFeatures('0.3.99-beta.1')).toEqual({
               commandList: true,
@@ -180,6 +185,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
           },
         },
@@ -206,6 +212,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
 
             alphaClient.rpc.mockResolvedValueOnce({
@@ -222,6 +229,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
 
             alphaClient.rpc.mockResolvedValueOnce({
@@ -237,6 +245,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
 
             const legacyClient = {
@@ -254,6 +263,7 @@ describe('ClientModeRuntime Host account control', () => {
               pluginRoute: false,
               cursor: false,
               antigravity: false,
+              opencode: false,
             })
           },
         },
@@ -268,6 +278,13 @@ describe('ClientModeRuntime Host account control', () => {
             expect(await probeRemoteHostFeatures(client as never)).toMatchObject({
               cursor: false,
               antigravity: true,
+              opencode: false,
+            })
+            client.rpc.mockResolvedValueOnce({ capabilities: ['agent.acp.v1', 'agent.acp.opencode.v1'] })
+            expect(await probeRemoteHostFeatures(client as never)).toMatchObject({
+              cursor: false,
+              antigravity: false,
+              opencode: true,
             })
           },
         },

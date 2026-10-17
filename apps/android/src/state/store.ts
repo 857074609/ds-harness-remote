@@ -49,6 +49,7 @@ import {
 } from '../services/codex'
 import { loadPiCatalog, mergePiCatalog, readPiHistory, loadPiModels, selectPiModel, type PiCatalog } from '../services/pi'
 import { loadAntigravityCatalog, mergeAntigravityCatalog, readAntigravityHistory, type AntigravityCatalog } from '../services/antigravity'
+import { loadOpencodeCatalog, mergeOpencodeCatalog, readOpencodeHistory, type OpencodeCatalog } from '../services/opencode'
 import {
   applyCursorFrame,
   createPiSession,
@@ -57,6 +58,8 @@ import {
   createAntigravityWorkspace,
   createCursorSession,
   createCursorWorkspace,
+  createOpencodeSession,
+  createOpencodeWorkspace,
   cursorNativeId,
   foldAcpHistory,
   mergeAcpHistoryAndLive,
@@ -148,6 +151,7 @@ interface AppState {
   cursorAvailable: boolean
   antigravityAvailable: boolean
   piAvailable: boolean
+  opencodeAvailable: boolean
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
   /** Newest first; the home screen falls back to these when Favorites is empty. */
@@ -223,7 +227,7 @@ interface AppState {
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
-  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'): Promise<WorkspaceView | undefined>
+  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
@@ -342,6 +346,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   cursorAvailable: false,
   antigravityAvailable: false,
   piAvailable: false,
+  opencodeAvailable: false,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],
@@ -618,6 +623,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         try { piCatalog = await loadPiCatalog(connection.requirePi(), get().workspaces) }
         catch (error) { piError = friendlyError(error) }
       }
+      let opencodeCatalog: OpencodeCatalog | undefined
+      let opencodeError: string | undefined
+      if (connection.hasOpencode()) {
+        try { opencodeCatalog = await loadOpencodeCatalog(connection.requireOpencode(), get().workspaces) }
+        catch (error) { opencodeError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
       if (generation !== connectionGeneration) return
       set(state => {
@@ -635,24 +646,28 @@ export const useAppStore = create<AppState>((set, get) => ({
         const cursorWorkspaces = connection.hasCursor() ? state.workspaces.filter(workspace => workspace.backend === 'cursor') : []
         const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
         const antigravityWorkspaces = connection.hasAntigravity() ? agy.workspaces : []
+        const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const opencodeWorkspaces = connection.hasOpencode() ? opc.workspaces : []
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
         const antigravitySessions = agy.sessions
         const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
         const piWorkspaces = connection.hasPi() ? pi.workspaces : []
         const piSessions = pi.sessions
-        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions]
+        const opencodeSessions = opc.sessions
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions]
         return {
           codexAvailable: connection.hasCodex(),
           cursorAvailable: connection.hasCursor(),
           antigravityAvailable: connection.hasAntigravity(),
           piAvailable: connection.hasPi(),
-          workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces],
+          opencodeAvailable: connection.hasOpencode(),
+          workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,
           selectedSession: state.selectedSession === undefined
             ? undefined
             : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-          ...(codexError === undefined && agyError === undefined && piError === undefined ? {} : { error: codexError ?? agyError ?? piError }),
+          ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError }),
         }
       })
     } catch (error) {
@@ -694,8 +709,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       cursorAvailable: false,
       antigravityAvailable: false,
       piAvailable: false,
-      workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi') : [],
-      sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') : [],
+      opencodeAvailable: false,
+      workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode') : [],
+      sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') : [],
       archivedSessionIds: [],
       sessionModels: undefined,
       error: undefined,
@@ -742,7 +758,8 @@ export const useAppStore = create<AppState>((set, get) => ({
                 codexAvailable: false,
                 cursorAvailable: false,
                 antigravityAvailable: false,
-                piAvailable: false,
+        piAvailable: false,
+        opencodeAvailable: false,
                 busyAction: undefined,
               })
             }
@@ -778,6 +795,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         try { piCatalog = await loadPiCatalog(connection.requirePi(), get().workspaces) }
         catch (error) { piError = friendlyError(error) }
       }
+      let opencodeCatalog: OpencodeCatalog | undefined
+      let opencodeError: string | undefined
+      if (connection.hasOpencode()) {
+        try { opencodeCatalog = await loadOpencodeCatalog(connection.requireOpencode(), get().workspaces) }
+        catch (error) { opencodeError = friendlyError(error) }
+      }
       const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
       const connectionNetworkDetails = await connection.getNetworkDetails().catch(() => undefined)
       if (generation !== connectionGeneration) return false
@@ -790,12 +813,15 @@ export const useAppStore = create<AppState>((set, get) => ({
         const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
         const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
         const antigravityWorkspaces = agy.workspaces
+        const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+        const opencodeWorkspaces = opc.workspaces
         const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
         const antigravitySessions = agy.sessions
         const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
         const piWorkspaces = connection.hasPi() ? pi.workspaces : []
         const piSessions = pi.sessions
-        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions]
+        const opencodeSessions = opc.sessions
+        const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions]
         const selectedSession = state.selectedSession === undefined
           ? undefined
           : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
@@ -806,7 +832,8 @@ export const useAppStore = create<AppState>((set, get) => ({
           cursorAvailable: connection.hasCursor(),
           antigravityAvailable: connection.hasAntigravity(),
           piAvailable: connection.hasPi(),
-          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces],
+          opencodeAvailable: connection.hasOpencode(),
+          workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces],
           archivedSessionIds: workspaceList.archivedSessionIds,
           sessions: combinedSessions,
           selectedSession,
@@ -815,7 +842,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           lastConnectedDeviceId: device.deviceId,
           pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: connection.getStats() ?? { mode: 'Relay', connected: true } },
-          ...(codexError === undefined && agyError === undefined && piError === undefined ? {} : { error: codexError ?? agyError ?? piError }),
+          ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError }),
         }
       })
       connectionStartedAt = Date.now()
@@ -835,6 +862,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         cursorAvailable: false,
         antigravityAvailable: false,
         piAvailable: false,
+        opencodeAvailable: false,
         error: message,
       })
       return false
@@ -897,6 +925,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       cursorAvailable: false,
       antigravityAvailable: false,
       piAvailable: false,
+      opencodeAvailable: false,
       workspaces: [],
       archivedSessionIds: [],
       sessions: [],
@@ -987,11 +1016,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         void refreshCodexModels(session.sessionId)
         return
       }
-      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
+      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
         await closeActiveCodexStream()
         await closeActiveCursorStream()
         if (!current()) return
-        const hasHistory = session.backend === 'antigravity' || session.backend === 'pi'
+        const hasHistory = session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode'
         // History replaces the previous connection's projection. Start the new
         // subscription on an empty projection, so only this subscription's
         // deltas survive the load (and stale bubbles cannot suppress catchUp).
@@ -999,15 +1028,19 @@ export const useAppStore = create<AppState>((set, get) => ({
           ...(hasHistory && state.messages[session.sessionId] !== undefined
             ? { messages: { ...state.messages, [session.sessionId]: [] } } : {}),
         }))
-        const acpClient = session.backend === 'pi'
-          ? connection.requirePi()
-          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
+        const acpClient = session.backend === 'opencode'
+          ? connection.requireOpencode()
+          : session.backend === 'pi'
+            ? connection.requirePi()
+            : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         const [history] = await Promise.all([
-          session.backend === 'pi'
-            ? readPiHistory(acpClient, cursorNativeId(session))
-            : session.backend === 'antigravity'
-            ? readAntigravityHistory(acpClient, cursorNativeId(session))
-            : Promise.resolve([] as unknown[]),
+          session.backend === 'opencode'
+            ? readOpencodeHistory(acpClient, cursorNativeId(session))
+            : session.backend === 'pi'
+              ? readPiHistory(acpClient, cursorNativeId(session))
+              : session.backend === 'antigravity'
+                ? readAntigravityHistory(acpClient, cursorNativeId(session))
+                : Promise.resolve([] as unknown[]),
           ensureCursorStream(session, current),
         ])
         if (!current()) return
@@ -1249,6 +1282,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return get().openSession(session)
       }
+      if (workspace?.backend === 'opencode') {
+        const created = await connection.requireOpencode().createSession(workspace.path, 'agent', 'opencode')
+        if (generation !== connectionGeneration) return false
+        const session = createOpencodeSession({
+          acpSessionId: created.sessionId,
+          cwd: workspace.path,
+        })
+        set(state => ({
+          sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+          workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+            ? {
+                ...item,
+                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                updatedAt: new Date().toISOString(),
+              }
+            : item),
+          busyAction: undefined,
+        }))
+        return get().openSession(session)
+      }
       const proxy = connection.requireProxy()
       const { sessionId } = await proxy.sessionCreate(workspaceId)
       if (generation !== connectionGeneration) return false
@@ -1305,7 +1358,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         return true
       }
-      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') {
+      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode') {
         if (get().selectedSession?.sessionId === sessionId) await closeActiveCursorStream()
         if (generation !== connectionGeneration) return false
         set(state => ({
@@ -1361,7 +1414,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         set({ sessionModels: models, modelSelecting: false })
         return true
       }
-      if (session.backend === 'cursor' || session.backend === 'antigravity') throw new Error(zhCN.messageActions.unavailable)
+      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'opencode') throw new Error(zhCN.messageActions.unavailable)
       const selected = await connection.requireProxy().sessionSelectModel(session.sessionId, selection)
       set(state => ({
         sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
@@ -1377,7 +1430,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async selectPermission(preset) {
     const session = get().selectedSession
-    if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') return false
+    if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode') return false
     if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
     const generation = connectionGeneration
     set({ permissionSelecting: true, error: undefined })
@@ -1431,7 +1484,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   async loadAgentPresets() {
     const backend = get().selectedSession?.backend
-    if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi') return false
+    if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi' || backend === 'opencode') return false
     if (get().connection.phase !== 'connected') return false
     if (get().agentPresetLoading) return false
     set({ agentPresetLoading: true, error: undefined })
@@ -1448,7 +1501,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   async selectAgentPreset(preset) {
     const session = get().selectedSession
     if (session === undefined || get().connection.phase !== 'connected') return false
-    if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') return false
+    if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') return false
     set({ agentPresetSelecting: true, error: undefined })
     try {
       const committed = await connection.requireProxy().agentPresetSelect(session.sessionId, preset)
@@ -1476,7 +1529,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode') {
         const nextTitle = title.trim()
         if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
         set(state => ({
@@ -1508,7 +1561,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode') {
         const sessionIds = new Set(target.sessionIds)
         const selected = get().selectedSession
         if (selected !== undefined && sessionIds.has(selected.sessionId)) {
@@ -1556,7 +1609,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (target?.backend === 'codex' || before?.backend === 'codex') {
         throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
       }
-      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi') {
+      if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi' || before?.backend === 'opencode') {
         set(state => {
           const items = state.workspaces.slice()
           const from = items.findIndex(item => item.workspaceId === workspaceId)
@@ -1577,7 +1630,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         workspaces: [
           ...workspaceIds.flatMap(id => byId.get(id) === undefined ? [] : [byId.get(id)!]),
-          ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi'),
+          ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi' || item.backend === 'opencode'),
         ],
         busyAction: undefined,
       })
@@ -1658,7 +1711,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const session = get().selectedSession
     const beforeSeq = get().oldestLoadedSeq
     if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
-    if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
+    if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
       set({ historyHasMore: false, historyLoadingOlder: false })
       return
     }
@@ -1697,7 +1750,9 @@ export const useAppStore = create<AppState>((set, get) => ({
           : backend === 'pi' ? 'create-pi-workspace'
           : backend === 'antigravity'
             ? 'create-antigravity-workspace'
-            : 'create-workspace',
+            : backend === 'opencode'
+              ? 'create-opencode-workspace'
+              : 'create-workspace',
       error: undefined,
     })
     try {
@@ -1746,6 +1801,23 @@ export const useAppStore = create<AppState>((set, get) => ({
           return {
             workspaces: [...state.workspaces.filter(item => item.backend !== 'pi'), ...merged.workspaces],
             sessions: [...state.sessions.filter(item => item.backend !== 'pi'), ...merged.sessions],
+            busyAction: undefined,
+          }
+        })
+        return created
+      }
+      if (backend === 'opencode') {
+        if (!connection.hasOpencode()) throw new Error(zhCN.runtime.opencodeUnavailable)
+        const workspace = createOpencodeWorkspace(path)
+        const catalog = await loadOpencodeCatalog(connection.requireOpencode(), [...get().workspaces, workspace], path)
+        if (generation !== connectionGeneration || !connection.hasOpencode()) return undefined
+        let created = workspace
+        set(state => {
+          const merged = mergeOpencodeCatalog(catalog, state.workspaces, state.sessions)
+          created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+          return {
+            workspaces: [...state.workspaces.filter(item => item.backend !== 'opencode'), ...merged.workspaces],
+            sessions: [...state.sessions.filter(item => item.backend !== 'opencode'), ...merged.sessions],
             busyAction: undefined,
           }
         })
@@ -1869,7 +1941,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               : state.selectedSession,
           }))
         }
-      } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
+} else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
         if (session.backend === 'cursor' && images.length > 0) throw new Error(zhCN.runtime.cursorTextOnly)
         if (session.backend === 'pi' && images.length > 0) throw new Error(zhCN.runtime.piTextOnly)
         // Always re-bind the ACP stream on the current RemoteClientCore before
@@ -1886,9 +1958,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         }))
         // Host may return immediately with stopReason=in_progress so frames can
         // interleave; keep running until prompt_completed / failure.
-        const acpClient = session.backend === 'pi'
-          ? connection.requirePi()
-          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
+        const acpClient = session.backend === 'opencode'
+          ? connection.requireOpencode()
+          : session.backend === 'pi'
+            ? connection.requirePi()
+            : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         const promptResult = await acpClient.prompt(cursorNativeId(session), text, undefined, images.map(image => ({
           type: 'image' as const, mimeType: image.mediaType, data: image.data,
         })), session.backend)
@@ -1950,7 +2024,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         // Only a deterministic failure may claim the agent is idle again; an
         // unconfirmed outcome leaves `running` untouched (the prompt may have
         // started on the Host).
-        ...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') && !unconfirmed ? {
+...((session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') && !unconfirmed ? {
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: session.running ?? false } : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? { ...state.selectedSession, running: session.running ?? false } : state.selectedSession,
         } : {}),
@@ -2027,10 +2101,12 @@ export const useAppStore = create<AppState>((set, get) => ({
         }
         if (turnId === undefined) throw new Error(zhCN.runtime.codexTurnUnavailable)
         await client.interrupt(threadId, turnId)
-      } else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi') {
-        const acpClient = session.backend === 'pi'
-          ? connection.requirePi()
-          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
+} else if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
+        const acpClient = session.backend === 'opencode'
+          ? connection.requireOpencode()
+          : session.backend === 'pi'
+            ? connection.requirePi()
+            : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         await acpClient.cancel(cursorNativeId(session))
         set(state => ({
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? { ...item, running: false } : item),
@@ -2059,10 +2135,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       const session = get().sessions.find(value => value.sessionId === item.sessionId) ?? get().selectedSession
       if (session?.backend === 'codex') {
         await connection.requireCodex().respond(item.approvalId, outcome === 'allowed-once' ? 'accept' : 'decline')
-      } else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi') {
-        const acpClient = session.backend === 'pi'
-          ? connection.requirePi()
-          : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
+} else if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode') {
+        const acpClient = session.backend === 'opencode'
+          ? connection.requireOpencode()
+          : session.backend === 'pi'
+            ? connection.requirePi()
+            : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
         await acpClient.respond(
           item.approvalId,
           outcome === 'allowed-once' ? 'allow-once' : 'reject-once',
@@ -2272,6 +2350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         cursorAvailable: false,
         antigravityAvailable: false,
         piAvailable: false,
+        opencodeAvailable: false,
       })
     }
   },
@@ -2422,7 +2501,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   handleCursorFrame(frame) {
     const session = get().selectedSession
-    if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi')) return
+    if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && session.backend !== 'opencode')) return
     const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
     if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
     const update = params === undefined
@@ -2447,13 +2526,14 @@ export const useAppStore = create<AppState>((set, get) => ({
               ? { ...state.selectedSession, running: false }
               : state.selectedSession,
             ...(kind === 'prompt_failed'
-              ? { error: session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
+              ? { error: session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
               : {}),
           }
         : {}),
     }))
     if (session.backend === 'antigravity' && kind === 'prompt_completed') void refreshAntigravityCatalog()
     if (session.backend === 'pi' && kind === 'prompt_completed') void refreshPiCatalog()
+    if (session.backend === 'opencode' && kind === 'prompt_completed') void refreshOpencodeCatalog()
   },
 }))
 
@@ -2497,6 +2577,26 @@ async function refreshPiCatalog(): Promise<void> {
   } catch { /* Keep the live projection when PI is still persisting its summary. */ }
 }
 
+async function refreshOpencodeCatalog(): Promise<void> {
+  if (!connection.hasOpencode()) return
+  const client = connection.requireOpencode()
+  const deviceId = useAppStore.getState().selectedDevice?.deviceId
+  try {
+    const catalog = await loadOpencodeCatalog(client, useAppStore.getState().workspaces)
+    if (!connection.hasOpencode() || connection.requireOpencode() !== client || useAppStore.getState().selectedDevice?.deviceId !== deviceId) return
+    useAppStore.setState(state => {
+      const merged = mergeOpencodeCatalog(catalog, state.workspaces, state.sessions)
+      return {
+        workspaces: [...state.workspaces.filter(item => item.backend !== 'opencode'), ...merged.workspaces],
+        sessions: [...state.sessions.filter(item => item.backend !== 'opencode'), ...merged.sessions],
+        selectedSession: state.selectedSession?.backend === 'opencode'
+          ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
+          : state.selectedSession,
+      }
+    })
+  } catch { /* Keep the live projection when OpenCode is still persisting its summary. */ }
+}
+
 async function closeActiveCodexStream(notifyRemote = true): Promise<void> {
   const stream = activeCodexStream
   activeCodexStream = undefined
@@ -2525,9 +2625,11 @@ async function closeActiveCursorStream(notifyRemote = true): Promise<void> {
 async function ensureCursorStream(session: RemoteSession, current: () => boolean = () => true): Promise<void> {
   await closeActiveCursorStream()
   if (!current()) return
-  const client = session.backend === 'pi'
-    ? connection.requirePi()
-    : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
+  const client = session.backend === 'opencode'
+    ? connection.requireOpencode()
+    : session.backend === 'pi'
+      ? connection.requirePi()
+      : session.backend === 'antigravity' ? connection.requireAntigravity() : connection.requireCursor()
   const nativeId = cursorNativeId(session)
   const stream = await client.openStream(
     nativeId,
@@ -2542,7 +2644,7 @@ async function ensureCursorStream(session: RemoteSession, current: () => boolean
         selectedSession: state.selectedSession?.sessionId === session.sessionId
           ? { ...state.selectedSession, running: false }
           : state.selectedSession,
-        ...(closed.reason === 'failed' ? { error: session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+        ...(closed.reason === 'failed' ? { error: session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
       }))
       // Transport flaps can close the ACP stream while the secure channel is
       // still up. Re-open so the next prompt does not miss live frames.
@@ -2550,7 +2652,7 @@ async function ensureCursorStream(session: RemoteSession, current: () => boolean
       const phase = useAppStore.getState().connection.phase
       if (phase !== 'connected') return
       const selected = useAppStore.getState().selectedSession
-      if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi')) return
+      if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi' && selected.backend !== 'opencode')) return
       void ensureCursorStream(selected, current).catch(() => undefined)
     },
   )
@@ -2748,7 +2850,7 @@ async function finalizeLogin(
 }
 
 function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -2765,6 +2867,7 @@ function initialData(): Pick<AppState,
     cursorAvailable: false,
     antigravityAvailable: false,
     piAvailable: false,
+    opencodeAvailable: false,
     workspaces: [],
     favoriteWorkspaces: [],
     recentWorkspaces: [],

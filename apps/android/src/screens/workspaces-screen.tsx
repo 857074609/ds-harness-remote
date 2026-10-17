@@ -31,6 +31,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
   const cursorAvailable = useAppStore(state => state.cursorAvailable)
   const piAvailable = useAppStore(state => state.piAvailable)
   const antigravityAvailable = useAppStore(state => state.antigravityAvailable)
+  const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
   const workspaces = useAppStore(state => state.workspaces)
   const sessions = useAppStore(state => state.sessions)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
@@ -47,7 +48,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
   const archiveSession = useAppStore(state => state.archiveSession)
   const [refreshing, setRefreshing] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const [activeBackend, setActiveBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'>(() => initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable))
+  const [activeBackend, setActiveBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'>(() => initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable))
   const [searchQuery, setSearchQuery] = useState('')
   const [renameTarget, setRenameTarget] = useState<WorkspaceView | undefined>(undefined)
   const [actionsTarget, setActionsTarget] = useState<WorkspaceView | undefined>(undefined)
@@ -72,7 +73,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
   useEffect(() => {
     const deviceId = selectedDevice?.deviceId
     let cancelled = false
-    setActiveBackend(initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable))
+    setActiveBackend(initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable))
     setSearchQuery('')
     setCollapsedWorkspaceIds(new Set())
     setAllSessionsWorkspaceKeys(new Set())
@@ -88,6 +89,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
         && (backend !== 'cursor' || cursorAvailable)
         && (backend !== 'antigravity' || antigravityAvailable)
         && (backend !== 'pi' || piAvailable)
+        && (backend !== 'opencode' || opencodeAvailable)
       ) setActiveBackend(backend)
     })
     void loadCollapsedWorkspaceIds(deviceId).then(workspaceIds => {
@@ -100,13 +102,13 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
       setCollapsedWorkspaceIds(next)
     })
     return () => { cancelled = true }
-  }, [selectedDevice?.deviceId, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable])
+  }, [selectedDevice?.deviceId, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable])
 
   const favoriteKeys = new Set(favoriteWorkspaces
     .filter(favorite => favorite.deviceId === selectedDevice?.deviceId)
     .map(favorite => favorite.key))
 
-  const selectBackend = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi') => {
+  const selectBackend = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode') => {
     setActiveBackend(backend)
     const deviceId = selectedDevice?.deviceId
     if (deviceId !== undefined) void saveWorkspaceBackend(deviceId, backend)
@@ -132,7 +134,17 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
       return
     }
     focusApplied.current = true
-    const backend = workspace.backend ?? 'harness'
+    const backend = workspace.backend === 'codex'
+      ? 'codex'
+      : workspace.backend === 'cursor'
+        ? 'cursor'
+        : workspace.backend === 'antigravity'
+          ? 'antigravity'
+          : workspace.backend === 'pi'
+            ? 'pi'
+            : workspace.backend === 'opencode'
+              ? 'opencode'
+              : 'harness'
     setSearchQuery('')
     if (backend !== activeBackend) selectBackend(backend)
     // Revealing is in-memory only: persisting here used to save a set that had
@@ -158,7 +170,8 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
     if (activeBackend === 'cursor' && !cursorAvailable) setActiveBackend('harness')
     if (activeBackend === 'antigravity' && !antigravityAvailable) setActiveBackend('harness')
     if (activeBackend === 'pi' && !piAvailable) setActiveBackend('harness')
-  }, [activeBackend, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable])
+    if (activeBackend === 'opencode' && !opencodeAvailable) setActiveBackend('harness')
+  }, [activeBackend, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable])
 
   const toggleFavorite = (workspace: WorkspaceView) => {
     void toggleFavoriteWorkspace(workspace)
@@ -219,7 +232,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
 
   const backendWorkspaces = workspaces.filter(workspace => matchesWorkspaceBackend(workspace, activeBackend))
   const manageableWorkspaces = activeBackend === 'codex' ? [] : backendWorkspaces
-  const showBackendTabs = codexAvailable || cursorAvailable || antigravityAvailable || piAvailable
+  const showBackendTabs = codexAvailable || cursorAvailable || antigravityAvailable || piAvailable || opencodeAvailable
   const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase()
   const filteredWorkspaces = normalizedSearchQuery.length === 0
     ? backendWorkspaces
@@ -302,7 +315,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
             >
               <Text style={[styles.backendTabText, activeBackend === 'antigravity' && styles.backendTabTextActive]}>{zhCN.workspaces.antigravity}</Text>
             </Pressable>}
-{piAvailable && <Pressable
+            {piAvailable && <Pressable
               accessibilityRole="tab"
               accessibilityState={{ selected: activeBackend === 'pi' }}
               onPress={() => selectBackend('pi')}
@@ -313,6 +326,18 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
               ]}
             >
               <Text style={[styles.backendTabText, activeBackend === 'pi' && styles.backendTabTextActive]}>{zhCN.workspaces.pi}</Text>
+            </Pressable>}
+            {opencodeAvailable && <Pressable
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeBackend === 'opencode' }}
+              onPress={() => selectBackend('opencode')}
+              style={({ pressed }) => [
+                styles.backendTab,
+                activeBackend === 'opencode' && styles.backendTabActive,
+                pressed && styles.workspaceRowPressed,
+              ]}
+            >
+              <Text style={[styles.backendTabText, activeBackend === 'opencode' && styles.backendTabTextActive]}>{zhCN.workspaces.opencode}</Text>
             </Pressable>}
           </View>}
           {backendWorkspaces.length > 0 && (
@@ -389,7 +414,7 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
                         <View style={styles.workspaceIcon}>
                           {workspace.backend === 'codex'
                             ? <Code2 size={18} color={colors.primary} />
-                            : workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi'
+                            : workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode'
                               ? <Sparkles size={18} color={colors.primary} />
                               : collapsed
                                 ? <Folder size={18} color={colors.primary} />
@@ -461,8 +486,9 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
         cursorAvailable={cursorAvailable}
         antigravityAvailable={antigravityAvailable}
         piAvailable={piAvailable}
+        opencodeAvailable={opencodeAvailable}
         initialBackend={activeBackend}
-        busy={busy === 'create-workspace' || busy === 'create-codex-workspace' || busy === 'create-cursor-workspace' || busy === 'create-antigravity-workspace' || busy === 'create-pi-workspace'}
+        busy={busy === 'create-workspace' || busy === 'create-codex-workspace' || busy === 'create-cursor-workspace' || busy === 'create-antigravity-workspace' || busy === 'create-pi-workspace' || busy === 'create-opencode-workspace'}
         onClose={() => setCreateOpen(false)}
         onCreate={workspaceCreate}
         onCreated={workspace => void createInWorkspace(workspace.workspaceId)}
@@ -551,12 +577,13 @@ function relativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString(zhCN.time.locale)
 }
 
-function matchesWorkspaceBackend(workspace: WorkspaceView, backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'): boolean {
+function matchesWorkspaceBackend(workspace: WorkspaceView, backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'): boolean {
   if (backend === 'codex') return workspace.backend === 'codex'
   if (backend === 'cursor') return workspace.backend === 'cursor'
-  if (backend === 'pi') return workspace.backend === 'pi'
   if (backend === 'antigravity') return workspace.backend === 'antigravity'
-  return workspace.backend !== 'codex' && workspace.backend !== 'cursor' && workspace.backend !== 'antigravity' && workspace.backend !== 'pi'
+  if (backend === 'pi') return workspace.backend === 'pi'
+  if (backend === 'opencode') return workspace.backend === 'opencode'
+  return workspace.backend !== 'codex' && workspace.backend !== 'cursor' && workspace.backend !== 'antigravity' && workspace.backend !== 'pi' && workspace.backend !== 'opencode'
 }
 
 function initialWorkspaceBackend(
@@ -565,31 +592,35 @@ function initialWorkspaceBackend(
   cursorAvailable: boolean,
   antigravityAvailable: boolean,
   piAvailable: boolean,
-): 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' {
-  const hasHarnessWorkspace = workspaces.some(workspace => workspace.backend !== 'codex' && workspace.backend !== 'cursor' && workspace.backend !== 'antigravity' && workspace.backend !== 'pi')
+  opencodeAvailable: boolean,
+): 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' {
+  const hasHarnessWorkspace = workspaces.some(workspace => workspace.backend !== 'codex' && workspace.backend !== 'cursor' && workspace.backend !== 'antigravity' && workspace.backend !== 'pi' && workspace.backend !== 'opencode')
   const hasCodexWorkspace = workspaces.some(workspace => workspace.backend === 'codex')
   const hasCursorWorkspace = workspaces.some(workspace => workspace.backend === 'cursor')
   const hasAntigravityWorkspace = workspaces.some(workspace => workspace.backend === 'antigravity')
+  const hasOpencodeWorkspace = workspaces.some(workspace => workspace.backend === 'opencode')
   if (!hasHarnessWorkspace && hasCodexWorkspace && codexAvailable) return 'codex'
   if (!hasHarnessWorkspace && !hasCodexWorkspace && hasCursorWorkspace && cursorAvailable) return 'cursor'
   if (!hasHarnessWorkspace && !hasCodexWorkspace && !hasCursorWorkspace && hasAntigravityWorkspace && antigravityAvailable) return 'antigravity'
   if (!hasHarnessWorkspace && piAvailable && workspaces.some(workspace => workspace.backend === 'pi')) return 'pi'
+  if (!hasHarnessWorkspace && opencodeAvailable && workspaces.some(workspace => workspace.backend === 'opencode')) return 'opencode'
   return 'harness'
 }
 
-function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
+function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, initialBackend, busy, onClose, onCreate, onCreated }: {
   visible: boolean
   codexAvailable: boolean
   cursorAvailable: boolean
-  piAvailable: boolean
   antigravityAvailable: boolean
-  initialBackend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'
+  piAvailable: boolean
+  opencodeAvailable: boolean
+  initialBackend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'
   busy: boolean
   onClose: () => void
-  onCreate: (path: string, backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi') => Promise<WorkspaceView | undefined>
+  onCreate: (path: string, backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode') => Promise<WorkspaceView | undefined>
   onCreated: (workspace: WorkspaceView) => void
 }) {
-  const [backend, setBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi'>('harness')
+  const [backend, setBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'>('harness')
   const [path, setPath] = useState('')
   const [browseOpen, setBrowseOpen] = useState(false)
   const { colors } = useTheme()
@@ -601,8 +632,9 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
     else if (initialBackend === 'cursor' && cursorAvailable) setBackend('cursor')
     else if (initialBackend === 'pi' && piAvailable) setBackend('pi')
     else if (initialBackend === 'antigravity' && antigravityAvailable) setBackend('antigravity')
+    else if (initialBackend === 'opencode' && opencodeAvailable) setBackend('opencode')
     else setBackend('harness')
-  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, initialBackend, visible])
+  }, [codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, initialBackend, visible])
 
   const create = async () => {
     const trimmed = path.trim()
@@ -715,6 +747,23 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
                 </View>
                 <Text style={[styles.backendOptionText, backend === 'pi' && styles.backendOptionTextSelected]}>{zhCN.workspaces.pi}</Text>
               </Pressable>}
+              {opencodeAvailable && <Pressable
+                accessibilityRole="radio"
+                accessibilityState={{ selected: backend === 'opencode', disabled: busy }}
+                disabled={busy}
+                onPress={() => setBackend('opencode')}
+                style={({ pressed }) => [
+                  styles.backendOption,
+                  backend === 'opencode' && styles.backendOptionSelected,
+                  pressed && !busy && styles.workspaceRowPressed,
+                  busy && styles.disabled,
+                ]}
+              >
+                <View style={[styles.radioIndicator, backend === 'opencode' && styles.radioIndicatorSelected]}>
+                  {backend === 'opencode' && <View style={styles.radioIndicatorDot} />}
+                </View>
+                <Text style={[styles.backendOptionText, backend === 'opencode' && styles.backendOptionTextSelected]}>{zhCN.workspaces.opencode}</Text>
+              </Pressable>}
             </View>
             <Text style={styles.fieldLabel}>{zhCN.workspaces.deviceDirectory}</Text>
             <View style={styles.pathRow}>
@@ -738,7 +787,9 @@ function CreateWorkspaceModal({ visible, codexAvailable, cursorAvailable, antigr
                   : backend === 'pi' ? zhCN.workspaces.piDirectoryHint
                    : backend === 'antigravity'
                     ? zhCN.workspaces.antigravityDirectoryHint
-                    : zhCN.workspaces.directoryHint
+                    : backend === 'opencode'
+                      ? zhCN.workspaces.opencodeDirectoryHint
+                      : zhCN.workspaces.directoryHint
             }</Text>
             <Button label={zhCN.workspaces.create} onPress={() => void create()} loading={busy} disabled={path.trim().length === 0} />
         </WorkspaceModalSurface>

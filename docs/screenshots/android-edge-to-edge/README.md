@@ -60,3 +60,13 @@
 - 在 `ModalSurface`、`WorkspaceModalSurface` 底部注入 `paddingBottom: basePadding + insets.bottom`，提供符合 Material 3 边到边规范的视觉呼吸空间。
 
 ![Bottom Sheet Modals Comparison](./04-bottom-sheet-modals-insets.png)
+
+---
+
+## 5. Pull Request 提交记录 (PR #128)
+
+- **PR 链接**: [GitHub PR #128](https://github.com/liguobao/ds-harness-remote/pull/128)
+- **目标分支**: `liguobao/ds-harness-remote:main` <- `dreamfarer-space/ds-harness-remote:feat/android-edge-to-edge`
+
+![GitHub PR #128 Submission](./github-pr-128-submission.png)
+

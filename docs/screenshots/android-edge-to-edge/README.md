@@ -1,6 +1,6 @@
 # Android 14/15+ Edge-to-Edge 沉浸式与键盘/手势避让优化对比
 
-本文档记录针对当前仓库 `apps/android` 客户端在 Android 14/15+ 强制 Edge-to-Edge 环境下的沉浸式系统栏、底部手势条、软键盘（IME）贴合以及各全屏/半屏弹窗安全避让的优化对比。
+本文档记录针对当前仓库 `apps/android` 客户端在 Android 14/15+ 强制 Edge-to-Edge 环境下的沉浸式系统栏、底部手势条、软键盘（IME）贴合以及各全屏/半屏弹窗安全避让的优化对比与真机实测验证。
 
 ---
 
@@ -13,7 +13,7 @@
 **优化方案**：
 - 重构 `KeyboardInset`：通过监听 `keyboardDidShow` / `keyboardDidHide` 获取真实 `endCoordinates.screenY`，并利用 `Math.max(0, windowHeight - keyboardScreenY)` 精确测算视口被键盘遮挡的像素量；
 - 软键盘升起时纯净贴合键盘顶部；软键盘收回时平滑退回到 `insets.bottom` 手势条安全间距；
-- 增加 `AppState` 监听，切后台或丢弃 hide 事件时自动回落安全区。
+- **Review 优化补充**：增加 `AppState` active 恢复监听，切后台保留坐标，返回前台时通过 `Keyboard.metrics()` 动态重新校准，避免键盘仍开启时输入框被系统软键盘遮挡。
 
 ![Chat Composer & IME Insets Comparison](./01-chat-composer-ime-edge-to-edge.png)
 
@@ -52,21 +52,41 @@
 ## 4. 半屏底弹窗与表单适配（Bottom Sheet Modals Insets）
 
 **优化前问题**：
-- 权限审批面板、工作区创建、设备重命名等 Bottom Sheet 模态框底部未贴合安全内边距，操作按钮（如“确认授权”、“重命名”、“取消”）过于贴近底部边缘甚至被横条截断；
-- 弹出时背景遮罩未穿透状态栏。
+- 权限审批面板、工作区创建、设备重命名等 Bottom Sheet 模态框未统一状态栏穿透；
+- 原先在半屏弹窗底部简单叠加 `insets.bottom`，而在 Android 14/三键导航下，原生 Dialog 已经避让底部导航栏，再加 `insets.bottom` 会产生明显的**重复留白（Double Inset Gap）**。
 
 **优化方案**：
-- 统一为所有浮层与 Modal 声明 `statusBarTranslucent`；
-- 在 `ModalSurface`、`WorkspaceModalSurface` 底部注入 `paddingBottom: basePadding + insets.bottom`，提供符合 Material 3 边到边规范的视觉呼吸空间。
+- 统一为所有浮层与 Modal 声明 `statusBarTranslucent`，蒙层平滑穿透顶部状态栏；
+- **Review 优化补充**：半屏弹窗统一由原生 Dialog 边界避让底部导航栏，移除 Sheet 内部多余的 `insets.bottom`，在 Android 14、手势条与三键导航下均维持紧凑自然的底边间距。
 
 ![Bottom Sheet Modals Comparison](./04-bottom-sheet-modals-insets.png)
 
 ---
 
-## 5. Pull Request 提交记录 (PR #128)
+## 5. 真机实测验证（Real Device Verification）
+
+针对 Reviewer 提出的键盘切前后台、手势导航与三键导航验证要求，进行了专项真机实测：
+
+### 实测 1：手势导航下软键盘切前后台重同步验证
+在全面屏手势导航模式下，输入状态切到多任务后台再切回前台：`KeyboardInset` 监听 `AppState` 自动通过 `Keyboard.metrics()` 恢复坐标，输入框未发生下坠或遮挡，零缝隙紧贴键盘顶边。
+
+![Gesture Nav Keyboard Resume](./05-real-gesture-nav-keyboard-foreground-resume.png)
+
+### 实测 2：三键导航底座与半屏 Modal 统一 Inset 处理
+在传统三键导航栏（高度 42dp/48dp）下呼出运行模式与权限选择抽屉：修复移除重复叠加的 `insets.bottom` 后，彻底消除 42dp 的冗余空隙，弹窗底边与三键底栏自然贴合。
+
+![3-Button Nav Modal Unified](./06-real-three-button-nav-modal-no-double-padding.png)
+
+### 实测 3：三键导航模式下聊天主界面与列表触底避让
+在三键物理底栏下：输入框收起状态精准贴合三键导航栏上方（避让 `insets.bottom`）；工作区与聊天列表滑到最底端时，末尾的操作按钮完全露出发起点击。
+
+![3-Button Nav Chat Clearance](./07-real-three-button-nav-chat-content-padding.png)
+
+---
+
+## 6. Pull Request 提交记录 (PR #128)
 
 - **PR 链接**: [GitHub PR #128](https://github.com/liguobao/ds-harness-remote/pull/128)
 - **目标分支**: `liguobao/ds-harness-remote:main` <- `dreamfarer-space/ds-harness-remote:feat/android-edge-to-edge`
 
 ![GitHub PR #128 Submission](./github-pr-128-submission.png)
-

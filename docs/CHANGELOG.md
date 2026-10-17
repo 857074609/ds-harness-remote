@@ -1,7 +1,20 @@
-## Unreleased
+## 0.5.10 - 2026-10-17
 
-- Local build `0.5.10` (2026-10-17) packages the current Plugin for Harness `0.2.1-rc.1` installation checks; not published to npm. Android remains `0.5.9`.
-- 本地安装包 `0.5.10`（2026-10-17）用于 Harness `0.2.1-rc.1` 安装验收，包含当前 Plugin 改动，未发布到 npm；Android 仍为 `0.5.9`。
+- Unifies all first-party package versions at `0.5.10`, including Plugin, Android, VS Code, Browser, Server and shared packages; Android `versionCode` and Expo iOS `buildNumber` are both `48`.
+- Adds Android Intelligent UI cards with version recovery, offline rendering and native confirmation for model-directed actions (#126 / #124). Release APKs bundle the pinned, audited renderer; full action/patch and reconnect device acceptance remains pending.
+- Improves Android 14/15+ edge-to-edge system bars, keyboard and modal insets (#128), reliable sends, queue visibility, agent-team display and chat responsiveness (#115 / #118). Workspace sessions in the drawer expand three at a time.
+- Adds OpenCode and Claude Host/Android workspace support alongside experimental Pi; encrypted cross-device acceptance remains pending.
+- Adds real WebSocket relay security coverage and refreshes acceptance priorities (#123 / #121).
+- Thanks @pengyz (#115), @dreamfarer-space (#118, #126, #128), @luojiyin1987 (#121, #123), and @liguobao for code, review, testing, documentation and release integration since `v0.5.8`.
+- 本仓库各自有包版本统一为 `0.5.10`，包含 Plugin、Android、VS Code、Browser、Server 与共享包；Android `versionCode` 与 Expo iOS `buildNumber` 均为 `48`。
+- Android 新增 Intelligent UI 卡片、版本恢复、离线渲染及模型操作前的原生确认（#126 / #124）；Release APK 打包固定审核版本的 renderer，完整操作/patch 与重连真机验收仍待完成。
+- 改进 Android 14/15+ 沉浸式系统栏、键盘及弹窗避让（#128），补齐可靠发送、队列可见性、Agent 团队面板与聊天响应优化（#115 / #118）；抽屉中每次展开三个工作区会话。
+- 在实验性 Pi 基础上加入 OpenCode、Claude Host/Android 工作区支持；加密跨设备验收仍待完成。
+- 增加真实 WebSocket Relay 安全验证并更新验收优先级（#123 / #121）。
+- 感谢自 `v0.5.8` 以来参与本版的 @pengyz（#115）、@dreamfarer-space（#118、#126、#128）、@luojiyin1987（#121、#123）及 @liguobao，贡献代码、审查、验证、文档与发布集成。
+
+The following entries retain the implementation and validation milestones recorded during development; later client integration supersedes earlier Host-only scope notes.
+以下保留开发期间的实现与验证记录；后续客户端接入已扩展早期仅 Host 的范围说明。
 
 - Updates the Harness baseline to `0.2.1-rc.1` and Cordis to `4.0.5`. Admitted Remote connections own independent Gateway Peers, including event replies and Fetch routes. Adapts native duplex terminals to the existing bounded terminal tunnel with Host acknowledgements and no input replay; supports RC.1 projection results and isolated CodeX/ACP projection reads. Cross-device and native-device acceptance is pending.
 - Harness 开发基线升级至 `0.2.1-rc.1`、Cordis `4.0.5`；已认证连接使用独立 Gateway Peer，覆盖事件回复和 Fetch 路由。官方双向终端接入既有有界终端隧道，按 Host 确认输入且断线不重放；补齐 RC.1 投影结果与 CodeX/ACP 独立投影读取。跨设备与原生真机验收仍待完成。

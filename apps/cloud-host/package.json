@@ -1,6 +1,6 @@
 {
   "name": "dsh-cloud-host-runtime",
-  "version": "1.0.0",
+  "version": "0.5.10",
   "private": true,
   "type": "module",
   "dependencies": {

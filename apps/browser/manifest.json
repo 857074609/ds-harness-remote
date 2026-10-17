@@ -3,7 +3,7 @@
   "name": "DeepSeek Harness Remote",
   "description": "__MSG_extensionDescription__",
   "default_locale": "en",
-  "version": "0.3.29",
+  "version": "0.5.10",
   "icons": {
     "128": "media/icon.png"
   },

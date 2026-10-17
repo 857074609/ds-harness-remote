@@ -13,6 +13,8 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { workspaceParentPath } from '../lib/workspace-path'
 
+const SESSION_PAGE_SIZE = 3
+
 export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
   onBack: () => void
   onClose: () => void
@@ -31,6 +33,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const [refreshing, setRefreshing] = useState(false)
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
+  const [visibleSessionCounts, setVisibleSessionCounts] = useState<Record<string, number>>({})
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
@@ -53,8 +56,10 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
     return grouped
   }, [sessions, archivedIds, workspaces, lifecycles, strings])
   const sections = groups.map(group => {
-    const expanded = expandedGroups[group.key] ?? (group.key === 'running' || group.sessions.some(session => session.sessionId === selected?.sessionId))
-    return { ...group, expanded, data: expanded ? group.sessions : [] }
+    const isWorkspace = group.key.startsWith('workspace:')
+    const expanded = expandedGroups[group.key] ?? (isWorkspace || group.key === 'running' || group.sessions.some(session => session.sessionId === selected?.sessionId))
+    const visibleSessions = isWorkspace ? group.sessions.slice(0, visibleSessionCounts[group.key] ?? SESSION_PAGE_SIZE) : group.sessions
+    return { ...group, expanded, data: expanded ? visibleSessions : [] }
   })
   const refresh = async () => {
     if (refreshing || busy !== undefined || !connected) return
@@ -79,9 +84,23 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
           contentContainerStyle={styles.list}
           refreshing={refreshing}
           onRefresh={() => void refresh()}
-          renderSectionFooter={({ section }) => section.key === 'running' && section.expanded && section.sessions.length === 0
-            ? <Text style={styles.emptyRunning}>{strings.chat.noRunningHostSessions}</Text>
-            : null}
+          renderSectionFooter={({ section }) => {
+            if (!section.expanded) return null
+            if (section.key === 'running' && section.sessions.length === 0) {
+              return <Text style={styles.emptyRunning}>{strings.chat.noRunningHostSessions}</Text>
+            }
+            if (section.data.length === section.sessions.length) return null
+            return <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${section.title} · ${strings.workspaces.showMoreSessions}`}
+              accessibilityState={{ expanded: false }}
+              onPress={() => setVisibleSessionCounts(current => ({ ...current, [section.key]: (current[section.key] ?? SESSION_PAGE_SIZE) + SESSION_PAGE_SIZE }))}
+              style={({ pressed }) => [styles.showMoreSessions, pressed && styles.pressedRow]}
+            >
+              <Text style={styles.showMoreSessionsText}>{strings.workspaces.showMoreSessions}</Text>
+              <ChevronDown size={17} color={colors.primary} />
+            </Pressable>
+          }}
           renderSectionHeader={({ section }) => <Pressable
             accessibilityRole="button"
             accessibilityLabel={section.expanded ? strings.workspaces.collapseWorkspace(section.title) : strings.workspaces.expandWorkspace(section.title)}
@@ -152,6 +171,8 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   count: { ...type.caption, color: colors.muted },
   rowSeparator: { position: 'absolute', bottom: 0, left: spacing.xs + 40 + spacing.xs, right: spacing.xs, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, borderRadius: radius.sm },
+  showMoreSessions: { minHeight: 48, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 40 + spacing.xs, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radius.sm },
+  showMoreSessionsText: { ...type.smallStrong, color: colors.primary },
   sessionIcon: { width: 40, alignItems: 'center', justifyContent: 'center' },
   activeRow: { backgroundColor: colors.primarySoft },
   pressedRow: { backgroundColor: colors.surfaceStrong },

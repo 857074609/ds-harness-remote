@@ -367,7 +367,8 @@ export class AcpRemoteGateway {
       this.requireAcp(backend)
       if (backend === 'pi' || backend === 'claude' || backend === 'opencode') {
         const cwd = await this.catalogSessionCwd(backend, conversationId)
-        this.requireSessionOwner(connectionId, conversationId)
+        // History uses an isolated reader and must neither require nor claim
+        // the live session's control ownership.
         const client = this.requireAcp(backend) as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
         if (!client.history) throw new RpcError('METHOD_NOT_ALLOWED', 'The ACP backend does not support history.')
         return { events: await client.history(conversationId, cwd) }
@@ -652,7 +653,7 @@ export class AcpRemoteGateway {
       return
     }
     if (owner !== connectionId) {
-      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this Cursor session.')
+      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this session.')
     }
   }
 
@@ -1026,7 +1027,7 @@ export class AcpRemoteGateway {
       return
     }
     if (owner !== connectionId && isSessionMutation(method)) {
-      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this Cursor session.')
+      throw new RpcError('CURSOR_SESSION_OWNED', 'Another Remote connection owns this session.')
     }
   }
 

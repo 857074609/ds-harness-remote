@@ -36369,7 +36369,6 @@ var AcpRemoteGateway = class {
       this.requireAcp(backend);
       if (backend === "pi" || backend === "claude" || backend === "opencode") {
         const cwd2 = await this.catalogSessionCwd(backend, conversationId);
-        this.requireSessionOwner(connectionId, conversationId);
         const client = this.requireAcp(backend);
         if (!client.history) throw new RpcError("METHOD_NOT_ALLOWED", "The ACP backend does not support history.");
         return { events: await client.history(conversationId, cwd2) };
@@ -36620,7 +36619,7 @@ var AcpRemoteGateway = class {
       return;
     }
     if (owner !== connectionId) {
-      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
+      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this session.");
     }
   }
   /** Replay frames buffered while no healthy peer could receive them. */
@@ -36978,7 +36977,7 @@ var AcpRemoteGateway = class {
       return;
     }
     if (owner !== connectionId && isSessionMutation(method)) {
-      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this Cursor session.");
+      throw new RpcError("CURSOR_SESSION_OWNED", "Another Remote connection owns this session.");
     }
   }
   requireSessionOwner(connectionId, sessionId) {

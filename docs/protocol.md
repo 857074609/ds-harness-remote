@@ -1224,6 +1224,12 @@ adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.bina
 `dsh/sessionList`、`dsh/sessionHistory`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
 不得通过 Harness ApiProxy / Typert 业务端点调用。
 
+`dsh/sessionHistory` 是只读访问：已认证且受信任的同账号连接通过 backend、会话目录 authority
+与真实 cwd 校验后，可以读取其他 Remote 连接正在使用的会话历史，包括活动回复期间；
+读取不得取得或转移 live session owner。Pi / Claude / OpenCode 使用独立 history reader，
+不向 live stream 重放历史。`session/load`、Prompt、cancel、模型切换、审批和工具的既有
+归属与权限检查保持不变。
+
 Client 侧 `initialize` 由 Gateway 返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
 `dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、
 不发送 prompt，也不注册客户端 Session；`session/new` 才领取预热进程。AGY 摘要数据库

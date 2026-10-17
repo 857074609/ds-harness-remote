@@ -301,8 +301,7 @@ describe('AcpRemoteGateway', () => {
         await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
       }
       await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
-      await expect(gateway.call('other', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
-      expect(history).not.toHaveBeenCalled()
+      await expect(gateway.call('other', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history() })
       await gateway.call('owner', { method: 'session/prompt', params: { backend: 'claude', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } })
       await expect(gateway.call('owner', { method: 'dsh/sessionHistory', params: { backend: 'claude', sessionId: 'claude:saved' } })).resolves.toEqual({ events: await history() })
       expect(history).toHaveBeenCalledWith('saved', cwd)
@@ -310,6 +309,44 @@ describe('AcpRemoteGateway', () => {
       await expect(gateway.call('other', { method: 'session/load', params: { backend: 'claude', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
       finish({ stopReason: 'end_turn' })
     } finally { await gateway.close() }
+  })
+
+  it('allows catalog-authorized history across connections without claiming or stealing live session control', async () => {
+    await runScenarios((['pi', 'claude', 'opencode'] as const).map(backend => ({ name: backend, run: async () => {
+      const cwd = await realpath(process.cwd())
+      const events = [{ method: 'session/update', params: { sessionId: 'saved' } }]
+      const history = vi.fn(async () => events)
+      const acp = Object.assign(readyAcp(), { history })
+      let finish: ((value: unknown) => void) | undefined
+      acp.call = vi.fn(async method => method === 'session/list'
+        ? { sessions: [{ sessionId: 'saved', cwd }] }
+        : method === 'session/prompt' ? new Promise(resolve => { finish = resolve }) : {})
+      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => acp)
+      await gateway.start()
+      const read = { method: 'dsh/sessionHistory', params: { backend, sessionId: `${backend}:saved` } }
+      const prompt = { method: 'session/prompt', params: { backend, sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } }
+      try {
+        await expect(gateway.call('reader', read)).resolves.toEqual({ events })
+        expect(history).toHaveBeenCalledWith('saved', cwd)
+        expect(vi.mocked(acp.call).mock.calls.map(([method]) => method)).toEqual(['session/list'])
+        // Reading first must not reserve ownership and prevent a different peer loading.
+        await expect(gateway.call('owner', { method: 'session/load', params: { backend, sessionId: 'saved' } })).resolves.toBeDefined()
+        await expect(gateway.call('owner', prompt)).resolves.toMatchObject({ accepted: true })
+        await expect(gateway.call('reader', read)).resolves.toEqual({ events })
+        for (const mutation of [prompt,
+          { method: 'session/cancel', params: { sessionId: 'saved' } },
+          { method: 'dsh/selectModel', params: { backend, sessionId: 'saved', model: 'other' } },
+        ]) await expect(gateway.call('reader', mutation)).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+        await expect(gateway.call('reader', { ...read, params: { backend, sessionId: `${backend}:unknown` } })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_UNAVAILABLE' })
+        const otherBackend = backend === 'pi' ? 'opencode' : 'pi'
+        await expect(gateway.call('reader', { ...read, params: { backend, sessionId: `${otherBackend}:saved` } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        expect(history).toHaveBeenCalledTimes(2)
+        // The reader must not displace the current owner or stop its active turn.
+        await expect(gateway.call('owner', { method: 'session/cancel', params: { sessionId: 'saved' } })).resolves.toBeDefined()
+        expect(vi.mocked(acp.call).mock.calls.filter(([method]) => method === 'session/prompt')).toHaveLength(1)
+        expect(vi.mocked(acp.call).mock.calls.filter(([method]) => method === 'session/cancel')).toHaveLength(1)
+      } finally { finish?.({ stopReason: 'end_turn' }); await gateway.close() }
+    } })))
   })
 
   it('rejects stale catalog authority across backend replacement, disable and shutdown', async () => {

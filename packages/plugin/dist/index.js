@@ -10724,11 +10724,11 @@ var AgentAcpClient = class {
     const result = await this.call("dsh/workspaceList", {
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error) => {
-      if (backend === "pi")
+      if (backend === "pi" || backend === "claude")
         throw error;
       return [];
     });
-    if (backend === "pi" && !Array.isArray(result)) {
+    if ((backend === "pi" || backend === "claude") && !Array.isArray(result)) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP workspace catalog is invalid.");
     }
     return Array.isArray(result) ? result : [];
@@ -10739,11 +10739,11 @@ var AgentAcpClient = class {
       ...backend === void 0 ? {} : { backend },
       ...limit === void 0 ? {} : { limit }
     }, signal).catch((error) => {
-      if (backend === "pi")
+      if (backend === "pi" || backend === "claude")
         throw error;
       return { items: [] };
     });
-    if (backend === "pi" && (!isRecord2(result) || !Array.isArray(result.items))) {
+    if ((backend === "pi" || backend === "claude") && (!isRecord2(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session catalog is invalid.");
     }
     return isRecord2(result) && Array.isArray(result.items) ? result.items : [];
@@ -10753,11 +10753,11 @@ var AgentAcpClient = class {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error) => {
-      if (backend === "pi")
+      if (backend === "pi" || backend === "claude")
         throw error;
       return { events: [] };
     });
-    if (backend === "pi" && (!isRecord2(result) || !Array.isArray(result.events))) {
+    if ((backend === "pi" || backend === "claude") && (!isRecord2(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
     return isRecord2(result) && Array.isArray(result.events) ? result.events : [];
@@ -11142,8 +11142,8 @@ var OPENCODE_WORKSPACE_PREFIX = "opencode:cwd:";
 var CURSOR_PROVIDER = "cursor";
 var OPENCODE_PROVIDER = "opencode";
 function acpCwdWorkspaceId(path, backend) {
-  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode") throw new Error("An explicit ACP workspace backend is required.");
-  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode" && backend !== "claude") throw new Error("An explicit ACP workspace backend is required.");
+  const prefix = backend === "claude" ? "claude:cwd:" : backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
   return `${prefix}${encodeURIComponent(path)}`;
 }
 function createAcpWorkspaceView(path, backend, title) {
@@ -11171,13 +11171,13 @@ async function discoverAcpVirtualWorkspaces(client, backend, signal) {
         });
       }
     } catch (error) {
-      if (backend === "pi") throw error;
+      if (backend === "pi" || backend === "claude") throw error;
     }
   }
   return [];
 }
 function recreateWorkspaceFromId(workspaceId, backend) {
-  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  const prefix = backend === "claude" ? "claude:cwd:" : backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
   if (!workspaceId.startsWith(prefix)) return void 0;
   try {
     const path = decodeURIComponent(workspaceId.slice(prefix.length));
@@ -11198,8 +11198,8 @@ function nativeWorkspace(view) {
   };
 }
 function modelCatalog(backend = "cursor") {
-  const provider = backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
-  const name2 = backend === "pi" ? "Pi" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
+  const provider = backend === "claude" ? "claude" : backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
+  const name2 = backend === "claude" ? "Claude" : backend === "pi" ? "Pi" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
   const models = [];
   const defaultModel = models[0]?.id ?? "host-settings";
   return {
@@ -11270,7 +11270,7 @@ function extractSessionId(request) {
   throw new Error("The sessionId is required.");
 }
 function sessionPrefix(backend) {
-  return backend === "pi" ? "pi:" : backend === "opencode" ? OPENCODE_SESSION_PREFIX : backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+  return backend === "claude" ? "claude:" : backend === "pi" ? "pi:" : backend === "opencode" ? OPENCODE_SESSION_PREFIX : backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
 }
 function nativeAcpId(sessionId, backend) {
   const prefix = sessionPrefix(backend);
@@ -11650,7 +11650,7 @@ var AcpLiveProjection = class {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.context.backend === "claude" ? "Claude" : this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.context.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.context.backend)
@@ -12195,7 +12195,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return [...this.workspaceById.values()];
   }
   backendLabel() {
-    return this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
+    return this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
   }
   async selectWorkspace(workspaceId) {
     const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
@@ -12259,7 +12259,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     try {
       const args = carrierArgs(payload);
       if (ACP_TOOL_CALL_ENDPOINTS.some((item) => item === endpoint)) {
-        if (!this.client.workspaceToolCall) return business(failure("method-not-found", "The Host does not support ACP workspace tools."));
+        if (this.backend === "claude" || !this.client.workspaceToolCall) return business(failure("method-not-found", "The Host does not support ACP workspace tools."));
         const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
         return business(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint, args, signal));
       }
@@ -12313,14 +12313,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "session/modelCatalog": {
           const sessionId = await this.preferredSessionId();
           const catalog = modelCatalog(this.backend);
-          if (this.backend === "cursor" || !sessionId) return business(success(catalog));
+          if (!sessionId) return business(success(catalog));
           const models = await this.hostSessionModels(sessionId);
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
           const rawId = extractSessionId(requestArg(args));
           const resolvedId = this.resolveSessionId(rawId);
-          if (this.backend !== "cursor" && resolvedId) {
+          if (resolvedId) {
             try {
               return business(success(await this.hostSessionModels(resolvedId)));
             } catch {
@@ -12364,6 +12364,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async open(endpoint, payload, signal) {
     const args = carrierArgs(payload);
     if (ACP_TOOL_STREAM_ENDPOINTS.some((item) => item === endpoint)) {
+      if (this.backend === "claude") throw new Error("Claude workspace tools are not available.");
       const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
       const queue = new AsyncValueQueue(signal);
       const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), (frame) => {
@@ -12603,7 +12604,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend);
       } catch (error) {
-        if (this.backend === "pi") throw error;
+        if (this.backend === "pi" || this.backend === "claude") throw error;
       }
     }
     if (events.length > 0) {
@@ -12628,7 +12629,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -12736,7 +12737,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30);
         } catch (error) {
-          if (this.backend === "pi") throw error;
+          if (this.backend === "pi" || this.backend === "claude") throw error;
         }
       }
       for (const item of discovered) {
@@ -12753,7 +12754,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       workspace.sessionCount = workspace.sessionIds.length;
       workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     } catch (error) {
-      if (this.backend === "pi") throw error;
+      if (this.backend === "pi" || this.backend === "claude") throw error;
     }
   }
   attachSessionToWorkspace(cwd2, sessionId) {
@@ -12808,7 +12809,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         kind: "sequenced",
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -12850,7 +12851,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async hostSessionModels(sessionId) {
     const resolvedId = this.resolveSessionId(sessionId);
-    if (this.backend === "cursor" || !this.client.sessionModels) {
+    if (!this.client.sessionModels) {
       const catalog = modelCatalog(this.backend);
       return {
         current: this.modelSelection(resolvedId),
@@ -12869,7 +12870,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const provider = requiredString(request.provider, "provider");
     const model = requiredString(request.model, "model");
     const reasoningEffort = string(request.reasoningEffort);
-    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
+    const catalog = await this.hostSessionModels(sessionId);
     const group = catalog.groups.find((g) => g.id === provider || g.id.toLowerCase() === provider.toLowerCase());
     const targetModel = group?.models.find((m) => {
       if (m.id === model) return true;
@@ -12889,7 +12890,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       model: targetModel.id,
       ...reasoningEffort === void 0 ? {} : { reasoningEffort }
     };
-    if (this.backend === "cursor" || !this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
+    if (!this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
     const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
     this.selectedModels.set(sessionId, confirmed);
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed);
@@ -14809,13 +14810,14 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   const cursor2 = available("cursor", "agent.acp.cursor.v1");
   const antigravity = available("antigravity", "agent.acp.antigravity.v1");
   const pi = available("pi", "agent.acp.pi.v1");
+  const claude = available("claude", "agent.acp.claude.v1");
   const opencode = available("opencode", "agent.acp.opencode.v1");
   if (remoteV1 && remoteV3) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode && !claude) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
@@ -14830,6 +14832,7 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     antigravity,
     ...pi ? { pi: true } : {},
     opencode,
+    claude,
     ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
     pluginRoute: capabilities.has("plugin.route.v1")
@@ -23086,6 +23089,25 @@ var ClientControl = class {
         }
         return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "opencode"));
       }
+      if (endpoint === "claude.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, "claude"));
+      }
+      if (endpoint === "claude.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Claude Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "claude"));
+      }
+      if (endpoint === "claude.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Claude project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "claude"));
+      }
       if (endpoint === "workspace.selection.consume") {
         const value = record2(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
@@ -23094,7 +23116,7 @@ var ClientControl = class {
         return ok(this.context.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" || value.backend === "opencode" ? { backend: value.backend } : {},
+          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" || value.backend === "opencode" || value.backend === "claude" ? { backend: value.backend } : {},
           ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
         }));
       }
@@ -32122,6 +32144,796 @@ function isUnpersistedThreadError(error) {
   return error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && error.message.toLowerCase().includes("not persisted yet");
 }
 
+// src/acp/adapters/session-models.ts
+var AcpSessionModelState = class {
+  constructor(backend) {
+    this.backend = backend;
+  }
+  get label() {
+    return { cursor: "Cursor", claude: "Claude", opencode: "OpenCode" }[this.backend];
+  }
+  model;
+  effort;
+  legacy = false;
+  update(value) {
+    if (!record6(value)) return;
+    if (Array.isArray(value.configOptions)) {
+      this.model = readOption(value.configOptions.find((option) => record6(option) && option.id === "model"));
+      this.effort = readOption(value.configOptions.find((option) => record6(option) && option.id === "effort"));
+      this.legacy = false;
+    } else if (record6(value.models) && Array.isArray(value.models.availableModels) && typeof value.models.currentModelId === "string") {
+      this.model = {
+        id: "model",
+        current: value.models.currentModelId,
+        options: value.models.availableModels.flatMap((model) => record6(model) && typeof model.modelId === "string" && typeof model.name === "string" ? [{ id: model.modelId, name: model.name }] : [])
+      };
+      this.effort = void 0;
+      this.legacy = true;
+    } else if (value.sessionUpdate === "current_model_update" && typeof value.currentModelId === "string" && this.model) {
+      this.model.current = value.currentModelId;
+    }
+  }
+  catalog() {
+    const model = this.model;
+    const effort = this.effort;
+    const models = (model?.options ?? []).map((item) => ({
+      ...item,
+      // ACP advertises effort choices only for the currently selected model.
+      ...item.id === model?.current && effort ? { reasoning: { efforts: effort.options, defaultEffort: effort.current } } : {}
+    }));
+    return {
+      current: {
+        provider: this.backend,
+        model: model?.current ?? "host-settings",
+        ...effort ? { reasoningEffort: effort.current } : {}
+      },
+      routable: models.length > 0,
+      failures: [],
+      groups: [{ id: this.backend, name: this.label, models }]
+    };
+  }
+  async select(sessionId, model, effort, request) {
+    if (typeof model !== "string" || !this.model?.options.some((item) => item.id === model)) {
+      throw new Error(`The selected ${this.label} model is unavailable on this Host.`);
+    }
+    if (effort !== void 0 && (model !== this.model.current || !this.effort?.options.some((item) => item.id === effort))) {
+      throw new Error(`Select the ${this.label} model before choosing an available effort level.`);
+    }
+    if (this.legacy) {
+      await request("session/set_model", { sessionId, modelId: model });
+      this.model.current = model;
+    } else {
+      this.update(await request("session/set_config_option", { sessionId, configId: "model", value: model }));
+      if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`);
+    }
+    if (effort !== void 0) {
+      if (!this.effort?.options.some((item) => item.id === effort)) throw new Error(`The ${this.label} effort level is unavailable.`);
+      this.update(await request("session/set_config_option", { sessionId, configId: "effort", value: effort }));
+      if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`);
+    }
+    return { selected: this.catalog().current };
+  }
+};
+function readOption(value) {
+  if (!record6(value) || value.type !== "select" || typeof value.id !== "string" || typeof value.currentValue !== "string" || !Array.isArray(value.options)) return void 0;
+  const options = value.options.flatMap((option) => record6(option) && Array.isArray(option.options) ? option.options : [option]);
+  return { id: value.id, current: value.currentValue, options: options.flatMap((option) => record6(option) && typeof option.value === "string" && typeof option.name === "string" ? [{ id: option.value, name: option.name }] : []) };
+}
+function record6(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/adapters/cursor-process.ts
+import { spawn as spawn3 } from "node:child_process";
+import { Buffer as Buffer4 } from "node:buffer";
+var ACP_REQUEST_TIMEOUT_MS = 6e4;
+var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
+var ACP_START_TIMEOUT_MS = 2e4;
+var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
+var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
+var CursorAcpError = class extends Error {
+  constructor(code, message, options) {
+    super(message, options);
+    this.code = code;
+    this.name = "CursorAcpError";
+  }
+};
+var CursorAcpClient = class {
+  constructor(binary, logger, spawnAcp = (binary2) => spawn3(binary2, options.args ?? ["acp"], {
+    cwd: options.cwd,
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: process.env
+  }), options = {}) {
+    this.binary = binary;
+    this.logger = logger;
+    this.spawnAcp = spawnAcp;
+    this.options = options;
+  }
+  process;
+  nextId = 1;
+  pending = /* @__PURE__ */ new Map();
+  inboundHandlers = /* @__PURE__ */ new Set();
+  unavailableHandlers = /* @__PURE__ */ new Set();
+  stdoutBuffer = Buffer4.alloc(0);
+  stderrBytes = 0;
+  ready = false;
+  closed = false;
+  failureNotified = false;
+  startPromise;
+  modelStates = /* @__PURE__ */ new Map();
+  modelBusy = /* @__PURE__ */ new Set();
+  start() {
+    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
+    if (this.ready) return Promise.resolve();
+    this.startPromise ??= this.startOnce().finally(() => {
+      this.startPromise = void 0;
+    });
+    return this.startPromise;
+  }
+  isReady() {
+    return this.ready;
+  }
+  async call(method, params, timeoutMs) {
+    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
+    const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
+    const id5 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
+      const state = id5 ? this.modelStates.get(id5) : void 0;
+      if (!state || !id5) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before selecting a model.");
+      if (method === "dsh/sessionModels") return state.catalog();
+      if (this.modelBusy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the reply before changing its model.");
+      const selection = params;
+      this.modelBusy.add(id5);
+      try {
+        const result2 = await state.select(
+          id5,
+          selection.model,
+          selection.reasoningEffort,
+          (method2, params2) => this.request(method2, params2, timeoutMs ?? ACP_REQUEST_TIMEOUT_MS)
+        );
+        for (const handler of this.inboundHandlers) handler({
+          kind: "notification",
+          method: "session/update",
+          params: { sessionId: id5, update: { sessionUpdate: "model_selection", selected: result2.selected } }
+        });
+        return result2;
+      } finally {
+        this.modelBusy.delete(id5);
+      }
+    }
+    if (backend && method === "session/prompt" && id5) {
+      if (this.modelBusy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The ACP session is busy.");
+      this.modelBusy.add(id5);
+      try {
+        return await this.request(method, params, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS);
+      } finally {
+        this.modelBusy.delete(id5);
+      }
+    }
+    if (method === "session/cancel" && this.options.authenticationMethod === null) {
+      this.write({ jsonrpc: "2.0", method, params });
+      return {};
+    }
+    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
+    const result = await this.request(method, params, budget);
+    if (backend && (method === "session/new" || method === "session/load")) {
+      const returnedId = isRecord15(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+      const sessionId = method === "session/load" ? id5 : returnedId;
+      if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "ACP returned an invalid session.");
+      const state = new AcpSessionModelState(backend);
+      state.update(result);
+      this.modelStates.set(sessionId, state);
+    }
+    return result;
+  }
+  async respond(id5, result) {
+    this.write({ jsonrpc: "2.0", id: id5, result });
+  }
+  async respondError(id5, code, message) {
+    this.write({ jsonrpc: "2.0", id: id5, error: { code, message } });
+  }
+  onInbound(handler) {
+    this.inboundHandlers.add(handler);
+    return () => this.inboundHandlers.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailableHandlers.add(handler);
+    return () => this.unavailableHandlers.delete(handler);
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.ready = false;
+    this.modelStates.clear();
+    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
+    const child = this.process;
+    this.process = void 0;
+    if (child === void 0 || child.exitCode !== null || child.killed) return;
+    await new Promise((resolve6) => {
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        resolve6();
+      }, 2e3);
+      timer.unref?.();
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve6();
+      });
+      child.kill("SIGTERM");
+    });
+  }
+  async startOnce() {
+    if (this.process !== void 0) {
+      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
+    }
+    const child = this.spawnAcp(this.binary);
+    this.process = child;
+    this.failureNotified = false;
+    this.stdoutBuffer = Buffer4.alloc(0);
+    this.stderrBytes = 0;
+    child.stdout.on("data", (chunk) => {
+      if (this.process === child) this.consumeStdout(Buffer4.from(chunk));
+    });
+    child.stderr.on("data", (chunk) => {
+      if (this.process !== child) return;
+      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
+    });
+    child.on("error", (error) => {
+      if (this.process === child) this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error);
+    });
+    child.on("exit", (code, signal) => {
+      if (this.process !== child) return;
+      this.process = void 0;
+      this.ready = false;
+      this.modelStates.clear();
+      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
+      if (!this.closed) {
+        this.logger?.warn("Cursor ACP exited", {
+          code: code ?? "none",
+          signal: signal ?? "none",
+          stderrBytes: this.stderrBytes
+        });
+        this.notifyUnavailable("CURSOR_ACP_EXITED");
+      }
+    });
+    try {
+      await this.request("initialize", {
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false
+        },
+        clientInfo: {
+          name: "deepseek_harness_remote",
+          version: PLUGIN_VERSION
+        }
+      }, ACP_START_TIMEOUT_MS);
+      this.assertStarting(child);
+      if (this.options.authenticationMethod !== null) {
+        await this.request("authenticate", { methodId: this.options.authenticationMethod ?? "cursor_login" }, ACP_START_TIMEOUT_MS);
+      }
+      this.assertStarting(child);
+      this.ready = true;
+      this.logger?.info("Cursor ACP ready");
+    } catch (error) {
+      this.ready = false;
+      this.modelStates.clear();
+      if (this.process === child) this.process = void 0;
+      child.kill("SIGTERM");
+      if (error instanceof CursorAcpError) throw error;
+      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error });
+    }
+  }
+  assertStarting(child) {
+    if (this.closed) throw new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed.");
+    if (this.process !== child || child.exitCode !== null || child.killed) {
+      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+    }
+  }
+  request(method, params, timeoutMs) {
+    const id5 = this.nextId++;
+    const result = new Promise((resolve6, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id5);
+        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
+      }, timeoutMs);
+      timer.unref?.();
+      this.pending.set(id5, { resolve: resolve6, reject, timer });
+    });
+    try {
+      this.write({ jsonrpc: "2.0", id: id5, method, params });
+    } catch (error) {
+      const pending = this.takePending(id5);
+      pending?.reject(error instanceof Error ? error : new Error("Cursor ACP write failed."));
+    }
+    return result;
+  }
+  write(message) {
+    const child = this.process;
+    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
+      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
+    }
+    child.stdin.write(`${JSON.stringify(message)}
+`);
+  }
+  consumeStdout(chunk) {
+    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
+    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
+      this.handleProcessFailure(
+        "CURSOR_RESPONSE_TOO_LARGE",
+        new Error("Cursor ACP emitted an oversized JSONL message.")
+      );
+      return;
+    }
+    let newline = this.stdoutBuffer.indexOf(10);
+    while (newline >= 0) {
+      const line = this.stdoutBuffer.subarray(0, newline);
+      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
+      if (line.length > 0) this.handleLine(line);
+      newline = this.stdoutBuffer.indexOf(10);
+    }
+  }
+  handleLine(line) {
+    let value;
+    try {
+      value = JSON.parse(line.toString("utf8"));
+    } catch {
+      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
+      return;
+    }
+    if (!isRecord15(value)) {
+      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
+      return;
+    }
+    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
+      const pending = this.takePending(value.id);
+      if (pending === void 0) return;
+      if ("error" in value && value.error !== void 0) {
+        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
+      } else {
+        pending.resolve(value.result);
+      }
+      return;
+    }
+    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
+    const params = value.params ?? {};
+    const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord15(params) && typeof params.sessionId === "string") {
+      this.modelStates.get(params.sessionId)?.update(params.update);
+    }
+    for (const handler of this.inboundHandlers) handler(inbound);
+  }
+  handleProcessFailure(code, cause) {
+    this.ready = false;
+    this.modelStates.clear();
+    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
+    const child = this.process;
+    this.process = void 0;
+    child?.kill("SIGTERM");
+    this.logger?.warn("Cursor ACP communication failed", { code });
+    if (!this.closed) this.notifyUnavailable(code);
+  }
+  notifyUnavailable(code) {
+    if (this.failureNotified) return;
+    this.failureNotified = true;
+    for (const handler of this.unavailableHandlers) handler(code);
+  }
+  takePending(id5) {
+    const pending = this.pending.get(id5);
+    if (pending === void 0) return void 0;
+    this.pending.delete(id5);
+    clearTimeout(pending.timer);
+    return pending;
+  }
+  failPending(error) {
+    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
+  }
+};
+function safeUpstreamError2(value) {
+  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  const message = value.message.toLowerCase();
+  if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
+    return "Cursor ACP authentication failed.";
+  }
+  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
+  return "Cursor ACP rejected the request.";
+}
+function isRecord15(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/history-events.ts
+function acpHistoryEvents(messages, sessionId, provider) {
+  const events = [];
+  const tools = /* @__PURE__ */ new Map();
+  let turn = 0;
+  let step = 1;
+  let afterTools = false;
+  let pending;
+  const push = (type, data2, surface = false) => events.push({ type: "event", event: {
+    type,
+    seq: events.length,
+    time: 0,
+    data: data2,
+    ...surface ? { surfaceOp: "append" } : {}
+  } });
+  const id5 = () => `${provider}-history:${sessionId}:${events.length}`;
+  const flushMessage = () => {
+    if (!pending) return;
+    const message = { id: id5(), role: pending.role, content: pending.content };
+    if (pending.role === "user") push("user/message", { ...message, source: { kind: "user" } }, true);
+    else push("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
+    pending = void 0;
+  };
+  const result = (tool) => {
+    if (tool.emitted || !tool.terminal) return;
+    tool.emitted = true;
+    push("tool/result", { turn, step, message: { id: id5(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
+      type: "tool-result",
+      toolCallId: tool.id,
+      content: tool.output,
+      ...tool.failed ? { isError: true } : {}
+    }] } }, true);
+  };
+  const flushTools = () => {
+    for (const tool of tools.values()) result(tool);
+  };
+  const endTurn = () => {
+    flushMessage();
+    flushTools();
+    if (turn) {
+      push("step/end", { turn, step });
+      push("turn/end", { turn, reason: { kind: "completed" } });
+    }
+    tools.clear();
+    afterTools = false;
+  };
+  for (const message of messages) {
+    const params = message.params;
+    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
+    const update = params.update;
+    if (!update) continue;
+    const kind = update.sessionUpdate;
+    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
+      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
+      const role = kind === "user_message_chunk" ? "user" : "assistant";
+      if (role === "user" && pending?.role !== "user") {
+        endTurn();
+        turn++;
+        step = 1;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      } else if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      if (pending && pending.role !== role) flushMessage();
+      flushTools();
+      if (role === "assistant" && afterTools) {
+        push("step/end", { turn, step });
+        step++;
+        push("step/start", { turn, step });
+        afterTools = false;
+      }
+      pending ??= { role, content: [] };
+      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
+      const previous = pending.content.at(-1);
+      if (previous?.type === type) previous.text += update.content.text;
+      else pending.content.push({ type, text: update.content.text });
+    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
+      flushMessage();
+      afterTools = true;
+      if (!turn) {
+        turn++;
+        push("turn/start", { turn });
+        push("step/start", { turn, step });
+      }
+      let tool = tools.get(update.toolCallId);
+      if (!tool) {
+        tool = {
+          id: update.toolCallId,
+          name: typeof update.title === "string" ? update.title : "tool",
+          input: update.rawInput,
+          output: [],
+          failed: false,
+          terminal: false,
+          emitted: false
+        };
+        tools.set(tool.id, tool);
+        push("tool/call", {
+          turn,
+          step,
+          callId: tool.id,
+          name: tool.name,
+          arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
+        });
+      }
+      const decoded = piToolResult(update);
+      if (decoded.content.length) tool.output = decoded.content;
+      tool.failed ||= decoded.isError;
+      tool.terminal ||= update.status === "completed" || update.status === "failed";
+      if (kind === "tool_call_update") result(tool);
+    }
+  }
+  endTurn();
+  return events;
+}
+
+// src/acp/adapters/isolated-process.ts
+var IsolatedAcpClient = class {
+  constructor(binary, logger, options = {}, factory = () => new CursorAcpClient(
+    binary,
+    logger,
+    void 0,
+    { ...options, args: options.args ?? (options.backend === "cursor" ? ["acp"] : []), authenticationMethod: options.backend === "cursor" ? "cursor_login" : null }
+  )) {
+    this.binary = binary;
+    this.logger = logger;
+    this.options = options;
+    this.factory = factory;
+  }
+  catalog;
+  clients = /* @__PURE__ */ new Map();
+  starting = /* @__PURE__ */ new Set();
+  inbound = /* @__PURE__ */ new Set();
+  unavailable = /* @__PURE__ */ new Set();
+  closed = false;
+  all = /* @__PURE__ */ new Set();
+  callbacks = /* @__PURE__ */ new Map();
+  nextCallback = 0;
+  configurations = /* @__PURE__ */ new Map();
+  busy = /* @__PURE__ */ new Set();
+  loading = /* @__PURE__ */ new Map();
+  historyBusy = false;
+  get backend() {
+    return this.options.backend ?? "pi";
+  }
+  get label() {
+    return this.backend === "cursor" ? "Cursor" : "Pi";
+  }
+  async start() {
+    this.catalog = await this.create();
+    this.catalog.onUnavailable((code) => {
+      for (const handler of this.unavailable) handler(code);
+    });
+  }
+  isReady() {
+    return !this.closed && this.catalog?.isReady() === true;
+  }
+  async create(history = false) {
+    if (this.closed) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
+    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", `Too many ${this.label} ACP sessions are active.`);
+    const client = this.factory();
+    this.starting.add(client);
+    this.all.add(client);
+    try {
+      await client.start();
+      if (this.closed) throw new CursorAcpError("ACP_CLOSED", `${this.label} ACP is closed.`);
+      return client;
+    } catch (error) {
+      await this.dispose(client);
+      throw error;
+    } finally {
+      this.starting.delete(client);
+    }
+  }
+  async call(method, params, timeoutMs) {
+    const p = params;
+    if (method === "session/load" && typeof p.sessionId === "string") {
+      const previous = this.loading.get(p.sessionId);
+      if (previous) return previous;
+      const promise = this.callOnce(method, params, timeoutMs);
+      this.loading.set(p.sessionId, promise);
+      try {
+        return await promise;
+      } finally {
+        this.loading.delete(p.sessionId);
+      }
+    }
+    return this.callOnce(method, params, timeoutMs);
+  }
+  async callOnce(method, params, timeoutMs) {
+    const p = params;
+    if (method === "session/list") return this.catalog.call(method, params, timeoutMs);
+    if (method === "session/new" || method === "session/load") {
+      const known = typeof p.sessionId === "string" ? this.clients.get(p.sessionId) : void 0;
+      if (known) return { sessionId: p.sessionId };
+      const client2 = await this.create();
+      let boundId = typeof p.sessionId === "string" ? p.sessionId : void 0;
+      const queued = [];
+      let replaying = method === "session/load";
+      const replayConfiguration = {};
+      const receive = (message) => {
+        if (replaying) {
+          if (message.kind === "request") {
+            void client2.respondError(message.id, -32600, `${this.label} session is not loaded.`).catch(() => void 0);
+          } else if (message.params?.sessionId === boundId) {
+            this.updateConfiguration(boundId, message, replayConfiguration);
+          }
+          return;
+        }
+        const incomingId = message.params?.sessionId;
+        if (!boundId) {
+          if (queued.length < 200) queued.push(message);
+          return;
+        }
+        if (incomingId !== boundId) return;
+        this.updateConfiguration(boundId, message);
+        if (message.kind === "request") {
+          const id6 = `${this.backend}-callback:${++this.nextCallback}`;
+          this.callbacks.set(id6, { client: client2, id: message.id });
+          message = { ...message, id: id6 };
+        }
+        for (const handler of this.inbound) handler(message);
+      };
+      client2.onInbound(receive);
+      client2.onUnavailable(() => {
+        if (boundId && this.clients.get(boundId) === client2) {
+          this.clients.delete(boundId);
+          this.configurations.delete(boundId);
+        }
+        void this.dispose(client2).catch(() => void 0);
+      });
+      try {
+        const result = await client2.call(method, params, timeoutMs);
+        const id6 = method === "session/load" ? p.sessionId : result.sessionId;
+        if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
+        this.clients.set(id6, client2);
+        const config = { ...result };
+        for (const key of ["models", "modes"]) {
+          if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] };
+        }
+        this.configurations.set(id6, config);
+        boundId = id6;
+        replaying = false;
+        for (const message of queued) receive(message);
+        return { ...result, sessionId: id6 };
+      } catch (error) {
+        await this.dispose(client2);
+        throw error;
+      }
+    }
+    const client = this.clients.get(String(p.sessionId));
+    if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", `Load the ${this.label} session before using it.`);
+    const id5 = String(p.sessionId);
+    if (this.backend === "cursor" && (method === "dsh/sessionModels" || method === "dsh/selectModel")) return client.call(method, params, timeoutMs);
+    if (method === "dsh/sessionModels") return this.models(id5);
+    if (method === "dsh/selectModel") {
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `Stop the ${this.label} reply before changing its model.`);
+      const config = this.configurations.get(id5);
+      if (!config?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
+        throw new CursorAcpError("INVALID_MESSAGE", `The ${this.label} model or thinking level is not available.`);
+      }
+      this.busy.add(id5);
+      try {
+        const modelResult = await client.call("session/set_config_option", { sessionId: id5, configId: "model", value: p.model });
+        this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
+        if (p.reasoningEffort !== void 0) {
+          if (!this.configurations.get(id5)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
+          const thinkingResult = await client.call("session/set_config_option", { sessionId: id5, configId: "thought_level", value: p.reasoningEffort });
+          this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
+        }
+        return { selected: this.models(id5).current };
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
+    if (method === "session/prompt") {
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", `The ${this.label} session is busy.`);
+      this.busy.add(id5);
+      try {
+        return await client.call(method, params, timeoutMs);
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
+    return client.call(method, params, timeoutMs);
+  }
+  updateConfiguration(id5, message, initial) {
+    if (message.method !== "session/update") return;
+    const update = message.params.update;
+    const config = initial ?? this.configurations.get(id5);
+    if (!update || !config) return;
+    if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config.modes = { ...config.modes, currentModeId: update.currentModeId };
+    if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
+      for (const option of update.configOptions) {
+        if (option.type !== "select" || !Array.isArray(option.options)) continue;
+        if (option.id === "model") config.models = {
+          currentModelId: option.currentValue,
+          availableModels: option.options.map((item) => ({ modelId: item.value, name: item.name }))
+        };
+        if (option.id === "thought_level") config.modes = {
+          currentModeId: option.currentValue,
+          availableModes: option.options.map((item) => ({ id: item.value, name: item.name }))
+        };
+      }
+    }
+  }
+  models(id5) {
+    const config = this.configurations.get(id5);
+    const modes = config?.modes;
+    return {
+      current: { provider: "pi", model: config?.models?.currentModelId ?? "", reasoningEffort: modes?.currentModeId },
+      routable: true,
+      failures: [],
+      groups: [{ id: "pi", name: `${this.label}`, models: (config?.models?.availableModels ?? []).map((model) => ({
+        id: model.modelId,
+        name: model.name,
+        ...modes?.availableModes?.length ? { reasoning: { efforts: modes.availableModes.map((mode2) => ({ id: mode2.id, name: mode2.name })), defaultEffort: modes.currentModeId } } : {}
+      })) }]
+    };
+  }
+  /** A separate wrapper prevents history reads from interrupting active sessions. */
+  async history(sessionId, cwd2) {
+    if (this.historyBusy) throw new CursorAcpError("ACP_PROCESS_LIMIT", `A ${this.label} history read is already in progress.`);
+    this.historyBusy = true;
+    let client;
+    try {
+      client = await this.create(true);
+    } catch (error) {
+      this.historyBusy = false;
+      throw error;
+    }
+    const updates = [];
+    let bytes = 0;
+    let count = 0;
+    client.onInbound((message) => {
+      if (message.kind !== "notification" || message.method !== "session/update" || message.params?.sessionId !== sessionId) return;
+      count++;
+      bytes += Buffer.byteLength(JSON.stringify(message));
+      if (bytes <= 8 * 1024 * 1024 && count <= 1e4) updates.push(message);
+    });
+    try {
+      const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      const loadedId = result?.sessionId;
+      if (loadedId !== void 0 && loadedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid history session.`);
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", `${this.label} history exceeds the transfer limit.`);
+      return acpHistoryEvents(updates, sessionId, this.backend);
+    } finally {
+      try {
+        await this.dispose(client);
+      } finally {
+        this.historyBusy = false;
+      }
+    }
+  }
+  async respond(id5, result) {
+    const pending = this.callbacks.get(String(id5));
+    if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", `The ${this.label} callback is unavailable.`);
+    this.callbacks.delete(String(id5));
+    await pending.client.respond(pending.id, result);
+  }
+  async respondError(id5, code, message) {
+    const pending = this.callbacks.get(String(id5));
+    if (!pending) return;
+    this.callbacks.delete(String(id5));
+    await pending.client.respondError(pending.id, code, message);
+  }
+  onInbound(handler) {
+    this.inbound.add(handler);
+    return () => this.inbound.delete(handler);
+  }
+  onUnavailable(handler) {
+    this.unavailable.add(handler);
+    return () => this.unavailable.delete(handler);
+  }
+  async dispose(client) {
+    await client.close();
+    this.all.delete(client);
+    for (const [key, pending] of this.callbacks) if (pending.client === client) this.callbacks.delete(key);
+  }
+  async close() {
+    this.closed = true;
+    const clients = this.all;
+    await Promise.all([...clients].map((client) => this.dispose(client)));
+    this.clients.clear();
+    this.all.clear();
+    this.callbacks.clear();
+  }
+};
+
 // src/workspace-bridge.ts
 import { realpath as realpath2, lstat, readdir as readdir2, readFile as readFile4, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve2 } from "node:path";
@@ -32131,7 +32943,7 @@ var import_headless = __toESM(require_xterm_headless(), 1);
 var import_addon_serialize = __toESM(require_addon_serialize(), 1);
 
 // src/remote-terminal-provider.ts
-import { spawn as spawn3 } from "node:child_process";
+import { spawn as spawn4 } from "node:child_process";
 import { access } from "node:fs/promises";
 import { constants as constants2 } from "node:fs";
 import { userInfo } from "node:os";
@@ -32188,7 +33000,7 @@ async function discoverTerminalShells(provider, signal = new AbortController().s
 function pipeTerminalSpawner() {
   return Object.assign(async (spec) => {
     spec.signal.throwIfAborted();
-    const child = spawn3(spec.argv[0], spec.argv.slice(1), {
+    const child = spawn4(spec.argv[0], spec.argv.slice(1), {
       cwd: spec.cwd,
       stdio: "pipe",
       windowsHide: true,
@@ -32902,8 +33714,8 @@ var WorkspaceBridge = class {
   }
 };
 function argsOf(payload) {
-  const value = isRecord15(payload) ? payload : {};
-  return isRecord15(value.args) ? value.args : value;
+  const value = isRecord16(payload) ? payload : {};
+  return isRecord16(value.args) ? value.args : value;
 }
 function toolScope(endpoint, args) {
   const session = args.agentId ?? args.sessionId;
@@ -32913,13 +33725,13 @@ function toolScope(endpoint, args) {
   }
   return session;
 }
-function isRecord15(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function byteOrLineRange(args) {
-  const options = isRecord15(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord15(options.range)) return options.range;
-  return isRecord15(args.range) ? args.range : args;
+  const options = isRecord16(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord16(options.range)) return options.range;
+  return isRecord16(args.range) ? args.range : args;
 }
 function readOffset(args) {
   const range = byteOrLineRange(args);
@@ -33059,273 +33871,6 @@ import { readdir as readdir3, realpath as realpath3, stat as stat5 } from "node:
 import { homedir as homedir5 } from "node:os";
 import { basename as basename4, isAbsolute as isAbsolute6, join as join11, relative as relative4, resolve as resolve4 } from "node:path";
 
-// src/acp/adapters/cursor-process.ts
-import { spawn as spawn4 } from "node:child_process";
-import { Buffer as Buffer4 } from "node:buffer";
-var ACP_REQUEST_TIMEOUT_MS = 6e4;
-var ACP_PROMPT_TIMEOUT_MS = 10 * 6e4;
-var ACP_START_TIMEOUT_MS = 2e4;
-var MAX_ACP_LINE_BYTES = 288 * 1024 * 1024;
-var MAX_STDERR_CAPTURE_BYTES2 = 4 * 1024;
-var CursorAcpError = class extends Error {
-  constructor(code, message, options) {
-    super(message, options);
-    this.code = code;
-    this.name = "CursorAcpError";
-  }
-};
-var CursorAcpClient = class {
-  constructor(binary, logger, spawnAcp = (binary2) => spawn4(binary2, options.args ?? ["acp"], {
-    cwd: options.cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    env: process.env
-  }), options = {}) {
-    this.binary = binary;
-    this.logger = logger;
-    this.spawnAcp = spawnAcp;
-    this.options = options;
-  }
-  process;
-  nextId = 1;
-  pending = /* @__PURE__ */ new Map();
-  inboundHandlers = /* @__PURE__ */ new Set();
-  unavailableHandlers = /* @__PURE__ */ new Set();
-  stdoutBuffer = Buffer4.alloc(0);
-  stderrBytes = 0;
-  ready = false;
-  closed = false;
-  failureNotified = false;
-  startPromise;
-  start() {
-    if (this.closed) return Promise.reject(new CursorAcpError("CURSOR_CLOSED", "The Cursor domain is closed."));
-    if (this.ready) return Promise.resolve();
-    this.startPromise ??= this.startOnce().finally(() => {
-      this.startPromise = void 0;
-    });
-    return this.startPromise;
-  }
-  isReady() {
-    return this.ready;
-  }
-  async call(method, params, timeoutMs) {
-    if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
-    if (method === "session/cancel" && this.options.authenticationMethod === null) {
-      this.write({ jsonrpc: "2.0", method, params });
-      return {};
-    }
-    const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
-    return this.request(method, params, budget);
-  }
-  async respond(id5, result) {
-    this.write({ jsonrpc: "2.0", id: id5, result });
-  }
-  async respondError(id5, code, message) {
-    this.write({ jsonrpc: "2.0", id: id5, error: { code, message } });
-  }
-  onInbound(handler) {
-    this.inboundHandlers.add(handler);
-    return () => this.inboundHandlers.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailableHandlers.add(handler);
-    return () => this.unavailableHandlers.delete(handler);
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.ready = false;
-    this.failPending(new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed."));
-    const child = this.process;
-    this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve6) => {
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
-        resolve6();
-      }, 2e3);
-      timer.unref?.();
-      child.once("exit", () => {
-        clearTimeout(timer);
-        resolve6();
-      });
-      child.kill("SIGTERM");
-    });
-  }
-  async startOnce() {
-    if (this.process !== void 0) {
-      throw new CursorAcpError("CURSOR_STARTING", "Cursor ACP is already starting.");
-    }
-    const child = this.spawnAcp(this.binary);
-    this.process = child;
-    this.failureNotified = false;
-    this.stdoutBuffer = Buffer4.alloc(0);
-    this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => {
-      if (this.process === child) this.consumeStdout(Buffer4.from(chunk));
-    });
-    child.stderr.on("data", (chunk) => {
-      if (this.process !== child) return;
-      this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES2, this.stderrBytes + Buffer4.byteLength(chunk));
-    });
-    child.on("error", (error) => {
-      if (this.process === child) this.handleProcessFailure("CURSOR_BINARY_UNAVAILABLE", error);
-    });
-    child.on("exit", (code, signal) => {
-      if (this.process !== child) return;
-      this.process = void 0;
-      this.ready = false;
-      this.failPending(new CursorAcpError("CURSOR_ACP_EXITED", "Cursor ACP exited unexpectedly."));
-      if (!this.closed) {
-        this.logger?.warn("Cursor ACP exited", {
-          code: code ?? "none",
-          signal: signal ?? "none",
-          stderrBytes: this.stderrBytes
-        });
-        this.notifyUnavailable("CURSOR_ACP_EXITED");
-      }
-    });
-    try {
-      await this.request("initialize", {
-        protocolVersion: 1,
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          terminal: false
-        },
-        clientInfo: {
-          name: "deepseek_harness_remote",
-          version: PLUGIN_VERSION
-        }
-      }, ACP_START_TIMEOUT_MS);
-      this.assertStarting(child);
-      if (this.options.authenticationMethod !== null) {
-        await this.request("authenticate", { methodId: this.options.authenticationMethod ?? "cursor_login" }, ACP_START_TIMEOUT_MS);
-      }
-      this.assertStarting(child);
-      this.ready = true;
-      this.logger?.info("Cursor ACP ready");
-    } catch (error) {
-      this.ready = false;
-      if (this.process === child) this.process = void 0;
-      child.kill("SIGTERM");
-      if (error instanceof CursorAcpError) throw error;
-      throw new CursorAcpError("CURSOR_INITIALIZE_FAILED", "Cursor ACP initialization failed.", { cause: error });
-    }
-  }
-  assertStarting(child) {
-    if (this.closed) throw new CursorAcpError("CURSOR_CLOSED", "Cursor ACP was closed.");
-    if (this.process !== child || child.exitCode !== null || child.killed) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
-    }
-  }
-  request(method, params, timeoutMs) {
-    const id5 = this.nextId++;
-    const result = new Promise((resolve6, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id5);
-        reject(new CursorAcpError("CURSOR_REQUEST_TIMEOUT", "Cursor ACP request timed out."));
-      }, timeoutMs);
-      timer.unref?.();
-      this.pending.set(id5, { resolve: resolve6, reject, timer });
-    });
-    try {
-      this.write({ jsonrpc: "2.0", id: id5, method, params });
-    } catch (error) {
-      const pending = this.takePending(id5);
-      pending?.reject(error instanceof Error ? error : new Error("Cursor ACP write failed."));
-    }
-    return result;
-  }
-  write(message) {
-    const child = this.process;
-    if (child === void 0 || child.stdin.destroyed || !child.stdin.writable) {
-      throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not available.");
-    }
-    child.stdin.write(`${JSON.stringify(message)}
-`);
-  }
-  consumeStdout(chunk) {
-    this.stdoutBuffer = this.stdoutBuffer.length === 0 ? chunk : Buffer4.concat([this.stdoutBuffer, chunk]);
-    if (this.stdoutBuffer.length > MAX_ACP_LINE_BYTES) {
-      this.handleProcessFailure(
-        "CURSOR_RESPONSE_TOO_LARGE",
-        new Error("Cursor ACP emitted an oversized JSONL message.")
-      );
-      return;
-    }
-    let newline = this.stdoutBuffer.indexOf(10);
-    while (newline >= 0) {
-      const line = this.stdoutBuffer.subarray(0, newline);
-      this.stdoutBuffer = this.stdoutBuffer.subarray(newline + 1);
-      if (line.length > 0) this.handleLine(line);
-      newline = this.stdoutBuffer.indexOf(10);
-    }
-  }
-  handleLine(line) {
-    let value;
-    try {
-      value = JSON.parse(line.toString("utf8"));
-    } catch {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
-      return;
-    }
-    if (!isRecord16(value)) {
-      this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
-      return;
-    }
-    if ((typeof value.id === "number" || typeof value.id === "string") && ("result" in value || "error" in value)) {
-      const pending = this.takePending(value.id);
-      if (pending === void 0) return;
-      if ("error" in value && value.error !== void 0) {
-        pending.reject(new CursorAcpError("CURSOR_UPSTREAM_ERROR", safeUpstreamError2(value.error)));
-      } else {
-        pending.resolve(value.result);
-      }
-      return;
-    }
-    if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
-    const params = value.params ?? {};
-    const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    for (const handler of this.inboundHandlers) handler(inbound);
-  }
-  handleProcessFailure(code, cause) {
-    this.ready = false;
-    this.failPending(new CursorAcpError(code, "Cursor ACP communication failed.", { cause }));
-    const child = this.process;
-    this.process = void 0;
-    child?.kill("SIGTERM");
-    this.logger?.warn("Cursor ACP communication failed", { code });
-    if (!this.closed) this.notifyUnavailable(code);
-  }
-  notifyUnavailable(code) {
-    if (this.failureNotified) return;
-    this.failureNotified = true;
-    for (const handler of this.unavailableHandlers) handler(code);
-  }
-  takePending(id5) {
-    const pending = this.pending.get(id5);
-    if (pending === void 0) return void 0;
-    this.pending.delete(id5);
-    clearTimeout(pending.timer);
-    return pending;
-  }
-  failPending(error) {
-    for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
-  }
-};
-function safeUpstreamError2(value) {
-  if (!isRecord16(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
-  const message = value.message.toLowerCase();
-  if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
-    return "Cursor ACP authentication failed.";
-  }
-  if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
-  return "Cursor ACP rejected the request.";
-}
-function isRecord16(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // src/acp/adapters/claude-process.ts
 import { Buffer as Buffer5 } from "node:buffer";
 
@@ -33464,7 +34009,7 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   shuttingDown = false;
   makeClient;
   constructor(binary = "claude-agent-acp", logger, spawnAcp, options = {}) {
-    const config = { ...options, args: options.args ?? [], authenticationMethod: null };
+    const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: "claude" };
     super(binary, logger, spawnAcp, config);
     this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config);
     super.onUnavailable(() => this.live.clear());
@@ -33571,388 +34116,8 @@ var ClaudeAcpClient = class extends CursorAcpClient {
   }
 };
 
-// src/acp/history-events.ts
-function acpHistoryEvents(messages, sessionId, provider) {
-  const events = [];
-  const tools = /* @__PURE__ */ new Map();
-  let turn = 0;
-  let step = 1;
-  let afterTools = false;
-  let pending;
-  const push = (type, data2, surface = false) => events.push({ type: "event", event: {
-    type,
-    seq: events.length,
-    time: 0,
-    data: data2,
-    ...surface ? { surfaceOp: "append" } : {}
-  } });
-  const id5 = () => `${provider}-history:${sessionId}:${events.length}`;
-  const flushMessage = () => {
-    if (!pending) return;
-    const message = { id: id5(), role: pending.role, content: pending.content };
-    if (pending.role === "user") push("user/message", { ...message, source: { kind: "user" } }, true);
-    else push("assistant/message", { turn, step, message: { ...message, source: { kind: "model", provider, model: "" } }, stream: [] }, true);
-    pending = void 0;
-  };
-  const result = (tool) => {
-    if (tool.emitted || !tool.terminal) return;
-    tool.emitted = true;
-    push("tool/result", { turn, step, message: { id: id5(), role: "user", source: { kind: "tool", callId: tool.id }, content: [{
-      type: "tool-result",
-      toolCallId: tool.id,
-      content: tool.output,
-      ...tool.failed ? { isError: true } : {}
-    }] } }, true);
-  };
-  const flushTools = () => {
-    for (const tool of tools.values()) result(tool);
-  };
-  const endTurn = () => {
-    flushMessage();
-    flushTools();
-    if (turn) {
-      push("step/end", { turn, step });
-      push("turn/end", { turn, reason: { kind: "completed" } });
-    }
-    tools.clear();
-    afterTools = false;
-  };
-  for (const message of messages) {
-    const params = message.params;
-    if (message.kind !== "notification" || message.method !== "session/update" || params?.sessionId !== sessionId) continue;
-    const update = params.update;
-    if (!update) continue;
-    const kind = update.sessionUpdate;
-    if (kind === "user_message_chunk" || kind === "agent_message_chunk" || kind === "agent_thought_chunk") {
-      if (update.content?.type !== "text" || typeof update.content.text !== "string") continue;
-      const role = kind === "user_message_chunk" ? "user" : "assistant";
-      if (role === "user" && pending?.role !== "user") {
-        endTurn();
-        turn++;
-        step = 1;
-        push("turn/start", { turn });
-        push("step/start", { turn, step });
-      } else if (!turn) {
-        turn++;
-        push("turn/start", { turn });
-        push("step/start", { turn, step });
-      }
-      if (pending && pending.role !== role) flushMessage();
-      flushTools();
-      if (role === "assistant" && afterTools) {
-        push("step/end", { turn, step });
-        step++;
-        push("step/start", { turn, step });
-        afterTools = false;
-      }
-      pending ??= { role, content: [] };
-      const type = kind === "agent_thought_chunk" ? "reasoning" : "text";
-      const previous = pending.content.at(-1);
-      if (previous?.type === type) previous.text += update.content.text;
-      else pending.content.push({ type, text: update.content.text });
-    } else if ((kind === "tool_call" || kind === "tool_call_update") && typeof update.toolCallId === "string") {
-      flushMessage();
-      afterTools = true;
-      if (!turn) {
-        turn++;
-        push("turn/start", { turn });
-        push("step/start", { turn, step });
-      }
-      let tool = tools.get(update.toolCallId);
-      if (!tool) {
-        tool = {
-          id: update.toolCallId,
-          name: typeof update.title === "string" ? update.title : "tool",
-          input: update.rawInput,
-          output: [],
-          failed: false,
-          terminal: false,
-          emitted: false
-        };
-        tools.set(tool.id, tool);
-        push("tool/call", {
-          turn,
-          step,
-          callId: tool.id,
-          name: tool.name,
-          arguments: typeof tool.input === "string" ? tool.input : JSON.stringify(tool.input ?? {})
-        });
-      }
-      const decoded = piToolResult(update);
-      if (decoded.content.length) tool.output = decoded.content;
-      tool.failed ||= decoded.isError;
-      tool.terminal ||= update.status === "completed" || update.status === "failed";
-      if (kind === "tool_call_update") result(tool);
-    }
-  }
-  endTurn();
-  return events;
-}
-
 // src/acp/adapters/pi-process.ts
-var PiAcpClient = class {
-  constructor(binary, logger, options = {}, factory = () => new CursorAcpClient(
-    binary,
-    logger,
-    void 0,
-    { ...options, args: options.args ?? [], authenticationMethod: null }
-  )) {
-    this.binary = binary;
-    this.logger = logger;
-    this.options = options;
-    this.factory = factory;
-  }
-  catalog;
-  clients = /* @__PURE__ */ new Map();
-  starting = /* @__PURE__ */ new Set();
-  inbound = /* @__PURE__ */ new Set();
-  unavailable = /* @__PURE__ */ new Set();
-  closed = false;
-  all = /* @__PURE__ */ new Set();
-  callbacks = /* @__PURE__ */ new Map();
-  nextCallback = 0;
-  configurations = /* @__PURE__ */ new Map();
-  busy = /* @__PURE__ */ new Set();
-  loading = /* @__PURE__ */ new Map();
-  historyBusy = false;
-  async start() {
-    this.catalog = await this.create();
-    this.catalog.onUnavailable((code) => {
-      for (const handler of this.unavailable) handler(code);
-    });
-  }
-  isReady() {
-    return !this.closed && this.catalog?.isReady() === true;
-  }
-  async create(history = false) {
-    if (this.closed) throw new CursorAcpError("ACP_CLOSED", "Pi ACP is closed.");
-    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", "Too many Pi ACP sessions are active.");
-    const client = this.factory();
-    this.starting.add(client);
-    this.all.add(client);
-    try {
-      await client.start();
-      if (this.closed) throw new CursorAcpError("ACP_CLOSED", "Pi ACP is closed.");
-      return client;
-    } catch (error) {
-      await this.dispose(client);
-      throw error;
-    } finally {
-      this.starting.delete(client);
-    }
-  }
-  async call(method, params, timeoutMs) {
-    const p = params;
-    if (method === "session/load" && typeof p.sessionId === "string") {
-      const previous = this.loading.get(p.sessionId);
-      if (previous) return previous;
-      const promise = this.callOnce(method, params, timeoutMs);
-      this.loading.set(p.sessionId, promise);
-      try {
-        return await promise;
-      } finally {
-        this.loading.delete(p.sessionId);
-      }
-    }
-    return this.callOnce(method, params, timeoutMs);
-  }
-  async callOnce(method, params, timeoutMs) {
-    const p = params;
-    if (method === "session/list") return this.catalog.call(method, params, timeoutMs);
-    if (method === "session/new" || method === "session/load") {
-      const known = typeof p.sessionId === "string" ? this.clients.get(p.sessionId) : void 0;
-      if (known) return { sessionId: p.sessionId };
-      const client2 = await this.create();
-      let boundId = typeof p.sessionId === "string" ? p.sessionId : void 0;
-      const queued = [];
-      let replaying = method === "session/load";
-      const replayConfiguration = {};
-      const receive = (message) => {
-        if (replaying) {
-          if (message.kind === "request") {
-            void client2.respondError(message.id, -32600, "Pi session is not loaded.").catch(() => void 0);
-          } else if (message.params?.sessionId === boundId) {
-            this.updateConfiguration(boundId, message, replayConfiguration);
-          }
-          return;
-        }
-        const incomingId = message.params?.sessionId;
-        if (!boundId) {
-          if (queued.length < 200) queued.push(message);
-          return;
-        }
-        if (incomingId !== boundId) return;
-        this.updateConfiguration(boundId, message);
-        if (message.kind === "request") {
-          const id6 = `pi-callback:${++this.nextCallback}`;
-          this.callbacks.set(id6, { client: client2, id: message.id });
-          message = { ...message, id: id6 };
-        }
-        for (const handler of this.inbound) handler(message);
-      };
-      client2.onInbound(receive);
-      client2.onUnavailable(() => {
-        if (boundId && this.clients.get(boundId) === client2) {
-          this.clients.delete(boundId);
-          this.configurations.delete(boundId);
-        }
-        void this.dispose(client2).catch(() => void 0);
-      });
-      try {
-        const result = await client2.call(method, params, timeoutMs);
-        const id6 = method === "session/load" ? p.sessionId : result.sessionId;
-        if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", "Pi returned an invalid session.");
-        this.clients.set(id6, client2);
-        const config = { ...result };
-        for (const key of ["models", "modes"]) {
-          if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] };
-        }
-        this.configurations.set(id6, config);
-        boundId = id6;
-        replaying = false;
-        for (const message of queued) receive(message);
-        return { ...result, sessionId: id6 };
-      } catch (error) {
-        await this.dispose(client2);
-        throw error;
-      }
-    }
-    const client = this.clients.get(String(p.sessionId));
-    if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the Pi session before using it.");
-    const id5 = String(p.sessionId);
-    if (method === "dsh/sessionModels") return this.models(id5);
-    if (method === "dsh/selectModel") {
-      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the Pi reply before changing its model.");
-      const config = this.configurations.get(id5);
-      if (!config?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
-        throw new CursorAcpError("INVALID_MESSAGE", "The Pi model or thinking level is not available.");
-      }
-      this.busy.add(id5);
-      try {
-        const modelResult = await client.call("session/set_config_option", { sessionId: id5, configId: "model", value: p.model });
-        this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
-        if (p.reasoningEffort !== void 0) {
-          if (!this.configurations.get(id5)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
-          const thinkingResult = await client.call("session/set_config_option", { sessionId: id5, configId: "thought_level", value: p.reasoningEffort });
-          this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
-        }
-        return { selected: this.models(id5).current };
-      } finally {
-        this.busy.delete(id5);
-      }
-    }
-    if (method === "session/prompt") {
-      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The Pi session is busy.");
-      this.busy.add(id5);
-      try {
-        return await client.call(method, params, timeoutMs);
-      } finally {
-        this.busy.delete(id5);
-      }
-    }
-    return client.call(method, params, timeoutMs);
-  }
-  updateConfiguration(id5, message, initial) {
-    if (message.method !== "session/update") return;
-    const update = message.params.update;
-    const config = initial ?? this.configurations.get(id5);
-    if (!update || !config) return;
-    if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config.modes = { ...config.modes, currentModeId: update.currentModeId };
-    if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
-      for (const option of update.configOptions) {
-        if (option.type !== "select" || !Array.isArray(option.options)) continue;
-        if (option.id === "model") config.models = {
-          currentModelId: option.currentValue,
-          availableModels: option.options.map((item) => ({ modelId: item.value, name: item.name }))
-        };
-        if (option.id === "thought_level") config.modes = {
-          currentModeId: option.currentValue,
-          availableModes: option.options.map((item) => ({ id: item.value, name: item.name }))
-        };
-      }
-    }
-  }
-  models(id5) {
-    const config = this.configurations.get(id5);
-    const modes = config?.modes;
-    return {
-      current: { provider: "pi", model: config?.models?.currentModelId ?? "", reasoningEffort: modes?.currentModeId },
-      routable: true,
-      failures: [],
-      groups: [{ id: "pi", name: "Pi", models: (config?.models?.availableModels ?? []).map((model) => ({
-        id: model.modelId,
-        name: model.name,
-        ...modes?.availableModes?.length ? { reasoning: { efforts: modes.availableModes.map((mode2) => ({ id: mode2.id, name: mode2.name })), defaultEffort: modes.currentModeId } } : {}
-      })) }]
-    };
-  }
-  /** A separate wrapper prevents history reads from interrupting active sessions. */
-  async history(sessionId, cwd2) {
-    if (this.historyBusy) throw new CursorAcpError("ACP_PROCESS_LIMIT", "A Pi history read is already in progress.");
-    this.historyBusy = true;
-    let client;
-    try {
-      client = await this.create(true);
-    } catch (error) {
-      this.historyBusy = false;
-      throw error;
-    }
-    const updates = [];
-    let bytes = 0;
-    let count = 0;
-    client.onInbound((message) => {
-      if (message.kind !== "notification" || message.method !== "session/update" || message.params?.sessionId !== sessionId) return;
-      count++;
-      bytes += Buffer.byteLength(JSON.stringify(message));
-      if (bytes <= 8 * 1024 * 1024 && count <= 1e4) updates.push(message);
-    });
-    try {
-      const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
-      const loadedId = result?.sessionId;
-      if (loadedId !== void 0 && loadedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "Pi returned an invalid history session.");
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "Pi history exceeds the transfer limit.");
-      return acpHistoryEvents(updates, sessionId, "pi");
-    } finally {
-      try {
-        await this.dispose(client);
-      } finally {
-        this.historyBusy = false;
-      }
-    }
-  }
-  async respond(id5, result) {
-    const pending = this.callbacks.get(String(id5));
-    if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", "The Pi callback is unavailable.");
-    this.callbacks.delete(String(id5));
-    await pending.client.respond(pending.id, result);
-  }
-  async respondError(id5, code, message) {
-    const pending = this.callbacks.get(String(id5));
-    if (!pending) return;
-    this.callbacks.delete(String(id5));
-    await pending.client.respondError(pending.id, code, message);
-  }
-  onInbound(handler) {
-    this.inbound.add(handler);
-    return () => this.inbound.delete(handler);
-  }
-  onUnavailable(handler) {
-    this.unavailable.add(handler);
-    return () => this.unavailable.delete(handler);
-  }
-  async dispose(client) {
-    await client.close();
-    this.all.delete(client);
-    for (const [key, pending] of this.callbacks) if (pending.client === client) this.callbacks.delete(key);
-  }
-  async close() {
-    this.closed = true;
-    const clients = this.all;
-    await Promise.all([...clients].map((client) => this.dispose(client)));
-    this.clients.clear();
-    this.all.clear();
-    this.callbacks.clear();
-  }
+var PiAcpClient = class extends IsolatedAcpClient {
 };
 
 // src/acp/adapters/antigravity/models.ts
@@ -34855,81 +35020,6 @@ function withoutSelectionArgs(args) {
 // src/acp/adapters/opencode-process.ts
 import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
-
-// src/acp/adapters/opencode-models.ts
-var OpencodeModels = class {
-  model;
-  effort;
-  legacy = false;
-  update(value) {
-    if (!record6(value)) return;
-    if (Array.isArray(value.configOptions)) {
-      this.model = readOption(value.configOptions.find((option) => record6(option) && option.id === "model"));
-      this.effort = readOption(value.configOptions.find((option) => record6(option) && option.id === "effort"));
-      this.legacy = false;
-    } else if (record6(value.models) && Array.isArray(value.models.availableModels) && typeof value.models.currentModelId === "string") {
-      this.model = {
-        id: "model",
-        current: value.models.currentModelId,
-        options: value.models.availableModels.flatMap((model) => record6(model) && typeof model.modelId === "string" && typeof model.name === "string" ? [{ id: model.modelId, name: model.name }] : [])
-      };
-      this.effort = void 0;
-      this.legacy = true;
-    } else if (value.sessionUpdate === "current_model_update" && typeof value.currentModelId === "string" && this.model) {
-      this.model.current = value.currentModelId;
-    }
-  }
-  catalog() {
-    const model = this.model;
-    const effort = this.effort;
-    const models = (model?.options ?? []).map((item) => ({
-      ...item,
-      // ACP advertises effort choices only for the currently selected model.
-      ...item.id === model?.current && effort ? { reasoning: { efforts: effort.options, defaultEffort: effort.current } } : {}
-    }));
-    return {
-      current: {
-        provider: "opencode",
-        model: model?.current ?? "host-settings",
-        ...effort ? { reasoningEffort: effort.current } : {}
-      },
-      routable: models.length > 0,
-      failures: [],
-      groups: [{ id: "opencode", name: "OpenCode", models }]
-    };
-  }
-  async select(sessionId, model, effort, request) {
-    if (typeof model !== "string" || !this.model?.options.some((item) => item.id === model)) {
-      throw new Error("The selected OpenCode model is unavailable on this Host.");
-    }
-    if (effort !== void 0 && (model !== this.model.current || !this.effort?.options.some((item) => item.id === effort))) {
-      throw new Error("Select the OpenCode model before choosing an available effort level.");
-    }
-    if (this.legacy) {
-      await request("session/set_model", { sessionId, modelId: model });
-      this.model.current = model;
-    } else {
-      this.update(await request("session/set_config_option", { sessionId, configId: "model", value: model }));
-      if (this.model?.current !== model) throw new Error("OpenCode did not confirm the model change.");
-    }
-    if (effort !== void 0) {
-      if (!this.effort?.options.some((item) => item.id === effort)) throw new Error("The OpenCode effort level is unavailable.");
-      this.update(await request("session/set_config_option", { sessionId, configId: "effort", value: effort }));
-      if (this.effort?.current !== effort) throw new Error("OpenCode did not confirm the effort change.");
-    }
-    return { selected: this.catalog().current };
-  }
-};
-function readOption(value) {
-  if (!record6(value) || value.type !== "select" || typeof value.id !== "string" || typeof value.currentValue !== "string" || !Array.isArray(value.options)) return void 0;
-  const options = value.options.flatMap((option) => record6(option) && Array.isArray(option.options) ? option.options : [option]);
-  return { id: value.id, current: value.currentValue, options: options.flatMap((option) => record6(option) && typeof option.value === "string" && typeof option.name === "string" ? [{ id: option.value, name: option.name }] : []) };
-}
-function record6(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
@@ -35069,7 +35159,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (!this.ready || !id5 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
     }
-    const models = new OpencodeModels();
+    const models = new AcpSessionModelState("opencode");
     models.update(result);
     this.models.set(id5, models);
     return result;
@@ -35308,10 +35398,10 @@ var schemas2 = {
     endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
     args: external_exports.record(external_exports.unknown())
   }).strict(),
-  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.enum(["antigravity", "pi", "opencode"]) }).strict(),
+  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]) }).strict(),
   "dsh/selectModel": external_exports.object({
     sessionId: id4,
-    backend: external_exports.enum(["antigravity", "pi", "opencode"]),
+    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
     model: id4,
     reasoningEffort: id4.optional()
   }).strict(),
@@ -36051,7 +36141,7 @@ var AcpRemoteGateway = class {
     if (backend.id === "opencode") {
       return new OpencodeAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
     }
-    return new CursorAcpClient(binary, targetLogger, void 0, { args: backend.args, cwd: backend.cwd });
+    return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: "cursor" });
   }, restartDelaysMs = DEFAULT_RESTART_DELAYS_MS2, terminalEnabled = () => false, terminalSpawner) {
     this.config = config;
     this.logger = logger;
@@ -36352,13 +36442,14 @@ var AcpRemoteGateway = class {
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
     }
-    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && (call.params.backend === "pi" || call.params.backend === "opencode")) {
+    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && (call.params.backend === "pi" || call.params.backend === "claude" || call.params.backend === "opencode")) {
       this.requireSessionOwner(connectionId, sessionId);
       const backend = call.params.backend;
       const cwd2 = await this.catalogSessionCwd(backend, sessionId);
       await this.requireAcp(backend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
     }
     if (call.method === "dsh/selectModel") {
+      if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its model.");
       const session = this.sessionCwds.get(sessionId);
       if (!session || session.backend !== call.params.backend) {
         throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
@@ -36371,13 +36462,14 @@ var AcpRemoteGateway = class {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
       this.promptsInProgress.add(sessionId);
       this.cancelledSessions.delete(sessionId);
-      if (this.sessionBackends.get(sessionId) === "pi") {
+      const preparationBackend = this.sessionBackends.get(sessionId);
+      if (preparationBackend === "pi" || preparationBackend === "claude") {
         const preparation = { cancelled: false };
         this.preparingPrompts.set(sessionId, preparation);
         try {
-          const cwd2 = await this.piSessionCwd(sessionId);
+          const cwd2 = await this.catalogSessionCwd(preparationBackend, sessionId);
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
-          await this.requireAcp("pi").call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+          await this.requireAcp(preparationBackend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
         } catch (error) {
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
@@ -36937,9 +37029,6 @@ var AcpRemoteGateway = class {
       seen.add(cursor2);
     }
     return items;
-  }
-  piSessionCwd(sessionId) {
-    return this.catalogSessionCwd("pi", sessionId);
   }
   async catalogSessionCwd(backend, sessionId) {
     const { assertCurrent } = this.captureCatalogClient(backend);
@@ -40847,7 +40936,7 @@ var HostPluginRuntime = class {
     for (const backend of this.acp.enabledBackends()) {
       types.push({
         id: backend,
-        name: backend === "cursor" ? "Cursor" : backend === "antigravity" ? "Antigravity" : backend === "opencode" ? "OpenCode" : backend,
+        name: backend === "claude" ? "Claude" : backend === "pi" ? "Pi" : backend === "cursor" ? "Cursor" : backend === "antigravity" ? "Antigravity" : backend === "opencode" ? "OpenCode" : backend,
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend)
       });

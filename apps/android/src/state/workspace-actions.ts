@@ -11,10 +11,13 @@ import {
   createAntigravityWorkspace,
   createCursorWorkspace,
   createOpencodeWorkspace,
+  createClaudeWorkspace,
   createPiWorkspace,
 } from '../services/cursor'
 import type { OpencodeCatalog } from '../services/opencode'
+import type { ClaudeCatalog } from '../services/claude'
 import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
+import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
 import type { PiCatalog } from '../services/pi'
 import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import type { AndroidRemoteRuntime } from '../services/remote-runtime'
@@ -115,6 +118,13 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           catch (error) { opencodeError = friendlyError(error) }
         }
         if (!current()) return
+        let claudeCatalog: ClaudeCatalog | undefined
+        let claudeError: string | undefined
+        if (connection.hasClaude()) {
+          try { claudeCatalog = await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces) }
+          catch (error) { claudeError = friendlyError(error) }
+        }
+        if (!current()) return
         const savedCodexPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
         if (!current()) return
         set(state => {
@@ -133,27 +143,31 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
           const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const antigravityWorkspaces = connection.hasAntigravity() ? agy.workspaces : []
           const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+          const claudeData = mergeClaudeCatalog(claudeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const opencodeWorkspaces = connection.hasOpencode() ? opc.workspaces : []
+          const claudeWorkspaces = connection.hasClaude() ? claudeData.workspaces : []
           const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
           const antigravitySessions = agy.sessions
           const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const piWorkspaces = connection.hasPi() ? pi.workspaces : []
           const piSessions = pi.sessions
           const opencodeSessions = opc.sessions
-          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions]
+          const claudeSessions = claudeData.sessions
+          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions, ...claudeSessions]
           return {
             codexAvailable: connection.hasCodex(),
             cursorAvailable: connection.hasCursor(),
             antigravityAvailable: connection.hasAntigravity(),
             piAvailable: connection.hasPi(),
             opencodeAvailable: connection.hasOpencode(),
-            workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces],
+            claudeAvailable: connection.hasClaude(),
+            workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces, ...claudeWorkspaces],
             archivedSessionIds: workspaceList.archivedSessionIds,
             sessions: combinedSessions,
             selectedSession: state.selectedSession === undefined
               ? undefined
               : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError }),
+            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined && claudeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError ?? claudeError }),
           }
         })
       } catch (error) {
@@ -171,7 +185,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode') {
+        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude') {
           const nextTitle = title.trim()
           if (nextTitle.length === 0) throw new Error(zhCN.workspaces.namePlaceholder)
           set(state => ({
@@ -206,7 +220,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode') {
+        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude') {
           const sessionIds = new Set(target.sessionIds)
           const selected = get().selectedSession
           if (selected !== undefined && sessionIds.has(selected.sessionId)) {
@@ -258,7 +272,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         if (target?.backend === 'codex' || before?.backend === 'codex') {
           throw new Error(zhCN.runtime.codexWorkspaceReadOnly)
         }
-        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi' || before?.backend === 'opencode') {
+        if (target?.backend === 'cursor' || target?.backend === 'antigravity' || target?.backend === 'pi' || target?.backend === 'opencode' || target?.backend === 'claude' || before?.backend === 'cursor' || before?.backend === 'antigravity' || before?.backend === 'pi' || before?.backend === 'opencode' || before?.backend === 'claude') {
           set(state => {
             const items = state.workspaces.slice()
             const from = items.findIndex(item => item.workspaceId === workspaceId)
@@ -280,7 +294,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
         set({
           workspaces: [
             ...workspaceIds.flatMap(id => byId.get(id) === undefined ? [] : [byId.get(id)!]),
-            ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi' || item.backend === 'opencode'),
+            ...get().workspaces.filter(item => item.backend === 'codex' || item.backend === 'cursor' || item.backend === 'antigravity' || item.backend === 'pi' || item.backend === 'opencode' || item.backend === 'claude'),
           ],
           busyAction: undefined,
         })
@@ -441,6 +455,23 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
             return {
               workspaces: [...state.workspaces.filter(item => item.backend !== 'opencode'), ...merged.workspaces],
               sessions: [...state.sessions.filter(item => item.backend !== 'opencode'), ...merged.sessions],
+              busyAction: undefined,
+            }
+          })
+          return created
+        }
+        if (backend === 'claude') {
+          if (!connection.hasClaude()) throw new Error(zhCN.runtime.claudeUnavailable)
+          const workspace = createClaudeWorkspace(path)
+          const catalog = await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), [...get().workspaces, workspace], path)
+          if (!scope.current()) return undefined
+          let created = workspace
+          set(state => {
+            const merged = mergeClaudeCatalog(catalog, state.workspaces, state.sessions)
+            created = merged.workspaces.find(item => item.workspaceId === workspace.workspaceId) ?? workspace
+            return {
+              workspaces: [...state.workspaces.filter(item => item.backend !== 'claude'), ...merged.workspaces],
+              sessions: [...state.sessions.filter(item => item.backend !== 'claude'), ...merged.sessions],
               busyAction: undefined,
             }
           })

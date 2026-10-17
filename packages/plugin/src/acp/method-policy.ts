@@ -24,8 +24,8 @@ export const acpToolStreamSchema = z.object({
 const schemas = {
   'dsh/toolCall': z.object({ sessionId: id, backend: z.enum(['cursor', 'antigravity', 'pi', 'opencode']),
     endpoint: z.enum(ACP_TOOL_CALL_ENDPOINTS), args: z.record(z.unknown()) }).strict(),
-  'dsh/sessionModels': z.object({ sessionId: id, backend: z.enum(['antigravity', 'pi', 'opencode']) }).strict(),
-  'dsh/selectModel': z.object({ sessionId: id, backend: z.enum(['antigravity', 'pi', 'opencode']),
+  'dsh/sessionModels': z.object({ sessionId: id, backend: z.enum(['cursor', 'claude', 'antigravity', 'pi', 'opencode']) }).strict(),
+  'dsh/selectModel': z.object({ sessionId: id, backend: z.enum(['cursor', 'claude', 'antigravity', 'pi', 'opencode']),
     model: id, reasoningEffort: id.optional() }).strict(),
   'initialize': z.object({
     protocolVersion: z.number().int().positive().optional(),

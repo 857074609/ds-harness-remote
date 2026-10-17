@@ -7,7 +7,10 @@ interface SelectOption {
 }
 
 /** Only configuration advertised by this session may be selected. */
-export class OpencodeModels {
+export class AcpSessionModelState {
+  constructor(private readonly backend: 'cursor' | 'claude' | 'opencode') {}
+  private get label(): string { return { cursor: 'Cursor', claude: 'Claude', opencode: 'OpenCode' }[this.backend] }
+
   private model?: SelectOption
   private effort?: SelectOption
   private legacy = false
@@ -36,17 +39,17 @@ export class OpencodeModels {
       // ACP advertises effort choices only for the currently selected model.
       ...(item.id === model?.current && effort ? { reasoning: { efforts: effort.options, defaultEffort: effort.current } } : {}),
     }))
-    return { current: { provider: 'opencode', model: model?.current ?? 'host-settings',
+    return { current: { provider: this.backend, model: model?.current ?? 'host-settings',
       ...(effort ? { reasoningEffort: effort.current } : {}) },
-      routable: models.length > 0, failures: [], groups: [{ id: 'opencode', name: 'OpenCode', models }] }
+      routable: models.length > 0, failures: [], groups: [{ id: this.backend, name: this.label, models }] }
   }
 
   async select(sessionId: string, model: unknown, effort: unknown, request: (method: string, params: unknown) => Promise<unknown>) {
     if (typeof model !== 'string' || !this.model?.options.some(item => item.id === model)) {
-      throw new Error('The selected OpenCode model is unavailable on this Host.')
+      throw new Error(`The selected ${this.label} model is unavailable on this Host.`)
     }
     if (effort !== undefined && (model !== this.model.current || !this.effort?.options.some(item => item.id === effort))) {
-      throw new Error('Select the OpenCode model before choosing an available effort level.')
+      throw new Error(`Select the ${this.label} model before choosing an available effort level.`)
     }
     if (this.legacy) {
       await request('session/set_model', { sessionId, modelId: model })
@@ -54,12 +57,12 @@ export class OpencodeModels {
       this.model.current = model
     } else {
       this.update(await request('session/set_config_option', { sessionId, configId: 'model', value: model }))
-      if (this.model?.current !== model) throw new Error('OpenCode did not confirm the model change.')
+      if (this.model?.current !== model) throw new Error(`${this.label} did not confirm the model change.`)
     }
     if (effort !== undefined) {
-      if (!this.effort?.options.some(item => item.id === effort)) throw new Error('The OpenCode effort level is unavailable.')
+      if (!this.effort?.options.some(item => item.id === effort)) throw new Error(`The ${this.label} effort level is unavailable.`)
       this.update(await request('session/set_config_option', { sessionId, configId: 'effort', value: effort }))
-      if (this.effort?.current !== effort) throw new Error('OpenCode did not confirm the effort change.')
+      if (this.effort?.current !== effort) throw new Error(`${this.label} did not confirm the effort change.`)
     }
     return { selected: this.catalog().current }
   }

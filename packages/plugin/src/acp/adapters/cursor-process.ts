@@ -1,3 +1,4 @@
+import { AcpSessionModelState } from './session-models.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
 import type { SafeLogger } from '../../logging.js'
@@ -35,6 +36,8 @@ export type CursorAcpUnavailableHandler = (code: string) => void
 export type SpawnCursorAcp = (binary: string) => ChildProcessWithoutNullStreams
 
 export interface CursorAcpOptions {
+  modelBackend?: 'cursor' | 'claude'
+
   args?: string[]
   cwd?: string
   /** null uses Host-local pre-authentication; undefined preserves Cursor login. */
@@ -77,6 +80,8 @@ export class CursorAcpClient implements CursorAcpLike {
   private closed = false
   private failureNotified = false
   private startPromise?: Promise<void>
+  private readonly modelStates = new Map<string, AcpSessionModelState>()
+  private readonly modelBusy = new Set<string>()
 
   constructor(
     private readonly binary: string,
@@ -101,13 +106,45 @@ export class CursorAcpClient implements CursorAcpLike {
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new CursorAcpError('CURSOR_UNAVAILABLE', 'Cursor ACP is not ready.')
+    const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? undefined : 'cursor')
+    const id = isRecord(params) && typeof params.sessionId === 'string' ? params.sessionId : undefined
+    if (backend && (method === 'dsh/sessionModels' || method === 'dsh/selectModel')) {
+      const state = id ? this.modelStates.get(id) : undefined
+      if (!state || !id) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', 'Load the ACP session before selecting a model.')
+      if (method === 'dsh/sessionModels') return state.catalog()
+      if (this.modelBusy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'Stop the reply before changing its model.')
+      const selection = params as Record<string, unknown>
+      this.modelBusy.add(id)
+      try {
+        const result = await state.select(id, selection.model, selection.reasoningEffort,
+          (method, params) => this.request(method, params, timeoutMs ?? ACP_REQUEST_TIMEOUT_MS))
+        for (const handler of this.inboundHandlers) handler({ kind: 'notification', method: 'session/update',
+          params: { sessionId: id, update: { sessionUpdate: 'model_selection', selected: result.selected } } })
+        return result
+      } finally { this.modelBusy.delete(id) }
+    }
+    if (backend && method === 'session/prompt' && id) {
+      if (this.modelBusy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'The ACP session is busy.')
+      this.modelBusy.add(id)
+      try { return await this.request(method, params, timeoutMs ?? ACP_PROMPT_TIMEOUT_MS) }
+      finally { this.modelBusy.delete(id) }
+    }
     if (method === 'session/cancel' && this.options.authenticationMethod === null) {
       this.write({ jsonrpc: '2.0', method, params })
       return {}
     }
     const budget = timeoutMs
       ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
-    return this.request(method, params, budget)
+    const result = await this.request(method, params, budget)
+    if (backend && (method === 'session/new' || method === 'session/load')) {
+      const returnedId = isRecord(result) && typeof result.sessionId === 'string' ? result.sessionId : undefined
+      const sessionId = method === 'session/load' ? id : returnedId
+      if (!this.ready || !sessionId || (returnedId && returnedId !== sessionId)) throw new CursorAcpError('ACP_INVALID_SESSION', 'ACP returned an invalid session.')
+      const state = new AcpSessionModelState(backend)
+      state.update(result)
+      this.modelStates.set(sessionId, state)
+    }
+    return result
   }
 
   async respond(id: string | number, result: unknown): Promise<void> {
@@ -132,6 +169,7 @@ export class CursorAcpClient implements CursorAcpLike {
     if (this.closed) return
     this.closed = true
     this.ready = false
+    this.modelStates.clear()
     this.failPending(new CursorAcpError('CURSOR_CLOSED', 'Cursor ACP was closed.'))
     const child = this.process
     this.process = undefined
@@ -173,6 +211,7 @@ export class CursorAcpClient implements CursorAcpLike {
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
+      this.modelStates.clear()
       this.failPending(new CursorAcpError('CURSOR_ACP_EXITED', 'Cursor ACP exited unexpectedly.'))
       if (!this.closed) {
         this.logger?.warn('Cursor ACP exited', {
@@ -205,6 +244,7 @@ export class CursorAcpClient implements CursorAcpLike {
       this.logger?.info('Cursor ACP ready')
     } catch (error) {
       this.ready = false
+      this.modelStates.clear()
       if (this.process === child) this.process = undefined
       child.kill('SIGTERM')
       if (error instanceof CursorAcpError) throw error
@@ -293,11 +333,15 @@ export class CursorAcpClient implements CursorAcpLike {
       && (typeof value.id === 'string' || typeof value.id === 'number')
       ? { kind: 'request', id: value.id, method: value.method, params }
       : { kind: 'notification', method: value.method, params }
+    if (inbound.kind === 'notification' && inbound.method === 'session/update' && isRecord(params) && typeof params.sessionId === 'string') {
+      this.modelStates.get(params.sessionId)?.update(params.update)
+    }
     for (const handler of this.inboundHandlers) handler(inbound)
   }
 
   private handleProcessFailure(code: string, cause: Error): void {
     this.ready = false
+    this.modelStates.clear()
     this.failPending(new CursorAcpError(code, 'Cursor ACP communication failed.', { cause }))
     const child = this.process
     this.process = undefined

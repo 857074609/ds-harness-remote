@@ -255,7 +255,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   useEffect(() => {
     const sessionId = session?.sessionId
     if (mentionType === null || sessionId === undefined) return
-    if (session?.backend === 'codex' || connection.phase !== 'connected') return
+    if (session?.backend === 'codex' || session?.backend === 'claude' || connection.phase !== 'connected') return
     if (mentionType === 'command' && skillCatalog === undefined && skillRequestedRef.current !== sessionId) {
       skillRequestedRef.current = sessionId
       void Promise.resolve().then(() => requireSessionTools().listSkills(sessionId))
@@ -575,11 +575,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   }), [workspaceFileRefs])
 
   const openFileLink = useCallback((href: string) => {
+    if (session?.backend === 'claude') return
     const path = markdownFilePath(href)
     if (path === undefined) return
     setFileLinkPath(path)
     setToolsMode('files')
-  }, [])
+  }, [session?.backend])
 
   if (session === undefined) return null
 
@@ -1107,12 +1108,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         {replyActive && (
           <View
             accessible
-            accessibilityLabel={stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : session.backend === 'pi' ? zhCN.chat.piGenerating : session.backend === 'antigravity' ? zhCN.chat.antigravityGenerating : zhCN.chat.generating}
+            accessibilityLabel={stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : session.backend === 'claude' ? zhCN.chat.claudeGenerating : session.backend === 'opencode' ? zhCN.chat.opencodeGenerating : session.backend === 'pi' ? zhCN.chat.piGenerating : session.backend === 'antigravity' ? zhCN.chat.antigravityGenerating : zhCN.chat.generating}
             accessibilityLiveRegion="polite"
             style={styles.replyStatus}
           >
             <Svg width={18} height={18} viewBox={`0 0 ${FISH_LOGO_VIEWBOX.width} ${FISH_LOGO_VIEWBOX.height}`} accessible={false}><Path d={FISH_LOGO_PATH} fill={colors.accent} /></Svg>
-            <Text style={styles.replyStatusText}>{stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : session.backend === 'pi' ? zhCN.chat.piGenerating : session.backend === 'antigravity' ? zhCN.chat.antigravityGenerating : zhCN.chat.generating}</Text>
+            <Text style={styles.replyStatusText}>{stopping ? zhCN.chat.stopping : session.backend === 'codex' ? zhCN.chat.codexGenerating : session.backend === 'cursor' ? zhCN.chat.cursorGenerating : session.backend === 'claude' ? zhCN.chat.claudeGenerating : session.backend === 'opencode' ? zhCN.chat.opencodeGenerating : session.backend === 'pi' ? zhCN.chat.piGenerating : session.backend === 'antigravity' ? zhCN.chat.antigravityGenerating : zhCN.chat.generating}</Text>
             {!stopping && <ReplyStatusDots />}
           </View>
         )}
@@ -1129,7 +1130,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 ? zhCN.chat.codexMessageLabel
                 : session.backend === 'cursor'
                   ? zhCN.chat.cursorMessageLabel
-                  : session.backend === 'pi' ? zhCN.chat.piMessageLabel : session.backend === 'antigravity'
+                  : session.backend === 'claude' ? zhCN.chat.claudeMessageLabel : session.backend === 'opencode' ? zhCN.chat.opencodeMessageLabel : session.backend === 'pi' ? zhCN.chat.piMessageLabel : session.backend === 'antigravity'
                     ? zhCN.chat.antigravityMessageLabel
                     : zhCN.chat.messageLabel}
               style={styles.composerInput}
@@ -1141,7 +1142,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 ? zhCN.chat.codexPlaceholder
                 : session.backend === 'cursor'
                   ? zhCN.chat.cursorPlaceholder
-                  : session.backend === 'pi' ? zhCN.chat.piPlaceholder : session.backend === 'antigravity'
+                  : session.backend === 'claude' ? zhCN.chat.claudePlaceholder : session.backend === 'opencode' ? zhCN.chat.opencodePlaceholder : session.backend === 'pi' ? zhCN.chat.piPlaceholder : session.backend === 'antigravity'
                     ? zhCN.chat.antigravityPlaceholder
                     : zhCN.chat.placeholder}
               placeholderTextColor={colors.muted}
@@ -1238,7 +1239,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             ? zhCN.chat.codexPolicyHint
             : session.backend === 'cursor'
               ? zhCN.chat.cursorPolicyHint
-              : session.backend === 'pi' ? zhCN.chat.piPolicyHint : session.backend === 'antigravity'
+              : session.backend === 'claude' ? zhCN.chat.claudePolicyHint : session.backend === 'opencode' ? zhCN.chat.opencodePolicyHint : session.backend === 'pi' ? zhCN.chat.piPolicyHint : session.backend === 'antigravity'
                 ? zhCN.chat.antigravityPolicyHint
                 : zhCN.chat.policyHint}
         </Text>
@@ -1286,7 +1287,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 <ChevronRight size={16} color={colors.muted} />
               </View>
             </Pressable>
-            {session.backend !== 'codex' && session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && (
+            {session.backend !== 'codex' && session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && session.backend !== 'opencode' && session.backend !== 'claude' && (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.selectMode}
@@ -1305,7 +1306,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 </View>
               </Pressable>
             )}
-            {connected && (
+            {connected && session.backend !== 'claude' && (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={zhCN.chat.toolAccess}

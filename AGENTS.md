@@ -368,7 +368,7 @@ attachment ID 跨连接复用、pending follow 断开，以及终端/后端清�
 
 ## Claude ACP Host 与单次工具审批（Issue #125）
 
-`claude` 默认关闭，使用 `claude-agent-acp`、空参数；不发送 Cursor 专属认证。仅实现 Host 首批接入，客户端工作区/历史投影仍待完成。真实 `@agentclientprotocol/claude-agent-acp@0.91.0` 使用已有兼容端点、私有 credential command 和 `gpt-6-sol` 在隔离临时目录通过初始化、对话及 Gateway Write 工具审批；这不代表 Anthropic Claude 模型或加密跨设备验收。
+`claude` 默认关闭，使用 `claude-agent-acp`、空参数；不发送 Cursor 专属认证。初始仅实现 Host 接入；2026-10-18 补齐客户端工作区/历史与模型投影，见下文。真实 `@agentclientprotocol/claude-agent-acp@0.91.0` 使用已有兼容端点、私有 credential command 和 `gpt-6-sol` 在隔离临时目录通过初始化、对话及 Gateway Write 工具审批；这不代表 Anthropic Claude 模型或加密跨设备验收。
 
 ACP permission response 仅允许 `allow-once | reject-once | cancel`，禁止 `allow-always` 和任意 permission `result`。必须按请求 `options.kind` 的单次选项映射真实 `optionId`，Claude 拒绝 ID 为 `reject`，不能硬编码 `reject-once`。句柄绑定连接/session/backend/进程实例；无主/未知请求不广播，上游不能覆盖 Host scope，非法响应不消费合法句柄。真实 Gateway 已验证拒绝不写文件、允许一次成功、同会话下一工具重新审批，以及跨连接/持久授权/result 越权/重放拒绝。断线与重配边界另有核心自动化覆盖；跨设备仍待验收。
 
@@ -434,5 +434,21 @@ configOptions 或 legacy models 获取模型，按会话保存状态；固定 mo
 或 legacy set_model 切换，禁止写死目录、全局 selectedModel 或吞掉上游失败。首次 load
 不把历史回放注入 live，重复 load 不打断回复。Pi/AGY/OpenCode Desktop 投影仅提交 Host
 确认的选择；Android 补齐 AGY 模型/思考强度并复用 ACP 模型解析。Cursor 的本地假模型
-选项已移除，Cursor/Claude 的 Remote 模型选择仍待实现。OpenCode 1.19.3 隔离 CLI 验证
+选项已移除；随后 Cursor/Claude 已接入同一模型契约。OpenCode 1.19.3 隔离 CLI 验证
 读取 42 个模型并成功切换（未发送 Prompt）；此验证不等于 APK/真机或加密跨设备验收。
+
+Cursor/Claude 使用共享 session model state 读取现代 configOptions 或 legacy models，
+只调用固定 model/effort key，拒绝回复中切换。Cursor 上游模型管理器为进程全局，
+因此与 Pi 共用隔离 wrapper，每个会话独立进程（最多 30 个活动会话）。Claude 保持其
+每会话状态及重复 load 去重；恢复 Prompt 前加载 catalog 确认的 cwd，准备期间取消与
+重试按任务身份隔离。Desktop/Android 增加 Claude 工作区/历史/文字会话及模型入口，
+显示名为 Claude，后端 ID 为 claude；不开通图片及 Files/Terminal，不扩展 Harness/Codex RPC。
+
+本轮真实 `claude-agent-acp@0.93.0` 模型烟测读取 5 个选项并确认切换（未发送 Prompt）。
+Cursor `2026.10.16-e3cb207` 在本机初始化超时，真实 CLI 模型切换未验收；不将模拟
+契约测试等同于 Cursor 实机、APK/真机或加密跨设备验证。
+
+本轮验证：全仓 check、Plugin 52 文件 / 353 测试（串行）、Android 23 文件 / 131 测试、
+client-core 与 protocol 测试及 Android Hermes export 通过。Plugin 并发运行曾出现
+Control 超时及文件监听时序失败，串行全量通过；Metro noble/hashes exports fallback
+警告仍存在。上述检查不等于原生 APK 或跨设备验收。

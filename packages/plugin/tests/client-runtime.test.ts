@@ -213,6 +213,7 @@ describe('ClientModeRuntime Host account control', () => {
               cursor: false,
               antigravity: false,
               opencode: false,
+              claude: false,
             })
 
             alphaClient.rpc.mockResolvedValueOnce({
@@ -230,6 +231,7 @@ describe('ClientModeRuntime Host account control', () => {
               cursor: false,
               antigravity: false,
               opencode: false,
+              claude: false,
             })
 
             alphaClient.rpc.mockResolvedValueOnce({
@@ -246,6 +248,7 @@ describe('ClientModeRuntime Host account control', () => {
               cursor: false,
               antigravity: false,
               opencode: false,
+              claude: false,
             })
 
             const legacyClient = {
@@ -317,7 +320,7 @@ describe('ClientModeRuntime Host account control', () => {
   }, 20000)
 
   it('requires workspace readiness alongside each independent backend capability', async () => {
-    const rows = ['cursor', 'antigravity'] as const
+    const rows = ['cursor', 'antigravity', 'claude'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row

@@ -32,7 +32,7 @@ export interface AcpLiveProjectionContext {
   readonly hydrateSession: (session: AcpSessionState) => Promise<void>
   readonly historyPage: (session: AcpSessionState, options?: { beforeSeq?: number; throughSeq?: number; limit?: number; }) => { assistantStream: { revision: number; }; activeTurnId?: string | undefined; header: { version: number; id: string; createdAt: number; cwd: string; isSeeded: boolean; }; cursor: number; nextTurn: number; records: { type: "event"; event: NativeEvent; }[]; hasMore: boolean; }
   readonly follows: Set<FollowState>
-  readonly backend: "cursor" | "antigravity" | "pi" | "opencode"
+  readonly backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude"
   readonly modelSelectionProjection: (sessionId: string) => { lastUsed: AcpModelSelection; next: AcpModelSelection; }
   readonly client: AcpClientLike
   readonly emitRemoteEvent: (event: string, args: unknown[]) => void
@@ -82,7 +82,7 @@ export class AcpLiveProjection {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.context.backend === "claude" ? "Claude" : this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.context.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.context.backend),

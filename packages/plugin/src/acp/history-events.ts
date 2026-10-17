@@ -9,7 +9,7 @@ import { piToolResult } from './pi-tool-result.js'
 export function acpHistoryEvents(
   messages: CursorAcpInbound[],
   sessionId: string,
-  provider: 'pi' | 'opencode',
+  provider: 'pi' | 'opencode' | 'cursor',
 ): unknown[] {
   type Block = { type: string; text: string }
   type Tool = { id: string; name: string; input: unknown; output: Block[]; failed: boolean; terminal: boolean; emitted: boolean }

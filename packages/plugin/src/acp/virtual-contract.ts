@@ -92,16 +92,16 @@ export interface PendingApproval {
 }
 
 export interface AcpClientLike {
-  sessionModels?(sessionId: string, backend: "antigravity" | "pi" | "opencode", signal?: AbortSignal): Promise<AcpSessionModels>
-  selectModel?(sessionId: string, backend: "antigravity" | "pi" | "opencode", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  sessionModels?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
   workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,
     mode?: "agent" | "plan" | "ask",
-    backend?: "cursor" | "antigravity" | "pi" | "opencode",
+    backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude",
     signal?: AbortSignal,
   ): Promise<{ sessionId: string; cwd?: string }>
-  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: "cursor" | "antigravity" | "pi" | "opencode"): Promise<unknown>
+  prompt(sessionId: string, text: string, signal?: AbortSignal, images?: AcpImage[], backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude"): Promise<unknown>
   cancel(sessionId: string, signal?: AbortSignal): Promise<unknown>
   listDirectory(path: string, signal?: AbortSignal): Promise<unknown>
   listWorkspaces?(backend?: string, signal?: AbortSignal): Promise<Array<{ path: string; title?: string; sessionCount?: number }>>
@@ -168,11 +168,11 @@ export function extractSessionId(request: JsonRecord): string {
   throw new Error('The sessionId is required.')
 }
 
-export function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'): string {
-  return backend === 'pi' ? 'pi:' : backend === 'opencode' ? OPENCODE_SESSION_PREFIX : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
+export function sessionPrefix(backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): string {
+  return backend === 'claude' ? 'claude:' : backend === 'pi' ? 'pi:' : backend === 'opencode' ? OPENCODE_SESSION_PREFIX : backend === 'antigravity' ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX
 }
 
-export function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'): string {
+export function nativeAcpId(sessionId: string, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): string {
   const prefix = sessionPrefix(backend)
   if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
     throw new Error('The selected Session does not belong to the virtual harness.')

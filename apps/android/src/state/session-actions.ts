@@ -16,6 +16,7 @@ import {
   createAntigravitySession,
   createCursorSession,
   createOpencodeSession,
+  createClaudeSession,
   createPiSession,
   cursorNativeId,
   foldAcpHistory,
@@ -23,6 +24,7 @@ import {
 } from '../services/cursor'
 import { forkMessage } from '../services/message-actions'
 import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
+import { readClaudeHistory, selectClaudeModel } from '../services/claude'
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
 import type { RemoteSession } from '../types'
@@ -174,11 +176,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           void runtime.refreshCodexModels(session.sessionId)
           return
         }
-        if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
+        if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
           await runtime.closeActiveCodexStream()
           await runtime.closeActiveCursorStream()
           if (!current()) return
-          const hasHistory = session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode'
+          const hasHistory = session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude'
           // History replaces the previous connection's projection. Start the new
           // subscription on an empty projection, so only this subscription's
           // deltas survive the load (and stale bubbles cannot suppress catchUp).
@@ -187,13 +189,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             ...(hasHistory && state.messages[session.sessionId] !== undefined
               ? { messages: { ...state.messages, [session.sessionId]: [] } } : {}),
           }))
-          const acpClient = session.backend === 'opencode'
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'opencode'
             ? runtime.connection.requireOpencode()
             : session.backend === 'pi'
               ? runtime.connection.requirePi()
               : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
           const [history] = await Promise.all([
-            session.backend === 'opencode'
+            session.backend === 'claude' ? readClaudeHistory(acpClient, cursorNativeId(session)) : session.backend === 'opencode'
               ? readOpencodeHistory(acpClient, cursorNativeId(session))
               : session.backend === 'pi'
                 ? readPiHistory(acpClient, cursorNativeId(session))
@@ -223,6 +225,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (session.backend === 'antigravity') void runtime.refreshAntigravityModels(session, current)
           if (session.backend === 'pi') void runtime.refreshPiModels(session, current)
           if (session.backend === 'opencode') void runtime.refreshOpencodeModels(session, current)
+          if (session.backend === 'claude') void runtime.refreshClaudeModels(session, current)
+          if (session.backend === 'cursor') void runtime.refreshCursorModels(session, current)
           return
         }
         await runtime.closeActiveCodexStream()
@@ -464,6 +468,26 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }))
           return get().openSession(session)
         }
+        if (workspace?.backend === 'claude') {
+          const created = await runtime.connection.requireClaude().createSession(workspace.path, 'agent', 'claude')
+          if (generation !== runtime.connectionGeneration) return false
+          const session = createClaudeSession({
+            acpSessionId: created.sessionId,
+            cwd: workspace.path,
+          })
+          set(state => ({
+            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+              ? {
+                ...item,
+                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                updatedAt: new Date().toISOString(),
+              }
+              : item),
+            busyAction: undefined,
+          }))
+          return get().openSession(session)
+        }
         const proxy = runtime.connection.requireProxy()
         const { sessionId } = await proxy.sessionCreate(workspaceId)
         if (generation !== runtime.connectionGeneration) return false
@@ -520,7 +544,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }))
           return true
         }
-        if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode') {
+        if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') {
           if (get().selectedSession?.sessionId === sessionId) await runtime.closeActiveCursorStream()
           if (generation !== runtime.connectionGeneration) return false
           set(state => ({
@@ -582,13 +606,24 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
+        if (session.backend === 'claude') {
+          const models = await selectClaudeModel(runtime.connection.requireClaude(), cursorNativeId(session), selection)
+          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          set({ sessionModels: models, modelSelecting: false })
+          return true
+        }
         if (session.backend === 'antigravity') {
           const models = await selectAcpModel(runtime.connection.requireAntigravity(), cursorNativeId(session), 'antigravity', selection)
           if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
-        if (session.backend === 'cursor') throw new Error(zhCN.messageActions.unavailable)
+        if (session.backend === 'cursor') {
+          const models = await selectAcpModel(runtime.connection.requireCursor(), cursorNativeId(session), 'cursor', selection)
+          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          set({ sessionModels: models, modelSelecting: false })
+          return true
+        }
         const selected = await runtime.connection.requireProxy().sessionSelectModel(session.sessionId, selection)
         set(state => ({
           sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
@@ -596,7 +631,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }))
         return true
       } catch (error) {
-        if ((session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'antigravity') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
+        if ((session.backend === 'cursor' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'antigravity') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
         set({ modelSelecting: false, error: friendlyError(error) })
         return false
       }
@@ -604,7 +639,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async selectPermission(preset) {
       const session = get().selectedSession
-      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode') return false
+      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') return false
       if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
       const generation = runtime.connectionGeneration
       set({ permissionSelecting: true, error: undefined })
@@ -658,7 +693,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async loadAgentPresets() {
       const backend = get().selectedSession?.backend
-      if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi' || backend === 'opencode') return false
+      if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude') return false
       if (get().connection.phase !== 'connected') return false
       if (get().agentPresetLoading) return false
       set({ agentPresetLoading: true, error: undefined })
@@ -675,7 +710,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async selectAgentPreset(preset) {
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
-      if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') return false
+      if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') return false
       set({ agentPresetSelecting: true, error: undefined })
       try {
         const committed = await runtime.connection.requireProxy().agentPresetSelect(session.sessionId, preset)
@@ -700,7 +735,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const session = get().selectedSession
       const beforeSeq = get().oldestLoadedSeq
       if (session === undefined || beforeSeq === undefined || get().historyLoadingOlder || !get().historyHasMore) return
-      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') {
+      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
         set({ historyHasMore: false, historyLoadingOlder: false })
         return
       }

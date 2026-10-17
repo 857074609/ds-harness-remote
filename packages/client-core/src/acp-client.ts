@@ -63,11 +63,11 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async sessionModels(sessionId: string, backend: 'antigravity' | 'pi' | 'opencode', signal?: AbortSignal): Promise<AcpSessionModels> {
+  async sessionModels(sessionId: string, backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode', signal?: AbortSignal): Promise<AcpSessionModels> {
     return this.call('dsh/sessionModels', { sessionId, backend }, signal) as Promise<AcpSessionModels>
   }
 
-  async selectModel(sessionId: string, backend: 'antigravity' | 'pi' | 'opencode', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
+  async selectModel(sessionId: string, backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
     if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
     if (backend === 'antigravity' && !this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
       await this.call('session/load', { sessionId, backend }, signal)
@@ -91,10 +91,10 @@ export class AgentAcpClient {
     const result = await this.call('dsh/workspaceList', {
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi') throw error
+      if (backend === 'pi' || backend === 'claude') throw error
       return []
     })
-    if (backend === 'pi' && !Array.isArray(result)) {
+    if ((backend === 'pi' || backend === 'claude') && !Array.isArray(result)) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP workspace catalog is invalid.')
     }
     return Array.isArray(result) ? result as Array<{ path: string; title?: string; sessionCount?: number }> : []
@@ -111,10 +111,10 @@ export class AgentAcpClient {
       ...(backend === undefined ? {} : { backend }),
       ...(limit === undefined ? {} : { limit }),
     }, signal).catch(error => {
-      if (backend === 'pi') throw error
+      if (backend === 'pi' || backend === 'claude') throw error
       return { items: [] }
     })
-    if (backend === 'pi' && (!isRecord(result) || !Array.isArray(result.items))) {
+    if ((backend === 'pi' || backend === 'claude') && (!isRecord(result) || !Array.isArray(result.items))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session catalog is invalid.')
     }
     return isRecord(result) && Array.isArray(result.items) ? result.items as Array<{
@@ -134,10 +134,10 @@ export class AgentAcpClient {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi') throw error
+      if (backend === 'pi' || backend === 'claude') throw error
       return { events: [] }
     })
-    if (backend === 'pi' && (!isRecord(result) || !Array.isArray(result.events))) {
+    if ((backend === 'pi' || backend === 'claude') && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
     return isRecord(result) && Array.isArray(result.events) ? result.events : []

@@ -5,6 +5,69 @@ import { describe, expect, it, vi } from 'vitest'
 import { CursorAcpClient } from '../src/acp/adapters/cursor-process.js'
 import { ClaudeAcpClient } from '../src/acp/adapters/claude-process.js'
 import type { SafeLogger } from '../src/logging.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import { IsolatedAcpClient } from '../src/acp/adapters/isolated-process.js'
+
+describe('Cursor and Claude model selection', () => {
+  it('routes model choices through the upstream configuration and preserves per-session ownership', async () => {
+    await runScenarios((['cursor', 'claude'] as const).map(backend => ({ name: backend, run: async () => {
+      const processes: Array<{ outbound: any[]; selected: Map<string, string> }> = []
+      let nextSession = 0
+      let rejectChange = false
+      const spawn = () => {
+        const fake = fakeProcess()
+        const state = { outbound: [] as any[], selected: new Map<string, string>() }
+        processes.push(state)
+        fake.child.stdin.on('data', chunk => {
+          for (const line of String(chunk).trim().split('\n')) {
+            const message = JSON.parse(line)
+            state.outbound.push(message)
+            let result: unknown = {}
+            const config = (sessionId: string) => ({ configOptions: [{ id: 'model', type: 'select', currentValue: state.selected.get(sessionId), options: [{ value: 'a', name: 'A' }, { value: 'b', name: 'B' }] }] })
+            if (message.method === 'session/new') {
+              const sessionId = `session-${++nextSession}`
+              state.selected.set(sessionId, 'a')
+              result = { sessionId, ...config(sessionId) }
+            }
+            if (message.method === 'session/set_config_option') {
+              if (rejectChange) {
+                fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'denied' } })}\n`)
+                continue
+              }
+              // Cursor applies a model change to every session in its process.
+              if (backend === 'cursor') for (const id of state.selected.keys()) state.selected.set(id, message.params.value)
+              else state.selected.set(message.params.sessionId, message.params.value)
+              result = config(message.params.sessionId)
+            }
+            if (message.id !== undefined) fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
+          }
+        })
+        return fake.child
+      }
+      const client = backend === 'claude' ? new ClaudeAcpClient('claude', logger(), spawn)
+        : new IsolatedAcpClient('agent', logger(), { backend: 'cursor' }, () => new CursorAcpClient('agent', logger(), spawn))
+      try {
+        await client.start()
+        const first = await client.call('session/new', { cwd: '/tmp', mcpServers: [] }) as { sessionId: string }
+        const second = await client.call('session/new', { cwd: '/tmp', mcpServers: [] }) as { sessionId: string }
+        await expect(client.call('dsh/selectModel', { ...first, model: 'b' })).resolves.toMatchObject({ selected: { provider: backend, model: 'b' } })
+        await expect(client.call('dsh/sessionModels', second)).resolves.toMatchObject({ current: { provider: backend, model: 'a' } })
+        expect(processes.flatMap(p => p.outbound).filter(p => p.method === 'session/set_config_option')).toEqual([
+          expect.objectContaining({ params: { sessionId: first.sessionId, configId: 'model', value: 'b' } }),
+        ])
+        const prompt = client.call('session/prompt', { ...first, prompt: [{ type: 'text', text: 'fixture' }] })
+        await expect(client.call('dsh/selectModel', { ...first, model: 'a' })).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
+        await prompt
+        rejectChange = true
+        await expect(client.call('dsh/selectModel', { ...first, model: 'a' })).rejects.toThrow()
+        await expect(client.call('dsh/sessionModels', first)).resolves.toMatchObject({ current: { model: 'b' } })
+        await client.call('session/load', { ...first, cwd: '/tmp', mcpServers: [] })
+        expect(processes.flatMap(p => p.outbound).some(p => p.method === 'session/load')).toBe(false)
+        expect(processes).toHaveLength(backend === 'cursor' ? 3 : 1)
+      } finally { await client.close() }
+    } })))
+  })
+})
 
 describe('CursorAcpClient', () => {
   it('initializes, authenticates, and correlates JSON-RPC responses', async () => {

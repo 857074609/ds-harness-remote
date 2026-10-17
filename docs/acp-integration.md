@@ -1,7 +1,7 @@
 # Agent 工作区接入指南
 
 本指南说明如何启用已支持的后端，以及新增 ACP adapter 需要修改的接入点。
-当前支持 Cursor、Antigravity（AGY）、Pi Agent 与 Codex。Cursor / AGY / Pi 使用 `agent.acp.*`；Codex 保留独立的 `codex.app.*` App Server 数据面。
+当前支持 Cursor、Antigravity（AGY）、Pi Agent、OpenCode、Claude 与 Codex。Cursor / AGY / Pi / OpenCode / Claude 使用 `agent.acp.*`；Codex 保留独立的 `codex.app.*` App Server 数据面。
 
 ### Pi Agent（Issue #97，实验性）
 
@@ -29,11 +29,11 @@ Pi 工作区使用 `pi:cwd:`，会话展示使用 `pi:`，需要 `agent.acp.pi.v
 - Pi 首次准备 Prompt 的 cwd/load 尚未完成时也可取消；取消后不启动 Prompt，旧准备任务结束不会清除后续重试。已运行的回复仍通过上游确认停止，Client 断线本身不视为取消。Desktop 的 turn/assistant finish 区分正常完成、失败、中断与 token 上限；Android 恢复后端标签时独立校验 Pi/AGY 的可用性。
 - 上述回放隔离与恢复竞态由核心状态机测试覆盖，真实本机 Gateway → ACP Client → Desktop 烟测也确认重启后首次继续对话不会重复插入历史工具结果。不代表新增 Android APK、原生真机或加密跨设备验收。
 
-### Claude Code / cc（Issue #125，Host 首批接入）
+### Claude（Issue #125）
 
 Host 注册后端 ID 为 `claude`，默认关闭，默认命令为 `claude-agent-acp`、参数为空。使用 [Claude ACP adapter](https://github.com/zed-industries/claude-agent-acp)，需用户在 Host 自行安装并完成 Claude 本机授权；Remote 不自动安装、不发起登录，也不发送 Cursor 专属 `cursor_login` 认证。`claude` CLI 本身不是 ACP 服务，不能配置为 `claude acp`。
 
-Host 的 `acp.backends` 可配置 `{ "id": "claude", "enabled": true, "command": "claude-agent-acp", "args": [] }`，也可指定绝对命令路径与 `cwd`。Host 已接通独立 ACP gateway 的初始化、会话、文字 Prompt、中断、上游 catalog 与有界历史恢复，复用连接归属、单次审批和热重配边界；不开放图片、模型、文件或终端扩展。Web/Desktop、Android 的 Claude 工作区入口和历史展示接入，以及加密跨设备 E2E 尚待完成，不代表完整产品支持。
+Host 的 `acp.backends` 可配置 `{ "id": "claude", "enabled": true, "command": "claude-agent-acp", "args": [] }`，也可指定绝对命令路径与 `cwd`。Host 已接通独立 ACP gateway 的初始化、会话、文字 Prompt、中断、上游 catalog 与有界历史恢复，复用连接归属、单次审批和热重配边界；Desktop/Android 已接入 Claude 工作区、历史、文字会话与模型选择，模型与 effort 仅来自上游 catalog 并等待切换确认。工作区前缀为 `claude:cwd:`，会话前缀为 `claude:`；所有投影仅保留内存。不开放图片输入或直接 Files/Terminal 访问；独立 Remote Web、APK/真机及加密跨设备 E2E 仍待验收。
 
 本机真实接入烟测：使用 `@agentclientprotocol/claude-agent-acp@0.91.0` 及已有 OpenAI 兼容 provider 的同一凭据与 `gpt-6-sol`。该端点实测也支持 Anthropic `/v1/messages`（HTTP 200）；不是把 OpenAI Responses 直接传给 Claude SDK，也未增加协议转换代理。仅在测试子进程设置 `ANTHROPIC_API_KEY`、`ANTHROPIC_BASE_URL`（去掉末尾 `/v1`）和 `ANTHROPIC_MODEL`，各默认模型同样映射至该模型；使用隔离临时工作目录与 `CLAUDE_CONFIG_DIR`，不修改已有用户配置。真实 `ClaudeAcpClient` 初始化、新建会话及文字 Prompt 完成，收到一个文本 chunk（2 字符）、`end_turn`；未调用工具或触发权限请求。该结果验证 Claude Agent SDK/ACP 运行时搭配兼容端点，不代表调用的是 Anthropic Claude 模型，也不代表 Remote Gateway/加密传输、工具审批、中断或历史已完成 E2E。
 
@@ -74,7 +74,9 @@ Codex 默认开启，Cursor 默认关闭；AGY 以 Host 配置为准。未就绪
 
 | 后端 | Host 接入 | 使用范围 |
 | --- | --- | --- |
-| Cursor | `agent acp` stdio | 文字 Prompt、流式回复、中断、单次审批 |
+| Cursor | `agent acp` stdio，每个会话独立进程 | 文字 Prompt、流式回复、中断、单次审批、真实模型选择 |
+| Claude | `claude-agent-acp` stdio | 工作区/历史、文字、流式工具、中断、单次审批、模型/effort |
+| OpenCode | `opencode acp` stdio | 工作区/历史、文字、流式回复、中断、模型/effort |
 | AGY | `agy --input-format stream-json --output-format stream-json` adapter | 工作区/历史、文字与受限图片、流式回复、模型选择 |
 | Pi Agent | `pi-acp` stdio（内部启动 `pi --mode rpc`） | 工作区/历史、文字、流式工具、中断、模型/Thinking |
 | Codex | `codex app-server` stdio | Project/Thread、历史、文字/图片、模型/权限、中断与审批 |

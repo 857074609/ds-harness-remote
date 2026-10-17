@@ -746,7 +746,7 @@ export type AcpWorkspaceToolCallEndpoint = 'workspaceFiles/list' | 'workspaceFil
   | 'terminal/environment' | 'terminal/shells' | 'terminal/list' | 'terminal/create' | 'terminal/write' | 'terminal/resize' | 'terminal/rename' | 'terminal/close'
 export type AcpWorkspaceToolStreamEndpoint = 'workspaceFiles/changes' | 'terminal/follow' | 'terminal/retain'
 export interface AcpWorkspaceToolParams { sessionId: string; backend: 'cursor' | 'antigravity' | 'pi' | 'opencode'; endpoint: AcpWorkspaceToolCallEndpoint; args: Record<string, unknown> }
-export interface AcpModelParams { sessionId: string; backend: 'antigravity' | 'pi' }
+export interface AcpModelParams { sessionId: string; backend: 'cursor' | 'claude' | 'antigravity' | 'pi' | 'opencode' }
 export interface AcpModelSelectionParams extends AcpModelParams { model: string; reasoningEffort?: string }
 export interface AgentAcpStreamOpenParams {
   streamId: string

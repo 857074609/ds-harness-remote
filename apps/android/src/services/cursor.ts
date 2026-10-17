@@ -55,6 +55,10 @@ export function opencodeWorkspaceId(path: string): string {
   return `opencode:cwd:${encodeURIComponent(path)}`
 }
 
+export function claudeWorkspaceId(path: string): string {
+  return `claude:cwd:${encodeURIComponent(path)}`
+}
+
 export function opencodeWorkspacePath(workspaceId: string): string | undefined {
   if (!workspaceId.startsWith('opencode:cwd:')) return undefined
   try {
@@ -120,11 +124,26 @@ export function createOpencodeWorkspace(path: string, title?: string): Workspace
   }
 }
 
+export function createClaudeWorkspace(path: string, title?: string): WorkspaceView {
+  const now = new Date().toISOString()
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path
+  return {
+    workspaceId: claudeWorkspaceId(path),
+    backend: 'claude',
+    path,
+    title: label,
+    sessionIds: [],
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 export function cursorNativeId(session: RemoteSession): string {
   if (session.nativeId !== undefined && session.nativeId.length > 0) return session.nativeId
   if (session.sessionId.startsWith('cursor:')) return session.sessionId.slice('cursor:'.length)
   if (session.sessionId.startsWith('pi:')) return session.sessionId.slice('pi:'.length)
   if (session.sessionId.startsWith('antigravity:')) return session.sessionId.slice('antigravity:'.length)
+  if (session.sessionId.startsWith('claude:')) return session.sessionId.slice('claude:'.length)
   if (session.sessionId.startsWith('opencode:')) return session.sessionId.slice('opencode:'.length)
   return session.sessionId
 }
@@ -208,6 +227,26 @@ export function createOpencodeSession(input: {
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     projections: {
       values: { backend: 'opencode' },
+    },
+  }
+}
+
+export function createClaudeSession(input: {
+  acpSessionId: string
+  cwd?: string
+  title?: string
+}): RemoteSession {
+  return {
+    sessionId: `claude:${input.acpSessionId}`,
+    backend: 'claude',
+    nativeId: input.acpSessionId,
+    updatedAt: Date.now(),
+    running: false,
+    blank: input.title === undefined,
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    projections: {
+      values: { backend: 'claude' },
     },
   }
 }

@@ -30,7 +30,7 @@ function fakeAcp() {
 
 describe('AcpVirtualHarness', () => {
   it('commits ACP model projections only after Host confirmation and fails closed on discovery errors', async () => {
-    await runScenarios((['pi', 'opencode', 'antigravity'] as const).map(backend => ({ name: backend, run: async () => {
+    await runScenarios((['cursor', 'claude', 'pi', 'opencode', 'antigravity'] as const).map(backend => ({ name: backend, run: async () => {
       const current = { provider: backend, model: 'host/a' }
       const client = { ...fakeAcp(),
         sessionModels: vi.fn(async () => ({ current, routable: true, failures: [],
@@ -45,7 +45,7 @@ describe('AcpVirtualHarness', () => {
         const request = { sessionId, provider: backend, model: 'host/b' }
         expect(await target.dispatch('session/models', { args: { request } }, signal)).toMatchObject({ ok: true, value: { current } })
         expect(await target.dispatch('session/selectModel', { args: { request } }, signal)).toMatchObject({ ok: false })
-        expect(client.selectModel).toHaveBeenCalledWith('remote-history', backend, { provider: backend, model: 'host/b' })
+        expect(client.selectModel).toHaveBeenCalledWith(backend === 'cursor' ? 'acp_1' : 'remote-history', backend, { provider: backend, model: 'host/b' })
         expect(await target.dispatch('session/projections', { args: { request } }, signal)).toMatchObject({ ok: true,
           value: { values: { modelSelection: { next: current } } } })
         client.sessionModels.mockRejectedValueOnce(new Error('catalog failed'))

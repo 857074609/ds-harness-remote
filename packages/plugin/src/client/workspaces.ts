@@ -44,12 +44,14 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState<CursorWorkspaceView[]>([])
     const [piWorkspaces, setPiWorkspaces] = React.useState<CursorWorkspaceView[]>([])
     const [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState<CursorWorkspaceView[]>([])
-    const [workspaceBackend, setWorkspaceBackend] = React.useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'>('harness')
+    const [claudeWorkspaces, setClaudeWorkspaces] = React.useState<CursorWorkspaceView[]>([])
+    const [workspaceBackend, setWorkspaceBackend] = React.useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'>('harness')
     const [codexWorkspaceId, setCodexWorkspaceId] = React.useState<string | undefined>(undefined)
     const [cursorWorkspaceId, setCursorWorkspaceId] = React.useState<string | undefined>(undefined)
     const [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState<string | undefined>(undefined)
     const [piWorkspaceId, setPiWorkspaceId] = React.useState<string | undefined>(undefined)
     const [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState<string | undefined>(undefined)
+    const [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState<string | undefined>(undefined)
     const [directory, setDirectory] = React.useState<RemoteDirectoryListing | undefined>(undefined)
     const [path, setPath] = React.useState('')
     const [addingWorkspace, setAddingWorkspace] = React.useState(false)
@@ -60,6 +62,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(false)
     const [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(false)
     const [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(false)
+    const [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(false)
     const workspaceListId = 'dsh-remote-workspace-list'
     const codexWorkspaceHeadingId = 'dsh-remote-codex-workspace-heading'
     const codexWorkspaceListId = 'dsh-remote-codex-workspace-list'
@@ -68,9 +71,11 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const antigravityWorkspaceHeadingId = 'dsh-remote-antigravity-workspace-heading'
     const piWorkspaceHeadingId = 'dsh-remote-pi-workspace-heading'
     const opencodeWorkspaceHeadingId = 'dsh-remote-opencode-workspace-heading'
+    const claudeWorkspaceHeadingId = 'dsh-remote-claude-workspace-heading'
     const antigravityWorkspaceListId = 'dsh-remote-antigravity-workspace-list'
     const piWorkspaceListId = 'dsh-remote-pi-workspace-list'
     const opencodeWorkspaceListId = 'dsh-remote-opencode-workspace-list'
+    const claudeWorkspaceListId = 'dsh-remote-claude-workspace-list'
     const [busy, setBusy] = React.useState(false)
     const [needsAuthorization, setNeedsAuthorization] = React.useState(false)
     const [email, setEmail] = React.useState('')
@@ -297,11 +302,15 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setCursorWorkspaces([])
       setAntigravityWorkspaces([])
       setPiWorkspaces([])
+      setOpencodeWorkspaces([])
+      setClaudeWorkspaces([])
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
       setShowAllCursorWorkspaces(false)
       setShowAllAntigravityWorkspaces(false)
       setShowAllPiWorkspaces(false)
+      setShowAllOpencodeWorkspaces(false)
+      setShowAllClaudeWorkspaces(false)
       try {
         const result = await runConnectHostProgress(
           status?.preferredTransports,
@@ -332,6 +341,9 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
             const nextOpencodeWorkspaces = await props.control<CursorWorkspaceView[]>('opencode.workspaces.list', {
               targetDeviceId: host.deviceId,
             }).catch(() => [])
+            const nextClaudeWorkspaces = await props.control<CursorWorkspaceView[]>('claude.workspaces.list', {
+              targetDeviceId: host.deviceId,
+            }).catch(() => [])
             const nextStatus = await props.control<RemoteStatus>('status').catch(() => undefined)
             if (nextStatus !== undefined) setStatus(nextStatus)
             return {
@@ -340,6 +352,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
               cursorWorkspaces: nextCursorWorkspaces,
               antigravityWorkspaces: nextAntigravityWorkspaces,
               piWorkspaces: nextPiWorkspaces,
+              opencodeWorkspaces: nextOpencodeWorkspaces,
+              claudeWorkspaces: nextClaudeWorkspaces,
               status: nextStatus,
             }
           },
@@ -350,11 +364,15 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
         setCursorWorkspaces(result.cursorWorkspaces)
         setAntigravityWorkspaces(result.antigravityWorkspaces)
         setPiWorkspaces(result.piWorkspaces)
+        setOpencodeWorkspaces(result.opencodeWorkspaces)
+        setClaudeWorkspaces(result.claudeWorkspaces)
         setWorkspaceBackend('harness')
         setCodexWorkspaceId(undefined)
         setCursorWorkspaceId(undefined)
         setAntigravityWorkspaceId(undefined)
         setPiWorkspaceId(undefined)
+        setOpencodeWorkspaceId(undefined)
+        setClaudeWorkspaceId(undefined)
         setSelectedHost(host)
         setPath('')
         setAddingWorkspace(false)
@@ -383,6 +401,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
         setCursorWorkspaceId(undefined)
         setAntigravityWorkspaceId(undefined)
         setPiWorkspaceId(undefined)
+        setOpencodeWorkspaceId(undefined)
+        setClaudeWorkspaceId(undefined)
         setPath(listing.path)
       } catch (reason) {
         setError(messageOf(reason))
@@ -391,18 +411,22 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       }
     }
 
-    const startAddingWorkspace = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'): void => {
+    const startAddingWorkspace = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): void => {
       setAddingWorkspace(true)
       setWorkspaceBackend(backend)
       setCodexWorkspaceId(undefined)
       setCursorWorkspaceId(undefined)
       setAntigravityWorkspaceId(undefined)
       setPiWorkspaceId(undefined)
+      setOpencodeWorkspaceId(undefined)
+      setClaudeWorkspaceId(undefined)
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
       setShowAllCursorWorkspaces(false)
       setShowAllAntigravityWorkspaces(false)
       setShowAllPiWorkspaces(false)
+      setShowAllOpencodeWorkspaces(false)
+      setShowAllClaudeWorkspaces(false)
       setDirectory(undefined)
       setPath('')
       void browseDirectory()
@@ -415,6 +439,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setCursorWorkspaceId(undefined)
       setAntigravityWorkspaceId(undefined)
       setPiWorkspaceId(undefined)
+      setOpencodeWorkspaceId(undefined)
+      setClaudeWorkspaceId(undefined)
       setDirectory(undefined)
       setPath('')
     }
@@ -435,16 +461,22 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
           setCursorWorkspaces([])
           setAntigravityWorkspaces([])
           setPiWorkspaces([])
+          setOpencodeWorkspaces([])
+          setClaudeWorkspaces([])
           setShowAllWorkspaces(false)
           setShowAllCodexWorkspaces(false)
           setShowAllCursorWorkspaces(false)
           setShowAllAntigravityWorkspaces(false)
           setShowAllPiWorkspaces(false)
+          setShowAllOpencodeWorkspaces(false)
+          setShowAllClaudeWorkspaces(false)
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
           setCursorWorkspaceId(undefined)
           setAntigravityWorkspaceId(undefined)
           setPiWorkspaceId(undefined)
+          setOpencodeWorkspaceId(undefined)
+          setClaudeWorkspaceId(undefined)
           setPath('')
           setAddingWorkspace(false)
           setDirectory(undefined)
@@ -463,16 +495,22 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
               setCursorWorkspaces([])
               setAntigravityWorkspaces([])
               setPiWorkspaces([])
+              setOpencodeWorkspaces([])
+              setClaudeWorkspaces([])
               setShowAllWorkspaces(false)
               setShowAllCodexWorkspaces(false)
               setShowAllCursorWorkspaces(false)
               setShowAllAntigravityWorkspaces(false)
               setShowAllPiWorkspaces(false)
+              setShowAllOpencodeWorkspaces(false)
+              setShowAllClaudeWorkspaces(false)
               setWorkspaceBackend('harness')
               setCodexWorkspaceId(undefined)
               setCursorWorkspaceId(undefined)
               setAntigravityWorkspaceId(undefined)
               setPiWorkspaceId(undefined)
+              setOpencodeWorkspaceId(undefined)
+              setClaudeWorkspaceId(undefined)
               setPath('')
               setAddingWorkspace(false)
               setDirectory(undefined)
@@ -488,6 +526,10 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                 .then(w => setAntigravityWorkspaces(w)).catch(() => undefined)
               void props.control<CursorWorkspaceView[]>('pi.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
                 .then(w => setPiWorkspaces(w)).catch(() => undefined)
+              void props.control<CursorWorkspaceView[]>('opencode.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                .then(w => setOpencodeWorkspaces(w)).catch(() => undefined)
+              void props.control<CursorWorkspaceView[]>('claude.workspaces.list', { targetDeviceId: nextSelectedHost.deviceId })
+                .then(w => setClaudeWorkspaces(w)).catch(() => undefined)
             }
           }
         } catch {
@@ -499,16 +541,22 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
           setCursorWorkspaces([])
           setAntigravityWorkspaces([])
           setPiWorkspaces([])
+          setOpencodeWorkspaces([])
+          setClaudeWorkspaces([])
           setShowAllWorkspaces(false)
           setShowAllCodexWorkspaces(false)
           setShowAllCursorWorkspaces(false)
           setShowAllAntigravityWorkspaces(false)
           setShowAllPiWorkspaces(false)
+          setShowAllOpencodeWorkspaces(false)
+          setShowAllClaudeWorkspaces(false)
           setWorkspaceBackend('harness')
           setCodexWorkspaceId(undefined)
           setCursorWorkspaceId(undefined)
           setAntigravityWorkspaceId(undefined)
           setPiWorkspaceId(undefined)
+          setOpencodeWorkspaceId(undefined)
+          setClaudeWorkspaceId(undefined)
           setPath('')
           setAddingWorkspace(false)
           setDirectory(undefined)
@@ -526,6 +574,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setShowAllCursorWorkspaces(false)
       setShowAllAntigravityWorkspaces(false)
       setShowAllPiWorkspaces(false)
+      setShowAllOpencodeWorkspaces(false)
+      setShowAllClaudeWorkspaces(false)
       setOpen(true)
       await refreshRemote()
     }
@@ -545,16 +595,22 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setCursorWorkspaces([])
       setAntigravityWorkspaces([])
       setPiWorkspaces([])
+      setOpencodeWorkspaces([])
+      setClaudeWorkspaces([])
       setShowAllWorkspaces(false)
       setShowAllCodexWorkspaces(false)
       setShowAllCursorWorkspaces(false)
       setShowAllAntigravityWorkspaces(false)
       setShowAllPiWorkspaces(false)
+      setShowAllOpencodeWorkspaces(false)
+      setShowAllClaudeWorkspaces(false)
       setWorkspaceBackend('harness')
       setCodexWorkspaceId(undefined)
       setCursorWorkspaceId(undefined)
       setAntigravityWorkspaceId(undefined)
       setPiWorkspaceId(undefined)
+      setOpencodeWorkspaceId(undefined)
+      setClaudeWorkspaceId(undefined)
       setDirectory(undefined)
       setPath('')
       setAddingWorkspace(false)
@@ -631,7 +687,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       | { backend: 'cursor'; path: string; workspaceId?: string }
       | { backend: 'antigravity'; path: string; workspaceId?: string }
       | { backend: 'pi'; path: string; workspaceId?: string }
-      | { backend: 'opencode'; path: string; workspaceId?: string }): Promise<void> => {
+      | { backend: 'opencode'; path: string; workspaceId?: string }
+      | { backend: 'claude'; path: string; workspaceId?: string }): Promise<void> => {
       const targetBackend = selection?.backend ?? workspaceBackend
       const targetPath = (selection?.path ?? path).trim()
       const targetCodexWorkspaceId = selection?.backend === 'codex'
@@ -649,6 +706,9 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       const targetOpencodeWorkspaceId = selection?.backend === 'opencode'
         ? selection.workspaceId
         : selection === undefined ? opencodeWorkspaceId : undefined
+      const targetClaudeWorkspaceId = selection?.backend === 'claude'
+        ? selection.workspaceId
+        : selection === undefined ? claudeWorkspaceId : undefined
       const createWorkspace = selection === undefined && addingWorkspace
       if (selectedHost === undefined
         || targetPath === ''
@@ -668,46 +728,14 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
               targetDeviceId: selectedHost.deviceId,
               workspaceId: targetCodexWorkspaceId,
             })
-          : targetBackend === 'cursor'
-            ? createWorkspace || targetCursorWorkspaceId === undefined
-              ? props.control<RemoteStatus>('cursor.workspace.create', {
-                targetDeviceId: selectedHost.deviceId,
-                path: targetPath,
-              })
-              : props.control<RemoteStatus>('cursor.workspace.open', {
-                targetDeviceId: selectedHost.deviceId,
-                workspaceId: targetCursorWorkspaceId,
-              })
-            : targetBackend === 'antigravity'
-              ? createWorkspace || targetAntigravityWorkspaceId === undefined
-                ? props.control<RemoteStatus>('antigravity.workspace.create', {
-                  targetDeviceId: selectedHost.deviceId,
-                  path: targetPath,
-                })
-                : props.control<RemoteStatus>('antigravity.workspace.open', {
-                  targetDeviceId: selectedHost.deviceId,
-                  workspaceId: targetAntigravityWorkspaceId,
-                })
-              : targetBackend === 'pi'
-                ? createWorkspace || targetPiWorkspaceId === undefined
-                  ? props.control<RemoteStatus>('pi.workspace.create', {
-                    targetDeviceId: selectedHost.deviceId,
-                    path: targetPath,
-                  })
-                  : props.control<RemoteStatus>('pi.workspace.open', {
-                    targetDeviceId: selectedHost.deviceId,
-                    workspaceId: targetPiWorkspaceId,
-                  })
-                : targetBackend === 'opencode'
-                  ? createWorkspace || targetOpencodeWorkspaceId === undefined
-                    ? props.control<RemoteStatus>('opencode.workspace.create', {
-                      targetDeviceId: selectedHost.deviceId,
-                      path: targetPath,
-                    })
-                    : props.control<RemoteStatus>('opencode.workspace.open', {
-                      targetDeviceId: selectedHost.deviceId,
-                      workspaceId: targetOpencodeWorkspaceId,
-                    })
+          : targetBackend !== 'harness'
+            ? (() => {
+              const workspaceId = { cursor: targetCursorWorkspaceId, antigravity: targetAntigravityWorkspaceId,
+                pi: targetPiWorkspaceId, opencode: targetOpencodeWorkspaceId, claude: targetClaudeWorkspaceId }[targetBackend]
+              return createWorkspace || workspaceId === undefined
+                ? props.control<RemoteStatus>(`${targetBackend}.workspace.create`, { targetDeviceId: selectedHost.deviceId, path: targetPath })
+                : props.control<RemoteStatus>(`${targetBackend}.workspace.open`, { targetDeviceId: selectedHost.deviceId, workspaceId })
+            })()
                   : props.control<RemoteStatus>('workspace.open', {
                     targetDeviceId: selectedHost.deviceId,
                     path: targetPath,
@@ -735,6 +763,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const visibleAntigravityWorkspaces = showAllAntigravityWorkspaces ? antigravityWorkspaces : antigravityWorkspaces.slice(0, 3)
     const visiblePiWorkspaces = showAllPiWorkspaces ? piWorkspaces : piWorkspaces.slice(0, 3)
     const visibleOpencodeWorkspaces = showAllOpencodeWorkspaces ? opencodeWorkspaces : opencodeWorkspaces.slice(0, 3)
+    const visibleClaudeWorkspaces = showAllClaudeWorkspaces ? claudeWorkspaces : claudeWorkspaces.slice(0, 3)
     // Runtime features already validate both negotiated capabilities and
     // workspace readiness, including the existing CodeX legacy fallback.
     const codexAvailable = status?.remoteFeatures?.codex === true
@@ -742,6 +771,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const antigravityAvailable = status?.remoteFeatures?.antigravity === true
     const piAvailable = status?.remoteFeatures?.pi === true
     const opencodeAvailable = status?.remoteFeatures?.opencode === true
+    const claudeAvailable = status?.remoteFeatures?.claude === true
     const selectedHostDetails = selectedHost === undefined ? undefined : [
       formatPlatform(selectedHost.platform),
       selectedHost.harnessVersion === undefined ? undefined : t('harnessVersion', { version: selectedHost.harnessVersion }),
@@ -992,6 +1022,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                             ? 'addAntigravityWorkspace'
                             : workspaceBackend === 'pi'
                               ? 'addPiWorkspace'
+                              : workspaceBackend === 'claude' ? 'addClaudeWorkspace'
                               : workspaceBackend === 'opencode'
                                 ? 'addOpencodeWorkspace'
                                 : 'addRemoteWorkspace'
@@ -1133,6 +1164,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                               setCodexWorkspaceId(undefined)
                               setAntigravityWorkspaceId(undefined)
                               setPiWorkspaceId(undefined)
+                              setOpencodeWorkspaceId(undefined)
+                              setClaudeWorkspaceId(undefined)
                               setPath(workspace.path)
                             },
                             onDoubleClick: () => void openWorkspace({
@@ -1183,6 +1216,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                               setWorkspaceBackend('antigravity')
                               setAntigravityWorkspaceId(workspace.workspaceId)
                               setPiWorkspaceId(undefined)
+                              setOpencodeWorkspaceId(undefined)
+                              setClaudeWorkspaceId(undefined)
                               setCodexWorkspaceId(undefined)
                               setCursorWorkspaceId(undefined)
                               setPath(workspace.path)
@@ -1287,6 +1322,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                               setWorkspaceBackend('opencode')
                               setOpencodeWorkspaceId(workspace.workspaceId)
                               setPiWorkspaceId(undefined)
+                              setClaudeWorkspaceId(undefined)
                               setAntigravityWorkspaceId(undefined)
                               setCodexWorkspaceId(undefined)
                               setCursorWorkspaceId(undefined)
@@ -1307,6 +1343,60 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                           'aria-controls': opencodeWorkspaceListId,
                           'aria-label': t('showAllOpencodeWorkspaces'),
                           onClick: () => setShowAllOpencodeWorkspaces(true),
+                        }, React.createElement('span', { 'aria-hidden': true }, '…'))),
+                      !claudeAvailable ? null : React.createElement('section', { className: 'dshRemoteCodexWorkspaceGroup' },
+                        React.createElement('div', {
+                          id: claudeWorkspaceHeadingId,
+                          className: 'dshRemoteWorkspaceSourceHeading',
+                        },
+                          React.createElement('span', { className: 'dshRemoteWorkspaceSourceText' }, React.createElement('strong', null, t('claudeVirtualWorkspace'))),
+                          React.createElement('button', {
+                            type: 'button',
+                            className: 'dshRemoteAddWorkspace',
+                            disabled: busy,
+                            title: t('addClaudeWorkspace'),
+                            'aria-label': t('addClaudeWorkspace'),
+                            onClick: () => startAddingWorkspace('claude'),
+                          }, React.createElement('svg', {
+                            className: 'dshRemoteAddWorkspaceIcon', viewBox: '0 0 16 16', 'aria-hidden': true, focusable: false,
+                          }, React.createElement('path', { d: 'M8 3v10M3 8h10', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' })))),
+                        React.createElement('div', {
+                          id: claudeWorkspaceListId,
+                          className: 'dshRemoteDirectoryList dshRemoteCodexWorkspaceList',
+                          'aria-labelledby': claudeWorkspaceHeadingId,
+                        }, visibleClaudeWorkspaces.length === 0
+                          ? React.createElement('p', null, t('noClaudeWorkspaces'))
+                          : visibleClaudeWorkspaces.map(workspace => React.createElement('button', {
+                            type: 'button',
+                            key: workspace.workspaceId,
+                            disabled: busy,
+                            className: workspaceBackend === 'claude' && claudeWorkspaceId === workspace.workspaceId ? 'isSelected' : '',
+                            'aria-pressed': workspaceBackend === 'claude' && claudeWorkspaceId === workspace.workspaceId,
+                            onClick: () => {
+                              setWorkspaceBackend('claude')
+                              setClaudeWorkspaceId(workspace.workspaceId)
+                              setPiWorkspaceId(undefined)
+                              setOpencodeWorkspaceId(undefined)
+                              setAntigravityWorkspaceId(undefined)
+                              setCodexWorkspaceId(undefined)
+                              setCursorWorkspaceId(undefined)
+                              setPath(workspace.path)
+                            },
+                            onDoubleClick: () => void openWorkspace({
+                              backend: 'claude',
+                              path: workspace.path,
+                              workspaceId: workspace.workspaceId,
+                            }),
+                          }, React.createElement('img', { className: 'dshRemoteWorkspaceIcon', src: deepSeekWorkspaceIcon, alt: '', 'aria-hidden': true }),
+                            React.createElement('span', null, workspace.title),
+                            React.createElement('small', null, `${workspace.path} · ${workspace.sessionCount}`)))),
+                        claudeWorkspaces.length <= 3 || showAllClaudeWorkspaces ? null : React.createElement('button', {
+                          type: 'button',
+                          className: 'dshRemoteWorkspaceMore',
+                          disabled: busy,
+                          'aria-controls': claudeWorkspaceListId,
+                          'aria-label': t('showAllClaudeWorkspaces'),
+                          onClick: () => setShowAllClaudeWorkspaces(true),
                         }, React.createElement('span', { 'aria-hidden': true }, '…')))),
                   React.createElement('footer', { className: 'dshRemoteOpenBar' },
                     React.createElement('div', null, React.createElement('span', null, t('currentDirectory')), React.createElement('strong', null, path || '—')),
@@ -1317,7 +1407,8 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                         || !addingWorkspace && workspaceBackend === 'cursor' && cursorWorkspaceId === undefined && path === ''
                         || !addingWorkspace && workspaceBackend === 'antigravity' && antigravityWorkspaceId === undefined && path === ''
                         || !addingWorkspace && workspaceBackend === 'pi' && piWorkspaceId === undefined && path === ''
-                        || !addingWorkspace && workspaceBackend === 'opencode' && opencodeWorkspaceId === undefined && path === '',
+                        || !addingWorkspace && workspaceBackend === 'opencode' && opencodeWorkspaceId === undefined && path === ''
+                        || !addingWorkspace && workspaceBackend === 'claude' && claudeWorkspaceId === undefined && path === '',
                       onClick: () => void openWorkspace(),
                     }, t(busy ? 'openingWorkspace' : addingWorkspace ? 'confirmAddWorkspace' : 'openWorkspace')))))),
           notice === undefined ? null : React.createElement('p', { className: 'dshRemoteNotice', role: 'status' }, notice),

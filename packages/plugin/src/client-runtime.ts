@@ -76,7 +76,7 @@ export class ClientModeRuntime {
   private readonly codexOpenedSessions = new Map<string, string>()
   private codexOpenGeneration = 0
   private cursorVirtual?: AcpVirtualHarness
-  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor'
+  private acpVirtualBackend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor'
   private readonly proxySwitch?: ApiProxySwitch
   private readonly gatewaySwitch: TypertGatewaySwitch
   private readonly codexStreams = new Map<string, CodexLoopbackStream>()
@@ -549,7 +549,7 @@ export class ClientModeRuntime {
     return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal)
   }
 
-  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
+  async listCursorWorkspaces(targetDeviceId: string, signal?: AbortSignal, backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor'): Promise<AcpVirtualWorkspaceView[]> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
     if (!remote.features[backend]) {
@@ -567,7 +567,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     workspaceId: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const remote = await this.ensureConnected(targetDeviceId, signal)
     remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
@@ -606,7 +606,7 @@ export class ClientModeRuntime {
     targetDeviceId: string,
     path: string,
     signal?: AbortSignal,
-    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' = 'cursor',
+    backend: 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' = 'cursor',
   ): Promise<Record<string, unknown>> {
     const trimmedPath = path.trim()
     if (trimmedPath === '') throw new ClientModeError('INVALID_MESSAGE', `A ${backend} project directory is required.`)

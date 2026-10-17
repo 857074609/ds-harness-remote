@@ -6,7 +6,9 @@ import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/ant
 import { loadCodexCatalog } from '../services/codex'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
 import type { OpencodeCatalog } from '../services/opencode'
+import type { ClaudeCatalog } from '../services/claude'
 import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
+import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
 import type { PiCatalog } from '../services/pi'
 import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import { serverSession } from '../services/server-session'
@@ -50,8 +52,9 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         antigravityAvailable: false,
         piAvailable: false,
         opencodeAvailable: false,
-        workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode') : [],
-        sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode') : [],
+        claudeAvailable: false,
+        workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode' || workspace.backend === 'claude') : [],
+        sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') : [],
         archivedSessionIds: [],
         sessionModels: undefined,
         error: undefined,
@@ -102,6 +105,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   antigravityAvailable: false,
                   piAvailable: false,
                   opencodeAvailable: false,
+                  claudeAvailable: false,
                   busyAction: undefined,
                 })
               }
@@ -143,6 +147,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           try { opencodeCatalog = await loadOpencodeCatalog(runtime.connection.requireOpencode(), get().workspaces) }
           catch (error) { opencodeError = friendlyError(error) }
         }
+        let claudeCatalog: ClaudeCatalog | undefined
+        let claudeError: string | undefined
+        if (runtime.connection.hasClaude()) {
+          try { claudeCatalog = await loadClaudeCatalog(runtime.connection.requireClaude(), get().workspaces) }
+          catch (error) { claudeError = friendlyError(error) }
+        }
         const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
         const connectionNetworkDetails = await runtime.connection.getNetworkDetails().catch(() => undefined)
         if (generation !== runtime.connectionGeneration) return false
@@ -156,14 +166,17 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const antigravityWorkspaces = agy.workspaces
           const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
+          const claudeData = mergeClaudeCatalog(claudeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const opencodeWorkspaces = opc.workspaces
+          const claudeWorkspaces = claudeData.workspaces
           const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
           const antigravitySessions = agy.sessions
           const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
           const piWorkspaces = runtime.connection.hasPi() ? pi.workspaces : []
           const piSessions = pi.sessions
           const opencodeSessions = opc.sessions
-          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions]
+          const claudeSessions = claudeData.sessions
+          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions, ...claudeSessions]
           const selectedSession = state.selectedSession === undefined
             ? undefined
             : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
@@ -175,7 +188,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             antigravityAvailable: runtime.connection.hasAntigravity(),
             piAvailable: runtime.connection.hasPi(),
             opencodeAvailable: runtime.connection.hasOpencode(),
-            workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces],
+            claudeAvailable: runtime.connection.hasClaude(),
+            workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces, ...claudeWorkspaces],
             archivedSessionIds: workspaceList.archivedSessionIds,
             sessions: combinedSessions,
             selectedSession,
@@ -184,7 +198,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             lastConnectedDeviceId: device.deviceId,
             pendingAutoConnectDeviceId: undefined,
             connection: { phase: 'connected', stats: runtime.connection.getStats() ?? { mode: 'Relay', connected: true } },
-            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError }),
+            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined && claudeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError ?? claudeError }),
           }
         })
         runtime.connectionStartedAt = Date.now()
@@ -205,6 +219,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           antigravityAvailable: false,
           piAvailable: false,
           opencodeAvailable: false,
+          claudeAvailable: false,
           error: message,
         })
         return false
@@ -262,6 +277,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         antigravityAvailable: false,
         piAvailable: false,
         opencodeAvailable: false,
+        claudeAvailable: false,
         workspaces: [],
         archivedSessionIds: [],
         sessions: [],
@@ -290,6 +306,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           antigravityAvailable: false,
           piAvailable: false,
           opencodeAvailable: false,
+          claudeAvailable: false,
         })
       }
     },

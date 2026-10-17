@@ -40,6 +40,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   antigravityAvailable: false,
   piAvailable: false,
   opencodeAvailable: false,
+  claudeAvailable: false,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],

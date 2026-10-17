@@ -50,13 +50,14 @@ export async function probeRemoteHostFeatures(
   const cursor = available('cursor', 'agent.acp.cursor.v1')
   const antigravity = available('antigravity', 'agent.acp.antigravity.v1')
   const pi = available('pi', 'agent.acp.pi.v1')
+  const claude = available('claude', 'agent.acp.claude.v1')
   const opencode = available('opencode', 'agent.acp.opencode.v1')
   if (remoteV1 && remoteV3) {
     throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
   }
   const sessionFormat = remoteV3 ? 3 as const : undefined
   const remoteGateway = remoteV3 || remoteV1
-  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode) {
+  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode && !claude) {
     throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
   }
   return {
@@ -71,6 +72,7 @@ export async function probeRemoteHostFeatures(
     antigravity,
     ...(pi ? { pi: true } : {}),
     opencode,
+    claude,
     ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
     ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
     pluginRoute: capabilities.has('plugin.route.v1'),

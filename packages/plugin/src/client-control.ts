@@ -36,9 +36,9 @@ export interface ClientControlContext {
   readonly openRemoteWorkspace: (targetDeviceId: string, path: string, signal?: AbortSignal) => Promise<Record<string, unknown>>
   readonly openCodexWorkspace: (targetDeviceId: string, workspaceId: string, signal?: AbortSignal) => Promise<Record<string, unknown>>
   readonly createCodexWorkspace: (targetDeviceId: string, path: string, signal?: AbortSignal) => Promise<Record<string, unknown>>
-  readonly listCursorWorkspaces: (targetDeviceId: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode") => Promise<AcpVirtualWorkspaceView[]>
-  readonly openCursorWorkspace: (targetDeviceId: string, workspaceId: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode") => Promise<Record<string, unknown>>
-  readonly createCursorWorkspace: (targetDeviceId: string, path: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode") => Promise<Record<string, unknown>>
+  readonly listCursorWorkspaces: (targetDeviceId: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude") => Promise<AcpVirtualWorkspaceView[]>
+  readonly openCursorWorkspace: (targetDeviceId: string, workspaceId: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude") => Promise<Record<string, unknown>>
+  readonly createCursorWorkspace: (targetDeviceId: string, path: string, signal?: AbortSignal, backend?: "cursor" | "antigravity" | "pi" | "opencode" | "claude") => Promise<Record<string, unknown>>
   readonly consumeWorkspaceSelection: (selection: RemoteWorkspaceSelection) => Record<string, unknown>
   readonly callRemoteFileViewer: (endpoint: RemoteFileViewerEndpoint, payload: unknown, signal?: AbortSignal) => Promise<unknown>
   readonly activeCodexRemote: () => ConnectedRemote | undefined
@@ -205,6 +205,25 @@ export class ClientControl {
         }
         return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'opencode'))
       }
+      if (endpoint === 'claude.workspaces.list') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, 'claude'))
+      }
+      if (endpoint === 'claude.workspace.open') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Claude Workspace are required.')
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'claude'))
+      }
+      if (endpoint === 'claude.workspace.create') {
+        const value = record(payload)
+        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Claude project directory are required.')
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'claude'))
+      }
       if (endpoint === 'workspace.selection.consume') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
@@ -213,7 +232,7 @@ export class ClientControl {
         return ok(this.context.consumeWorkspaceSelection({
           targetDeviceId: value.targetDeviceId,
           workspaceId: value.workspaceId,
-          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' || value.backend === 'opencode' ? { backend: value.backend } : {}),
+          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' || value.backend === 'opencode' || value.backend === 'claude' ? { backend: value.backend } : {}),
           ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
         }))
       }

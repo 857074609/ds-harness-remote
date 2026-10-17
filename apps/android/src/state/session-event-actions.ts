@@ -165,7 +165,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
 
     handleCursorFrame(frame) {
       const session = get().selectedSession
-      if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && session.backend !== 'opencode')) return
+      if (session === undefined || (session.backend !== 'cursor' && session.backend !== 'antigravity' && session.backend !== 'pi' && session.backend !== 'opencode' && session.backend !== 'claude')) return
       const params = isRecord(frame.frame.params) ? frame.frame.params : undefined
       if (params?.sessionId !== undefined && params.sessionId !== cursorNativeId(session)) return
       const update = params === undefined
@@ -190,7 +190,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
               ? { ...state.selectedSession, running: false }
               : state.selectedSession,
             ...(kind === 'prompt_failed'
-              ? { error: session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
+              ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable }
               : {}),
           }
           : {}),
@@ -198,6 +198,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
       if (session.backend === 'antigravity' && kind === 'prompt_completed') void runtime.refreshAntigravityCatalog()
       if (session.backend === 'pi' && kind === 'prompt_completed') void runtime.refreshPiCatalog()
       if (session.backend === 'opencode' && kind === 'prompt_completed') void runtime.refreshOpencodeCatalog()
+      if (session.backend === 'claude' && kind === 'prompt_completed') void runtime.refreshClaudeCatalog()
     },
   }
 }

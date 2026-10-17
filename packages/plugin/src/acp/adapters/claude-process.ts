@@ -15,7 +15,7 @@ export class ClaudeAcpClient extends CursorAcpClient {
 
   constructor(binary = 'claude-agent-acp', logger?: SafeLogger, spawnAcp?: SpawnCursorAcp,
     options: Pick<CursorAcpOptions, 'args' | 'cwd'> = {}) {
-    const config = { ...options, args: options.args ?? [], authenticationMethod: null }
+    const config = { ...options, args: options.args ?? [], authenticationMethod: null, modelBackend: 'claude' as const }
     super(binary, logger, spawnAcp, config)
     this.makeClient = () => new CursorAcpClient(binary, logger, spawnAcp, config)
     super.onUnavailable(() => this.live.clear())

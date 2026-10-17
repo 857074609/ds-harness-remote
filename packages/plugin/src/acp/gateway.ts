@@ -1,3 +1,4 @@
+import { IsolatedAcpClient } from './adapters/isolated-process.js'
 import { WorkspaceBridge, WorkspaceBridgeState, type RemoteTerminalSpawner } from '../workspace-bridge.js'
 import { TerminalPolicy } from '../terminal-policy.js'
 import { AcpWorkspaceTools } from './workspace-tools.js'
@@ -11,7 +12,6 @@ import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
 import { PLUGIN_VERSION } from '../version.js'
 import {
-  CursorAcpClient,
   CursorAcpError,
   type CursorAcpInbound,
   type CursorAcpLike,
@@ -134,7 +134,7 @@ export class AcpRemoteGateway {
       if (backend.id === 'opencode') {
         return new OpencodeAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
       }
-      return new CursorAcpClient(binary, targetLogger, undefined, { args: backend.args, cwd: backend.cwd })
+      return new IsolatedAcpClient(binary, targetLogger, { args: backend.args, cwd: backend.cwd, backend: 'cursor' })
     },
     private readonly restartDelaysMs: readonly number[] = DEFAULT_RESTART_DELAYS_MS,
     private readonly terminalEnabled: () => boolean = () => false,
@@ -449,7 +449,7 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId)
     }
 
-    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && (call.params.backend === 'pi' || call.params.backend === 'opencode')) {
+    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && (call.params.backend === 'pi' || call.params.backend === 'claude' || call.params.backend === 'opencode')) {
       this.requireSessionOwner(connectionId, sessionId!)
       const backend = call.params.backend
       const cwd = await this.catalogSessionCwd(backend, sessionId!)
@@ -457,6 +457,7 @@ export class AcpRemoteGateway {
     }
 
     if (call.method === 'dsh/selectModel') {
+      if (this.promptsInProgress.has(sessionId!)) throw new RpcError('PROMPT_IN_PROGRESS', 'Stop the ACP reply before changing its model.')
       const session = this.sessionCwds.get(sessionId!)
       if (!session || session.backend !== call.params.backend) {
         throw new RpcError('ACP_WORKSPACE_UNAVAILABLE', 'The ACP session has no trusted workspace.')
@@ -476,13 +477,14 @@ export class AcpRemoteGateway {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
       this.promptsInProgress.add(sessionId)
       this.cancelledSessions.delete(sessionId)
-      if (this.sessionBackends.get(sessionId) === 'pi') {
+      const preparationBackend = this.sessionBackends.get(sessionId)
+      if (preparationBackend === 'pi' || preparationBackend === 'claude') {
         const preparation = { cancelled: false }
         this.preparingPrompts.set(sessionId, preparation)
         try {
-          const cwd = await this.piSessionCwd(sessionId)
+          const cwd = await this.catalogSessionCwd(preparationBackend, sessionId)
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
-          await this.requireAcp('pi').call('session/load', { sessionId, cwd, mcpServers: [] })
+          await this.requireAcp(preparationBackend).call('session/load', { sessionId, cwd, mcpServers: [] })
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
         } catch (error) {
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
@@ -1078,8 +1080,6 @@ export class AcpRemoteGateway {
     }
     return items
   }
-
-  private piSessionCwd(sessionId: string): Promise<string> { return this.catalogSessionCwd('pi', sessionId) }
 
   private async catalogSessionCwd(backend: 'pi' | 'claude' | 'opencode', sessionId: string): Promise<string> {
     const { assertCurrent } = this.captureCatalogClient(backend)

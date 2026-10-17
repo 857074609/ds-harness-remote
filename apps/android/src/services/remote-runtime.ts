@@ -44,6 +44,8 @@ export class AndroidRemoteRuntime {
   hasPi() { return this.client.hasPi() }
   requireOpencode() { return this.client.requireOpencode() }
   hasOpencode() { return this.client.hasOpencode() }
+  requireClaude() { return this.client.requireClaude() }
+  hasClaude() { return this.client.hasClaude() }
   getStats() { return this.client.getStats() }
   getNetworkDetails() { return this.client.getNetworkDetails() }
 

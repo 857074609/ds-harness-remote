@@ -6,6 +6,7 @@ import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/ant
 import { loadCodexModels } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
 import { loadOpencodeCatalog, loadOpencodeModels, mergeOpencodeCatalog } from '../services/opencode'
+import { loadClaudeCatalog, loadClaudeModels, mergeClaudeCatalog } from '../services/claude'
 import { loadPiCatalog, loadPiModels, mergePiCatalog } from '../services/pi'
 import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveRecentWorkspaces } from '../services/storage'
@@ -153,6 +154,26 @@ export class SessionRuntime {
     } catch { /* Keep the live projection when OpenCode is still persisting its summary. */ }
   }
 
+  async refreshClaudeCatalog(): Promise<void> {
+    if (!this.connection.hasClaude()) return
+    const client = this.connection.requireClaude()
+    const deviceId = this.store.get().selectedDevice?.deviceId
+    try {
+      const catalog = await loadClaudeCatalog(client, this.store.get().workspaces)
+      if (!this.connection.hasClaude() || this.connection.requireClaude() !== client || this.store.get().selectedDevice?.deviceId !== deviceId) return
+      this.store.set(state => {
+        const merged = mergeClaudeCatalog(catalog, state.workspaces, state.sessions)
+        return {
+          workspaces: [...state.workspaces.filter(item => item.backend !== 'claude'), ...merged.workspaces],
+          sessions: [...state.sessions.filter(item => item.backend !== 'claude'), ...merged.sessions],
+          selectedSession: state.selectedSession?.backend === 'claude'
+            ? merged.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession
+            : state.selectedSession,
+        }
+      })
+    } catch { /* Keep the live projection when Claude is still persisting its summary. */ }
+  }
+
   async closeActiveCodexStream(notifyRemote = true): Promise<void> {
     const stream = this.activeCodexStream
     this.activeCodexStream = undefined
@@ -169,7 +190,7 @@ export class SessionRuntime {
   async ensureCursorStream(session: RemoteSession, current: () => boolean = () => true): Promise<void> {
     await this.closeActiveCursorStream()
     if (!current()) return
-    const client = session.backend === 'opencode'
+    const client = session.backend === 'claude' ? this.connection.requireClaude() : session.backend === 'opencode'
       ? this.connection.requireOpencode()
       : session.backend === 'pi'
         ? this.connection.requirePi()
@@ -188,7 +209,7 @@ export class SessionRuntime {
           selectedSession: state.selectedSession?.sessionId === session.sessionId
             ? { ...state.selectedSession, running: false }
             : state.selectedSession,
-          ...(closed.reason === 'failed' ? { error: session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
+          ...(closed.reason === 'failed' ? { error: session.backend === 'claude' ? zhCN.runtime.claudeUnavailable : session.backend === 'opencode' ? zhCN.runtime.opencodeUnavailable : session.backend === 'pi' ? zhCN.runtime.piUnavailable : session.backend === 'antigravity' ? zhCN.runtime.antigravityUnavailable : zhCN.runtime.cursorUnavailable } : {}),
         }))
         // Transport flaps can close the ACP stream while the secure channel is
         // still up. Re-open so the next prompt does not miss live frames.
@@ -196,7 +217,7 @@ export class SessionRuntime {
         const phase = this.store.get().connection.phase
         if (phase !== 'connected') return
         const selected = this.store.get().selectedSession
-        if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi' && selected.backend !== 'opencode')) return
+        if (selected?.sessionId !== session.sessionId || (selected.backend !== 'cursor' && selected.backend !== 'antigravity' && selected.backend !== 'pi' && selected.backend !== 'opencode' && selected.backend !== 'claude')) return
         void this.ensureCursorStream(selected, current).catch(() => undefined)
       },
     )
@@ -243,6 +264,16 @@ export class SessionRuntime {
     } catch { /* Optional model discovery must not prevent conversation recovery. */ }
   }
 
+  async refreshCursorModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadAcpModels(this.connection.requireCursor(), cursorNativeId(session), 'cursor')
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
+  }
+
   async refreshPiModels(session: RemoteSession, current: () => boolean): Promise<void> {
     const generation = this.connectionGeneration
     try {
@@ -257,6 +288,16 @@ export class SessionRuntime {
     const generation = this.connectionGeneration
     try {
       const models = await loadOpencodeModels(this.connection.requireOpencode(), cursorNativeId(session))
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
+  }
+
+  async refreshClaudeModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadClaudeModels(this.connection.requireClaude(), cursorNativeId(session))
       if (!current() || generation !== this.connectionGeneration) return
       this.store.set(state => state.selectedSession?.sessionId === session.sessionId
         ? { sessionModels: models } : {})

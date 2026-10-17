@@ -22,10 +22,12 @@ ACP Client
 ## 启动与后端配置
 
 `acp.enabled` 控制 gateway；`acp.backends` 内各后端独立使用 `enabled`、`command`、`args`、
-可选 `cwd`。当前支持 `cursor` / `antigravity` / `opencode`，不按 binary 名称推测 adapter，也不把不可用后端的
+可选 `cwd`。当前支持 `cursor` / `antigravity` / `pi` / `opencode` / `claude`，不按 binary 名称推测 adapter，也不把不可用后端的
 请求转发到其他后端。仅配置旧 `cursor` 字段时，只启用 Cursor。
 
 对于 `opencode`，Host 运行 `opencode acp` 子进程接入标准 ACP 协议，采用标准 `initialize` 握手（避免发送 Cursor 私有 `cursor_login` 鉴权方法）。默认优先探测官方安装位置的 `~/.opencode/bin/opencode`、`~/.local/bin/opencode` 及系统 PATH。独立 capability 声明为 `agent.acp.opencode.v1`。工作区目录来自标准 `session/list` 返回的 cwd，历史通过独立临时进程的 `session/load` 回放生成，不写入 Harness SessionStore。
+
+Cursor/Claude 的 Desktop/Android 模型选择读取真实会话 catalog，并等待上游确认。Cursor 为避免进程级模型设置串会话，每个活动会话使用独立进程。Claude 显示名统一为 Claude，工作区与历史投影见 [接入说明](acp-integration.md)。
 
 ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册和 Client 初始化。
 能力声明表示已启用的协议支持，`workspaceTypes.available` 表示实际就绪；关闭期间会清理

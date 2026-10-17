@@ -7,7 +7,7 @@
 
 ### Claude ACP Host 实验性接入（Issue #125）
 
-`claude` 是独立 ACP backend ID，默认关闭，只使用现有加密 `agent.acp.*` 数据面及固定方法 allowlist；`initialize`、`session/new`、`session/prompt` 的 backend 可显式选择 `claude`。不得按命令名称猜测后端或在其不可用时回退到 Cursor。Host 使用本机预授权的 `claude-agent-acp` stdio adapter，不发送 Cursor `authenticate(cursor_login)`。权限响应仍仅允许现有单次允许/拒绝契约。Host 通过固定 `dsh/workspaceList` / `dsh/sessionList` 使用上游 ACP `session/list` 的分页目录与 Session authority；只接受 Host realpath 验证的真实 cwd。Claude `session/load` 必须显式指定 backend，并由 Host catalog 或本机已创建的 Session 确认 cwd，不能接受 Client 自报路径；活动回复期间禁止重新 load，独立 history 读取不受此限制。`dsh/sessionHistory` 可使用 `claude:<native-session-id>`，前缀必须匹配 backend；历史只经独立临时 ACP process 的 `session/load` replay 获取，不读本机 transcript 文件，最多 8 MiB / 10,000 更新，超限显式失败，读取失败不得返回成功的部分历史或伪造空历史。保留最多 30 个 live/loading Session，以及一个临时 history process；重复 load 不重放污染 live stream。`session/cancel` 使用标准无请求 ID 的 notification；Gateway 同步撤销该会话待审批句柄并隔离迟到权限请求，其他会话/后端不受影响，最终完成状态由上游 `cancelled` 确认，不伪造停止成功。不定义 Claude Workspace UI 前缀，不开放 Claude 图片、模型、文件或终端扩展；客户端工作区投影与加密跨设备验收尚待完成，不得将该 Host 接入解释为完整 Client/E2E 支持。
+`claude` 是独立 ACP backend ID，默认关闭，只使用现有加密 `agent.acp.*` 数据面及固定方法 allowlist；`initialize`、`session/new`、`session/prompt` 的 backend 可显式选择 `claude`。不得按命令名称猜测后端或在其不可用时回退到 Cursor。Host 使用本机预授权的 `claude-agent-acp` stdio adapter，不发送 Cursor `authenticate(cursor_login)`。权限响应仍仅允许现有单次允许/拒绝契约。Host 通过固定 `dsh/workspaceList` / `dsh/sessionList` 使用上游 ACP `session/list` 的分页目录与 Session authority；只接受 Host realpath 验证的真实 cwd。Claude `session/load` 必须显式指定 backend，并由 Host catalog 或本机已创建的 Session 确认 cwd，不能接受 Client 自报路径；活动回复期间禁止重新 load，独立 history 读取不受此限制。`dsh/sessionHistory` 可使用 `claude:<native-session-id>`，前缀必须匹配 backend；历史只经独立临时 ACP process 的 `session/load` replay 获取，不读本机 transcript 文件，最多 8 MiB / 10,000 更新，超限显式失败，读取失败不得返回成功的部分历史或伪造空历史。保留最多 30 个 live/loading Session，以及一个临时 history process；重复 load 不重放污染 live stream。`session/cancel` 使用标准无请求 ID 的 notification；Gateway 同步撤销该会话待审批句柄并隔离迟到权限请求，其他会话/后端不受影响，最终完成状态由上游 `cancelled` 确认，不伪造停止成功。Claude Desktop/Android 使用 `claude:cwd:` 工作区与 `claude:` 会话前缀，仅作客户端内存投影。模型目录与切换复用下述固定 `dsh/sessionModels` / `dsh/selectModel`，不开放 Claude 图片、文件或终端扩展。恢复会话发送 Prompt 前，Host 必须使用可信 cwd 加载；准备期间取消不启动迟到回复，也不清除后续重试。加密跨设备及原生设备验收仍待完成。
 
 ## 0. 文档地位与仓库边界（规范性）
 
@@ -1752,18 +1752,20 @@ continue to ignore `workspaceTypes`; newer clients require these optional capabi
   earlier replies after a model change. AGY transcripts without model metadata
   must not be assigned a fabricated historical model.
 
-ACP model selection also accepts `backend:"pi"|"opencode"` through the same
+ACP model selection also accepts `backend:"cursor"|"claude"|"pi"|"opencode"` through the same
 `dsh/sessionModels` / `dsh/selectModel` envelope. Pi uses its wrapper's reported
-model/thinking options. OpenCode uses the session's `configOptions` (including
+model/thinking options. Cursor, Claude and OpenCode use the session's `configOptions` (including
 grouped model choices), or legacy `models.availableModels`; no static catalog
 is advertised. The Host loads saved sessions only with catalog-validated cwd,
 deduplicates live loads, and excludes history replay from live streams.
-OpenCode changes use fixed Host-local `session/set_config_option` keys `model`
+Cursor, Claude and OpenCode changes use fixed Host-local `session/set_config_option` keys `model`
 and `effort`, or legacy `session/set_model` when only legacy models are reported.
 These upstream methods are not exposed as generic Remote RPC. Selection is
 per session, rejected during prompts/another change, and acknowledged only
 after upstream success; modern config responses/updates must confirm the value.
 Effort choices apply only to the current model: select a different model first,
 then read its effort choices. Missing catalogs and rejected changes never become
-successful local selections. Cursor and Claude do not currently implement this
-Remote model-selection envelope; clients must not advertise fabricated choices.
+successful local selections. Cursor uses one process per session because its upstream
+model manager is process-wide (maximum 30 active sessions plus the catalog process);
+Claude keeps per-session model state in its existing adapter. Neither adds generic
+configuration RPC or fabricated choices. The display name is `Claude`, backend ID `claude`.

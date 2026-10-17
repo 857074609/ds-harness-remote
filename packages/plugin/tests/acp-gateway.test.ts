@@ -29,8 +29,31 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
-  it('fences cancelled Pi preparation from later retries', async () => {
-    await runScenarios(['session/list', 'session/load'].map(stage => ({ name: stage, run: async () => {
+  it('loads Claude model catalogs only with trusted cwd and scopes Cursor/Claude changes to the owner', async () => {
+    await runScenarios((['cursor', 'claude'] as const).map(backend => ({ name: backend, run: async () => {
+      const acp = readyAcp(), cwd = await realpath(process.cwd())
+      acp.call = vi.fn(async (method, params) => {
+        if (method === 'session/new') return { sessionId: 'owned' }
+        if (method === 'dsh/sessionModels') return { current: { provider: backend, model: 'a' }, groups: [], failures: [], routable: true }
+        if (method === 'dsh/selectModel') return { selected: { provider: backend, model: (params as { model: string }).model } }
+        return {}
+      })
+      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => acp)
+      await gateway.start()
+      try {
+        await gateway.call('owner', { method: 'session/new', params: { backend, cwd } })
+        await expect(gateway.call('owner', { method: 'dsh/sessionModels', params: { backend, sessionId: 'owned' } })).resolves.toMatchObject({ current: { provider: backend } })
+        if (backend === 'claude') expect(acp.call).toHaveBeenCalledWith('session/load', { sessionId: 'owned', cwd, mcpServers: [] })
+        const selection = { method: 'dsh/selectModel', params: { backend, sessionId: 'owned', model: 'b' } }
+        await expect(gateway.call('other', selection)).rejects.toThrow()
+        await expect(gateway.call('owner', { ...selection, params: { ...selection.params, backend: backend === 'cursor' ? 'claude' : 'cursor' } })).rejects.toThrow()
+        await expect(gateway.call('owner', selection)).resolves.toMatchObject({ selected: { provider: backend, model: 'b' } })
+        expect(vi.mocked(acp.call).mock.calls.filter(([method]) => method === 'dsh/selectModel')).toHaveLength(1)
+      } finally { await gateway.close() }
+    } })))
+  })
+  it('fences cancelled Pi/Claude preparation from later retries', async () => {
+    await runScenarios((['pi', 'claude'] as const).flatMap(backend => ['session/list', 'session/load'].map(stage => ({ name: `${backend}: ${stage}`, run: async () => {
       const acp = readyAcp(), cwd = await realpath(process.cwd())
       let release!: (value: unknown) => void, entered!: () => void
       const blocked = new Promise<void>(resolve => { entered = resolve })
@@ -44,9 +67,9 @@ describe('AcpRemoteGateway', () => {
         if (method === 'session/prompt') return new Promise(() => {})
         return {}
       })
-      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'pi', enabled: true, command: 'pi-acp', args: [] }] }, silentLogger(), () => acp)
+      const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => acp)
       await gateway.start()
-      const prompt = { method: 'session/prompt', params: { backend: 'pi', sessionId: 'saved', prompt: [{ type: 'text', text: 'hi' }] } }
+      const prompt = { method: 'session/prompt', params: { backend, sessionId: 'saved', prompt: [{ type: 'text', text: 'hi' }] } }
       try {
         const old = gateway.call('owner', prompt)
         await blocked
@@ -60,7 +83,7 @@ describe('AcpRemoteGateway', () => {
         gateway.dropPeer('owner')
         expect(vi.mocked(acp.call).mock.calls.some(([method]) => method === 'session/cancel')).toBe(false)
       } finally { await gateway.close() }
-    } })))
+    } }))))
   })
   it('maps one-shot permission kinds to real option IDs without accepting result or persistent grants', async () => {
     await runScenarios(['allow-once', 'reject-once', 'cancel'].map(decision => ({ name: decision, run: async () => {

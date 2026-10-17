@@ -9,7 +9,7 @@ import { workspaceStableKey } from '../src/lib/workspace-key'
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
@@ -28,10 +28,12 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   hasPi = transport.hasPi
   hasAntigravity = transport.hasAntigravity
   hasOpencode = transport.hasOpencode
+  hasClaude = transport.hasClaude
   requireCursor() { return acp }
   requireAntigravity() { return acp }
   requirePi() { return acp }
   requireOpencode() { return acp }
+  requireClaude() { return acp }
   getNetworkDetails() { return Promise.resolve(undefined) }
   getStats() { return { mode: 'Relay', connected: true } }
 } }))
@@ -56,6 +58,7 @@ const prepareScenario1 = () => {
   transport.hasAntigravity.mockReturnValue(false)
   transport.hasPi.mockReturnValue(false)
   transport.hasOpencode.mockReturnValue(false)
+  transport.hasClaude.mockReturnValue(false)
   acp.call.mockResolvedValue([])
   acp.transferCall.mockResolvedValue({ events: [] })
   acp.prompt.mockResolvedValue({ accepted: true, stopReason: 'in_progress' })
@@ -414,7 +417,7 @@ describe('session restore state machine', () => {
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
   })
   it('restores ACP sessions once across overlapping reconnects and respects restoreSession=false', async () => {
-    const rows = ['cursor', 'antigravity', 'pi', 'opencode'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row
@@ -461,7 +464,7 @@ describe('session restore state machine', () => {
     )
   })
   it('ignores ACP model commits completing after navigation and releases the old selector state', async () => {
-    await runScenarios((['pi', 'opencode', 'antigravity'] as const).flatMap(backend => ['resolve', 'reject'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
+    await runScenarios((['cursor', 'claude', 'pi', 'opencode', 'antigravity'] as const).flatMap(backend => ['resolve', 'reject'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
       let finish!: () => void
       acp.selectModel.mockReturnValueOnce(new Promise((resolve, reject) => {
         finish = () => outcome === 'resolve' ? resolve({ provider: backend, model: 'm', reasoningEffort: 'high' }) : reject(new Error('late rejection'))
@@ -598,7 +601,7 @@ describe('session restore state machine', () => {
   })
 
   it('isolates late ACP prompt subscriptions from the new conversation', async () => {
-    const rows = ['cursor', 'antigravity', 'pi'] as const
+    const rows = ['cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const
     await runScenarios(
       rows.map((row, index) => {
         const backend = row

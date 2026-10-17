@@ -4,7 +4,7 @@ import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
-import { OpencodeModels } from './opencode-models.js'
+import { AcpSessionModelState } from './session-models.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -127,7 +127,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     }
   }
 
-  private readonly models = new Map<string, OpencodeModels>()
+  private readonly models = new Map<string, AcpSessionModelState>()
   private readonly loads = new Map<string, Promise<unknown>>()
   private readonly busy = new Set<string>()
 
@@ -174,7 +174,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (!this.ready || !id || (sessionId && returnedId && returnedId !== sessionId)) {
       throw new OpencodeAcpError('ACP_INVALID_SESSION', 'OpenCode returned an invalid session.')
     }
-    const models = new OpencodeModels()
+    const models = new AcpSessionModelState('opencode')
     models.update(result)
     this.models.set(id, models)
     return result

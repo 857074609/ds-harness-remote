@@ -29,10 +29,10 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 ## Claude Code ACP（Issue #125）
 
 - [x] 创建 [Issue #125](https://github.com/liguobao/ds-harness-remote/issues/125)，开始 Host `claude` 后端与专用 ACP stdio adapter 接入，默认关闭。
-- [ ] 完成 Desktop/Web 与 Android Claude 工作区/会话内存投影、独立后端识别与历史恢复。
+- [x] 完成 Desktop Plugin 与 Android Claude 工作区/会话内存投影、独立后端识别、历史恢复与模型切换；独立 Remote Web runtime 另行接入。
 - [x] 复用已有 OpenAI 兼容端点/凭据与 `gpt-6-sol` 完成真实 Claude ACP 初始化、文字对话及本机 Gateway `Write` 工具拒绝/单次允许；同会话第二次工具调用重新审批，真实句柄的跨连接、持久授权、result 越权及重放被拒绝。
 - [x] Claude Host 中断、catalog/load 与独立有界 history：真实待审批 Write 取消后旧句柄失效/无文件；Bash 运行期间 history 不打断 turn，随后返回 cancelled；Gateway/adapter 进程重启后 catalog/load/history 与上下文继续对话通过。
-- [ ] Claude 独立客户端工作区/历史展示、重连 UI、Windows、APK/真机及加密跨设备验收；本机兼容模型测试不代表 Anthropic Claude 模型或完整产品验收。
+- [ ] Claude 独立 Remote Web、重连 UI 实机、Windows、APK/真机及加密跨设备验收；本机兼容模型测试不代表 Anthropic Claude 模型或完整产品验收。
 
 ## 当前执行顺序
 
@@ -118,7 +118,8 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 ## P1：Agent ACP / Cursor / Antigravity（实验）
 
 - [x] OpenCode 模型目录与切换使用真实 ACP 上游响应，按会话隔离；Pi / AGY / OpenCode 投影只提交确认状态，Android 接入 AGY 模型/思考强度。
-- [ ] Cursor / Claude Remote 真实模型目录与切换；Cursor 已移除仅在本地记录的无效选项。
+- [x] Cursor / Claude Remote 真实模型目录与上游确认的切换，Cursor 按会话隔离进程；Claude Desktop/Android 工作区、历史与文字会话入口。
+- [ ] Cursor / Claude 模型选择的 APK/真机、Windows 与加密跨设备验收。
 - [ ] OpenCode 模型切换及 AGY Android 模型选择的 APK / 真机 / 加密跨设备验收。
 
 通用 `agent.acp.*` gateway 已接入 Cursor 与 Antigravity adapter。技术说明见

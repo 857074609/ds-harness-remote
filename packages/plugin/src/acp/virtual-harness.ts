@@ -69,7 +69,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   constructor(
     private readonly client: AcpClientLike,
     private readonly host: { deviceId: string; name: string },
-    readonly backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor",
+    readonly backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude" = "cursor",
     /**
      * Host gateway used for endpoints this virtual Harness does not project
      * (settings, plugins, models, credentials, …). A real Harness workspace
@@ -121,7 +121,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   static remote(
     core: ConstructorParameters<typeof AgentAcpClient>[0],
     host: { deviceId: string; name: string },
-    backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor",
+    backend: "cursor" | "antigravity" | "pi" | "opencode" | "claude" = "cursor",
     capabilities: readonly string[] = [],
     hostCarrier?: RemoteTypertGatewayTarget,
   ): AcpVirtualHarness {
@@ -133,7 +133,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private backendLabel(): string {
-    return this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"
+    return this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"
   }
 
   async selectWorkspace(workspaceId: string): Promise<AcpVirtualWorkspaceView> {
@@ -204,7 +204,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     try {
       const args = carrierArgs(payload)
       if (ACP_TOOL_CALL_ENDPOINTS.some(item => item === endpoint)) {
-        if (!this.client.workspaceToolCall) return business(failure('method-not-found', 'The Host does not support ACP workspace tools.'))
+        if (this.backend === 'claude' || !this.client.workspaceToolCall) return business(failure('method-not-found', 'The Host does not support ACP workspace tools.'))
         const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, 'sessionId')
         return business(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint as typeof ACP_TOOL_CALL_ENDPOINTS[number], args, signal))
       }
@@ -238,14 +238,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/modelCatalog': {
           const sessionId = await this.preferredSessionId()
           const catalog = modelCatalog(this.backend)
-          if (this.backend === 'cursor' || !sessionId) return business(success(catalog))
+          if (!sessionId) return business(success(catalog))
           const models = await this.hostSessionModels(sessionId)
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }))
         }
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
           const resolvedId = this.resolveSessionId(rawId)
-          if (this.backend !== 'cursor' && resolvedId) {
+          if (resolvedId) {
             try {
               return business(success(await this.hostSessionModels(resolvedId)))
             } catch {
@@ -283,6 +283,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   async open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
     const args = carrierArgs(payload)
     if (ACP_TOOL_STREAM_ENDPOINTS.some(item => item === endpoint)) {
+      if (this.backend === 'claude') throw new Error('Claude workspace tools are not available.')
       const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, 'sessionId')
       const queue = new AsyncValueQueue(signal)
       const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), frame => {
@@ -535,7 +536,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       } catch (error) {
         // A failed Pi read is not a successful empty baseline; do not continue
         // a restored conversation until its authoritative history is available.
-        if (this.backend === 'pi') throw error
+        if (this.backend === 'pi' || this.backend === 'claude') throw error
         // Preserve legacy AGY history availability behavior.
       }
     }
@@ -562,7 +563,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -694,7 +695,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         try {
           discovered = await this.client.listSessions(workspace.path, this.backend, 30)
         } catch (error) {
-          if (this.backend === 'pi') throw error
+          if (this.backend === 'pi' || this.backend === 'claude') throw error
           // Preserve legacy AGY catalog availability behavior.
         }
       }
@@ -712,7 +713,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       workspace.sessionCount = workspace.sessionIds.length
       workspace.updatedAt = new Date().toISOString()
     } catch (error) {
-      if (this.backend === 'pi') throw error
+      if (this.backend === 'pi' || this.backend === 'claude') throw error
       // Preserve legacy AGY catalog availability behavior.
     }
   }
@@ -778,7 +779,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         kind: 'sequenced',
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend),
@@ -827,7 +828,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
     const resolvedId = this.resolveSessionId(sessionId)
-    if (this.backend === 'cursor' || !this.client.sessionModels) {
+    if (!this.client.sessionModels) {
       const catalog = modelCatalog(this.backend)
       return {
         current: this.modelSelection(resolvedId),
@@ -847,7 +848,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
     const reasoningEffort = string(request.reasoningEffort)
-    const catalog = this.backend !== 'cursor' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
+    const catalog = await this.hostSessionModels(sessionId)
     const group = catalog.groups.find(g => g.id === provider || g.id.toLowerCase() === provider.toLowerCase())
     const targetModel = group?.models.find(m => {
       if (m.id === model) return true
@@ -867,7 +868,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       model: targetModel.id,
       ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
     }
-    if (this.backend === 'cursor' || !this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
+    if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
     const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
     this.selectedModels.set(sessionId, confirmed)
     if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed)

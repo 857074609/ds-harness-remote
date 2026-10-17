@@ -12332,17 +12332,32 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(await this.attachment(requestArg(args)));
         case "session/modelCatalog": {
           const sessionId = await this.preferredSessionId();
-          if (this.backend === "cursor" || this.backend === "opencode" || !sessionId) return business(success(modelCatalog(this.backend)));
+          const catalog = modelCatalog(this.backend);
+          if (this.backend === "cursor" || !sessionId) return business(success(catalog));
+          if (this.backend === "opencode") {
+            const current = this.modelSelection(sessionId);
+            return business(success({
+              default: current,
+              routableProviders: [catalog.default.provider],
+              groups: catalog.groups,
+              failures: []
+            }));
+          }
           const models = await this.hostSessionModels(sessionId);
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
           const rawId = extractSessionId(requestArg(args));
-          nativeAcpId(rawId, this.backend);
-          if (this.backend !== "cursor" && this.backend !== "opencode") return business(success(await this.hostSessionModels(rawId)));
+          const resolvedId = this.resolveSessionId(rawId);
+          if (this.backend !== "cursor" && this.backend !== "opencode" && resolvedId) {
+            try {
+              return business(success(await this.hostSessionModels(resolvedId)));
+            } catch {
+            }
+          }
           const catalog = modelCatalog(this.backend);
           return business(success({
-            current: this.modelSelection(rawId),
+            current: this.modelSelection(resolvedId || rawId),
             routable: true,
             groups: catalog.groups,
             failures: []
@@ -12350,6 +12365,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         }
         case "session/selectModel":
           return business(await this.selectModel(requestArg(args)));
+        case "session/initializeDefaultModel":
+          return business(success(void 0));
         case "session/canOpenWorkspacePath":
           return business(this.selectedWorkspaceId !== void 0);
         case "session/openWorkspacePath":
@@ -12487,22 +12504,29 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const seq = this.nextProjectionSeq();
     this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
     this.events.publishProjection(session.sessionId, "title", session.title ?? this.backendLabel(), seq);
+    this.events.publishProjection(session.sessionId, "modelSelection", this.modelSelectionProjection(session.sessionId), seq);
     return success({ sessionId: session.sessionId });
   }
   ensureSessionRegistered(sessionId) {
     let session = this.sessions.get(sessionId);
     if (session !== void 0) return session;
-    if (this.backend !== "cursor" && sessionId.startsWith(sessionPrefix(this.backend))) {
-      const acpSessionId = sessionId.slice(sessionPrefix(this.backend).length);
-      const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
-      const cwd2 = workspace?.path ?? "/";
-      session = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
-      if (workspace && !workspace.sessionIds.includes(sessionId)) {
-        workspace.sessionIds.unshift(sessionId);
-        workspace.sessionCount = workspace.sessionIds.length;
-        this.publishWorkspaceBaseline();
+    const prefix = sessionPrefix(this.backend);
+    if (this.backend !== "cursor") {
+      if (sessionId.startsWith(prefix)) {
+        const acpSessionId = sessionId.slice(prefix.length);
+        const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
+        const cwd2 = workspace?.path ?? "/";
+        session = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
+        if (workspace && !workspace.sessionIds.includes(sessionId)) {
+          workspace.sessionIds.unshift(sessionId);
+          workspace.sessionCount = workspace.sessionIds.length;
+          this.publishWorkspaceBaseline();
+        }
+        return session;
       }
-      return session;
+      const prefixed = `${prefix}${sessionId}`;
+      const found = this.sessions.get(prefixed);
+      if (found !== void 0) return found;
     }
     return void 0;
   }
@@ -12779,7 +12803,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const title = this.backend === "antigravity" ? "Antigravity" : this.backend === "opencode" ? "OpenCode" : workspace.title;
     const session = this.registerSession(sessionId, cwd2, title);
     this.attachSessionToWorkspace(cwd2, session.sessionId);
-    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session, 0)]);
+    const seq = this.nextProjectionSeq();
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
+    this.events.publishProjection(session.sessionId, "title", session.title ?? this.backendLabel(), seq);
+    this.events.publishProjection(session.sessionId, "modelSelection", this.modelSelectionProjection(session.sessionId), seq);
     this.publishWorkspaceBaseline();
     return session;
   }
@@ -12817,36 +12844,67 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       }
     };
   }
+  resolveSessionId(rawId) {
+    if (!rawId) {
+      return this.preferredSessionIdSync() ?? "";
+    }
+    const prefix = sessionPrefix(this.backend);
+    if (rawId.startsWith(prefix) && this.sessions.has(rawId)) {
+      return rawId;
+    }
+    if (this.sessions.has(rawId)) {
+      return rawId;
+    }
+    const prefixed = `${prefix}${rawId}`;
+    if (this.sessions.has(prefixed)) {
+      return prefixed;
+    }
+    for (const [id5] of this.sessions) {
+      if (id5.endsWith(rawId)) return id5;
+    }
+    return this.preferredSessionIdSync() ?? rawId;
+  }
+  preferredSessionIdSync() {
+    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    return selected?.sessionIds[0] ?? [...this.sessions.keys()][0];
+  }
   modelSelection(sessionId) {
-    return this.selectedModels.get(sessionId) ?? modelCatalog(this.backend).default;
+    const resolved = this.resolveSessionId(sessionId);
+    return this.selectedModels.get(resolved) ?? this.selectedModels.get(sessionId) ?? modelCatalog(this.backend).default;
   }
   modelSelectionProjection(sessionId) {
     const selection = this.modelSelection(sessionId);
     return { lastUsed: selection, next: selection };
   }
   async hostSessionModels(sessionId) {
+    const resolvedId = this.resolveSessionId(sessionId);
     if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) {
       const catalog = modelCatalog(this.backend);
       return {
-        current: this.modelSelection(sessionId),
+        current: this.modelSelection(resolvedId),
         routable: true,
         groups: catalog.groups,
         failures: []
       };
     }
-    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend);
-    this.selectedModels.set(sessionId, models.current);
+    const models = await this.client.sessionModels(nativeAcpId(resolvedId, this.backend), this.backend);
+    this.selectedModels.set(resolvedId, models.current);
     return models;
   }
   async selectModel(request) {
-    const sessionId = extractSessionId(request);
-    nativeAcpId(sessionId, this.backend);
+    const rawSessionId = extractSessionId(request);
+    const sessionId = this.resolveSessionId(rawSessionId);
     const provider = requiredString(request.provider, "provider");
     const model = requiredString(request.model, "model");
     const reasoningEffort = string(request.reasoningEffort);
     const catalog = this.backend !== "cursor" && this.backend !== "opencode" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
-    const group = catalog.groups.find((g) => g.id === provider);
-    const targetModel = group?.models.find((m) => m.id === model);
+    const group = catalog.groups.find((g) => g.id === provider || g.id.toLowerCase() === provider.toLowerCase());
+    const targetModel = group?.models.find((m) => {
+      if (m.id === model) return true;
+      if (m.id.endsWith(`/${model}`)) return true;
+      if (model.endsWith(`/${m.id}`)) return true;
+      return false;
+    });
     if (group === void 0 || targetModel === void 0) {
       return failure("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
     }
@@ -12855,19 +12913,32 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       return failure("model-unavailable", `The selected reasoning effort is unavailable for this ${this.backend} model.`);
     }
     const selected = {
-      provider,
-      model,
+      provider: group.id,
+      model: targetModel.id,
       ...reasoningEffort === void 0 ? {} : { reasoningEffort }
     };
+    this.selectedModels.set(sessionId, selected);
+    if (rawSessionId && rawSessionId !== sessionId) {
+      this.selectedModels.set(rawSessionId, selected);
+    }
     if (this.backend !== "cursor" && this.backend !== "opencode") {
       if (!this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
       const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
       this.selectedModels.set(sessionId, confirmed);
-    } else {
-      this.selectedModels.set(sessionId, selected);
+      if (rawSessionId && rawSessionId !== sessionId) {
+        this.selectedModels.set(rawSessionId, confirmed);
+      }
+    } else if (this.backend === "opencode" && this.client.selectModel) {
+      try {
+        await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
+      } catch {
+      }
     }
     const seq = this.nextProjectionSeq();
     this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
+    if (rawSessionId && rawSessionId !== sessionId) {
+      this.events.publishProjection(rawSessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
+    }
     return success({ selected: this.modelSelection(sessionId) });
   }
   publishWorkspaceBaseline() {

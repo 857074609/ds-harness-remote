@@ -317,7 +317,7 @@ function AppNavigator() {
           if (selectedDevice !== undefined) push({ name: 'device', deviceId: selectedDevice.deviceId, source: 'workspaces' })
         }}
       />}
-      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={() => push({ name: 'workspaces' })} />}
+      {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
       <HomeActionsMenu

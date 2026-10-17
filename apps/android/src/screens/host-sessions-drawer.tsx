@@ -11,7 +11,6 @@ import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { resolveSessionDisplayTitle } from './session-title'
 import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
-import { workspaceParentPath } from '../lib/workspace-path'
 import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup } from '../services/storage'
 
 const SESSION_PAGE_SIZE = 3
@@ -38,9 +37,12 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
   const deviceId = device?.deviceId
   const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>({})
   const [storageErrors, setStorageErrors] = useState<Record<string, boolean>>({})
+  const [loadedDeviceId, setLoadedDeviceId] = useState<string>()
+  const groupsReady = deviceId === undefined || loadedDeviceId === deviceId
   const expandedGroups = deviceId === undefined ? {} : groupsByDevice[deviceId] ?? {}
   useEffect(() => {
     if (deviceId === undefined) return
+    setLoadedDeviceId(undefined)
     let cancelled = false
     void loadHostSessionsDrawerGroups(deviceId).then(saved => {
       if (cancelled) return
@@ -48,6 +50,8 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
       setGroupsByDevice(current => ({ ...current, [deviceId]: { ...saved, ...current[deviceId] } }))
     }).catch(() => {
       if (!cancelled) setStorageErrors(current => ({ ...current, [deviceId]: true }))
+    }).finally(() => {
+      if (!cancelled) setLoadedDeviceId(deviceId)
     })
     return () => { cancelled = true }
   }, [deviceId])
@@ -70,18 +74,17 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
       key: `workspace:${workspace.backend ?? 'harness'}:${workspace.workspaceId}`,
       title: workspace.title,
       backend: workspace.backend ?? 'harness',
-      detail: workspaceParentPath(workspace.path),
       sessions: getVisibleWorkspaceSessions(workspace, sessions, archivedIds).sort((a, b) => b.updatedAt - a.updatedAt),
     })).filter(group => group.sessions.length > 0)
     const unassigned = sessions.filter(session => !archived.has(session.sessionId) && !assigned.has(session.sessionId))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-    if (unassigned.length > 0) grouped.push({ key: 'unassigned', title: strings.chat.otherHostSessions, backend: 'harness', detail: '', sessions: unassigned })
+    if (unassigned.length > 0) grouped.push({ key: 'unassigned', title: strings.chat.otherHostSessions, backend: 'harness', sessions: unassigned })
     const usedIds = new Set(currentWorkSessionIds)
     const knownSessions = selected !== undefined && !sessions.some(session => session.sessionId === selected.sessionId)
       ? [selected, ...sessions] : sessions
     const currentWork = knownSessions.filter(session => !archived.has(session.sessionId) && usedIds.has(session.sessionId))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-    grouped.unshift({ key: 'current-work', title: strings.chat.currentWorkSessions, backend: 'harness', detail: '', sessions: currentWork })
+    grouped.unshift({ key: 'current-work', title: strings.chat.currentWorkSessions, backend: 'harness', sessions: currentWork })
     return grouped
   }, [sessions, selected, archivedIds, workspaces, currentWorkSessionIds, strings])
   const sections = groups.map(group => {
@@ -108,7 +111,8 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
         {error !== undefined && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
         {deviceId !== undefined && storageErrors[deviceId] && <Text style={styles.error} accessibilityRole="alert">{strings.app.secureStorageUnavailable}</Text>}
         <SectionList
-          sections={sections}
+          sections={groupsReady ? sections : []}
+          ListEmptyComponent={groupsReady ? null : <ActivityIndicator style={styles.loading} color={colors.muted} accessibilityLabel={strings.workspaces.loading} />}
           stickySectionHeadersEnabled={false}
           keyExtractor={session => session.sessionId}
           contentContainerStyle={styles.list}
@@ -128,7 +132,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
               style={({ pressed }) => [styles.showMoreSessions, pressed && styles.pressedRow]}
             >
               <Text style={styles.showMoreSessionsText}>{strings.workspaces.showMoreSessions}</Text>
-              <ChevronDown size={17} color={colors.primary} />
+              <ChevronDown size={16} color={colors.muted} />
             </Pressable>
           }}
           renderSectionHeader={({ section }) => <Pressable
@@ -136,35 +140,30 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
             accessibilityLabel={section.expanded ? strings.workspaces.collapseWorkspace(section.title) : strings.workspaces.expandWorkspace(section.title)}
             accessibilityState={{ expanded: section.expanded }}
             onPress={() => toggleGroup(section.key, !section.expanded)}
-            style={({ pressed }) => [styles.group, pressed && styles.pressedRow]}
+            style={({ pressed }) => [styles.group, !section.expanded && styles.collapsedGroup, pressed && styles.pressedRow]}
           >
             <View style={styles.workspaceIcon}>
               {section.key === 'current-work'
-                ? <Activity size={18} color={colors.primary} />
+                ? <Activity size={18} color={colors.muted} />
                 : section.backend === 'codex'
-                ? <Code2 size={18} color={colors.primary} />
+                ? <Code2 size={18} color={colors.muted} />
                 : section.backend !== 'harness'
-                  ? <Sparkles size={18} color={colors.primary} />
-                  : section.expanded ? <FolderOpen size={18} color={colors.primary} /> : <Folder size={18} color={colors.primary} />}
+                  ? <Sparkles size={18} color={colors.muted} />
+                  : section.expanded ? <FolderOpen size={18} color={colors.muted} /> : <Folder size={18} color={colors.muted} />}
             </View>
             <View style={styles.copy}>
               <View style={styles.groupTitleRow}>
                 <Text style={styles.groupTitle} numberOfLines={1}>{section.title}</Text>
-                <Text style={styles.count}>{section.detail.length > 0 ? `${strings.workspaces[section.backend === 'harness' ? 'dsh' : section.backend]} · ` : ''}{section.sessions.length}</Text>
+                <Text style={styles.count}>{section.key.startsWith('workspace:') ? `${strings.workspaces[section.backend === 'harness' ? 'dsh' : section.backend]} · ` : ''}{section.sessions.length}</Text>
               </View>
-              {section.detail.length > 0 && <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">{section.detail}</Text>}
             </View>
-            {section.expanded ? <ChevronDown size={18} color={colors.muted} /> : <ChevronRight size={18} color={colors.muted} />}
-            <View pointerEvents="none" style={styles.rowSeparator} />
+            {section.expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
           </Pressable>}
-          renderItem={({ item, index, section }) => {
+          renderItem={({ item }) => {
             const active = item.sessionId === selected?.sessionId
             const running = lifecycles[item.sessionId]?.running ?? item.running
             const disabled = busy !== undefined || refreshing || !connected
-            return <View style={styles.sessionBranch}>
-              <View pointerEvents="none" style={[styles.branchTrunk, index === section.data.length - 1 && styles.branchEnd]} />
-              <View pointerEvents="none" style={styles.branchLink} />
-              <Pressable
+            return <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: active, disabled }}
               disabled={disabled}
@@ -174,7 +173,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
               <View style={styles.sessionIcon}>
                 {running
                   ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <MessageSquare size={16} color={active ? colors.primary : colors.muted} />}
+                  : <MessageSquare size={16} color={active ? colors.ink : colors.muted} />}
               </View>
               <View style={styles.copy}>
                 <Text style={[styles.sessionTitle, active && styles.activeTitle]} numberOfLines={1}>{resolveSessionDisplayTitle(item) ?? strings.sessions.untitled}</Text>
@@ -182,8 +181,8 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
               {running && <Text style={styles.runningStatus} numberOfLines={1}>{strings.status.running}</Text>}
               {busy === `session:${item.sessionId}`
                 ? <ActivityIndicator size="small" color={colors.primary} />
-                : active ? <Check size={16} color={colors.primary} /> : null}
-            </Pressable><View pointerEvents="none" style={styles.rowSeparator} /></View>
+                : active ? <Check size={16} color={colors.muted} /> : null}
+            </Pressable>
           }}
         />
       </View>
@@ -197,27 +196,23 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
   list: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
-  group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs, minHeight: 72, marginTop: spacing.sm, backgroundColor: colors.surfaceStrong, borderRadius: radius.md },
-  workspaceIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  loading: { paddingVertical: spacing.xl },
+  group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, marginTop: spacing.xs, borderRadius: radius.sm },
+  collapsedGroup: { marginTop: 0 },
+  workspaceIcon: { width: 20, height: 20, alignItems: 'center', justifyContent: 'center' },
   groupTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  groupTitle: { ...type.heading, fontWeight: '700', color: colors.ink, flex: 1 },
+  groupTitle: { ...type.smallStrong, color: colors.ink, flex: 1 },
   count: { ...type.caption, color: colors.muted },
-  rowSeparator: { position: 'absolute', bottom: 0, left: spacing.xs + 40 + spacing.xs, right: spacing.xs, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
-  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, borderRadius: radius.sm },
-  showMoreSessions: { minHeight: 48, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 40 + spacing.xs, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radius.sm },
-  showMoreSessionsText: { ...type.smallStrong, color: colors.primary },
-  sessionBranch: { paddingLeft: 32 },
-  branchTrunk: { position: 'absolute', left: 24, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
-  branchEnd: { bottom: '50%' },
-  branchLink: { position: 'absolute', left: 24, top: '50%', width: 12, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
-  sessionIcon: { width: 28, alignItems: 'center', justifyContent: 'center' },
-  activeRow: { backgroundColor: colors.primarySoft },
+  row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, marginLeft: spacing.lg, minHeight: 48, borderRadius: radius.sm },
+  showMoreSessions: { minHeight: 48, marginLeft: spacing.lg, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 20 + spacing.xs, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radius.sm },
+  showMoreSessionsText: { ...type.small, color: colors.muted },
+  sessionIcon: { width: 20, alignItems: 'center', justifyContent: 'center' },
+  activeRow: { backgroundColor: colors.surfaceStrong },
   pressedRow: { backgroundColor: colors.surfaceStrong },
   copy: { flex: 1, minWidth: 0 },
-  sessionTitle: { ...type.caption, fontWeight: '400', color: colors.ink },
-  activeTitle: { color: colors.primary },
+  sessionTitle: { ...type.small, color: colors.ink },
+  activeTitle: { fontWeight: '600' },
   runningStatus: { ...type.caption, color: colors.primary },
-  meta: { ...type.caption, color: colors.muted, marginTop: 2, fontFamily: 'monospace', writingDirection: 'ltr' },
-  emptyRunning: { ...type.caption, color: colors.muted, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 40 + spacing.xs, paddingRight: spacing.xs },
+  emptyRunning: { ...type.caption, color: colors.muted, paddingVertical: spacing.sm, paddingLeft: spacing.lg + spacing.xs + 20 + spacing.xs, paddingRight: spacing.xs },
   error: { ...type.small, color: colors.danger, padding: spacing.sm },
 })

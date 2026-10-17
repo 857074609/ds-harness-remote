@@ -105,6 +105,8 @@ import {
 import { relativeTime, sessionTitle } from './chat/presentation'
 import { createStyles } from './chat/styles'
 import { useLiveSessionStatus } from './device-screens'
+import { SessionInfo } from './chat/session-info'
+import { workspaceStableKey } from '../lib/workspace-key'
 import { HostSessionsDrawer } from './host-sessions-drawer'
 import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
@@ -117,12 +119,13 @@ const LONG_DRAFT_HINT = 12_000
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
 
-export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: () => void }) {
+export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
   useLiveSessionStatus()
   const session = useAppStore(state => state.selectedSession)
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
+  const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
   const connection = useAppStore(state => state.connection)
@@ -156,6 +159,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const [teamOpen, setTeamOpen] = useState(false)
 
   const [sessionsOpen, setSessionsOpen] = useState(false)
+  const [sessionInfoOpen, setSessionInfoOpen] = useState(false)
 
   // Web-style blue marks: `/` commands and `@` references render in accent blue.
   const draftSegments = useMemo(() => splitDraftSegments(draft), [draft])
@@ -337,7 +341,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
-    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen || teamOpen
+    || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen || teamOpen || sessionInfoOpen
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -998,6 +1002,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const header = <>
       <TopBar
         title={sessionTitle(session)}
+        onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
         onBack={trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
         backIcon={trajectory ? ArrowLeft : Menu}
@@ -1356,6 +1361,17 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       <TeamAgentPanel visible={teamOpen} members={teamState?.members ?? []} tasks={teamState?.tasks ?? []}
         sessions={sessions} onClose={() => setTeamOpen(false)}
         onOpen={session => { setTeamOpen(false); void openSession(session) }} />
+      {sessionInfoOpen && <SessionInfo
+        key={`${hostId}:${session.sessionId}`}
+        session={session}
+        workspace={currentWorkspace}
+        onClose={() => setSessionInfoOpen(false)}
+        onOpenWorkspace={() => {
+          setSessionInfoOpen(false)
+          if (onOpenWorkspaces !== undefined) onOpenWorkspaces(currentWorkspace === undefined ? undefined : workspaceStableKey(currentWorkspace, hostPlatform))
+          else onBack()
+        }}
+      />}
       {sessionsOpen && <HostSessionsDrawer
         onBack={() => {
           Keyboard.dismiss()

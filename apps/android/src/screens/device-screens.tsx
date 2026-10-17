@@ -856,20 +856,13 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
 }) {
   const selected = useAppStore(state => state.selectedDevice)
   const connection = useAppStore(state => state.connection)
-  const connectionProbeOrder = useAppStore(state => state.connectionProbeOrder)
   const descriptor = useAppStore(state => state.hostDescriptor)
-  const networkDetails = useAppStore(state => state.connectionNetworkDetails)
   const workspaces = useAppStore(state => state.workspaces)
-  const refreshNetworkDetails = useAppStore(state => state.refreshConnectionNetworkDetails)
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
   const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
-
-  useEffect(() => {
-    if (isConnected) void refreshNetworkDetails()
-  }, [device.deviceId, isConnected, refreshNetworkDetails])
 
   const trustAndContinue = async () => {
     if (await trust(device) && device.online) onConnect()
@@ -929,30 +922,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
                     </View>
                   </View>
 
-                  <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
-                  <View style={styles.group}>
-                    <KeyValue
-                      label={zhCN.devices.path}
-                      value={connectionPath(connection.stats.mode)}
-                    />
-                    {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
-                    <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
-                  </View>
-
-                  <View style={styles.networkDetails}>
-                    <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
-                    <View style={styles.group}>
-                      <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
-                      <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
-                      {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(networkDetails.controlChannelUrl)} mono />}
-                      {networkDetails?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(networkDetails.webRtc.protocol, networkDetails.webRtc.relayProtocol)} />}
-                      {networkDetails?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(networkDetails.webRtc.localCandidateType, networkDetails.webRtc.localAddressScope, networkDetails.webRtc.remoteCandidateType, networkDetails.webRtc.remoteAddressScope)} />}
-                      {networkDetails?.webRtc?.currentRoundTripTimeMs !== undefined && <KeyValue label={zhCN.devices.roundTripTime} value={`${networkDetails.webRtc.currentRoundTripTimeMs.toLocaleString()} ms`} />}
-                      {networkDetails?.webRtc?.availableOutgoingBitrate !== undefined && <KeyValue label={zhCN.devices.availableBitrate} value={formatBitrate(networkDetails.webRtc.availableOutgoingBitrate)} />}
-                      {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={networkDetails.connectedAt === undefined ? zhCN.common.unavailable : new Date(networkDetails.connectedAt).toLocaleString()} />}
-                      {(connection.stats.bytesSent !== undefined || connection.stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(connection.stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(connection.stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
-                    </View>
-                  </View>
+                  <DeviceConnectionInfo deviceId={device.deviceId} />
 
                   {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
                 </>}
@@ -961,6 +931,53 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
       {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
     </View>
   )
+}
+
+/** Read-only diagnostics shared by Host details and conversation information. */
+export function DeviceConnectionInfo({ deviceId }: { deviceId?: string }) {
+  const selectedId = useAppStore(state => state.selectedDevice?.deviceId)
+  const connection = useAppStore(state => state.connection)
+  const connectionProbeOrder = useAppStore(state => state.connectionProbeOrder)
+  const networkDetails = useAppStore(state => state.connectionNetworkDetails)
+  const refreshNetworkDetails = useAppStore(state => state.refreshConnectionNetworkDetails)
+  const styles = useThemedStyles(createStyles)
+  const isConnected = deviceId !== undefined && selectedId === deviceId && connection.phase === 'connected'
+
+  useEffect(() => {
+    if (isConnected) void refreshNetworkDetails()
+  }, [deviceId, isConnected, refreshNetworkDetails])
+
+  if (!isConnected) return <>
+    <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+    <KeyValue label={zhCN.devices.path} value={zhCN.status.disconnected} />
+  </>
+
+  return <>
+    <SectionTitle>{zhCN.devices.secureConnection}</SectionTitle>
+    <View style={styles.group}>
+      <KeyValue
+        label={zhCN.devices.path}
+        value={connectionPath(connection.stats.mode)}
+      />
+      {connectionProbeOrder.length > 0 && <KeyValue label={zhCN.devices.probeOrder} value={probeOrderText(connectionProbeOrder)} />}
+      <KeyValue label={zhCN.devices.encryption} value="Noise IK · ChaCha20-Poly1305" />
+    </View>
+
+    <View style={styles.networkDetails}>
+      <SectionTitle>{zhCN.devices.networkDetails}</SectionTitle>
+      <View style={styles.group}>
+        <KeyValue label={zhCN.devices.phoneEndpoint} value={networkDetails?.webRtc?.localAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.localAddress !== undefined} />
+        <KeyValue label={zhCN.devices.computerEndpoint} value={networkDetails?.webRtc?.remoteAddress ?? zhCN.devices.relayEndpointUnavailable} mono={networkDetails?.webRtc?.remoteAddress !== undefined} />
+        {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectionServer} value={controlServerName(networkDetails.controlChannelUrl)} mono />}
+        {networkDetails?.webRtc?.protocol !== undefined && <KeyValue label={zhCN.devices.networkProtocol} value={protocolText(networkDetails.webRtc.protocol, networkDetails.webRtc.relayProtocol)} />}
+        {networkDetails?.webRtc !== undefined && <KeyValue label={zhCN.devices.candidatePath} value={candidatePathText(networkDetails.webRtc.localCandidateType, networkDetails.webRtc.localAddressScope, networkDetails.webRtc.remoteCandidateType, networkDetails.webRtc.remoteAddressScope)} />}
+        {networkDetails?.webRtc?.currentRoundTripTimeMs !== undefined && <KeyValue label={zhCN.devices.roundTripTime} value={`${networkDetails.webRtc.currentRoundTripTimeMs.toLocaleString()} ms`} />}
+        {networkDetails?.webRtc?.availableOutgoingBitrate !== undefined && <KeyValue label={zhCN.devices.availableBitrate} value={formatBitrate(networkDetails.webRtc.availableOutgoingBitrate)} />}
+        {networkDetails !== undefined && <KeyValue label={zhCN.devices.connectedAt} value={networkDetails.connectedAt === undefined ? zhCN.common.unavailable : new Date(networkDetails.connectedAt).toLocaleString()} />}
+        {(connection.stats.bytesSent !== undefined || connection.stats.bytesReceived !== undefined) && <KeyValue label={zhCN.devices.traffic} value={`${formatBytes(connection.stats.bytesSent ?? 0)} ${zhCN.devices.sent} · ${formatBytes(connection.stats.bytesReceived ?? 0)} ${zhCN.devices.received}`} />}
+      </View>
+    </View>
+  </>
 }
 
 function sessionTitle(session: RemoteSession): string {

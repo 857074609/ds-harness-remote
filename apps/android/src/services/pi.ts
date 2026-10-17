@@ -1,3 +1,4 @@
+import { loadAcpModels, selectAcpModel } from './acp-models'
 import type { AgentAcpClient } from '@dsh-remote/client-core'
 import type { ModelSelection, RemoteSession, SessionModels, WorkspaceView } from '../types'
 import { createPiSession, createPiWorkspace } from './cursor'
@@ -7,10 +8,10 @@ export interface PiCatalog {
   sessions: RemoteSession[]
 }
 
-/** Read the Host's PI catalog without spawning a spare CLI for every directory. */
+/** Read the Host's Pi catalog without spawning a spare CLI for every directory. */
 export async function loadPiCatalog(client: AgentAcpClient, remembered: WorkspaceView[] = [], warmPath?: string): Promise<PiCatalog> {
   const roots = await client.call('dsh/workspaceList', { backend: 'pi' })
-  if (!Array.isArray(roots)) throw new Error('Invalid PI workspace catalog.')
+  if (!Array.isArray(roots)) throw new Error('Invalid Pi workspace catalog.')
   const workspaces = new Map(remembered.filter(item => item.backend === 'pi').map(item => [item.path, item]))
   for (const root of roots) {
     if (!record(root) || typeof root.path !== 'string' || !absolutePath(root.path)) continue
@@ -19,7 +20,7 @@ export async function loadPiCatalog(client: AgentAcpClient, remembered: Workspac
   const sessions = new Map<string, RemoteSession>()
   for (const [path, workspace] of workspaces) {
     const result = await client.call('dsh/sessionList', { backend: 'pi', path, limit: 100, prewarm: path === warmPath })
-    if (!record(result) || !Array.isArray(result.items)) throw new Error('Invalid PI session catalog.')
+    if (!record(result) || !Array.isArray(result.items)) throw new Error('Invalid Pi session catalog.')
     const ids: string[] = []
     for (const row of result.items) {
       if (!record(row) || typeof row.conversationId !== 'string' || !row.conversationId) continue
@@ -35,7 +36,7 @@ export async function loadPiCatalog(client: AgentAcpClient, remembered: Workspac
   return { workspaces: [...workspaces.values()], sessions: [...sessions.values()] }
 }
 
-/** Preserve new empty sessions and active turns until PI writes its durable summary. */
+/** Preserve new empty sessions and active turns until Pi writes its durable summary. */
 export function mergePiCatalog(catalog: PiCatalog, workspaces: WorkspaceView[], sessions: RemoteSession[]): PiCatalog {
   const byId = new Map(sessions.filter(item => item.backend === 'pi').map(item => [item.sessionId, item]))
   for (const session of catalog.sessions) {
@@ -53,37 +54,16 @@ export function mergePiCatalog(catalog: PiCatalog, workspaces: WorkspaceView[], 
 /** History can contain several images; always use the bounded ACP transfer response. */
 export async function readPiHistory(client: AgentAcpClient, sessionId: string): Promise<unknown[]> {
   const result = await client.transferCall('dsh/sessionHistory', { sessionId, backend: 'pi' })
-  if (!record(result) || !Array.isArray(result.events)) throw new Error('Invalid PI history response.')
+  if (!record(result) || !Array.isArray(result.events)) throw new Error('Invalid Pi history response.')
   return result.events
 }
 
-export async function loadPiModels(client: AgentAcpClient, sessionId: string): Promise<SessionModels> {
-  const result = await client.sessionModels(sessionId, 'pi')
-  if (!record(result) || !record(result.current) || result.current.provider !== 'pi'
-    || typeof result.current.model !== 'string' || !Array.isArray(result.groups)) throw new Error('Invalid PI model catalog.')
-  const groups = result.groups.flatMap(group => {
-    if (!record(group) || group.id !== 'pi' || !Array.isArray(group.models)) return []
-    const models = group.models.flatMap(model => {
-      if (!record(model) || typeof model.id !== 'string' || typeof model.name !== 'string') return []
-      const reasoning = record(model.reasoning) && Array.isArray(model.reasoning.efforts)
-        ? { efforts: model.reasoning.efforts.flatMap(effort => record(effort) && typeof effort.id === 'string' && typeof effort.name === 'string'
-          ? [{ id: effort.id, name: effort.name }] : []),
-          ...(typeof model.reasoning.defaultEffort === 'string' ? { defaultEffort: model.reasoning.defaultEffort } : {}) }
-        : undefined
-      return [{ id: model.id, name: model.name, ...(reasoning === undefined ? {} : { reasoning }) }]
-    })
-    return [{ id: 'pi', name: typeof group.name === 'string' ? group.name : 'PI', models }]
-  })
-  return { current: { provider: 'pi', model: result.current.model,
-    ...(typeof result.current.reasoningEffort === 'string' ? { reasoningEffort: result.current.reasoningEffort } : {}) },
-    routable: result.routable === true, groups, failures: [] }
+export function loadPiModels(client: AgentAcpClient, sessionId: string): Promise<SessionModels> {
+  return loadAcpModels(client, sessionId, 'pi')
 }
 
-export async function selectPiModel(client: AgentAcpClient, sessionId: string, selection: ModelSelection): Promise<SessionModels> {
-  if (selection.provider !== 'pi') throw new Error('Invalid PI model provider.')
-  await client.selectModel(sessionId, 'pi', selection)
-  // Re-read the authoritative selection; never fabricate a successful mode switch.
-  return loadPiModels(client, sessionId)
+export function selectPiModel(client: AgentAcpClient, sessionId: string, selection: ModelSelection): Promise<SessionModels> {
+  return selectAcpModel(client, sessionId, 'pi', selection)
 }
 
 function record(value: unknown): value is Record<string, unknown> {

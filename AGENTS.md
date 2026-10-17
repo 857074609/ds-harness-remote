@@ -425,3 +425,14 @@ APK/原生真机与独立 Remote Web 尚未验收，详见 docs/compatibility.zh
 失败并阻塞界面。只处理 describe 和成功写入返回值；不修改 Host schema、revision、用户
 配置或拒绝结果。已用安装版官方 RC.1 bundle 复现并验证初始化修复，Plugin check/build、
 20 个相关 Gateway 测试与 bundle 校验通过；未增加纯展示测试，真实跨设备恢复仍待验收。
+
+
+## ACP model selection audit (2026-10-18)
+
+Pi 显示名统一为 `Pi`，后端 ID 保留 `pi`。OpenCode 从真实 ACP session new/load 的
+configOptions 或 legacy models 获取模型，按会话保存状态；固定 model/effort config key
+或 legacy set_model 切换，禁止写死目录、全局 selectedModel 或吞掉上游失败。首次 load
+不把历史回放注入 live，重复 load 不打断回复。Pi/AGY/OpenCode Desktop 投影仅提交 Host
+确认的选择；Android 补齐 AGY 模型/思考强度并复用 ACP 模型解析。Cursor 的本地假模型
+选项已移除，Cursor/Claude 的 Remote 模型选择仍待实现。OpenCode 1.19.3 隔离 CLI 验证
+读取 42 个模型并成功切换（未发送 Prompt）；此验证不等于 APK/真机或加密跨设备验收。

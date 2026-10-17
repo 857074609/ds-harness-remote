@@ -8,11 +8,7 @@ const OPENCODE_WORKSPACE_PREFIX = 'opencode:cwd:'
 
 const CURSOR_PROVIDER = 'cursor'
 
-const CURSOR_MODEL = 'cursor'
-
 const OPENCODE_PROVIDER = 'opencode'
-
-const OPENCODE_MODEL = 'opencode'
 
 export interface AcpVirtualWorkspaceView {
   workspaceId: string
@@ -110,28 +106,6 @@ export interface AcpModelView {
   }
 }
 
-const CURSOR_MODELS: AcpModelView[] = [
-  { id: 'auto', name: 'Auto' },
-  { id: 'claude-3.7-sonnet', name: 'Claude 3.7 Sonnet' },
-  { id: 'claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-  { id: 'gpt-4o', name: 'GPT-4o' },
-  { id: 'o3-mini', name: 'o3-mini' },
-  { id: 'deepseek-r1', name: 'DeepSeek R1' },
-]
-
-const OPENCODE_MODELS: AcpModelView[] = [
-  { id: 'opencode/deepseek-v4.1-flash-free', name: 'DeepSeek V4.1 Flash Free' },
-  { id: 'opencode/glm-5.3-flash-free', name: 'GLM 5.3 Flash Free' },
-  { id: 'opencode/mimo-v2.6-flash-free', name: 'MiMo V2.6 Flash Free' },
-  { id: 'opencode/nemotron-3-ultra-free', name: 'Nemotron 3 Ultra Free' },
-  { id: 'opencode/nemotron-3.5-lightning-free', name: 'Nemotron 3.5 Lightning Free' },
-  { id: 'opencode/nemotron-3.5-super-vl-free', name: 'Nemotron 3.5 Super VL Free' },
-  { id: 'opencode/longcat-2.5-preview-free', name: 'LongCat 2.5 Preview Free' },
-  { id: 'opencode/beam-free', name: 'Beam Free' },
-  { id: 'opencode/big-pickle', name: 'Big Pickle' },
-  { id: 'opencode/space-bunny-free', name: 'Space Bunny Free' },
-]
-
 export function modelCatalog(backend: "cursor" | "antigravity" | "pi" | "opencode" = "cursor"): {
   default: AcpModelSelection
   routableProviders: string[]
@@ -139,12 +113,12 @@ export function modelCatalog(backend: "cursor" | "antigravity" | "pi" | "opencod
   failures: Array<{ id: string; name: string; message: string }>
 } {
   const provider = backend === 'pi' ? 'pi' : backend === 'opencode' ? OPENCODE_PROVIDER : backend === 'antigravity' ? 'antigravity' : CURSOR_PROVIDER
-  const name = backend === 'pi' ? 'PI' : backend === 'opencode' ? 'OpenCode' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
-  const models = backend === 'cursor' ? CURSOR_MODELS : backend === 'opencode' ? OPENCODE_MODELS : []
+  const name = backend === 'pi' ? 'Pi' : backend === 'opencode' ? 'OpenCode' : backend === 'antigravity' ? 'Antigravity' : 'Cursor'
+  const models: AcpModelView[] = []
   const defaultModel = models[0]?.id ?? 'host-settings'
   return {
     default: { provider, model: defaultModel },
-    routableProviders: [provider],
+    routableProviders: [],
     groups: [{
       id: provider,
       name,

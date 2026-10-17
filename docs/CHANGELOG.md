@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fixes OpenCode model selection using the Host's actual ACP catalog and confirmed per-session changes; removes hardcoded catalogs and false success on upstream errors. Adds Android AGY model/effort selection, standardizes the display name to Pi, and removes ineffective Cursor model choices. Cursor and Claude Remote model selection remain unsupported.
+- 修复 OpenCode 模型选择：读取 Host 实际 ACP 模型目录，按会话调用上游切换并确认结果，移除写死目录及吞错后的虚假成功；补齐 Android AGY 模型/思考强度选择，显示名统一为 Pi，并移除 Cursor 无效模型选项。Cursor、Claude Remote 模型选择仍未接入。
+
 - Fixes OpenCode workspaces on a Host where the CLI is installed at the official `~/.opencode/bin/opencode` location, and wires OpenCode project/session discovery plus `session/load` history replay so saved conversations load again.
 - 修复 OpenCode CLI 安装在官方 `~/.opencode/bin/opencode` 时 Host 无法发现后端的问题，并接入 OpenCode 的项目/会话发现与 `session/load` 历史回放，已保存的会话可以重新加载。
 

@@ -1,3 +1,4 @@
+import { selectAcpModel } from '../services/acp-models'
 import { createCodexTimelineState, projectCodexThread } from '@dsh-remote/client-core'
 import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isStreamTimeoutError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
@@ -219,6 +220,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             oldestLoadedSeq: undefined,
             busyAction: undefined,
           }))
+          if (session.backend === 'antigravity') void runtime.refreshAntigravityModels(session, current)
           if (session.backend === 'pi') void runtime.refreshPiModels(session, current)
           if (session.backend === 'opencode') void runtime.refreshOpencodeModels(session, current)
           return
@@ -580,7 +582,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
-        if (session.backend === 'cursor' || session.backend === 'antigravity') throw new Error(zhCN.messageActions.unavailable)
+        if (session.backend === 'antigravity') {
+          const models = await selectAcpModel(runtime.connection.requireAntigravity(), cursorNativeId(session), 'antigravity', selection)
+          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          set({ sessionModels: models, modelSelecting: false })
+          return true
+        }
+        if (session.backend === 'cursor') throw new Error(zhCN.messageActions.unavailable)
         const selected = await runtime.connection.requireProxy().sessionSelectModel(session.sessionId, selection)
         set(state => ({
           sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
@@ -588,7 +596,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }))
         return true
       } catch (error) {
-        if ((session.backend === 'pi' || session.backend === 'opencode') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
+        if ((session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'antigravity') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
         set({ modelSelecting: false, error: friendlyError(error) })
         return false
       }

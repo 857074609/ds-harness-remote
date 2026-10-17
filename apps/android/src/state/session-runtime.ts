@@ -1,3 +1,4 @@
+import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
@@ -129,7 +130,7 @@ export class SessionRuntime {
             : state.selectedSession,
         }
       })
-    } catch { /* Keep the live projection when PI is still persisting its summary. */ }
+    } catch { /* Keep the live projection when Pi is still persisting its summary. */ }
   }
 
   async refreshOpencodeCatalog(): Promise<void> {
@@ -230,6 +231,16 @@ export class SessionRuntime {
       return
     }
     this.store.set({ recentWorkspaces: next })
+  }
+
+  async refreshAntigravityModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadAcpModels(this.connection.requireAntigravity(), cursorNativeId(session), 'antigravity')
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
   }
 
   async refreshPiModels(session: RemoteSession, current: () => boolean): Promise<void> {

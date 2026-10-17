@@ -29,6 +29,31 @@ function fakeAcp() {
 }
 
 describe('AcpVirtualHarness', () => {
+  it('commits ACP model projections only after Host confirmation and fails closed on discovery errors', async () => {
+    await runScenarios((['pi', 'opencode', 'antigravity'] as const).map(backend => ({ name: backend, run: async () => {
+      const current = { provider: backend, model: 'host/a' }
+      const client = { ...fakeAcp(),
+        sessionModels: vi.fn(async () => ({ current, routable: true, failures: [],
+          groups: [{ id: backend, name: backend, models: [{ id: 'host/a', name: 'A' }, { id: 'host/b', name: 'B' }] }] })),
+        selectModel: vi.fn(async () => { throw new Error('upstream rejected') }),
+      }
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
+      const signal = new AbortController().signal
+      try {
+        const workspace = await target.selectOrCreateWorkspace('/test')
+        const sessionId = workspace.sessionIds[0]!
+        const request = { sessionId, provider: backend, model: 'host/b' }
+        expect(await target.dispatch('session/models', { args: { request } }, signal)).toMatchObject({ ok: true, value: { current } })
+        expect(await target.dispatch('session/selectModel', { args: { request } }, signal)).toMatchObject({ ok: false })
+        expect(client.selectModel).toHaveBeenCalledWith('remote-history', backend, { provider: backend, model: 'host/b' })
+        expect(await target.dispatch('session/projections', { args: { request } }, signal)).toMatchObject({ ok: true,
+          value: { values: { modelSelection: { next: current } } } })
+        client.sessionModels.mockRejectedValueOnce(new Error('catalog failed'))
+        expect(await target.dispatch('session/models', { args: { request } }, signal)).toMatchObject({ ok: false })
+      } finally { await target.close() }
+    } })))
+  })
+
   it('keeps a new AGY follow empty and reuses only the requested blank session', async () => {
     const client = { ...fakeAcp(),
       listSessions: vi.fn(async () => [{ conversationId: 'old', title: 'Old history', createdAt: 1, updatedAt: 2 }]),

@@ -4,7 +4,7 @@ import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
-import { modelCatalog } from '../virtual-catalog.js'
+import { OpencodeModels } from './opencode-models.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -75,7 +75,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
       windowsHide: true,
       env: process.env,
     }),
-    private readonly options: { args?: string[]; cwd?: string } = {},
+    private readonly options: { args?: string[]; cwd?: string; historyReader?: boolean } = {},
   ) {}
 
   start(): Promise<void> {
@@ -96,7 +96,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'The OpenCode domain is closed.')
     if (this.historyBusy) throw new OpencodeAcpError('OPENCODE_HISTORY_BUSY', 'An OpenCode history read is already in progress.')
     this.historyBusy = true
-    const client = new OpencodeAcpClient(this.binary, this.logger, undefined, this.options)
+    const client = new OpencodeAcpClient(this.binary, this.logger, undefined, { ...this.options, historyReader: true })
     const updates: CursorAcpInbound[] = []
     let bytes = 0
     let count = 0
@@ -127,30 +127,61 @@ export class OpencodeAcpClient implements CursorAcpLike {
     }
   }
 
-  private selectedModel?: string
+  private readonly models = new Map<string, OpencodeModels>()
+  private readonly loads = new Map<string, Promise<unknown>>()
+  private readonly busy = new Set<string>()
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
-    if (method === 'dsh/sessionModels') {
-      const catalog = modelCatalog('opencode')
-      const currentModel = this.selectedModel ?? catalog.default.model
-      return {
-        current: { provider: 'opencode', model: currentModel },
-        routable: true,
-        failures: [],
-        groups: catalog.groups,
-      }
-    }
-    if (method === 'dsh/selectModel') {
-      const p = params as { model?: string }
-      if (typeof p?.model === 'string') {
-        this.selectedModel = p.model
-      }
-      return { selected: { provider: 'opencode', model: this.selectedModel ?? 'opencode/deepseek-v4.1-flash-free' } }
-    }
     if (!this.ready) throw new OpencodeAcpError('OPENCODE_UNAVAILABLE', 'OpenCode ACP is not ready.')
-    const budget = timeoutMs
-      ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
+    const p = isRecord(params) ? params : {}
+    const id = typeof p.sessionId === 'string' ? p.sessionId : undefined
+    const budget = timeoutMs ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
+    if (method === 'session/load' && id) {
+      // Re-reading models must never replay history into an active conversation.
+      if (this.models.has(id)) return { sessionId: id }
+      const pending = this.loads.get(id)
+      if (pending) return pending
+      const load = Promise.resolve().then(() => this.loadSession(method, params, budget, id))
+      this.loads.set(id, load)
+      try { return await load } finally { this.loads.delete(id) }
+    }
+    if (method === 'session/new') return this.loadSession(method, params, budget)
+    if (method === 'dsh/sessionModels' || method === 'dsh/selectModel') {
+      const models = id ? this.models.get(id) : undefined
+      if (!models) throw new OpencodeAcpError('ACP_SESSION_NOT_LOADED', 'Load the OpenCode session before selecting its model.')
+      if (method === 'dsh/sessionModels') return models.catalog()
+      if (this.busy.has(id!)) throw new OpencodeAcpError('PROMPT_IN_PROGRESS', 'Stop the OpenCode reply before changing its model.')
+      this.busy.add(id!)
+      try {
+        const result = await models.select(id!, p.model, p.reasoningEffort, (method, params) => this.request(method, params, budget))
+        this.publish({ kind: 'notification', method: 'session/update', params: { sessionId: id,
+          update: { sessionUpdate: 'model_selection', selected: result.selected } } })
+        return result
+      } finally { this.busy.delete(id!) }
+    }
+    if (method === 'session/prompt' && id) {
+      if (this.busy.has(id)) throw new OpencodeAcpError('PROMPT_IN_PROGRESS', 'The OpenCode session is busy.')
+      this.busy.add(id)
+      try { return await this.request(method, params, budget) } finally { this.busy.delete(id) }
+    }
     return this.request(method, params, budget)
+  }
+
+  private async loadSession(method: string, params: unknown, budget: number, sessionId?: string): Promise<unknown> {
+    const result = await this.request(method, params, budget)
+    const returnedId = isRecord(result) && typeof result.sessionId === 'string' ? result.sessionId : undefined
+    const id = sessionId ?? returnedId
+    if (!this.ready || !id || (sessionId && returnedId && returnedId !== sessionId)) {
+      throw new OpencodeAcpError('ACP_INVALID_SESSION', 'OpenCode returned an invalid session.')
+    }
+    const models = new OpencodeModels()
+    models.update(result)
+    this.models.set(id, models)
+    return result
+  }
+
+  private publish(message: CursorAcpInbound): void {
+    for (const handler of this.inboundHandlers) handler(message)
   }
 
   async respond(id: string | number, result: unknown): Promise<void> {
@@ -175,6 +206,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.closed) return
     this.closed = true
     this.ready = false
+    this.models.clear()
     this.failPending(new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.'))
     const child = this.process
     this.process = undefined
@@ -211,6 +243,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
+      this.models.clear()
       this.failPending(new OpencodeAcpError('OPENCODE_ACP_EXITED', 'OpenCode ACP exited unexpectedly.'))
       if (!this.closed) {
         this.logger?.warn('OpenCode ACP exited', {
@@ -317,11 +350,21 @@ export class OpencodeAcpClient implements CursorAcpLike {
       && (typeof value.id === 'string' || typeof value.id === 'number')
       ? { kind: 'request', id: value.id, method: value.method, params }
       : { kind: 'notification', method: value.method, params }
-    for (const handler of this.inboundHandlers) handler(inbound)
+    if (inbound.kind === 'request' && isRecord(params) && typeof params.sessionId === 'string' && this.loads.has(params.sessionId)) {
+      void this.respondError(inbound.id, -32600, 'OpenCode session is not loaded.').catch(() => undefined)
+      return
+    }
+    if (inbound.kind === 'notification' && inbound.method === 'session/update' && isRecord(params) && typeof params.sessionId === 'string') {
+      this.models.get(params.sessionId)?.update(params.update)
+      // session/load replays belong to the separate history reader, not live UI.
+      if (this.loads.has(params.sessionId) && !this.options.historyReader) return
+    }
+    this.publish(inbound)
   }
 
   private handleProcessFailure(code: string, cause: Error): void {
     this.ready = false
+    this.models.clear()
     this.failPending(new OpencodeAcpError(code, 'OpenCode ACP communication failed.', { cause }))
     const child = this.process
     this.process = undefined

@@ -175,14 +175,14 @@ export class ClientControl {
       if (endpoint === 'pi.workspace.open') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and PI Workspace are required.')
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Pi Workspace are required.')
         }
         return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'pi'))
       }
       if (endpoint === 'pi.workspace.create') {
         const value = record(payload)
         if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and PI project directory are required.')
+          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Pi project directory are required.')
         }
         return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'pi'))
       }

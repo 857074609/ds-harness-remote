@@ -82,7 +82,7 @@ export class AcpLiveProjection {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.context.backend === "pi" ? "PI" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.context.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.context.backend),
@@ -217,7 +217,7 @@ export class AcpLiveProjection {
           const buffered = follow.piToolOutputs.get(callId)
           const content = buffered ? [{
             type: 'text', text: buffered.overflow
-              ? '[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]' : buffered.text
+              ? '[Pi tool output exceeds the live preview limit; reload history to read the bounded persisted result.]' : buffered.text
           }]
             : output.content
           this.pushEvent(follow, 'tool/result', {
@@ -405,7 +405,7 @@ export class AcpLiveProjection {
     this.pushAssistantChunk(follow, { type: 'reasoning-delta', index: follow.reasoningBlockIndex, text: delta })
   }
 
-  /** PI model steps settle before tools; a tool round does not end the turn. */
+  /** Pi model steps settle before tools; a tool round does not end the turn. */
   ensurePiStep(follow: FollowState, advanceAfterTools: boolean): void {
     if (!follow.stepOpen) {
       follow.turn++
@@ -430,7 +430,7 @@ export class AcpLiveProjection {
       .sort((a, b) => a.index - b.index)
     for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: 'block-end', index, block: { type, text } })
     const reason = outcome.kind === 'error' ? { kind: 'error', failure: outcome.error }
-      : outcome.kind === 'aborted' ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'PI reply interrupted.' } }
+      : outcome.kind === 'aborted' ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'Pi reply interrupted.' } }
         : { kind: outcome.kind === 'max-tokens' ? 'max-tokens' : 'stop' }
     this.pushAssistantChunk(follow, { type: 'finish', reason })
     const selection = this.context.modelSelection(follow.sessionId)

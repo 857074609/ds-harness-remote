@@ -170,6 +170,9 @@ Desktop 与 Android 在内存中将工作区和会话映射到现有界面，不
 - **Cursor**：通过 CLI 的 ACP 接口接入。
 - **Antigravity（AGY）**：将 CLI 的 stream-json 接口适配到 ACP gateway。
 - **Pi Agent（实验性）**：在 Host 安装 `@earendil-works/pi-coding-agent` 与 `pi-acp`，配置 Pi 本机模型服务后，Remote 默认自动检测并初始化，ACP 初始化成功才开放工作区；可在 Remote 设置中明确关闭，使用独立 ACP 数据面。工具按 Host 用户权限执行，逐工具确认需要 Pi 扩展，默认不会自动启用。
+
+Desktop/Android 的 Pi、OpenCode、AGY 模型选择使用 Host 实际模型目录；OpenCode 切换由其 ACP 进程确认，先选择模型再读取该模型的思考强度选项。Cursor、Claude Remote 模型选择暂未支持。
+
 - **Codex**：通过独立的 App Server 接口接入，使用同一工作区入口。
 
 配置与后端适配开发见 [Agent 工作区接入指南](docs/acp-integration.md)。

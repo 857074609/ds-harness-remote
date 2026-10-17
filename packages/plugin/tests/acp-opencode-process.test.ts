@@ -4,8 +4,91 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
 import { OpencodeAcpClient, OpencodeAcpError } from '../src/acp/adapters/opencode-process.js'
 import type { SafeLogger } from '../src/logging.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
 describe('OpencodeAcpClient', () => {
+  it('uses upstream model contracts with session isolation, rejection and prompt exclusion', async () => {
+    await runScenarios(['configOptions', 'legacy'].map(format => ({ name: format, run: async () => {
+      const fake = fakeProcess()
+      const outbound: any[] = []
+      const selected = new Map<string, string>()
+      const efforts = new Map<string, string>()
+      let rejectChange = false
+      let confirmChange = true
+      const configuration = (id: string) => format === 'legacy'
+        ? { models: { currentModelId: selected.get(id), availableModels: [{ modelId: 'provider/a', name: 'A' }, { modelId: 'provider/b', name: 'B' }] } }
+        : { configOptions: [{ id: 'model', type: 'select', currentValue: selected.get(id),
+          options: [{ name: 'Provider', options: [{ value: 'provider/a', name: 'A' }, { value: 'provider/b', name: 'B' }] }] },
+          ...(selected.get(id) === 'provider/b' ? [{ id: 'effort', type: 'select', currentValue: efforts.get(id) ?? 'default',
+            options: [{ value: 'default', name: 'Default' }, { value: 'high', name: 'High' }] }] : [])] }
+      const respond = (message: any, result: unknown) => fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
+      fake.child.stdin.on('data', chunk => {
+        for (const line of String(chunk).trim().split('\n')) {
+          const message = JSON.parse(line)
+          outbound.push(message)
+          if (message.method === 'initialize') respond(message, { protocolVersion: 1 })
+          if (message.method === 'session/load') {
+            selected.set(message.params.sessionId, 'provider/a')
+            fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: {
+              sessionId: message.params.sessionId, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'old' } },
+            } })}\n`)
+            respond(message, configuration(message.params.sessionId))
+          }
+          if (['session/set_model', 'session/set_config_option'].includes(message.method)) {
+            if (rejectChange) fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, error: { code: -32602, message: 'invalid model' } })}\n`)
+            else {
+              if (confirmChange) {
+                if (message.params.configId === 'effort') efforts.set(message.params.sessionId, message.params.value)
+                else selected.set(message.params.sessionId, message.params.modelId ?? message.params.value)
+              }
+              respond(message, format === 'legacy' ? {} : configuration(message.params.sessionId))
+            }
+          }
+        }
+      })
+      const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+      const inbound = vi.fn()
+      client.onInbound(inbound)
+      try {
+        await client.start()
+        await expect(client.call('dsh/sessionModels', { sessionId: 'missing' })).rejects.toThrow('Load the OpenCode session')
+        await Promise.all(['a', 'b'].map(sessionId => client.call('session/load', { sessionId, cwd: '/tmp', mcpServers: [] })))
+        expect(inbound).not.toHaveBeenCalled()
+        await expect(client.call('dsh/sessionModels', { sessionId: 'a' })).resolves.toMatchObject({
+          current: { model: 'provider/a' }, groups: [{ models: [{ id: 'provider/a' }, { id: 'provider/b' }] }],
+        })
+        const requestCount = outbound.length
+        await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'invented' })).rejects.toThrow('unavailable')
+        await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/b', reasoningEffort: 'invented' })).rejects.toThrow()
+        expect(outbound).toHaveLength(requestCount)
+        await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/b' })).resolves.toMatchObject({ selected: { model: 'provider/b' } })
+        expect(outbound.at(-1)).toMatchObject({ method: format === 'legacy' ? 'session/set_model' : 'session/set_config_option',
+          params: format === 'legacy' ? { sessionId: 'a', modelId: 'provider/b' } : { sessionId: 'a', configId: 'model', value: 'provider/b' } })
+        await expect(client.call('dsh/sessionModels', { sessionId: 'b' })).resolves.toMatchObject({ current: { model: 'provider/a' } })
+        if (format === 'configOptions') {
+          await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/b', reasoningEffort: 'high' })).resolves.toMatchObject({ selected: { model: 'provider/b', reasoningEffort: 'high' } })
+          expect(outbound.at(-1)).toMatchObject({ method: 'session/set_config_option', params: { sessionId: 'a', configId: 'effort', value: 'high' } })
+        }
+        rejectChange = true
+        await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/a' })).rejects.toThrow()
+        await expect(client.call('dsh/sessionModels', { sessionId: 'a' })).resolves.toMatchObject({ current: { model: 'provider/b' } })
+        if (format === 'configOptions') {
+          rejectChange = false
+          confirmChange = false
+          await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/a' })).rejects.toThrow('did not confirm')
+        }
+        const prompt = client.call('session/prompt', { sessionId: 'a', prompt: [] })
+        await expect(client.call('dsh/selectModel', { sessionId: 'a', model: 'provider/a' })).rejects.toThrow('Stop the OpenCode reply')
+        await client.call('session/load', { sessionId: 'a', cwd: '/tmp', mcpServers: [] })
+        expect(outbound.filter(message => message.method === 'session/load')).toHaveLength(2)
+        respond(outbound.find(message => message.method === 'session/prompt'), { stopReason: 'end_turn' })
+        await prompt
+        await client.close()
+        await expect(client.call('dsh/sessionModels', { sessionId: 'a' })).rejects.toThrow('not ready')
+      } finally { await client.close() }
+    } })))
+  })
+
   it('initializes with standard ACP initialize and correlates JSON-RPC responses (without authenticate)', async () => {
     const fake = fakeProcess()
     const outbound: Array<Record<string, unknown>> = []

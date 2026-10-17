@@ -1751,3 +1751,19 @@ continue to ignore `workspaceTypes`; newer clients require these optional capabi
   preserve the selected model in each turn's message source and do not relabel
   earlier replies after a model change. AGY transcripts without model metadata
   must not be assigned a fabricated historical model.
+
+ACP model selection also accepts `backend:"pi"|"opencode"` through the same
+`dsh/sessionModels` / `dsh/selectModel` envelope. Pi uses its wrapper's reported
+model/thinking options. OpenCode uses the session's `configOptions` (including
+grouped model choices), or legacy `models.availableModels`; no static catalog
+is advertised. The Host loads saved sessions only with catalog-validated cwd,
+deduplicates live loads, and excludes history replay from live streams.
+OpenCode changes use fixed Host-local `session/set_config_option` keys `model`
+and `effort`, or legacy `session/set_model` when only legacy models are reported.
+These upstream methods are not exposed as generic Remote RPC. Selection is
+per session, rejected during prompts/another change, and acknowledged only
+after upstream success; modern config responses/updates must confirm the value.
+Effort choices apply only to the current model: select a different model first,
+then read its effort choices. Missing catalogs and rejected changes never become
+successful local selections. Cursor and Claude do not currently implement this
+Remote model-selection envelope; clients must not advertise fabricated choices.

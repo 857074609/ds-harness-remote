@@ -11197,34 +11197,14 @@ function nativeWorkspace(view) {
     updatedAt: view.updatedAt
   };
 }
-var CURSOR_MODELS = [
-  { id: "auto", name: "Auto" },
-  { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
-  { id: "gpt-4o", name: "GPT-4o" },
-  { id: "o3-mini", name: "o3-mini" },
-  { id: "deepseek-r1", name: "DeepSeek R1" }
-];
-var OPENCODE_MODELS = [
-  { id: "opencode/deepseek-v4.1-flash-free", name: "DeepSeek V4.1 Flash Free" },
-  { id: "opencode/glm-5.3-flash-free", name: "GLM 5.3 Flash Free" },
-  { id: "opencode/mimo-v2.6-flash-free", name: "MiMo V2.6 Flash Free" },
-  { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
-  { id: "opencode/nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning Free" },
-  { id: "opencode/nemotron-3.5-super-vl-free", name: "Nemotron 3.5 Super VL Free" },
-  { id: "opencode/longcat-2.5-preview-free", name: "LongCat 2.5 Preview Free" },
-  { id: "opencode/beam-free", name: "Beam Free" },
-  { id: "opencode/big-pickle", name: "Big Pickle" },
-  { id: "opencode/space-bunny-free", name: "Space Bunny Free" }
-];
 function modelCatalog(backend = "cursor") {
   const provider = backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
-  const name2 = backend === "pi" ? "PI" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
-  const models = backend === "cursor" ? CURSOR_MODELS : backend === "opencode" ? OPENCODE_MODELS : [];
+  const name2 = backend === "pi" ? "Pi" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
+  const models = [];
   const defaultModel = models[0]?.id ?? "host-settings";
   return {
     default: { provider, model: defaultModel },
-    routableProviders: [provider],
+    routableProviders: [],
     groups: [{
       id: provider,
       name: name2,
@@ -11241,13 +11221,13 @@ var OPENCODE_SESSION_PREFIX = "opencode:";
 function piStreamOutcome(reason) {
   if (reason === "completed") return { kind: "completed" };
   if (reason === "cancelled" || reason === "peer-disconnected") return { kind: "aborted", reason: { kind: reason === "cancelled" ? "user" : "disposed" } };
-  return { kind: "error", error: { code: "ACP_STREAM_FAILED", message: "PI reply stream failed." } };
+  return { kind: "error", error: { code: "ACP_STREAM_FAILED", message: "Pi reply stream failed." } };
 }
 function piPromptOutcome(kind, update) {
   if (update.stopReason === "cancelled") return { kind: "aborted", reason: { kind: "user" } };
   if (kind === "prompt_failed" || update.stopReason === "error") return {
     kind: "error",
-    error: { code: "PI_PROMPT_FAILED", message: "PI reply failed." }
+    error: { code: "PI_PROMPT_FAILED", message: "Pi reply failed." }
   };
   if (update.stopReason === "max_tokens") return { kind: "max-tokens" };
   return { kind: "completed" };
@@ -11670,7 +11650,7 @@ var AcpLiveProjection = class {
       projections: {
         asOfSeq: history.cursor,
         values: {
-          title: session.title ?? (this.context.backend === "pi" ? "PI" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.context.backend === "pi" ? "Pi" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.context.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.context.backend)
@@ -11804,7 +11784,7 @@ var AcpLiveProjection = class {
           const buffered = follow.piToolOutputs.get(callId);
           const content = buffered ? [{
             type: "text",
-            text: buffered.overflow ? "[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
+            text: buffered.overflow ? "[Pi tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
           }] : output.content;
           this.pushEvent(follow, "tool/result", {
             turn: follow.turn,
@@ -11973,7 +11953,7 @@ var AcpLiveProjection = class {
     }
     this.pushAssistantChunk(follow, { type: "reasoning-delta", index: follow.reasoningBlockIndex, text: delta });
   }
-  /** PI model steps settle before tools; a tool round does not end the turn. */
+  /** Pi model steps settle before tools; a tool round does not end the turn. */
   ensurePiStep(follow, advanceAfterTools) {
     if (!follow.stepOpen) {
       follow.turn++;
@@ -11995,7 +11975,7 @@ var AcpLiveProjection = class {
       { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
     ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
     for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
-    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "PI reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
+    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "Pi reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
     this.pushAssistantChunk(follow, { type: "finish", reason });
     const selection = this.context.modelSelection(follow.sessionId);
     const seq = this.pushEvent(follow, "assistant/message", {
@@ -12215,7 +12195,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return [...this.workspaceById.values()];
   }
   backendLabel() {
-    return this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
+    return this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
   }
   async selectWorkspace(workspaceId) {
     const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
@@ -12334,31 +12314,23 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           const sessionId = await this.preferredSessionId();
           const catalog = modelCatalog(this.backend);
           if (this.backend === "cursor" || !sessionId) return business(success(catalog));
-          if (this.backend === "opencode") {
-            const current = this.modelSelection(sessionId);
-            return business(success({
-              default: current,
-              routableProviders: [catalog.default.provider],
-              groups: catalog.groups,
-              failures: []
-            }));
-          }
           const models = await this.hostSessionModels(sessionId);
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
           const rawId = extractSessionId(requestArg(args));
           const resolvedId = this.resolveSessionId(rawId);
-          if (this.backend !== "cursor" && this.backend !== "opencode" && resolvedId) {
+          if (this.backend !== "cursor" && resolvedId) {
             try {
               return business(success(await this.hostSessionModels(resolvedId)));
             } catch {
+              return business(failure("model-unavailable", "The Host model catalog is unavailable."));
             }
           }
           const catalog = modelCatalog(this.backend);
           return business(success({
             current: this.modelSelection(resolvedId || rawId),
-            routable: true,
+            routable: false,
             groups: catalog.groups,
             failures: []
           }));
@@ -12656,7 +12628,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       projections: {
         asOfSeq: page.cursor,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -12836,7 +12808,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         kind: "sequenced",
         asOfSeq,
         values: {
-          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          title: session.title ?? (this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend)
@@ -12878,11 +12850,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async hostSessionModels(sessionId) {
     const resolvedId = this.resolveSessionId(sessionId);
-    if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) {
+    if (this.backend === "cursor" || !this.client.sessionModels) {
       const catalog = modelCatalog(this.backend);
       return {
         current: this.modelSelection(resolvedId),
-        routable: true,
+        routable: false,
         groups: catalog.groups,
         failures: []
       };
@@ -12897,7 +12869,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const provider = requiredString(request.provider, "provider");
     const model = requiredString(request.model, "model");
     const reasoningEffort = string(request.reasoningEffort);
-    const catalog = this.backend !== "cursor" && this.backend !== "opencode" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
+    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
     const group = catalog.groups.find((g) => g.id === provider || g.id.toLowerCase() === provider.toLowerCase());
     const targetModel = group?.models.find((m) => {
       if (m.id === model) return true;
@@ -12917,23 +12889,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       model: targetModel.id,
       ...reasoningEffort === void 0 ? {} : { reasoningEffort }
     };
-    this.selectedModels.set(sessionId, selected);
-    if (rawSessionId && rawSessionId !== sessionId) {
-      this.selectedModels.set(rawSessionId, selected);
-    }
-    if (this.backend !== "cursor" && this.backend !== "opencode") {
-      if (!this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
-      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
-      this.selectedModels.set(sessionId, confirmed);
-      if (rawSessionId && rawSessionId !== sessionId) {
-        this.selectedModels.set(rawSessionId, confirmed);
-      }
-    } else if (this.backend === "opencode" && this.client.selectModel) {
-      try {
-        await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
-      } catch {
-      }
-    }
+    if (this.backend === "cursor" || !this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
+    const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
+    this.selectedModels.set(sessionId, confirmed);
+    if (rawSessionId && rawSessionId !== sessionId) this.selectedModels.set(rawSessionId, confirmed);
     const seq = this.nextProjectionSeq();
     this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
     if (rawSessionId && rawSessionId !== sessionId) {
@@ -23097,14 +23056,14 @@ var ClientControl = class {
       if (endpoint === "pi.workspace.open") {
         const value = record2(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI Workspace are required.");
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Pi Workspace are required.");
         }
         return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "pi"));
       }
       if (endpoint === "pi.workspace.create") {
         const value = record2(payload);
         if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI project directory are required.");
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Pi project directory are required.");
         }
         return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "pi"));
       }
@@ -26136,14 +26095,14 @@ function requestSignal(req) {
 }
 function clientRequest(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
-  const record8 = value;
-  if (record8.type !== "client-request" || typeof record8.rpcId !== "string" || typeof record8.method !== "string") return void 0;
-  return { type: "client-request", rpcId: record8.rpcId, method: record8.method, payload: record8.payload };
+  const record9 = value;
+  if (record9.type !== "client-request" || typeof record9.rpcId !== "string" || typeof record9.method !== "string") return void 0;
+  return { type: "client-request", rpcId: record9.rpcId, method: record9.method, payload: record9.payload };
 }
 function rpcId(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return INVALID_REQUEST_RPC_ID;
-  const record8 = value;
-  return typeof record8.rpcId === "string" ? record8.rpcId : INVALID_REQUEST_RPC_ID;
+  const record9 = value;
+  return typeof record9.rpcId === "string" ? record9.rpcId : INVALID_REQUEST_RPC_ID;
 }
 function errorResponse(rpcId2, error) {
   return fullResponse(rpcId2, { ok: false, error });
@@ -26601,15 +26560,15 @@ function normalizeRecords(value) {
   if (!Array.isArray(value)) return value;
   const records = [];
   let previousSeq;
-  for (const record8 of value) {
-    if (!isEventEntry(record8)) continue;
-    const seq = entrySeq(record8);
+  for (const record9 of value) {
+    if (!isEventEntry(record9)) continue;
+    const seq = entrySeq(record9);
     if (previousSeq !== void 0 && seq !== void 0 && seq > previousSeq + 1) {
       for (let fillerSeq = previousSeq + 1; fillerSeq < seq; fillerSeq += 1) {
-        records.push(createLegacyGapRecord(fillerSeq, record8));
+        records.push(createLegacyGapRecord(fillerSeq, record9));
       }
     }
-    records.push(normalizeEntry(record8));
+    records.push(normalizeEntry(record9));
     if (seq !== void 0) previousSeq = seq;
   }
   return records;
@@ -27116,10 +27075,10 @@ var ServerCredentialStore = class {
     return parsed.serverUrl === serverUrl && parsed.deviceId === deviceId ? parsed : void 0;
   }
   async save(credentials) {
-    const record8 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
-    await atomicWrite(this.path, `${JSON.stringify(record8, null, 2)}
+    const record9 = credentialSchema.parse({ schemaVersion: 1, ...credentials });
+    await atomicWrite(this.path, `${JSON.stringify(record9, null, 2)}
 `);
-    return record8;
+    return record9;
   }
   async clear() {
     await rm(this.path, { force: true });
@@ -30091,24 +30050,24 @@ var IdentityStore = class {
     }
     if (!hasDevice) {
       const keys = generateKeyPair();
-      const record8 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
-      await atomicJsonWrite(devicePath, record8, 384);
+      const record9 = { schemaVersion: 1, deviceId: uuidV7(), name: deviceName, publicKey: keys.publicKey };
+      await atomicJsonWrite(devicePath, record9, 384);
       await atomicTextWrite(keyPath, `${keys.privateKey}
 `, 384);
     }
     await assertPrivateMode2(keyPath);
     try {
-      let record8 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
+      let record9 = identitySchema.parse(JSON.parse(await readFile3(devicePath, "utf8")));
       const privateKey = (await readFile3(keyPath, "utf8")).trim();
       const regenerated = generateKeyPair(fromBase64Url2(privateKey));
-      if (regenerated.publicKey !== record8.publicKey) {
+      if (regenerated.publicKey !== record9.publicKey) {
         throw new IdentityInvalidError("device public and private keys do not match");
       }
-      if (record8.name !== deviceName) {
-        record8 = { ...record8, name: deviceName };
-        await atomicJsonWrite(devicePath, record8, 384);
+      if (record9.name !== deviceName) {
+        record9 = { ...record9, name: deviceName };
+        await atomicJsonWrite(devicePath, record9, 384);
       }
-      this.identity = { ...record8, privateKey, fingerprint: fingerprint(record8.publicKey) };
+      this.identity = { ...record9, privateKey, fingerprint: fingerprint(record9.publicKey) };
       await this.loadPeers();
       return this.identity;
     } catch (error) {
@@ -31987,7 +31946,7 @@ function filterThreadListByWorkspaceAuthority(result, authority) {
   }
   return {
     ...result,
-    data: result.data.map((record8) => isRecord14(record8) ? record8 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record9) => isRecord14(record9) ? record9 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
@@ -33766,14 +33725,14 @@ var PiAcpClient = class {
     return !this.closed && this.catalog?.isReady() === true;
   }
   async create(history = false) {
-    if (this.closed) throw new CursorAcpError("ACP_CLOSED", "PI ACP is closed.");
-    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", "Too many PI ACP sessions are active.");
+    if (this.closed) throw new CursorAcpError("ACP_CLOSED", "Pi ACP is closed.");
+    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError("ACP_PROCESS_LIMIT", "Too many Pi ACP sessions are active.");
     const client = this.factory();
     this.starting.add(client);
     this.all.add(client);
     try {
       await client.start();
-      if (this.closed) throw new CursorAcpError("ACP_CLOSED", "PI ACP is closed.");
+      if (this.closed) throw new CursorAcpError("ACP_CLOSED", "Pi ACP is closed.");
       return client;
     } catch (error) {
       await this.dispose(client);
@@ -33811,7 +33770,7 @@ var PiAcpClient = class {
       const receive = (message) => {
         if (replaying) {
           if (message.kind === "request") {
-            void client2.respondError(message.id, -32600, "PI session is not loaded.").catch(() => void 0);
+            void client2.respondError(message.id, -32600, "Pi session is not loaded.").catch(() => void 0);
           } else if (message.params?.sessionId === boundId) {
             this.updateConfiguration(boundId, message, replayConfiguration);
           }
@@ -33842,7 +33801,7 @@ var PiAcpClient = class {
       try {
         const result = await client2.call(method, params, timeoutMs);
         const id6 = method === "session/load" ? p.sessionId : result.sessionId;
-        if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", "PI returned an invalid session.");
+        if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", "Pi returned an invalid session.");
         this.clients.set(id6, client2);
         const config = { ...result };
         for (const key of ["models", "modes"]) {
@@ -33859,14 +33818,14 @@ var PiAcpClient = class {
       }
     }
     const client = this.clients.get(String(p.sessionId));
-    if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the PI session before using it.");
+    if (!client) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the Pi session before using it.");
     const id5 = String(p.sessionId);
     if (method === "dsh/sessionModels") return this.models(id5);
     if (method === "dsh/selectModel") {
-      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the PI reply before changing its model.");
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "Stop the Pi reply before changing its model.");
       const config = this.configurations.get(id5);
       if (!config?.models?.availableModels?.some((item) => item.modelId === p.model) || p.reasoningEffort !== void 0 && !config?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) {
-        throw new CursorAcpError("INVALID_MESSAGE", "The PI model or thinking level is not available.");
+        throw new CursorAcpError("INVALID_MESSAGE", "The Pi model or thinking level is not available.");
       }
       this.busy.add(id5);
       try {
@@ -33883,7 +33842,7 @@ var PiAcpClient = class {
       }
     }
     if (method === "session/prompt") {
-      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The PI session is busy.");
+      if (this.busy.has(id5)) throw new CursorAcpError("PROMPT_IN_PROGRESS", "The Pi session is busy.");
       this.busy.add(id5);
       try {
         return await client.call(method, params, timeoutMs);
@@ -33920,7 +33879,7 @@ var PiAcpClient = class {
       current: { provider: "pi", model: config?.models?.currentModelId ?? "", reasoningEffort: modes?.currentModeId },
       routable: true,
       failures: [],
-      groups: [{ id: "pi", name: "PI", models: (config?.models?.availableModels ?? []).map((model) => ({
+      groups: [{ id: "pi", name: "Pi", models: (config?.models?.availableModels ?? []).map((model) => ({
         id: model.modelId,
         name: model.name,
         ...modes?.availableModes?.length ? { reasoning: { efforts: modes.availableModes.map((mode2) => ({ id: mode2.id, name: mode2.name })), defaultEffort: modes.currentModeId } } : {}
@@ -33929,7 +33888,7 @@ var PiAcpClient = class {
   }
   /** A separate wrapper prevents history reads from interrupting active sessions. */
   async history(sessionId, cwd2) {
-    if (this.historyBusy) throw new CursorAcpError("ACP_PROCESS_LIMIT", "A PI history read is already in progress.");
+    if (this.historyBusy) throw new CursorAcpError("ACP_PROCESS_LIMIT", "A Pi history read is already in progress.");
     this.historyBusy = true;
     let client;
     try {
@@ -33950,8 +33909,8 @@ var PiAcpClient = class {
     try {
       const result = await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
       const loadedId = result?.sessionId;
-      if (loadedId !== void 0 && loadedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "PI returned an invalid history session.");
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "PI history exceeds the transfer limit.");
+      if (loadedId !== void 0 && loadedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "Pi returned an invalid history session.");
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) throw new CursorAcpError("ACP_HISTORY_TOO_LARGE", "Pi history exceeds the transfer limit.");
       return acpHistoryEvents(updates, sessionId, "pi");
     } finally {
       try {
@@ -33963,7 +33922,7 @@ var PiAcpClient = class {
   }
   async respond(id5, result) {
     const pending = this.callbacks.get(String(id5));
-    if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", "The PI callback is unavailable.");
+    if (!pending) throw new CursorAcpError("ACP_CALLBACK_NOT_FOUND", "The Pi callback is unavailable.");
     this.callbacks.delete(String(id5));
     await pending.client.respond(pending.id, result);
   }
@@ -34244,50 +34203,50 @@ var TranscriptWatcher = class extends EventEmitter {
     }
   }
   async parseAndDispatch(rawLine) {
-    let record8;
+    let record9;
     try {
-      record8 = JSON.parse(rawLine);
+      record9 = JSON.parse(rawLine);
     } catch {
       return;
     }
-    if (Array.isArray(record8.truncated_fields) && record8.truncated_fields.length > 0) {
-      record8 = await this.enrichFromFullTranscript(record8);
+    if (Array.isArray(record9.truncated_fields) && record9.truncated_fields.length > 0) {
+      record9 = await this.enrichFromFullTranscript(record9);
     }
-    this.emit("step", record8);
-    if (record8.type === "PLANNER_RESPONSE") {
-      if (record8.thinking && record8.thinking.trim() !== "") {
+    this.emit("step", record9);
+    if (record9.type === "PLANNER_RESPONSE") {
+      if (record9.thinking && record9.thinking.trim() !== "") {
         this.emit("thinking", {
-          stepIndex: record8.step_index,
-          thinking: record8.thinking,
-          createdAt: record8.created_at
+          stepIndex: record9.step_index,
+          thinking: record9.thinking,
+          createdAt: record9.created_at
         });
       }
-      if (Array.isArray(record8.tool_calls) && record8.tool_calls.length > 0) {
+      if (Array.isArray(record9.tool_calls) && record9.tool_calls.length > 0) {
         this.emit("toolCall", {
-          stepIndex: record8.step_index,
-          toolCalls: record8.tool_calls,
-          createdAt: record8.created_at
+          stepIndex: record9.step_index,
+          toolCalls: record9.tool_calls,
+          createdAt: record9.created_at
         });
       }
-      if (record8.content && record8.content.trim() !== "") {
+      if (record9.content && record9.content.trim() !== "") {
         this.emit("message", {
-          stepIndex: record8.step_index,
-          text: record8.content,
-          createdAt: record8.created_at
+          stepIndex: record9.step_index,
+          text: record9.content,
+          createdAt: record9.created_at
         });
       }
-    } else if (record8.type === "USER_INPUT" && record8.content) {
+    } else if (record9.type === "USER_INPUT" && record9.content) {
       this.emit("message", {
-        stepIndex: record8.step_index,
-        text: record8.content,
-        createdAt: record8.created_at
+        stepIndex: record9.step_index,
+        text: record9.content,
+        createdAt: record9.created_at
       });
     }
-    if (record8.status === "DONE" && record8.type === "PLANNER_RESPONSE") {
+    if (record9.status === "DONE" && record9.type === "PLANNER_RESPONSE") {
       this.emit("complete", this.conversationId);
     }
   }
-  async enrichFromFullTranscript(record8) {
+  async enrichFromFullTranscript(record9) {
     try {
       const content = await fs2.readFile(this.transcriptFullPath, "utf-8");
       const lines = content.split("\n");
@@ -34295,13 +34254,13 @@ var TranscriptWatcher = class extends EventEmitter {
         const trimmed = line.trim();
         if (!trimmed) continue;
         const full = JSON.parse(trimmed);
-        if (full.step_index === record8.step_index) {
+        if (full.step_index === record9.step_index) {
           return full;
         }
       }
     } catch {
     }
-    return record8;
+    return record9;
   }
 };
 
@@ -34896,6 +34855,81 @@ function withoutSelectionArgs(args) {
 // src/acp/adapters/opencode-process.ts
 import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
+
+// src/acp/adapters/opencode-models.ts
+var OpencodeModels = class {
+  model;
+  effort;
+  legacy = false;
+  update(value) {
+    if (!record6(value)) return;
+    if (Array.isArray(value.configOptions)) {
+      this.model = readOption(value.configOptions.find((option) => record6(option) && option.id === "model"));
+      this.effort = readOption(value.configOptions.find((option) => record6(option) && option.id === "effort"));
+      this.legacy = false;
+    } else if (record6(value.models) && Array.isArray(value.models.availableModels) && typeof value.models.currentModelId === "string") {
+      this.model = {
+        id: "model",
+        current: value.models.currentModelId,
+        options: value.models.availableModels.flatMap((model) => record6(model) && typeof model.modelId === "string" && typeof model.name === "string" ? [{ id: model.modelId, name: model.name }] : [])
+      };
+      this.effort = void 0;
+      this.legacy = true;
+    } else if (value.sessionUpdate === "current_model_update" && typeof value.currentModelId === "string" && this.model) {
+      this.model.current = value.currentModelId;
+    }
+  }
+  catalog() {
+    const model = this.model;
+    const effort = this.effort;
+    const models = (model?.options ?? []).map((item) => ({
+      ...item,
+      // ACP advertises effort choices only for the currently selected model.
+      ...item.id === model?.current && effort ? { reasoning: { efforts: effort.options, defaultEffort: effort.current } } : {}
+    }));
+    return {
+      current: {
+        provider: "opencode",
+        model: model?.current ?? "host-settings",
+        ...effort ? { reasoningEffort: effort.current } : {}
+      },
+      routable: models.length > 0,
+      failures: [],
+      groups: [{ id: "opencode", name: "OpenCode", models }]
+    };
+  }
+  async select(sessionId, model, effort, request) {
+    if (typeof model !== "string" || !this.model?.options.some((item) => item.id === model)) {
+      throw new Error("The selected OpenCode model is unavailable on this Host.");
+    }
+    if (effort !== void 0 && (model !== this.model.current || !this.effort?.options.some((item) => item.id === effort))) {
+      throw new Error("Select the OpenCode model before choosing an available effort level.");
+    }
+    if (this.legacy) {
+      await request("session/set_model", { sessionId, modelId: model });
+      this.model.current = model;
+    } else {
+      this.update(await request("session/set_config_option", { sessionId, configId: "model", value: model }));
+      if (this.model?.current !== model) throw new Error("OpenCode did not confirm the model change.");
+    }
+    if (effort !== void 0) {
+      if (!this.effort?.options.some((item) => item.id === effort)) throw new Error("The OpenCode effort level is unavailable.");
+      this.update(await request("session/set_config_option", { sessionId, configId: "effort", value: effort }));
+      if (this.effort?.current !== effort) throw new Error("OpenCode did not confirm the effort change.");
+    }
+    return { selected: this.catalog().current };
+  }
+};
+function readOption(value) {
+  if (!record6(value) || value.type !== "select" || typeof value.id !== "string" || typeof value.currentValue !== "string" || !Array.isArray(value.options)) return void 0;
+  const options = value.options.flatMap((option) => record6(option) && Array.isArray(option.options) ? option.options : [option]);
+  return { id: value.id, current: value.currentValue, options: options.flatMap((option) => record6(option) && typeof option.value === "string" && typeof option.name === "string" ? [{ id: option.value, name: option.name }] : []) };
+}
+function record6(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
@@ -34952,7 +34986,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed.");
     if (this.historyBusy) throw new OpencodeAcpError("OPENCODE_HISTORY_BUSY", "An OpenCode history read is already in progress.");
     this.historyBusy = true;
-    const client = new _OpencodeAcpClient(this.binary, this.logger, void 0, this.options);
+    const client = new _OpencodeAcpClient(this.binary, this.logger, void 0, { ...this.options, historyReader: true });
     const updates = [];
     let bytes = 0;
     let count = 0;
@@ -34979,28 +35013,69 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.historyBusy = false;
     }
   }
-  selectedModel;
+  models = /* @__PURE__ */ new Map();
+  loads = /* @__PURE__ */ new Map();
+  busy = /* @__PURE__ */ new Set();
   async call(method, params, timeoutMs) {
-    if (method === "dsh/sessionModels") {
-      const catalog = modelCatalog("opencode");
-      const currentModel = this.selectedModel ?? catalog.default.model;
-      return {
-        current: { provider: "opencode", model: currentModel },
-        routable: true,
-        failures: [],
-        groups: catalog.groups
-      };
-    }
-    if (method === "dsh/selectModel") {
-      const p = params;
-      if (typeof p?.model === "string") {
-        this.selectedModel = p.model;
-      }
-      return { selected: { provider: "opencode", model: this.selectedModel ?? "opencode/deepseek-v4.1-flash-free" } };
-    }
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
+    const p = isRecord17(params) ? params : {};
+    const id5 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
+    if (method === "session/load" && id5) {
+      if (this.models.has(id5)) return { sessionId: id5 };
+      const pending = this.loads.get(id5);
+      if (pending) return pending;
+      const load = Promise.resolve().then(() => this.loadSession(method, params, budget, id5));
+      this.loads.set(id5, load);
+      try {
+        return await load;
+      } finally {
+        this.loads.delete(id5);
+      }
+    }
+    if (method === "session/new") return this.loadSession(method, params, budget);
+    if (method === "dsh/sessionModels" || method === "dsh/selectModel") {
+      const models = id5 ? this.models.get(id5) : void 0;
+      if (!models) throw new OpencodeAcpError("ACP_SESSION_NOT_LOADED", "Load the OpenCode session before selecting its model.");
+      if (method === "dsh/sessionModels") return models.catalog();
+      if (this.busy.has(id5)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before changing its model.");
+      this.busy.add(id5);
+      try {
+        const result = await models.select(id5, p.model, p.reasoningEffort, (method2, params2) => this.request(method2, params2, budget));
+        this.publish({ kind: "notification", method: "session/update", params: {
+          sessionId: id5,
+          update: { sessionUpdate: "model_selection", selected: result.selected }
+        } });
+        return result;
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
+    if (method === "session/prompt" && id5) {
+      if (this.busy.has(id5)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "The OpenCode session is busy.");
+      this.busy.add(id5);
+      try {
+        return await this.request(method, params, budget);
+      } finally {
+        this.busy.delete(id5);
+      }
+    }
     return this.request(method, params, budget);
+  }
+  async loadSession(method, params, budget, sessionId) {
+    const result = await this.request(method, params, budget);
+    const returnedId = isRecord17(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const id5 = sessionId ?? returnedId;
+    if (!this.ready || !id5 || sessionId && returnedId && returnedId !== sessionId) {
+      throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
+    }
+    const models = new OpencodeModels();
+    models.update(result);
+    this.models.set(id5, models);
+    return result;
+  }
+  publish(message) {
+    for (const handler of this.inboundHandlers) handler(message);
   }
   async respond(id5, result) {
     this.write({ jsonrpc: "2.0", id: id5, result });
@@ -35020,6 +35095,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.closed) return;
     this.closed = true;
     this.ready = false;
+    this.models.clear();
     this.failPending(new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed."));
     const child = this.process;
     this.process = void 0;
@@ -35055,6 +35131,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
+      this.models.clear();
       this.failPending(new OpencodeAcpError("OPENCODE_ACP_EXITED", "OpenCode ACP exited unexpectedly."));
       if (!this.closed) {
         this.logger?.warn("OpenCode ACP exited", {
@@ -35153,10 +35230,19 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    for (const handler of this.inboundHandlers) handler(inbound);
+    if (inbound.kind === "request" && isRecord17(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
+      void this.respondError(inbound.id, -32600, "OpenCode session is not loaded.").catch(() => void 0);
+      return;
+    }
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord17(params) && typeof params.sessionId === "string") {
+      this.models.get(params.sessionId)?.update(params.update);
+      if (this.loads.has(params.sessionId) && !this.options.historyReader) return;
+    }
+    this.publish(inbound);
   }
   handleProcessFailure(code, cause) {
     this.ready = false;
+    this.models.clear();
     this.failPending(new OpencodeAcpError(code, "OpenCode ACP communication failed.", { cause }));
     const child = this.process;
     this.process = void 0;
@@ -35338,14 +35424,14 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join10(
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    let record8;
+    let record9;
     try {
-      record8 = JSON.parse(trimmed);
+      record9 = JSON.parse(trimmed);
     } catch {
       continue;
     }
-    const time = record8.created_at ? new Date(record8.created_at).getTime() : Date.now();
-    if (record8.type === "USER_INPUT") {
+    const time = record9.created_at ? new Date(record9.created_at).getTime() : Date.now();
+    if (record9.type === "USER_INPUT") {
       if (turnOpen) {
         push("step/end", { turn: currentTurn, step: 1 }, time);
         push("turn/end", { turn: currentTurn, reason: { kind: "completed" } }, time);
@@ -35355,25 +35441,25 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join10(
       turnOpen = true;
       push("turn/start", { turn: currentTurn }, time);
       push("step/start", { turn: currentTurn, step: 1 }, time);
-      const text = cleanUserPrompt(record8.content);
-      const images = (await Promise.all(agyImageReferences(record8.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
+      const text = cleanUserPrompt(record9.content);
+      const images = (await Promise.all(agyImageReferences(record9.content ?? "").map((path) => readAgyImage(conversationId, path)))).filter((image) => image !== void 0);
       push("user/message", {
-        id: `user:${record8.step_index}`,
+        id: `user:${record9.step_index}`,
         role: "user",
         content: [...text ? [{ type: "text", text }] : [], ...images],
         source: { kind: "user" }
       }, time, true);
-    } else if (record8.type === "PLANNER_RESPONSE") {
+    } else if (record9.type === "PLANNER_RESPONSE") {
       if (!turnOpen) {
         currentTurn += 1;
         turnOpen = true;
         push("turn/start", { turn: currentTurn }, time);
         push("step/start", { turn: currentTurn, step: 1 }, time);
       }
-      if (Array.isArray(record8.tool_calls)) {
-        for (const call of record8.tool_calls) {
+      if (Array.isArray(record9.tool_calls)) {
+        for (const call of record9.tool_calls) {
           const toolName = typeof call.name === "string" && call.name.length > 0 ? call.name : "tool";
-          const callId = `${record8.step_index}:${toolName}`;
+          const callId = `${record9.step_index}:${toolName}`;
           push("tool/call", {
             turn: currentTurn,
             step: 1,
@@ -35386,17 +35472,17 @@ async function loadTranscriptEvents(conversationId, sessionId, baseDir = join10(
           }, time, false);
         }
       }
-      if (record8.content && record8.content.trim() !== "") {
+      if (record9.content && record9.content.trim() !== "") {
         const contentBlocks2 = [];
-        if (record8.thinking && record8.thinking.trim() !== "") {
-          contentBlocks2.push({ type: "reasoning", text: record8.thinking.trim() });
+        if (record9.thinking && record9.thinking.trim() !== "") {
+          contentBlocks2.push({ type: "reasoning", text: record9.thinking.trim() });
         }
-        contentBlocks2.push({ type: "text", text: record8.content.trim() });
+        contentBlocks2.push({ type: "text", text: record9.content.trim() });
         push("assistant/message", {
           turn: currentTurn,
           step: 1,
           message: {
-            id: `${sessionId}:${record8.step_index}`,
+            id: `${sessionId}:${record9.step_index}`,
             role: "assistant",
             content: contentBlocks2
           },
@@ -35493,11 +35579,11 @@ async function readTranscriptSummary(baseDir, conversationId) {
       const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
       const firstLine = buffer.subarray(0, bytesRead).toString("utf-8").split("\n")[0];
       if (!firstLine) return void 0;
-      const record8 = JSON.parse(firstLine);
-      if (record8.type !== "USER_INPUT") return void 0;
-      const title = cleanUserPrompt(record8.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record8.content ?? "").length > 0 ? "Image" : void 0);
+      const record9 = JSON.parse(firstLine);
+      if (record9.type !== "USER_INPUT") return void 0;
+      const title = cleanUserPrompt(record9.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record9.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record8.created_at ? new Date(record8.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
+      return { conversationId, title, createdAt: record9.created_at ? new Date(record9.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -36266,10 +36352,11 @@ var AcpRemoteGateway = class {
     if (isSessionMutation(call.method) && sessionId !== void 0) {
       this.requireSessionOwner(connectionId, sessionId);
     }
-    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && call.params.backend === "pi") {
+    if ((call.method === "dsh/sessionModels" || call.method === "dsh/selectModel") && (call.params.backend === "pi" || call.params.backend === "opencode")) {
       this.requireSessionOwner(connectionId, sessionId);
-      const cwd2 = await this.piSessionCwd(sessionId);
-      await this.requireAcp("pi").call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      const backend = call.params.backend;
+      const cwd2 = await this.catalogSessionCwd(backend, sessionId);
+      await this.requireAcp(backend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
     }
     if (call.method === "dsh/selectModel") {
       const session = this.sessionCwds.get(sessionId);
@@ -37083,7 +37170,7 @@ var PluginControlRuntime = class {
       if (endpoint === "settings.acp.remove") return ok3(await this.removeAcp(payload));
       if (endpoint === "settings.logout") return ok3(await this.logout());
       if (endpoint === "host.authorization.set" && this.client !== void 0) {
-        const value = record6(payload);
+        const value = record7(payload);
         if (typeof value.enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
         const status2 = await this.client.setHostAuthorization(value.enabled);
         if (this.settings !== void 0) {
@@ -37102,7 +37189,7 @@ var PluginControlRuntime = class {
       if (endpoint === "devices") return ok3([]);
       if (endpoint === "host.account.login") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record6(payload);
+        const value = record7(payload);
         if (typeof value.email !== "string" || typeof value.password !== "string") {
           throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
         }
@@ -37110,13 +37197,13 @@ var PluginControlRuntime = class {
       }
       if (endpoint === "host.registration-code.submit") {
         if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record6(payload);
+        const value = record7(payload);
         if (typeof value.code !== "string" || value.code.trim() === "") {
           throw new ClientModeError("INVALID_MESSAGE", "A Host registration code is required.");
         }
         return ok3(await this.host.authorizeHostWithCode(value.code));
       }
-      if (endpoint === "mode.set" && record6(payload).mode === "local") return ok3(this.hostOnlyStatus());
+      if (endpoint === "mode.set" && record7(payload).mode === "local") return ok3(this.hostOnlyStatus());
       throw new ClientModeError("METHOD_NOT_ALLOWED", "Remote Client mode is disabled by the plugin role.");
     } catch (error) {
       return fail4(error);
@@ -37126,7 +37213,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const value = record6(payload);
+    const value = record7(payload);
     if (value.role !== "host" && value.role !== "client") {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
     }
@@ -37167,7 +37254,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const value = record6(payload);
+    const value = record7(payload);
     if (typeof value.serverUrl !== "string") {
       throw new ClientModeError("INVALID_MESSAGE", "Server URL is required.");
     }
@@ -37180,7 +37267,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const role = record6(payload).role;
+    const role = record7(payload).role;
     if (role !== "host" && role !== "client") {
       throw new ClientModeError("INVALID_MESSAGE", "Role must be Host or Client.");
     }
@@ -37194,7 +37281,7 @@ var PluginControlRuntime = class {
   }
   async setDevelopment(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    const value = record6(payload);
+    const value = record7(payload);
     if (value.terminalEnabled !== void 0 && typeof value.terminalEnabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "The terminal switch must be a boolean.");
     if (value.ports !== void 0 && (!Array.isArray(value.ports) || value.ports.some((port) => !Number.isInteger(port)))) throw new ClientModeError("INVALID_MESSAGE", "Loopback ports must be integers.");
     if (value.terminalEnabled === void 0 && value.ports === void 0) throw new ClientModeError("INVALID_MESSAGE", "A terminal switch or loopback ports are required.");
@@ -37213,7 +37300,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const enabled = record6(payload).enabled;
+    const enabled = record7(payload).enabled;
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Codex Remote enabled must be a boolean.");
     }
@@ -37223,7 +37310,7 @@ var PluginControlRuntime = class {
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
-    const enabled = record6(payload).enabled;
+    const enabled = record7(payload).enabled;
     if (typeof enabled !== "boolean") {
       throw new ClientModeError("INVALID_MESSAGE", "Cursor Remote enabled must be a boolean.");
     }
@@ -37242,7 +37329,7 @@ var PluginControlRuntime = class {
   }
   async setAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    const value = record6(payload);
+    const value = record7(payload);
     const backend = value.backend;
     const enabled = value.enabled;
     if (typeof backend !== "string" || typeof enabled !== "boolean") throw new ClientModeError("INVALID_MESSAGE", "ACP backend and enabled are required.");
@@ -37260,7 +37347,7 @@ var PluginControlRuntime = class {
   }
   async addAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    const value = record6(payload);
+    const value = record7(payload);
     if (typeof value.id !== "string" || typeof value.command !== "string" || !Array.isArray(value.args) || !value.args.every((item) => typeof item === "string")) {
       throw new ClientModeError("INVALID_MESSAGE", "ACP name, command, and arguments are required.");
     }
@@ -37275,7 +37362,7 @@ var PluginControlRuntime = class {
   }
   async removeAcp(payload) {
     if (this.settings === void 0) throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    const id5 = record6(payload).id;
+    const id5 = record7(payload).id;
     if (typeof id5 !== "string" || ["codex", "cursor", "antigravity", "pi", "claude", "opencode"].includes(id5)) throw new ClientModeError("INVALID_MESSAGE", "Only custom ACP backends can be removed.");
     const current = resolveConfig(this.settings.get());
     const backends = (current.acp?.backends ?? []).filter((item) => item.id !== id5);
@@ -37401,7 +37488,7 @@ function editableConfig(config) {
 function isRecord20(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function record6(value) {
+function record7(value) {
   if (!isRecord20(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
@@ -40308,11 +40395,11 @@ function needsDirectoryFallback(result) {
   return code.includes("capability") || code === "directory-picker/unavailable" || code === "directory-picker-unavailable" || message.includes("browse capability") || message.includes("browser capability") || message.includes("brower capability") || message.includes("directory-picker-unavailable");
 }
 function requestArgs(payload) {
-  const root = record7(payload);
+  const root = record8(payload);
   const args = isRecord21(root.args) ? root.args : root;
-  return record7(args.request ?? args._request ?? args);
+  return record8(args.request ?? args._request ?? args);
 }
-function record7(value) {
+function record8(value) {
   return isRecord21(value) ? value : {};
 }
 function isRecord21(value) {

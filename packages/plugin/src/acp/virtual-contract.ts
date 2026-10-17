@@ -24,13 +24,13 @@ export type PiTurnOutcome = { kind: 'completed' } | { kind: 'max-tokens' }
 export function piStreamOutcome(reason: AgentAcpStreamClosedData['reason']): PiTurnOutcome {
   if (reason === 'completed') return { kind: 'completed' }
   if (reason === 'cancelled' || reason === 'peer-disconnected') return { kind: 'aborted', reason: { kind: reason === 'cancelled' ? 'user' : 'disposed' } }
-  return { kind: 'error', error: { code: 'ACP_STREAM_FAILED', message: 'PI reply stream failed.' } }
+  return { kind: 'error', error: { code: 'ACP_STREAM_FAILED', message: 'Pi reply stream failed.' } }
 }
 
 export function piPromptOutcome(kind: string, update: JsonRecord): PiTurnOutcome {
   if (update.stopReason === 'cancelled') return { kind: 'aborted', reason: { kind: 'user' } }
   if (kind === 'prompt_failed' || update.stopReason === 'error') return {
-    kind: 'error', error: { code: 'PI_PROMPT_FAILED', message: 'PI reply failed.' },
+    kind: 'error', error: { code: 'PI_PROMPT_FAILED', message: 'Pi reply failed.' },
   }
   if (update.stopReason === 'max_tokens') return { kind: 'max-tokens' }
   return { kind: 'completed' }

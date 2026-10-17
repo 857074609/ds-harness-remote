@@ -117,7 +117,7 @@ describe('PI ACP client isolation and recovery', () => {
     expect(result.groups[0]?.models[0]?.reasoning).toEqual(models.groups[0]!.models[0]!.reasoning)
     selectModel.mockClear()
     sessionModels.mockClear()
-    await expect(selectPiModel(client, 'durable', { provider: 'codex', model: 'other' })).rejects.toThrow('Invalid PI model provider')
+    await expect(selectPiModel(client, 'durable', { provider: 'codex', model: 'other' })).rejects.toThrow('Invalid ACP model provider')
     expect(selectModel).not.toHaveBeenCalled()
     selectModel.mockRejectedValueOnce(new Error('denied'))
     await expect(selectPiModel(client, 'durable', { provider: 'pi', model: 'provider/model' })).rejects.toThrow('denied')

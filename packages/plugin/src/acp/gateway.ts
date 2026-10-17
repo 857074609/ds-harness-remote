@@ -449,10 +449,11 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId)
     }
 
-    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && call.params.backend === 'pi') {
+    if ((call.method === 'dsh/sessionModels' || call.method === 'dsh/selectModel') && (call.params.backend === 'pi' || call.params.backend === 'opencode')) {
       this.requireSessionOwner(connectionId, sessionId!)
-      const cwd = await this.piSessionCwd(sessionId!)
-      await this.requireAcp('pi').call('session/load', { sessionId, cwd, mcpServers: [] })
+      const backend = call.params.backend
+      const cwd = await this.catalogSessionCwd(backend, sessionId!)
+      await this.requireAcp(backend).call('session/load', { sessionId, cwd, mcpServers: [] })
     }
 
     if (call.method === 'dsh/selectModel') {

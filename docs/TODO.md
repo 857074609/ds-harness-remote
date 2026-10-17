@@ -117,6 +117,10 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P1：Agent ACP / Cursor / Antigravity（实验）
 
+- [x] OpenCode 模型目录与切换使用真实 ACP 上游响应，按会话隔离；Pi / AGY / OpenCode 投影只提交确认状态，Android 接入 AGY 模型/思考强度。
+- [ ] Cursor / Claude Remote 真实模型目录与切换；Cursor 已移除仅在本地记录的无效选项。
+- [ ] OpenCode 模型切换及 AGY Android 模型选择的 APK / 真机 / 加密跨设备验收。
+
 通用 `agent.acp.*` gateway 已接入 Cursor 与 Antigravity adapter。技术说明见
 [docs/acp-remote.md](acp-remote.md)。**暂不**推进 Codex→ACP adapter。
 

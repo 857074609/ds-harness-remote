@@ -460,16 +460,16 @@ describe('session restore state machine', () => {
       },
     )
   })
-  it('ignores PI model commits completing after navigation and releases the old selector state', async () => {
-    await runScenarios(['resolve', 'reject'].map(outcome => ({ name: outcome, run: async () => {
+  it('ignores ACP model commits completing after navigation and releases the old selector state', async () => {
+    await runScenarios((['pi', 'opencode', 'antigravity'] as const).flatMap(backend => ['resolve', 'reject'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
       let finish!: () => void
       acp.selectModel.mockReturnValueOnce(new Promise((resolve, reject) => {
-        finish = () => outcome === 'resolve' ? resolve({ provider: 'pi', model: 'm', reasoningEffort: 'high' }) : reject(new Error('late rejection'))
+        finish = () => outcome === 'resolve' ? resolve({ provider: backend, model: 'm', reasoningEffort: 'high' }) : reject(new Error('late rejection'))
       }))
-      acp.sessionModels.mockResolvedValue({ current: { provider: 'pi', model: 'm', reasoningEffort: 'high' }, groups: [], failures: [], routable: true })
-      const selected = { ...session, backend: 'pi' as const, sessionId: 'pi:old', nativeId: 'old' }
+      acp.sessionModels.mockResolvedValue({ current: { provider: backend, model: 'm', reasoningEffort: 'high' }, groups: [], failures: [], routable: true })
+      const selected = { ...session, backend, sessionId: `${backend}:old`, nativeId: 'old' }
       useAppStore.setState({ selectedSession: selected, sessions: [selected] })
-      const selecting = useAppStore.getState().selectModel({ provider: 'pi', model: 'm', reasoningEffort: 'high' })
+      const selecting = useAppStore.getState().selectModel({ provider: backend, model: 'm', reasoningEffort: 'high' })
       expect(useAppStore.getState().modelSelecting).toBe(true)
       expect(await useAppStore.getState().openSession({ ...session, sessionId: 'new' })).toBe(true)
       expect(useAppStore.getState().modelSelecting).toBe(false)
@@ -478,7 +478,7 @@ describe('session restore state machine', () => {
       expect(useAppStore.getState().selectedSession?.sessionId).toBe('new')
       expect(useAppStore.getState().sessionModels).toBeUndefined()
       expect(useAppStore.getState().error).toBeUndefined()
-    } })), prepareScenario1)
+    } }))), prepareScenario1)
   })
 
   it('deduplicates ACP boundary overlap only with an identity anchor', () => {

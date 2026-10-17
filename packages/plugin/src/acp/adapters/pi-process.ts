@@ -28,14 +28,14 @@ export class PiAcpClient implements CursorAcpLike {
   }
   isReady(): boolean { return !this.closed && this.catalog?.isReady() === true }
   private async create(history = false): Promise<CursorAcpLike> {
-    if (this.closed) throw new CursorAcpError('ACP_CLOSED', 'PI ACP is closed.')
-    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError('ACP_PROCESS_LIMIT', 'Too many PI ACP sessions are active.')
+    if (this.closed) throw new CursorAcpError('ACP_CLOSED', 'Pi ACP is closed.')
+    if (this.all.size >= (history ? 32 : 31)) throw new CursorAcpError('ACP_PROCESS_LIMIT', 'Too many Pi ACP sessions are active.')
     const client = this.factory()
     this.starting.add(client)
     this.all.add(client)
     try {
       await client.start()
-      if (this.closed) throw new CursorAcpError('ACP_CLOSED', 'PI ACP is closed.')
+      if (this.closed) throw new CursorAcpError('ACP_CLOSED', 'Pi ACP is closed.')
       return client
     } catch (error) { await this.dispose(client); throw error }
     finally { this.starting.delete(client) }
@@ -68,7 +68,7 @@ export class PiAcpClient implements CursorAcpLike {
         // state and reject callbacks before this wrapper has a committed session.
         if (replaying) {
           if (message.kind === 'request') {
-            void client.respondError(message.id, -32600, 'PI session is not loaded.').catch(() => undefined)
+            void client.respondError(message.id, -32600, 'Pi session is not loaded.').catch(() => undefined)
           } else if ((message.params as { sessionId?: string } | undefined)?.sessionId === boundId) {
             this.updateConfiguration(boundId!, message, replayConfiguration)
           }
@@ -94,7 +94,7 @@ export class PiAcpClient implements CursorAcpLike {
         const result = await client.call(method, params, timeoutMs)
         const id = method === 'session/load' ? p.sessionId : (result as Record<string, unknown>).sessionId
         if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,240}$/.test(id) || this.clients.has(id) || this.closed
-          || (method === 'session/load' && typeof (result as Record<string, unknown>).sessionId === 'string' && (result as Record<string, unknown>).sessionId !== id)) throw new CursorAcpError('ACP_INVALID_SESSION', 'PI returned an invalid session.')
+          || (method === 'session/load' && typeof (result as Record<string, unknown>).sessionId === 'string' && (result as Record<string, unknown>).sessionId !== id)) throw new CursorAcpError('ACP_INVALID_SESSION', 'Pi returned an invalid session.')
         this.clients.set(id, client)
         const config = { ...(result as Record<string, any>) }
         for (const key of ['models', 'modes']) {
@@ -108,15 +108,15 @@ export class PiAcpClient implements CursorAcpLike {
       } catch (error) { await this.dispose(client); throw error }
     }
     const client = this.clients.get(String(p.sessionId))
-    if (!client) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', 'Load the PI session before using it.')
+    if (!client) throw new CursorAcpError('ACP_SESSION_NOT_LOADED', 'Load the Pi session before using it.')
     const id = String(p.sessionId)
     if (method === 'dsh/sessionModels') return this.models(id)
     if (method === 'dsh/selectModel') {
-      if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'Stop the PI reply before changing its model.')
+      if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'Stop the Pi reply before changing its model.')
       const config = this.configurations.get(id)!
       if (!config?.models?.availableModels?.some((item: any) => item.modelId === p.model)
         || (p.reasoningEffort !== undefined && !config?.modes?.availableModes?.some((item: any) => item.id === p.reasoningEffort))) {
-        throw new CursorAcpError('INVALID_MESSAGE', 'The PI model or thinking level is not available.')
+        throw new CursorAcpError('INVALID_MESSAGE', 'The Pi model or thinking level is not available.')
       }
       this.busy.add(id)
       try {
@@ -131,7 +131,7 @@ export class PiAcpClient implements CursorAcpLike {
       } finally { this.busy.delete(id) }
     }
     if (method === 'session/prompt') {
-      if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'The PI session is busy.')
+      if (this.busy.has(id)) throw new CursorAcpError('PROMPT_IN_PROGRESS', 'The Pi session is busy.')
       this.busy.add(id)
       try { return await client.call(method, params, timeoutMs) } finally { this.busy.delete(id) }
     }
@@ -157,14 +157,14 @@ export class PiAcpClient implements CursorAcpLike {
     const config = this.configurations.get(id)
     const modes = config?.modes
     return { current: { provider: 'pi', model: config?.models?.currentModelId ?? '', reasoningEffort: modes?.currentModeId },
-      routable: true, failures: [], groups: [{ id: 'pi', name: 'PI', models: (config?.models?.availableModels ?? []).map((model: any) => ({
+      routable: true, failures: [], groups: [{ id: 'pi', name: 'Pi', models: (config?.models?.availableModels ?? []).map((model: any) => ({
         id: model.modelId, name: model.name, ...(modes?.availableModes?.length ? { reasoning: { efforts: modes.availableModes.map((mode: any) => ({ id: mode.id, name: mode.name })), defaultEffort: modes.currentModeId } } : {}),
       })) }] }
   }
 
   /** A separate wrapper prevents history reads from interrupting active sessions. */
   async history(sessionId: string, cwd: string): Promise<unknown[]> {
-    if (this.historyBusy) throw new CursorAcpError('ACP_PROCESS_LIMIT', 'A PI history read is already in progress.')
+    if (this.historyBusy) throw new CursorAcpError('ACP_PROCESS_LIMIT', 'A Pi history read is already in progress.')
     this.historyBusy = true
     let client: CursorAcpLike
     try { client = await this.create(true) }
@@ -181,15 +181,15 @@ export class PiAcpClient implements CursorAcpLike {
     try {
       const result = await client.call('session/load', { sessionId, cwd, mcpServers: [] })
       const loadedId = (result as { sessionId?: unknown } | null)?.sessionId
-      if (loadedId !== undefined && loadedId !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', 'PI returned an invalid history session.')
-      if (bytes > 8 * 1024 * 1024 || count > 10000) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', 'PI history exceeds the transfer limit.')
+      if (loadedId !== undefined && loadedId !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', 'Pi returned an invalid history session.')
+      if (bytes > 8 * 1024 * 1024 || count > 10000) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', 'Pi history exceeds the transfer limit.')
       return acpHistoryEvents(updates, sessionId, 'pi')
     }
     finally { try { await this.dispose(client) } finally { this.historyBusy = false } }
   }
   async respond(id: string | number, result: unknown): Promise<void> {
     const pending = this.callbacks.get(String(id))
-    if (!pending) throw new CursorAcpError('ACP_CALLBACK_NOT_FOUND', 'The PI callback is unavailable.')
+    if (!pending) throw new CursorAcpError('ACP_CALLBACK_NOT_FOUND', 'The Pi callback is unavailable.')
     this.callbacks.delete(String(id)); await pending.client.respond(pending.id, result)
   }
   async respondError(id: string | number, code: number, message: string): Promise<void> {

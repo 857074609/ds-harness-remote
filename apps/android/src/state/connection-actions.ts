@@ -27,8 +27,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const generation = ++runtime.connectionGeneration
       ++runtime.sessionLoadGeneration
       const sameHost = get().selectedDevice?.deviceId === device.deviceId
+      // reconnect() marks recovery before delegating here. A direct connect starts
+      // a new usage lifecycle even when choosing the same Host again.
+      const recovering = sameHost && get().connection.phase === 'reconnecting'
       // In-memory ACP sessions belong to one Host; keep them only across its reconnect.
       set(state => ({
+        ...(!recovering ? { currentWorkSessionIds: [] } : {}),
         ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
@@ -262,6 +266,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         archivedSessionIds: [],
         sessions: [],
         selectedSession: undefined,
+        currentWorkSessionIds: [],
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
         sessionModels: undefined,

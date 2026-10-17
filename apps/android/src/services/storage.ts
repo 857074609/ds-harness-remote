@@ -22,6 +22,7 @@ const KEYS = {
   themePreference: 'dshremote.theme-preference.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
+  hostSessionsDrawer: 'dshremote.host-sessions-drawer.v1',
   workspaceBackends: 'dshremote.workspace-backends.v1',
   codexPermissionPresets: 'dshremote.codex-permission-presets.v1',
   favoriteWorkspaces: 'dshremote.favorite-workspaces.v1',
@@ -195,6 +196,33 @@ export function saveCollapsedWorkspaceIds(deviceId: string, workspaceIds: readon
     await writeJson(KEYS.collapsedWorkspaces, { byDevice })
   })
   return collapsedWorkspacesWrite
+}
+
+// One queue protects read/modify/write across hosts and drawer remounts. A failed
+// operation rejects its caller, but must not poison later reads or writes.
+let hostSessionsDrawerWrite = Promise.resolve()
+
+export async function loadHostSessionsDrawerGroups(deviceId: string): Promise<Record<string, boolean>> {
+  await hostSessionsDrawerWrite
+  const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+  const byDevice = isRecord(stored) && isRecord(stored.byDevice) ? stored.byDevice : {}
+  const groups = byDevice[deviceId]
+  return isRecord(groups)
+    ? Object.fromEntries(Object.entries(groups).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean'))
+    : {}
+}
+
+export function saveHostSessionsDrawerGroup(deviceId: string, groupKey: string, expanded: boolean): Promise<void> {
+  const nextWrite = hostSessionsDrawerWrite.then(async () => {
+    const stored = await readJson<unknown>(KEYS.hostSessionsDrawer)
+    const byDevice = isRecord(stored) && isRecord(stored.byDevice) ? stored.byDevice : {}
+    const groups = isRecord(byDevice[deviceId]) ? byDevice[deviceId] : {}
+    await writeJson(KEYS.hostSessionsDrawer, {
+      byDevice: { ...byDevice, [deviceId]: { ...groups, [groupKey]: expanded } },
+    })
+  })
+  hostSessionsDrawerWrite = nextWrite.catch(() => undefined)
+  return nextWrite
 }
 
 export async function loadWorkspaceBackend(deviceId: string): Promise<AgentBackend | undefined> {

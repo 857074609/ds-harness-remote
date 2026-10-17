@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ActivityIndicator, SectionList, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Activity, ArrowLeft, Check, ChevronDown, ChevronRight, Code2, Folder, FolderOpen, MessageSquare, Sparkles, RefreshCw } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -12,6 +12,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { resolveSessionDisplayTitle } from './session-title'
 import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { workspaceParentPath } from '../lib/workspace-path'
+import { loadHostSessionsDrawerGroups, saveHostSessionsDrawerGroup } from '../services/storage'
 
 const SESSION_PAGE_SIZE = 3
 
@@ -23,6 +24,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
   // The store's catalog is scoped to selectedDevice and reset when changing hosts.
   const device = useAppStore(state => state.selectedDevice)
   const sessions = useAppStore(state => state.sessions)
+  const currentWorkSessionIds = useAppStore(state => state.currentWorkSessionIds)
   const lifecycles = useAppStore(state => state.sessionLifecycles)
   const selected = useAppStore(state => state.selectedSession)
   const archivedIds = useAppStore(state => state.archivedSessionIds)
@@ -32,8 +34,32 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const [refreshing, setRefreshing] = useState(false)
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({})
   const [visibleSessionCounts, setVisibleSessionCounts] = useState<Record<string, number>>({})
+  const deviceId = device?.deviceId
+  const [groupsByDevice, setGroupsByDevice] = useState<Record<string, Record<string, boolean>>>({})
+  const [storageErrors, setStorageErrors] = useState<Record<string, boolean>>({})
+  const expandedGroups = deviceId === undefined ? {} : groupsByDevice[deviceId] ?? {}
+  useEffect(() => {
+    if (deviceId === undefined) return
+    let cancelled = false
+    void loadHostSessionsDrawerGroups(deviceId).then(saved => {
+      if (cancelled) return
+      // Explicit user choices made while reading take precedence over hydration.
+      setGroupsByDevice(current => ({ ...current, [deviceId]: { ...saved, ...current[deviceId] } }))
+    }).catch(() => {
+      if (!cancelled) setStorageErrors(current => ({ ...current, [deviceId]: true }))
+    })
+    return () => { cancelled = true }
+  }, [deviceId])
+  const toggleGroup = (key: string, expanded: boolean) => {
+    if (deviceId === undefined) return
+    setGroupsByDevice(current => ({ ...current, [deviceId]: { ...current[deviceId], [key]: expanded } }))
+    // Keep a failure visible for this open drawer: later successful writes to
+    // another group do not imply the failed choice was persisted.
+    void saveHostSessionsDrawerGroup(deviceId, key, expanded).catch(() => {
+      setStorageErrors(current => ({ ...current, [deviceId]: true }))
+    })
+  }
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
@@ -50,14 +76,17 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
     const unassigned = sessions.filter(session => !archived.has(session.sessionId) && !assigned.has(session.sessionId))
       .sort((a, b) => b.updatedAt - a.updatedAt)
     if (unassigned.length > 0) grouped.push({ key: 'unassigned', title: strings.chat.otherHostSessions, backend: 'harness', detail: '', sessions: unassigned })
-    const running = sessions.filter(session => !archived.has(session.sessionId) && (lifecycles[session.sessionId]?.running ?? session.running))
+    const usedIds = new Set(currentWorkSessionIds)
+    const knownSessions = selected !== undefined && !sessions.some(session => session.sessionId === selected.sessionId)
+      ? [selected, ...sessions] : sessions
+    const currentWork = knownSessions.filter(session => !archived.has(session.sessionId) && usedIds.has(session.sessionId))
       .sort((a, b) => b.updatedAt - a.updatedAt)
-    grouped.unshift({ key: 'running', title: strings.chat.runningHostSessions, backend: 'harness', detail: '', sessions: running })
+    grouped.unshift({ key: 'current-work', title: strings.chat.currentWorkSessions, backend: 'harness', detail: '', sessions: currentWork })
     return grouped
-  }, [sessions, archivedIds, workspaces, lifecycles, strings])
+  }, [sessions, selected, archivedIds, workspaces, currentWorkSessionIds, strings])
   const sections = groups.map(group => {
     const isWorkspace = group.key.startsWith('workspace:')
-    const expanded = expandedGroups[group.key] ?? (isWorkspace || group.key === 'running' || group.sessions.some(session => session.sessionId === selected?.sessionId))
+    const expanded = expandedGroups[group.key] ?? (isWorkspace || group.key === 'current-work' || group.sessions.some(session => session.sessionId === selected?.sessionId))
     const visibleSessions = isWorkspace ? group.sessions.slice(0, visibleSessionCounts[group.key] ?? SESSION_PAGE_SIZE) : group.sessions
     return { ...group, expanded, data: expanded ? visibleSessions : [] }
   })
@@ -77,6 +106,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
           <IconButton label={strings.common.refresh} icon={RefreshCw} onPress={() => void refresh()} disabled={refreshing || busy !== undefined || !connected} />
         </View>
         {error !== undefined && <Text style={styles.error} accessibilityRole="alert">{error}</Text>}
+        {deviceId !== undefined && storageErrors[deviceId] && <Text style={styles.error} accessibilityRole="alert">{strings.app.secureStorageUnavailable}</Text>}
         <SectionList
           sections={sections}
           stickySectionHeadersEnabled={false}
@@ -86,8 +116,8 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
           onRefresh={() => void refresh()}
           renderSectionFooter={({ section }) => {
             if (!section.expanded) return null
-            if (section.key === 'running' && section.sessions.length === 0) {
-              return <Text style={styles.emptyRunning}>{strings.chat.noRunningHostSessions}</Text>
+            if (section.key === 'current-work' && section.sessions.length === 0) {
+              return <Text style={styles.emptyRunning}>{strings.chat.noCurrentWorkSessions}</Text>
             }
             if (section.data.length === section.sessions.length) return null
             return <Pressable
@@ -105,11 +135,11 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
             accessibilityRole="button"
             accessibilityLabel={section.expanded ? strings.workspaces.collapseWorkspace(section.title) : strings.workspaces.expandWorkspace(section.title)}
             accessibilityState={{ expanded: section.expanded }}
-            onPress={() => setExpandedGroups(current => ({ ...current, [section.key]: !section.expanded }))}
+            onPress={() => toggleGroup(section.key, !section.expanded)}
             style={({ pressed }) => [styles.group, pressed && styles.pressedRow]}
           >
             <View style={styles.workspaceIcon}>
-              {section.key === 'running'
+              {section.key === 'current-work'
                 ? <Activity size={18} color={colors.primary} />
                 : section.backend === 'codex'
                 ? <Code2 size={18} color={colors.primary} />
@@ -127,11 +157,14 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect }: {
             {section.expanded ? <ChevronDown size={18} color={colors.muted} /> : <ChevronRight size={18} color={colors.muted} />}
             <View pointerEvents="none" style={styles.rowSeparator} />
           </Pressable>}
-          renderItem={({ item }) => {
+          renderItem={({ item, index, section }) => {
             const active = item.sessionId === selected?.sessionId
             const running = lifecycles[item.sessionId]?.running ?? item.running
             const disabled = busy !== undefined || refreshing || !connected
-            return <View><Pressable
+            return <View style={styles.sessionBranch}>
+              <View pointerEvents="none" style={[styles.branchTrunk, index === section.data.length - 1 && styles.branchEnd]} />
+              <View pointerEvents="none" style={styles.branchLink} />
+              <Pressable
               accessibilityRole="button"
               accessibilityState={{ selected: active, disabled }}
               disabled={disabled}
@@ -164,16 +197,20 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
   list: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
-  group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs, minHeight: 72 },
+  group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.sm, paddingHorizontal: spacing.xs, minHeight: 72, marginTop: spacing.sm, backgroundColor: colors.surfaceStrong, borderRadius: radius.md },
   workspaceIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   groupTitleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
-  groupTitle: { ...type.heading, color: colors.ink, flex: 1 },
+  groupTitle: { ...type.heading, fontWeight: '700', color: colors.ink, flex: 1 },
   count: { ...type.caption, color: colors.muted },
   rowSeparator: { position: 'absolute', bottom: 0, left: spacing.xs + 40 + spacing.xs, right: spacing.xs, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, borderRadius: radius.sm },
   showMoreSessions: { minHeight: 48, paddingVertical: spacing.sm, paddingLeft: spacing.xs + 40 + spacing.xs, paddingRight: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, borderRadius: radius.sm },
   showMoreSessionsText: { ...type.smallStrong, color: colors.primary },
-  sessionIcon: { width: 40, alignItems: 'center', justifyContent: 'center' },
+  sessionBranch: { paddingLeft: 32 },
+  branchTrunk: { position: 'absolute', left: 24, top: 0, bottom: 0, width: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
+  branchEnd: { bottom: '50%' },
+  branchLink: { position: 'absolute', left: 24, top: '50%', width: 12, height: StyleSheet.hairlineWidth, backgroundColor: colors.separator },
+  sessionIcon: { width: 28, alignItems: 'center', justifyContent: 'center' },
   activeRow: { backgroundColor: colors.primarySoft },
   pressedRow: { backgroundColor: colors.surfaceStrong },
   copy: { flex: 1, minWidth: 0 },

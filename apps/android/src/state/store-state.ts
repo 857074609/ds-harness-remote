@@ -54,6 +54,8 @@ export interface AppState {
   archivedSessionIds: string[]
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
+  /** Successfully opened in this remote-use lifecycle; retained across transport recovery. */
+  currentWorkSessionIds: string[]
   messages: Record<string, ChatItem[]>
   sessionLifecycles: Record<string, { seq: number; running: boolean; turn?: string; finished?: 'completed' | 'failed' }>
   sessionProjectionSeqs: Record<string, Record<string, number>>
@@ -153,7 +155,7 @@ export const disconnected: ConnectionSnapshot = {
 
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -176,6 +178,7 @@ export function initialData(): Pick<AppState,
     archivedSessionIds: [],
     sessions: [],
     selectedSession: undefined,
+    currentWorkSessionIds: [],
     messages: {},
     sessionLifecycles: {},
     sessionProjectionSeqs: {},

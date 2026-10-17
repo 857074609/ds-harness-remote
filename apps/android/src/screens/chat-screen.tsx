@@ -295,15 +295,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     return placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
   }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
   const visibleUiIds = useMemo(() => new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
-  const interleavedTurns = useMemo(() => {
-    const seen = new Set<string>()
-    const interleaved = new Set<string>()
-    for (const section of visibleSections) if (section.kind === 'process') {
-      if (seen.has(section.turn)) interleaved.add(section.turn)
-      seen.add(section.turn)
-    }
-    return interleaved
-  }, [visibleSections])
   // Queued prompts: the Host `inbox` projection is authoritative (includes
   // items queued from other devices); local `queued` rows are the fallback for
   // Hosts without projections. Rows in this state are hidden from the timeline.
@@ -453,9 +444,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? []} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? []} availableUiIds={visibleUiIds} foldAllowed={!interleavedTurns.has(item.turn)} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? []} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? []} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, interleavedTurns, uiBySection, visibleUiIds])
+  [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can

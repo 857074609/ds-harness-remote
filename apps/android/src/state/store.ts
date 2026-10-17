@@ -45,6 +45,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   recentWorkspaces: [],
   archivedSessionIds: [],
   sessions: [],
+  currentWorkSessionIds: [],
   messages: {},
   sessionLifecycles: {},
   sessionProjectionSeqs: {},

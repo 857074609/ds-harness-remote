@@ -92,6 +92,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       runtime.flushPendingMuxFrames()
       let loadGeneration = ++runtime.sessionLoadGeneration
       const current = () => loadGeneration === runtime.sessionLoadGeneration
+      const finishOpen = async () => {
+        await runtime.rememberRecentWorkspace(session)
+        if (!current() || get().selectedSession?.sessionId !== session.sessionId) return false
+        set(state => state.currentWorkSessionIds.includes(session.sessionId)
+          ? {}
+          : { currentWorkSessionIds: [...state.currentWorkSessionIds, session.sessionId] })
+        return true
+      }
       // Reset per-session view state up front: `historyLoadingOlder` and the
       // model catalog belong to the previous session and must not leak into the
       // new one (stuck pagination spinners, codex prompts sent with the previous
@@ -268,8 +276,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       try {
         await load()
         if (!current()) return false
-        await runtime.rememberRecentWorkspace(session)
-        return true
+        return await finishOpen()
       } catch (error) {
         if (!current()) return false
         // A subagent address that never answers must not burn a full reconnect
@@ -292,8 +299,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             try {
               await load()
               if (!current()) return false
-              await runtime.rememberRecentWorkspace(session)
-              return true
+              return await finishOpen()
             } catch (retryError) {
               if (!current()) return false
               set({ busyAction: undefined, error: friendlyError(retryError) })

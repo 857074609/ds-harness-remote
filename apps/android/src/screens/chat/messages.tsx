@@ -53,36 +53,25 @@ import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
 import { createStyles } from './styles'
 
-/** ui-chat has two independent folds: activity ranges, then a normally ended whole Turn. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, foldAllowed, busyAction, onApproval, onQuestion }: {
+/** Only activity ranges fold; completing a turn must never hide spoken replies. */
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, busyAction, onApproval, onQuestion }: {
   items: ChatItem[]
   artifacts: UiArtifact[]
   updatedArtifacts: UiArtifact[]
   availableUiIds: ReadonlySet<string>
-  foldAllowed: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
-  const [open, setOpen] = useState(false)
   const backend = useAppStore(state => state.selectedSession?.backend)
   const last = items.at(-1)
   const codexClosed = backend === 'codex' && !items.some(isActiveChatItem)
     && last?.kind === 'message' && last.role === 'assistant'
   const end = items.find(item => item.turnEnd !== undefined)?.turnEnd
     ?? (codexClosed ? { reason: 'completed' as const, time: 0 } : undefined)
-  const pending = items.some(item => (item.kind === 'approval' || item.kind === 'question') && item.outcome === undefined)
-  const canFold = end?.reason === 'completed' && foldAllowed && !pending
-  const answer = end?.reason === 'completed' && last?.kind === 'message' && last.role === 'assistant'
-    && (hasVisibleMessageText(last.text) || (last.images?.length ?? 0) > 0) ? last : undefined
-  const process: ChatItem[] = answer === undefined ? items : [
-    ...items.slice(0, -1),
-    ...(hasVisibleMessageText(answer.reasoning ?? '') ? [{ ...answer, text: '', images: undefined }] : []),
-  ]
-  const segments = useMemo(() => processSegments(process), [items, answer])
-  const expanded = !canFold || open
+  const segments = useMemo(() => processSegments(items), [items])
   const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
     && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
     && !availableUiIds.has(item.id)
@@ -91,18 +80,13 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   return <View style={styles.processGroup}>
-    {end !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={label}
-      accessibilityState={{ expanded, disabled: !canFold || process.length === 0 }}
-      disabled={!canFold || process.length === 0} onPress={() => setOpen(value => !value)}
-      style={({ pressed }) => [styles.turnProcessHeader, pressed && styles.reasoningHeaderPressed]}>
+    {end !== undefined && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
-      {canFold && process.length > 0 && (expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />)}
-    </Pressable>}
-    {expanded && segments.map((segment, index) => segment.kind === 'response'
+    </View>}
+    {segments.map((segment, index) => segment.kind === 'response'
       ? <MessageBubble key={segment.key} item={segment.item} compact />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
-    {answer !== undefined && <MessageBubble item={{ ...answer, reasoning: undefined }} compact />}
     {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
     {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
     {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}

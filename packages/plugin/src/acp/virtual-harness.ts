@@ -224,6 +224,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'workspace/insertSessionBefore': return business(await this.workspaceForSession(requestArg(args)))
         case 'workspace/archiveSession': return business(await this.archiveSession(requestArg(args)))
         case 'session/list': return business(success({ items: await this.handleSessionList() }))
+        case 'session/projections': return business(await this.sessionProjections(requestArg(args)))
         case 'session/search': return business(success({ items: [], hasMore: false }))
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(failure('bad-request', `${this.backendLabel()} Remote does not support session fork yet.`))
@@ -553,6 +554,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         },
       },
     })
+  }
+
+  private async sessionProjections(request: JsonRecord): Promise<unknown> {
+    const sessionId = extractSessionId(request)
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId)
+    if (session === undefined) return success(null)
+    await this.hydrateSession(session)
+    return success(this.sessionSummary(session, session.events.at(-1)?.event.seq ?? -1).projections)
   }
 
   private async sessionPage(request: JsonRecord): Promise<unknown> {

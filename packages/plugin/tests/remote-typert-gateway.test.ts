@@ -5,6 +5,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { RemoteTypertGateway } from '../src/remote-typert-gateway.js'
 
 describe('RemoteTypertGateway', () => {
+  it('marks legacy projection cuts while preserving migration-required and missing results', async () => {
+    await runScenarios([
+      { name: 'legacy exact cut', value: { asOfSeq: 7, values: { title: 'fixture' } }, expected: { kind: 'sequenced', asOfSeq: 7, values: { title: 'fixture' } } },
+      { name: 'migration hint', value: { kind: 'migration-required', values: { title: 'fixture' } }, expected: { kind: 'migration-required', values: { title: 'fixture' } } },
+      { name: 'absent', value: null, expected: null },
+    ].map(({ name, value, expected }) => ({ name, run: async () => {
+      const remote = new RemoteTypertGateway({ rpc: vi.fn(async () => ({ ok: true, value })) } as unknown as RemoteClientCore)
+      await expect(remote.dispatch('session/projections', { args: { request: { sessionId: 's1' } } }, new AbortController().signal))
+        .resolves.toEqual({ ok: true, value: expected })
+    } })))
+  })
+
   it('preserves object-shaped Typert Remote arguments', async () => {
     await runScenarios([
       {

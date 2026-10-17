@@ -1,7 +1,7 @@
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 
 export interface PluginRouteConnectionLike {
-  createSharedFetchHandler?(channel: '/api'): { fetch(request: Request): Promise<Response> }
+  createSharedFetchHandler?(channel: '/api'): { fetch(request: Request, peer?: unknown): Promise<Response> }
   authenticatedUrl?(baseUrl: string): string
 }
 
@@ -9,6 +9,7 @@ export interface PluginRouteConnectionLike {
 export function createPluginRouteDispatcher(
   readConnection: () => PluginRouteConnectionLike | undefined,
   readPort: () => number | undefined,
+  peer?: unknown,
 ): PluginRouteDispatcher {
   let cookie: string | undefined
   return async (route, body, signal) => {
@@ -24,7 +25,7 @@ export function createPluginRouteDispatcher(
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body ?? {}),
         signal,
-      })), signal)
+      }), peer), signal)
     } else {
       const port = readPort()
       if (connection?.authenticatedUrl === undefined || typeof port !== 'number') {

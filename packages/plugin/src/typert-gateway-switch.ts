@@ -1,3 +1,4 @@
+import { openRemoteTerminal } from './terminal-carrier-compat.js'
 import type {
   LegacyWireStreamOpen,
   LocalTypertGateway,
@@ -10,7 +11,7 @@ import type {
 
 type RemoteInvoke = (request: TypertGatewayRequest) => Promise<unknown>
 type CarrierDispatch = (endpoint: string, payload: unknown, signal: AbortSignal, peer?: unknown) => Promise<TypertRpcResult>
-type CarrierOpen = (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<AsyncIterable<unknown>>
+type CarrierOpen = (endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>, peer?: unknown) => Promise<AsyncIterable<unknown>>
 
 /**
  * dsh 0.1.7-rc.1 private carrier dispatcher:
@@ -72,22 +73,24 @@ export class TypertGatewaySwitch {
   }
 
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
-  local(): LocalTypertGateway {
-    const dispatch: CarrierDispatch = this.localDispatch ?? (async (endpoint, payload, signal) => {
+  local(peer?: unknown): LocalTypertGateway {
+    const invoke: RemoteInvoke = request => this.localInvoke({ ...request, ...(peer === undefined ? {} : { peer }) })
+    const dispatch: CarrierDispatch = this.localDispatch === undefined ? (async (endpoint, payload, signal) => {
       try {
         const request = requestFromCarrier(endpoint, payload, signal)
-        return { ok: true, value: await this.localInvoke(request) }
+        return { ok: true, value: await invoke(request) }
       } catch (error) {
         return { ok: false, error: this.failure(error) }
       }
-    })
-    const open: CarrierOpen = this.localOpen ?? (async (endpoint, payload, signal) => {
+    }) : (endpoint, payload, signal) => this.localDispatch!(endpoint, payload, signal, peer)
+    const open: CarrierOpen = this.localOpen === undefined ? (async (endpoint, payload, signal) => {
       if (this.localStream === undefined) throw new Error('The local Harness Gateway does not support Remote streams.')
-      return this.localStream(requestFromCarrier(endpoint, payload, signal))
-    })
+      return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...(peer === undefined ? {} : { peer }) })
+    }) : (endpoint, payload, signal, uplink) => this.localOpen!(endpoint, payload, signal, uplink, peer)
     return {
-      invoke: this.localInvoke,
-      ...(this.localStream === undefined ? {} : { stream: this.localStream }),
+      invoke,
+      peer,
+      ...(this.localStream === undefined ? {} : { stream: (request: TypertGatewayRequest) => this.localStream!({ ...request, ...(peer === undefined ? {} : { peer }) }) }),
       dispatch,
       open,
       failure: error => this.failure(error),
@@ -111,7 +114,7 @@ export class TypertGatewaySwitch {
     if (this.originalStream !== undefined) {
       this.runtime.stream = request => this.remoteTarget === undefined || isLocalOnlyEndpoint(endpointOf(request))
         ? this.localStream!(request)
-        : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal)
+        : this.openRemote(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal, request.uplink)
     }
     if (this.originalDispatch !== undefined) {
       this.runtime.dispatchRpc = (...args) => {
@@ -137,7 +140,7 @@ export class TypertGatewaySwitch {
             : (open as CarrierOpen).call(this.runtime, endpoint, callArgs[1], callArgs[2] as AbortSignal)
         }
         const signal = (rc1 ? callArgs[4] : callArgs[2]) as AbortSignal | undefined
-        return this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal)
+        return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] as AsyncIterable<unknown> : undefined)
       }
     }
     this.installed = true
@@ -188,9 +191,15 @@ export class TypertGatewaySwitch {
     this.installed = false
   }
 
+  private openRemote(endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>): Promise<AsyncIterable<unknown>> {
+    return endpoint === 'terminal/attach'
+      ? openRemoteTerminal(this.remoteTarget!, payload, signal, uplink ?? endedUplink())
+      : this.remoteTarget!.open(endpoint, payload, signal)
+  }
+
   private selectInvoke(request: TypertGatewayRequest): Promise<unknown> {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request)
-    if (this.remoteTarget !== undefined) return this.remoteTarget.invoke(request)
+    if (this.remoteTarget !== undefined) return this.remoteTarget.invoke(request).then(value => normalizeTerminalEnvironment(endpointOf(request), value))
     if (request.namespace !== 'commands' || !isRemoteCommandMethod(request.method) || this.remoteInvoke === undefined) {
       return this.localInvoke(request)
     }
@@ -211,6 +220,7 @@ export class TypertGatewaySwitch {
 
 /** The local Connection HTTP hop needs the same binary envelope as the native Gateway. */
 function workspaceConnectionResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
+  if (endpoint === 'terminal/environment' && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) }
   if (endpoint !== 'workspaceFiles/readBytes' && endpoint !== 'officeToPdf/render') return result
   if (!result.ok || !isRecord(result.value) || !(result.value.data instanceof Uint8Array)) return result
   return {
@@ -261,8 +271,8 @@ function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): C
   const open = runtime.openWireStream
   if (open !== undefined) {
     return usesRc1Arity(open)
-      ? (endpoint, payload, signal) => (open as Rc1OpenWireStream)
-        .call(runtime, endpoint, payload, endedUplink(), undefined, signal, linkControl(signal))
+      ? (endpoint, payload, signal, uplink, peer) => (open as Rc1OpenWireStream)
+        .call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal))
       : (endpoint, payload, signal) => (open as CarrierOpen).call(runtime, endpoint, payload, signal)
   }
   const wire = gateway.wireStream
@@ -270,7 +280,7 @@ function createLocalOpen(gateway: TypertGatewayLike, runtime: RuntimeGateway): C
   const wireOpen = wire.open
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen as Rc1WireStreamOpen
-    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), undefined, signal)
+    return (endpoint, payload, signal, uplink, peer) => rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal)
   }
   const legacy = wireOpen as LegacyWireStreamOpen
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal)
@@ -302,4 +312,10 @@ function isRemoteCommandMethod(method: string): method is typeof REMOTE_COMMAND_
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** RC.1 input flow control also applies to older Hosts and CodeX/ACP projections. */
+function normalizeTerminalEnvironment(endpoint: string, value: unknown): unknown {
+  if (endpoint !== 'terminal/environment' || !isRecord(value) || value.maxBufferedBytes !== undefined) return value
+  return { ...value, maxBufferedBytes: 256 * 1024 }
 }

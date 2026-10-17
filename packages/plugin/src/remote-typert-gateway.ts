@@ -71,7 +71,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
       const value = this.compatibility === 'legacy-to-v3'
         ? normalizeLegacySessionGatewayValue(endpoint, result.value)
         : normalizeAssistantMessageStreamValue(endpoint, result.value)
-      return { ...result, value: normalizeWorkspaceBinaryResult(endpoint, value) }
+      return { ...result, value: normalizeProjectionResult(endpoint, normalizeWorkspaceBinaryResult(endpoint, value)) }
     }
     return result
   }
@@ -366,4 +366,10 @@ function patchWelcomeDescribe(value: Record<string, unknown>): Record<string, un
     return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } }
   })
   return { ...value, namespaces }
+}
+
+/** Older Hosts return the exact projection cut without RC.1's discriminator. */
+function normalizeProjectionResult(endpoint: string, value: unknown): unknown {
+  if (endpoint !== 'session/projections' || !isRecord(value) || value.kind !== undefined) return value
+  return Number.isSafeInteger(value.asOfSeq) && isRecord(value.values) ? { ...value, kind: 'sequenced' } : value
 }

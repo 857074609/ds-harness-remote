@@ -1,3 +1,4 @@
+import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
 import type {
   HarnessApiTransferChunkParams,
   HarnessApiTransferCommitResult,
@@ -144,6 +145,7 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'session/modelCatalog',
   'session/page',
   'session/prompt',
+  'remoteAccess/follow',
   'session/projections',
   'session/initializeDefaultModel',
   'session/workspacePathApplications',
@@ -194,6 +196,8 @@ export class HarnessRemoteBridge {
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
 
+  private readonly terminalCarrier: TerminalCarrierCompat | undefined
+
   constructor(
     private readonly gateway: LocalTypertGateway,
     private readonly publish: PublishRemoteFrame,
@@ -201,7 +205,9 @@ export class HarnessRemoteBridge {
     private readonly harnessVersion?: string,
     private readonly terminal = new TerminalPolicy(() => false, "", new Map()),
     private readonly codexWorkspace?: CodexWorkspaceBridge,
-  ) {}
+  ) {
+    this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : undefined
+  }
 
   async call(input: unknown): Promise<TypertRpcResult> {
     const params = callSchema.parse(input) as HarnessRemoteCallParams
@@ -236,7 +242,9 @@ export class HarnessRemoteBridge {
       const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion)
       const nativeResult = params.endpoint === 'commands/execute'
         ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion)
-        : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
+        : this.terminalCarrier !== undefined && (params.endpoint === 'terminal/write' || params.endpoint === 'terminal/resize')
+          ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal)
+          : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
         : nativeResult
@@ -398,7 +406,9 @@ export class HarnessRemoteBridge {
     let source: AsyncIterable<unknown>
     try {
       source = (this.codexWorkspace === undefined ? undefined : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal))
-        ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal)
+        ?? await (params.endpoint === 'terminal/follow' && this.terminalCarrier !== undefined
+          ? this.terminalCarrier.open(params.payload, controller.signal)
+          : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal))
       controller.signal.throwIfAborted()
     } catch (error) {
       this.streams.delete(params.streamId)
@@ -425,7 +435,7 @@ export class HarnessRemoteBridge {
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
     for (const [, stream] of streams) stream.controller.abort(reason)
-    await this.codexWorkspace?.closeAll()
+    await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()])
   }
 
   private assertAllowed(endpoint: string): void {

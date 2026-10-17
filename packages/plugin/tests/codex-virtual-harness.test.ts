@@ -27,6 +27,19 @@ describe('CodexVirtualHarness', () => {
     await target.close()
   })
 
+  it('returns RC.1 sequenced projections from CodeX history without forwarding its identity to Harness', async () => {
+    const hostCarrier = { invoke: vi.fn(), dispatch: vi.fn(), open: vi.fn() }
+    const target = new CodexVirtualHarness(fakeCodex(), { deviceId: 'host-1', name: 'Host' }, 'v3', hostCarrier)
+    const signal = new AbortController().signal
+    try {
+      await expect(target.dispatch('session/projections', { args: { request: { sessionId: 'codex:thr_1' } } }, signal))
+        .resolves.toMatchObject({ ok: true, value: { kind: 'sequenced', asOfSeq: expect.any(Number), values: { title: expect.any(String) } } })
+      await expect(target.dispatch('session/projections', { args: { request: { sessionId: 'codex:absent' } } }, signal))
+        .resolves.toEqual({ ok: true, value: null })
+      expect(hostCarrier.dispatch).not.toHaveBeenCalled()
+    } finally { await target.close() }
+  })
+
   it('answers the background-job roster without a terminal stream failure', async () => {
     const target = new CodexVirtualHarness(fakeCodex(), { deviceId: 'host-1', name: 'Host' })
     const rosterController = new AbortController()

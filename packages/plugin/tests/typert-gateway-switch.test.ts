@@ -58,6 +58,21 @@ describe('TypertGatewaySwitch', () => {
       target.restore()
     }
   })
+  it('supplies RC.1 terminal input flow control for older Hosts and projected backends', async () => {
+    const gateway = { invoke: vi.fn(async (_request: Parameters<TypertGatewayLike['invoke']>[0]) => undefined as unknown), dispatchRpc: vi.fn(async (_endpoint: string, _payload: unknown, _signal: AbortSignal) => ({ ok: true as const, value: undefined as unknown })) }
+    const switching = new TypertGatewaySwitch(gateway)
+    switching.install()
+    try {
+      await runScenarios([undefined, 131072].map(maxBufferedBytes => ({ name: String(maxBufferedBytes), run: async () => {
+        const value = { maxInputBytes: 65536, ...(maxBufferedBytes === undefined ? {} : { maxBufferedBytes }) }
+        switching.selectRemote({ invoke: async () => value, dispatch: async () => ({ ok: true, value }), open: async () => (async function* () {})() })
+        const expected = { ...value, maxBufferedBytes: maxBufferedBytes ?? 262144 }
+        await expect(gateway.invoke({ namespace: 'terminal', method: 'environment', args: {} })).resolves.toEqual(expected)
+        await expect(gateway.dispatchRpc('terminal/environment', {}, new AbortController().signal)).resolves.toEqual({ ok: true, value: expected })
+      } })))
+    } finally { switching.restore() }
+  })
+
   it('returns remote RPC refusals in the official HTTP envelope without calling local services', async () => {
     const ctx = new Context()
     try {
@@ -68,6 +83,7 @@ describe('TypertGatewaySwitch', () => {
       const target = new TypertGatewaySwitch(gateway)
       target.install()
       connection.rpc.intercept('/api', () => true, (endpoint, payload, signal) => gateway.dispatchRpc(endpoint, payload, signal))
+      const peer = connection.createPeer({ principal: { kind: 'owner' } })
       const handler = connection.createSharedFetchHandler('/api')
       await runScenarios(['METHOD_NOT_ALLOWED', 'TRANSPORT_CLOSED'].map(code => ({
         name: code,
@@ -79,7 +95,7 @@ describe('TypertGatewaySwitch', () => {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ type: 'client-request', rpcId: 'schedule-read', method: 'schedule/list', payload: { args: { request: { sessionId: 's1' } } } }),
-          }))
+          }), peer)
           expect(response.status).toBe(200)
           expect(await response.json()).toMatchObject({
             type: 'server-response', rpcId: 'schedule-read', result: { ok: false, error: { code } },
@@ -104,6 +120,7 @@ describe('TypertGatewaySwitch', () => {
       const target = new TypertGatewaySwitch(gateway)
       target.install()
       connection.rpc.intercept('/api', () => true, (endpoint, payload, signal) => gateway.dispatchRpc(endpoint, payload, signal))
+      const peer = connection.createPeer({ principal: { kind: 'owner' } })
       const handler = connection.createSharedFetchHandler('/api')
       await runScenarios(['workspaceFiles/readBytes', 'officeToPdf/render'].flatMap(endpoint =>
         [new Uint8Array([0, 255, 16]), new Uint8Array()].map(data => ({
@@ -119,7 +136,7 @@ describe('TypertGatewaySwitch', () => {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ type: 'client-request', rpcId: 'preview', method: endpoint, payload: { args: {} } }),
-            }))
+            }), peer)
             expect(response.status).toBe(200)
             expect(response.headers.get('content-type')).toContain('multipart/form-data')
             const parts = await response.formData()

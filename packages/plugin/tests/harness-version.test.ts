@@ -25,7 +25,7 @@ describe('Harness version discovery', () => {
     expect(harnessSessionGeneration('0.1.5-rc.1')).toBe('v3')
     expect(harnessSessionGeneration('0.1.7-rc.1')).toBe('v3')
     expect(harnessSessionGeneration('0.2.0-rc.1')).toBe('v3')
-    for (const version of ['0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1', '0.2.2-rc.1']) {
+    for (const version of ['0.2.0-rc.2', '0.2.1-alpha.1', '0.2.1-rc.1', 'dsh-v0.2.1-rc.1', '0.2.1', '0.2.2-rc.1']) {
       expect(harnessSessionGeneration(version), version).toBe('v3')
     }
     expect(harnessSessionGeneration('dsh-v0.2.0-rc.1')).toBe('v3')

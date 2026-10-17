@@ -405,3 +405,15 @@ ACP 恢复审查修复：Pi 初次 load 的文本/思考/tool 回放不得进入
 共享 ID/工具调用锚点做边界去重，不因相同短文本误删独立回复。Claude/Pi catalog 与缓存
 cwd 校验捕获后端实例，在异步操作后验证其仍有效，重配/禁用/关闭后的迟到结果明确失败，
 不可重建已清理的 authority。核心测试覆盖这些恢复/代际竞态；不新增真机或跨设备验收声明。
+
+## Harness 0.2.1 RC compatibility (2026-10-17)
+
+开发依赖升级到 `0.2.1-rc.1` 与 Cordis `4.0.5`，源码对照同级 Harness 仓库的
+`dsh-v0.2.1-rc.1` tag。已认证连接各自创建并释放官方 owner Peer，RPC/stream/事件回复与
+Fetch 路由共用该连接的 Peer，不使用共享 browser Peer，固定 allowlist 增加只读
+`remoteAccess/follow`。终端保持既有 Remote follow/write/resize 协议，在两端本地对接官方
+attach 双向流，按 Host ack 确认，保留有界队列、设备归属与断线不重放。CodeX/ACP 保留独立
+数据面；session/projections 返回各自历史/内存的 sequenced 投影，不进入 Harness 持久化。
+RC.1 官方 Gateway/Peer 与核心终端回归、全仓 check/test、生产 build/Hermes 和 DSH bundle
+校验通过；Plugin 最终 52 文件/349 测试。跨设备、Desktop UI、Android
+APK/原生真机与独立 Remote Web 尚未验收，详见 docs/compatibility.zh.md 与 docs/TODO.md。

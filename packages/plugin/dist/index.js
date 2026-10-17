@@ -5439,6 +5439,9 @@ var require_addon_serialize = __commonJS({
   }
 });
 
+// src/index.ts
+import * as DshConnection from "@deepseek-ai/dsh-client-connection";
+
 // node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -6098,41 +6101,41 @@ var ZodType = class {
   get description() {
     return this._def.description;
   }
-  _getType(input2) {
-    return getParsedType(input2.data);
+  _getType(input3) {
+    return getParsedType(input3.data);
   }
-  _getOrReturnCtx(input2, ctx) {
+  _getOrReturnCtx(input3, ctx) {
     return ctx || {
-      common: input2.parent.common,
-      data: input2.data,
-      parsedType: getParsedType(input2.data),
+      common: input3.parent.common,
+      data: input3.data,
+      parsedType: getParsedType(input3.data),
       schemaErrorMap: this._def.errorMap,
-      path: input2.path,
-      parent: input2.parent
+      path: input3.path,
+      parent: input3.parent
     };
   }
-  _processInputParams(input2) {
+  _processInputParams(input3) {
     return {
       status: new ParseStatus(),
       ctx: {
-        common: input2.parent.common,
-        data: input2.data,
-        parsedType: getParsedType(input2.data),
+        common: input3.parent.common,
+        data: input3.data,
+        parsedType: getParsedType(input3.data),
         schemaErrorMap: this._def.errorMap,
-        path: input2.path,
-        parent: input2.parent
+        path: input3.path,
+        parent: input3.parent
       }
     };
   }
-  _parseSync(input2) {
-    const result = this._parse(input2);
+  _parseSync(input3) {
+    const result = this._parse(input3);
     if (isAsync(result)) {
       throw new Error("Synchronous parse encountered promise.");
     }
     return result;
   }
-  _parseAsync(input2) {
-    const result = this._parse(input2);
+  _parseAsync(input3) {
+    const result = this._parse(input3);
     return Promise.resolve(result);
   }
   parse(data2, params) {
@@ -6458,13 +6461,13 @@ function isValidCidr(ip, version) {
   return false;
 }
 var ZodString = class _ZodString extends ZodType {
-  _parse(input2) {
+  _parse(input3) {
     if (this._def.coerce) {
-      input2.data = String(input2.data);
+      input3.data = String(input3.data);
     }
-    const parsedType = this._getType(input2);
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.string) {
-      const ctx2 = this._getOrReturnCtx(input2);
+      const ctx2 = this._getOrReturnCtx(input3);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.string,
@@ -6476,8 +6479,8 @@ var ZodString = class _ZodString extends ZodType {
     let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
-        if (input2.data.length < check.value) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (input3.data.length < check.value) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             minimum: check.value,
@@ -6489,8 +6492,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "max") {
-        if (input2.data.length > check.value) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (input3.data.length > check.value) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             maximum: check.value,
@@ -6502,10 +6505,10 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "length") {
-        const tooBig = input2.data.length > check.value;
-        const tooSmall = input2.data.length < check.value;
+        const tooBig = input3.data.length > check.value;
+        const tooSmall = input3.data.length < check.value;
         if (tooBig || tooSmall) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           if (tooBig) {
             addIssueToContext(ctx, {
               code: ZodIssueCode.too_big,
@@ -6528,8 +6531,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "email") {
-        if (!emailRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!emailRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "email",
             code: ZodIssueCode.invalid_string,
@@ -6541,8 +6544,8 @@ var ZodString = class _ZodString extends ZodType {
         if (!emojiRegex) {
           emojiRegex = new RegExp(_emojiRegex, "u");
         }
-        if (!emojiRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!emojiRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "emoji",
             code: ZodIssueCode.invalid_string,
@@ -6551,8 +6554,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "uuid") {
-        if (!uuidRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!uuidRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "uuid",
             code: ZodIssueCode.invalid_string,
@@ -6561,8 +6564,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "nanoid") {
-        if (!nanoidRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!nanoidRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "nanoid",
             code: ZodIssueCode.invalid_string,
@@ -6571,8 +6574,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "cuid") {
-        if (!cuidRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!cuidRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "cuid",
             code: ZodIssueCode.invalid_string,
@@ -6581,8 +6584,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "cuid2") {
-        if (!cuid2Regex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!cuid2Regex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "cuid2",
             code: ZodIssueCode.invalid_string,
@@ -6591,8 +6594,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "ulid") {
-        if (!ulidRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!ulidRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "ulid",
             code: ZodIssueCode.invalid_string,
@@ -6602,9 +6605,9 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "url") {
         try {
-          new URL(input2.data);
+          new URL(input3.data);
         } catch {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "url",
             code: ZodIssueCode.invalid_string,
@@ -6614,9 +6617,9 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "regex") {
         check.regex.lastIndex = 0;
-        const testResult = check.regex.test(input2.data);
+        const testResult = check.regex.test(input3.data);
         if (!testResult) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "regex",
             code: ZodIssueCode.invalid_string,
@@ -6625,10 +6628,10 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "trim") {
-        input2.data = input2.data.trim();
+        input3.data = input3.data.trim();
       } else if (check.kind === "includes") {
-        if (!input2.data.includes(check.value, check.position)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!input3.data.includes(check.value, check.position)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { includes: check.value, position: check.position },
@@ -6637,12 +6640,12 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "toLowerCase") {
-        input2.data = input2.data.toLowerCase();
+        input3.data = input3.data.toLowerCase();
       } else if (check.kind === "toUpperCase") {
-        input2.data = input2.data.toUpperCase();
+        input3.data = input3.data.toUpperCase();
       } else if (check.kind === "startsWith") {
-        if (!input2.data.startsWith(check.value)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!input3.data.startsWith(check.value)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { startsWith: check.value },
@@ -6651,8 +6654,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "endsWith") {
-        if (!input2.data.endsWith(check.value)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!input3.data.endsWith(check.value)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: { endsWith: check.value },
@@ -6662,8 +6665,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "datetime") {
         const regex = datetimeRegex(check);
-        if (!regex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!regex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "datetime",
@@ -6673,8 +6676,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "date") {
         const regex = dateRegex;
-        if (!regex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!regex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "date",
@@ -6684,8 +6687,8 @@ var ZodString = class _ZodString extends ZodType {
         }
       } else if (check.kind === "time") {
         const regex = timeRegex(check);
-        if (!regex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!regex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_string,
             validation: "time",
@@ -6694,8 +6697,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "duration") {
-        if (!durationRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!durationRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "duration",
             code: ZodIssueCode.invalid_string,
@@ -6704,8 +6707,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "ip") {
-        if (!isValidIP(input2.data, check.version)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!isValidIP(input3.data, check.version)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "ip",
             code: ZodIssueCode.invalid_string,
@@ -6714,8 +6717,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "jwt") {
-        if (!isValidJWT(input2.data, check.alg)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!isValidJWT(input3.data, check.alg)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "jwt",
             code: ZodIssueCode.invalid_string,
@@ -6724,8 +6727,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "cidr") {
-        if (!isValidCidr(input2.data, check.version)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!isValidCidr(input3.data, check.version)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "cidr",
             code: ZodIssueCode.invalid_string,
@@ -6734,8 +6737,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "base64") {
-        if (!base64Regex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!base64Regex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "base64",
             code: ZodIssueCode.invalid_string,
@@ -6744,8 +6747,8 @@ var ZodString = class _ZodString extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "base64url") {
-        if (!base64urlRegex.test(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!base64urlRegex.test(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             validation: "base64url",
             code: ZodIssueCode.invalid_string,
@@ -6757,7 +6760,7 @@ var ZodString = class _ZodString extends ZodType {
         util.assertNever(check);
       }
     }
-    return { status: status2.value, value: input2.data };
+    return { status: status2.value, value: input3.data };
   }
   _regex(regex, validation, message) {
     return this.refinement((data2) => regex.test(data2), {
@@ -7018,13 +7021,13 @@ var ZodNumber = class _ZodNumber extends ZodType {
     this.max = this.lte;
     this.step = this.multipleOf;
   }
-  _parse(input2) {
+  _parse(input3) {
     if (this._def.coerce) {
-      input2.data = Number(input2.data);
+      input3.data = Number(input3.data);
     }
-    const parsedType = this._getType(input2);
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.number) {
-      const ctx2 = this._getOrReturnCtx(input2);
+      const ctx2 = this._getOrReturnCtx(input3);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.number,
@@ -7036,8 +7039,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
     const status2 = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "int") {
-        if (!util.isInteger(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!util.isInteger(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.invalid_type,
             expected: "integer",
@@ -7047,9 +7050,9 @@ var ZodNumber = class _ZodNumber extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input2.data < check.value : input2.data <= check.value;
+        const tooSmall = check.inclusive ? input3.data < check.value : input3.data <= check.value;
         if (tooSmall) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             minimum: check.value,
@@ -7061,9 +7064,9 @@ var ZodNumber = class _ZodNumber extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input2.data > check.value : input2.data >= check.value;
+        const tooBig = check.inclusive ? input3.data > check.value : input3.data >= check.value;
         if (tooBig) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             maximum: check.value,
@@ -7075,8 +7078,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "multipleOf") {
-        if (floatSafeRemainder(input2.data, check.value) !== 0) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (floatSafeRemainder(input3.data, check.value) !== 0) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
             multipleOf: check.value,
@@ -7085,8 +7088,8 @@ var ZodNumber = class _ZodNumber extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "finite") {
-        if (!Number.isFinite(input2.data)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (!Number.isFinite(input3.data)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_finite,
             message: check.message
@@ -7097,7 +7100,7 @@ var ZodNumber = class _ZodNumber extends ZodType {
         util.assertNever(check);
       }
     }
-    return { status: status2.value, value: input2.data };
+    return { status: status2.value, value: input3.data };
   }
   gte(value, message) {
     return this.setLimit("min", value, true, errorUtil.toString(message));
@@ -7249,25 +7252,25 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
     this.min = this.gte;
     this.max = this.lte;
   }
-  _parse(input2) {
+  _parse(input3) {
     if (this._def.coerce) {
       try {
-        input2.data = BigInt(input2.data);
+        input3.data = BigInt(input3.data);
       } catch {
-        return this._getInvalidInput(input2);
+        return this._getInvalidInput(input3);
       }
     }
-    const parsedType = this._getType(input2);
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.bigint) {
-      return this._getInvalidInput(input2);
+      return this._getInvalidInput(input3);
     }
     let ctx = void 0;
     const status2 = new ParseStatus();
     for (const check of this._def.checks) {
       if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input2.data < check.value : input2.data <= check.value;
+        const tooSmall = check.inclusive ? input3.data < check.value : input3.data <= check.value;
         if (tooSmall) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             type: "bigint",
@@ -7278,9 +7281,9 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input2.data > check.value : input2.data >= check.value;
+        const tooBig = check.inclusive ? input3.data > check.value : input3.data >= check.value;
         if (tooBig) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             type: "bigint",
@@ -7291,8 +7294,8 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "multipleOf") {
-        if (input2.data % check.value !== BigInt(0)) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (input3.data % check.value !== BigInt(0)) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.not_multiple_of,
             multipleOf: check.value,
@@ -7304,10 +7307,10 @@ var ZodBigInt = class _ZodBigInt extends ZodType {
         util.assertNever(check);
       }
     }
-    return { status: status2.value, value: input2.data };
+    return { status: status2.value, value: input3.data };
   }
-  _getInvalidInput(input2) {
-    const ctx = this._getOrReturnCtx(input2);
+  _getInvalidInput(input3) {
+    const ctx = this._getOrReturnCtx(input3);
     addIssueToContext(ctx, {
       code: ZodIssueCode.invalid_type,
       expected: ZodParsedType.bigint,
@@ -7416,13 +7419,13 @@ ZodBigInt.create = (params) => {
   });
 };
 var ZodBoolean = class extends ZodType {
-  _parse(input2) {
+  _parse(input3) {
     if (this._def.coerce) {
-      input2.data = Boolean(input2.data);
+      input3.data = Boolean(input3.data);
     }
-    const parsedType = this._getType(input2);
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.boolean) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.boolean,
@@ -7430,7 +7433,7 @@ var ZodBoolean = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
 };
 ZodBoolean.create = (params) => {
@@ -7441,13 +7444,13 @@ ZodBoolean.create = (params) => {
   });
 };
 var ZodDate = class _ZodDate extends ZodType {
-  _parse(input2) {
+  _parse(input3) {
     if (this._def.coerce) {
-      input2.data = new Date(input2.data);
+      input3.data = new Date(input3.data);
     }
-    const parsedType = this._getType(input2);
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.date) {
-      const ctx2 = this._getOrReturnCtx(input2);
+      const ctx2 = this._getOrReturnCtx(input3);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.date,
@@ -7455,8 +7458,8 @@ var ZodDate = class _ZodDate extends ZodType {
       });
       return INVALID;
     }
-    if (Number.isNaN(input2.data.getTime())) {
-      const ctx2 = this._getOrReturnCtx(input2);
+    if (Number.isNaN(input3.data.getTime())) {
+      const ctx2 = this._getOrReturnCtx(input3);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_date
       });
@@ -7466,8 +7469,8 @@ var ZodDate = class _ZodDate extends ZodType {
     let ctx = void 0;
     for (const check of this._def.checks) {
       if (check.kind === "min") {
-        if (input2.data.getTime() < check.value) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (input3.data.getTime() < check.value) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_small,
             message: check.message,
@@ -7479,8 +7482,8 @@ var ZodDate = class _ZodDate extends ZodType {
           status2.dirty();
         }
       } else if (check.kind === "max") {
-        if (input2.data.getTime() > check.value) {
-          ctx = this._getOrReturnCtx(input2, ctx);
+        if (input3.data.getTime() > check.value) {
+          ctx = this._getOrReturnCtx(input3, ctx);
           addIssueToContext(ctx, {
             code: ZodIssueCode.too_big,
             message: check.message,
@@ -7497,7 +7500,7 @@ var ZodDate = class _ZodDate extends ZodType {
     }
     return {
       status: status2.value,
-      value: new Date(input2.data.getTime())
+      value: new Date(input3.data.getTime())
     };
   }
   _addCheck(check) {
@@ -7550,10 +7553,10 @@ ZodDate.create = (params) => {
   });
 };
 var ZodSymbol = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.symbol) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.symbol,
@@ -7561,7 +7564,7 @@ var ZodSymbol = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
 };
 ZodSymbol.create = (params) => {
@@ -7571,10 +7574,10 @@ ZodSymbol.create = (params) => {
   });
 };
 var ZodUndefined = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.undefined) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.undefined,
@@ -7582,7 +7585,7 @@ var ZodUndefined = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
 };
 ZodUndefined.create = (params) => {
@@ -7592,10 +7595,10 @@ ZodUndefined.create = (params) => {
   });
 };
 var ZodNull = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.null) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.null,
@@ -7603,7 +7606,7 @@ var ZodNull = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
 };
 ZodNull.create = (params) => {
@@ -7617,8 +7620,8 @@ var ZodAny = class extends ZodType {
     super(...arguments);
     this._any = true;
   }
-  _parse(input2) {
-    return OK(input2.data);
+  _parse(input3) {
+    return OK(input3.data);
   }
 };
 ZodAny.create = (params) => {
@@ -7632,8 +7635,8 @@ var ZodUnknown = class extends ZodType {
     super(...arguments);
     this._unknown = true;
   }
-  _parse(input2) {
-    return OK(input2.data);
+  _parse(input3) {
+    return OK(input3.data);
   }
 };
 ZodUnknown.create = (params) => {
@@ -7643,8 +7646,8 @@ ZodUnknown.create = (params) => {
   });
 };
 var ZodNever = class extends ZodType {
-  _parse(input2) {
-    const ctx = this._getOrReturnCtx(input2);
+  _parse(input3) {
+    const ctx = this._getOrReturnCtx(input3);
     addIssueToContext(ctx, {
       code: ZodIssueCode.invalid_type,
       expected: ZodParsedType.never,
@@ -7660,10 +7663,10 @@ ZodNever.create = (params) => {
   });
 };
 var ZodVoid = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.undefined) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.void,
@@ -7671,7 +7674,7 @@ var ZodVoid = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
 };
 ZodVoid.create = (params) => {
@@ -7681,8 +7684,8 @@ ZodVoid.create = (params) => {
   });
 };
 var ZodArray = class _ZodArray extends ZodType {
-  _parse(input2) {
-    const { ctx, status: status2 } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx, status: status2 } = this._processInputParams(input3);
     const def = this._def;
     if (ctx.parsedType !== ZodParsedType.array) {
       addIssueToContext(ctx, {
@@ -7822,10 +7825,10 @@ var ZodObject = class _ZodObject extends ZodType {
     this._cached = { shape, keys };
     return this._cached;
   }
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.object) {
-      const ctx2 = this._getOrReturnCtx(input2);
+      const ctx2 = this._getOrReturnCtx(input3);
       addIssueToContext(ctx2, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.object,
@@ -7833,7 +7836,7 @@ var ZodObject = class _ZodObject extends ZodType {
       });
       return INVALID;
     }
-    const { status: status2, ctx } = this._processInputParams(input2);
+    const { status: status2, ctx } = this._processInputParams(input3);
     const { shape, keys: shapeKeys } = this._getCached();
     const extraKeys = [];
     if (!(this._def.catchall instanceof ZodNever && this._def.unknownKeys === "strip")) {
@@ -8146,8 +8149,8 @@ ZodObject.lazycreate = (shape, params) => {
   });
 };
 var ZodUnion = class extends ZodType {
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     const options = this._def.options;
     function handleResults(results) {
       for (const result of results) {
@@ -8268,8 +8271,8 @@ var getDiscriminator = (type) => {
   }
 };
 var ZodDiscriminatedUnion = class _ZodDiscriminatedUnion extends ZodType {
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.object) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8382,8 +8385,8 @@ function mergeValues(a, b) {
   }
 }
 var ZodIntersection = class extends ZodType {
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     const handleParsed = (parsedLeft, parsedRight) => {
       if (isAborted(parsedLeft) || isAborted(parsedRight)) {
         return INVALID;
@@ -8435,8 +8438,8 @@ ZodIntersection.create = (left, right, params) => {
   });
 };
 var ZodTuple = class _ZodTuple extends ZodType {
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.array) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8508,8 +8511,8 @@ var ZodRecord = class _ZodRecord extends ZodType {
   get valueSchema() {
     return this._def.valueType;
   }
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.object) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8561,8 +8564,8 @@ var ZodMap = class extends ZodType {
   get valueSchema() {
     return this._def.valueType;
   }
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.map) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8621,8 +8624,8 @@ ZodMap.create = (keyType, valueType, params) => {
   });
 };
 var ZodSet = class _ZodSet extends ZodType {
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.set) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8710,8 +8713,8 @@ var ZodFunction = class _ZodFunction extends ZodType {
     super(...arguments);
     this.validate = this.implement;
   }
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.function) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8814,8 +8817,8 @@ var ZodLazy = class extends ZodType {
   get schema() {
     return this._def.getter();
   }
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     const lazySchema = this._def.getter();
     return lazySchema._parse({ data: ctx.data, path: ctx.path, parent: ctx });
   }
@@ -8828,9 +8831,9 @@ ZodLazy.create = (getter, params) => {
   });
 };
 var ZodLiteral = class extends ZodType {
-  _parse(input2) {
-    if (input2.data !== this._def.value) {
-      const ctx = this._getOrReturnCtx(input2);
+  _parse(input3) {
+    if (input3.data !== this._def.value) {
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         received: ctx.data,
         code: ZodIssueCode.invalid_literal,
@@ -8838,7 +8841,7 @@ var ZodLiteral = class extends ZodType {
       });
       return INVALID;
     }
-    return { status: "valid", value: input2.data };
+    return { status: "valid", value: input3.data };
   }
   get value() {
     return this._def.value;
@@ -8859,9 +8862,9 @@ function createZodEnum(values, params) {
   });
 }
 var ZodEnum = class _ZodEnum extends ZodType {
-  _parse(input2) {
-    if (typeof input2.data !== "string") {
-      const ctx = this._getOrReturnCtx(input2);
+  _parse(input3) {
+    if (typeof input3.data !== "string") {
+      const ctx = this._getOrReturnCtx(input3);
       const expectedValues = this._def.values;
       addIssueToContext(ctx, {
         expected: util.joinValues(expectedValues),
@@ -8873,8 +8876,8 @@ var ZodEnum = class _ZodEnum extends ZodType {
     if (!this._cache) {
       this._cache = new Set(this._def.values);
     }
-    if (!this._cache.has(input2.data)) {
-      const ctx = this._getOrReturnCtx(input2);
+    if (!this._cache.has(input3.data)) {
+      const ctx = this._getOrReturnCtx(input3);
       const expectedValues = this._def.values;
       addIssueToContext(ctx, {
         received: ctx.data,
@@ -8883,7 +8886,7 @@ var ZodEnum = class _ZodEnum extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
   get options() {
     return this._def.values;
@@ -8924,9 +8927,9 @@ var ZodEnum = class _ZodEnum extends ZodType {
 };
 ZodEnum.create = createZodEnum;
 var ZodNativeEnum = class extends ZodType {
-  _parse(input2) {
+  _parse(input3) {
     const nativeEnumValues = util.getValidEnumValues(this._def.values);
-    const ctx = this._getOrReturnCtx(input2);
+    const ctx = this._getOrReturnCtx(input3);
     if (ctx.parsedType !== ZodParsedType.string && ctx.parsedType !== ZodParsedType.number) {
       const expectedValues = util.objectValues(nativeEnumValues);
       addIssueToContext(ctx, {
@@ -8939,7 +8942,7 @@ var ZodNativeEnum = class extends ZodType {
     if (!this._cache) {
       this._cache = new Set(util.getValidEnumValues(this._def.values));
     }
-    if (!this._cache.has(input2.data)) {
+    if (!this._cache.has(input3.data)) {
       const expectedValues = util.objectValues(nativeEnumValues);
       addIssueToContext(ctx, {
         received: ctx.data,
@@ -8948,7 +8951,7 @@ var ZodNativeEnum = class extends ZodType {
       });
       return INVALID;
     }
-    return OK(input2.data);
+    return OK(input3.data);
   }
   get enum() {
     return this._def.values;
@@ -8965,8 +8968,8 @@ var ZodPromise = class extends ZodType {
   unwrap() {
     return this._def.type;
   }
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     if (ctx.parsedType !== ZodParsedType.promise && ctx.common.async === false) {
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
@@ -8998,8 +9001,8 @@ var ZodEffects = class extends ZodType {
   sourceType() {
     return this._def.schema._def.typeName === ZodFirstPartyTypeKind.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
   }
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     const effect = this._def.effect || null;
     const checkCtx = {
       addIssue: (arg) => {
@@ -9131,12 +9134,12 @@ ZodEffects.createWithPreprocess = (preprocess, schema, params) => {
   });
 };
 var ZodOptional = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType === ZodParsedType.undefined) {
       return OK(void 0);
     }
-    return this._def.innerType._parse(input2);
+    return this._def.innerType._parse(input3);
   }
   unwrap() {
     return this._def.innerType;
@@ -9150,12 +9153,12 @@ ZodOptional.create = (type, params) => {
   });
 };
 var ZodNullable = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType === ZodParsedType.null) {
       return OK(null);
     }
-    return this._def.innerType._parse(input2);
+    return this._def.innerType._parse(input3);
   }
   unwrap() {
     return this._def.innerType;
@@ -9169,8 +9172,8 @@ ZodNullable.create = (type, params) => {
   });
 };
 var ZodDefault = class extends ZodType {
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     let data2 = ctx.data;
     if (ctx.parsedType === ZodParsedType.undefined) {
       data2 = this._def.defaultValue();
@@ -9194,8 +9197,8 @@ ZodDefault.create = (type, params) => {
   });
 };
 var ZodCatch = class extends ZodType {
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     const newCtx = {
       ...ctx,
       common: {
@@ -9247,10 +9250,10 @@ ZodCatch.create = (type, params) => {
   });
 };
 var ZodNaN = class extends ZodType {
-  _parse(input2) {
-    const parsedType = this._getType(input2);
+  _parse(input3) {
+    const parsedType = this._getType(input3);
     if (parsedType !== ZodParsedType.nan) {
-      const ctx = this._getOrReturnCtx(input2);
+      const ctx = this._getOrReturnCtx(input3);
       addIssueToContext(ctx, {
         code: ZodIssueCode.invalid_type,
         expected: ZodParsedType.nan,
@@ -9258,7 +9261,7 @@ var ZodNaN = class extends ZodType {
       });
       return INVALID;
     }
-    return { status: "valid", value: input2.data };
+    return { status: "valid", value: input3.data };
   }
 };
 ZodNaN.create = (params) => {
@@ -9269,8 +9272,8 @@ ZodNaN.create = (params) => {
 };
 var BRAND = Symbol("zod_brand");
 var ZodBranded = class extends ZodType {
-  _parse(input2) {
-    const { ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { ctx } = this._processInputParams(input3);
     const data2 = ctx.data;
     return this._def.type._parse({
       data: data2,
@@ -9283,8 +9286,8 @@ var ZodBranded = class extends ZodType {
   }
 };
 var ZodPipeline = class _ZodPipeline extends ZodType {
-  _parse(input2) {
-    const { status: status2, ctx } = this._processInputParams(input2);
+  _parse(input3) {
+    const { status: status2, ctx } = this._processInputParams(input3);
     if (ctx.common.async) {
       const handleAsync = async () => {
         const inResult = await this._def.in._parseAsync({
@@ -9338,8 +9341,8 @@ var ZodPipeline = class _ZodPipeline extends ZodType {
   }
 };
 var ZodReadonly = class extends ZodType {
-  _parse(input2) {
-    const result = this._def.innerType._parse(input2);
+  _parse(input3) {
+    const result = this._def.innerType._parse(input3);
     const freeze = (data2) => {
       if (isValid(data2)) {
         data2.value = Object.freeze(data2.value);
@@ -9942,11 +9945,11 @@ function createRpcError(requestId, code, message, details, retryable) {
 function createEvent(event, data2, options = {}) {
   return createMessage("event", { event, data: data2, ...options });
 }
-function parseRemoteMessage(input2) {
-  return remoteMessageSchema.parse(input2);
+function parseRemoteMessage(input3) {
+  return remoteMessageSchema.parse(input3);
 }
-function parseControlFrame(input2) {
-  const frame = controlFrameSchema.parse(input2);
+function parseControlFrame(input3) {
+  const frame = controlFrameSchema.parse(input3);
   const payloadSchema = controlFramePayloadSchemas[frame.type];
   if (payloadSchema) {
     return { ...frame, payload: payloadSchema.parse(frame.payload) };
@@ -11086,8 +11089,8 @@ function parseAcpImage(value) {
   if (btoa(atob(tail)) !== tail) throw new Error("Invalid AGY image base64.");
   const bytes = imageByteLength(data2);
   if (bytes > AGY_MAX_IMAGE_BYTES) throw new Error("AGY image attachment exceeds the size limit.");
-  const dimensions = imageDimensions(mimeType, data2);
-  if (!dimensions || dimensions.width < 1 || dimensions.height < 1 || dimensions.width > 8192 || dimensions.height > 8192 || dimensions.width * dimensions.height > 4e7) throw new Error("Invalid AGY image dimensions or media type.");
+  const dimensions2 = imageDimensions(mimeType, data2);
+  if (!dimensions2 || dimensions2.width < 1 || dimensions2.height < 1 || dimensions2.width > 8192 || dimensions2.height > 8192 || dimensions2.width * dimensions2.height > 4e7) throw new Error("Invalid AGY image dimensions or media type.");
   return { type: "image", mimeType, data: data2 };
 }
 function imageByteLength(data2) {
@@ -11125,8 +11128,8 @@ function imageDimensions(mediaType, data2) {
   return void 0;
 }
 function acpImageContent(image, attachmentId) {
-  const dimensions = imageDimensions(image.mimeType, image.data);
-  return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions }, mediaType: image.mimeType, data: image.data };
+  const dimensions2 = imageDimensions(image.mimeType, image.data);
+  return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions2 }, mediaType: image.mimeType, data: image.data };
 }
 function acpImageLimits(backend) {
   return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
@@ -11472,21 +11475,21 @@ var AcpEventCarrier = class {
       });
     }
   }
-  emitApproval(input2) {
+  emitApproval(input3) {
     for (const queue of this.context.eventStreams.values()) queue.push({
       type: "waterfall",
       event: "approval/request",
-      eventId: input2.eventId,
-      agentId: input2.agentId,
-      request: input2.request
+      eventId: input3.eventId,
+      agentId: input3.agentId,
+      request: input3.request
     });
     this.broadcastRcMux({
       type: "approval/requested",
-      sessionId: input2.agentId,
-      approvalId: input2.eventId,
-      toolName: string(input2.request.toolName) ?? this.context.backendLabel(),
-      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
-    }, input2.eventId);
+      sessionId: input3.agentId,
+      approvalId: input3.eventId,
+      toolName: string(input3.request.toolName) ?? this.context.backendLabel(),
+      ...typeof input3.request.reason === "string" ? { reason: input3.request.reason } : {}
+    }, input3.eventId);
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string(args.eventId);
@@ -12296,6 +12299,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(await this.archiveSession(requestArg(args)));
         case "session/list":
           return business(success({ items: await this.handleSessionList() }));
+        case "session/projections":
+          return business(await this.sessionProjections(requestArg(args)));
         case "session/search":
           return business(success({ items: [], hasMore: false }));
         case "session/create":
@@ -12625,6 +12630,13 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         }
       }
     });
+  }
+  async sessionProjections(request) {
+    const sessionId = extractSessionId(request);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return success(null);
+    await this.hydrateSession(session);
+    return success(this.sessionSummary(session, session.events.at(-1)?.event.seq ?? -1).projections);
   }
   async sessionPage(request) {
     const sessionId = extractSessionId(request);
@@ -21929,9 +21941,9 @@ function fromBase64Url2(value) {
 
 // src/client-secure-transport.ts
 var ClientSecureTransport = class {
-  constructor(inner, identity, host) {
+  constructor(inner, identity2, host) {
     this.inner = inner;
-    this.identity = identity;
+    this.identity = identity2;
     this.host = host;
   }
   noise;
@@ -22082,7 +22094,7 @@ var ClientConnection = class {
     const progressRunId = this.context.connectionProgressRun + 1;
     this.context.connectionProgressRun = progressRunId;
     this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
-    const identity = this.context.requireIdentity();
+    const identity2 = this.context.requireIdentity();
     let client;
     try {
       const serverDevice = (await this.context.server.listDevices()).find((device) => device.deviceId === targetDeviceId);
@@ -22093,7 +22105,7 @@ var ClientConnection = class {
       const target2 = await this.authorizeHostPeer(serverDevice);
       const presence = await this.context.server.presenceFor(targetDeviceId);
       if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
-      const credentials = await this.context.server.authenticate(identity);
+      const credentials = await this.context.server.authenticate(identity2);
       const rtcFactory = this.context.config.forceRelay ? void 0 : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => void 0);
       if (!this.context.config.forceRelay && rtcFactory === void 0) {
         this.context.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
@@ -22105,7 +22117,7 @@ var ClientConnection = class {
         websocketUrl(this.context.server.baseUrl),
         {
           role: "client",
-          deviceId: identity.deviceId,
+          deviceId: identity2.deviceId,
           accessToken: credentials.accessToken,
           targetDeviceId,
           forceRelay: this.context.config.forceRelay || attempt === "relay",
@@ -22137,7 +22149,7 @@ var ClientConnection = class {
         const stopProgressTimer = this.beginAttemptProgress(progressRunId, attempt);
         try {
           transport = createTransport(attempt);
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target2), 6e4);
+          client = new RemoteClientCore(new ClientSecureTransport(transport, identity2, target2), 6e4);
           const attemptClient = client;
           const onAbort = () => {
             void attemptClient.close();
@@ -22335,9 +22347,9 @@ var LoopbackHost = class {
     const allowed = new Set(ports);
     for (const [id5, handle] of this.handles) if (!allowed.has(handle.port)) this.close(id5);
   }
-  async call(input2) {
+  async call(input3) {
     if (this.closed) throw new RpcError("TRANSPORT_CLOSED", "Preview connection closed.");
-    const value = loopbackRequestSchema.parse(input2);
+    const value = loopbackRequestSchema.parse(input3);
     if (value.op === "describe") return { ports: [...this.ports] };
     if (value.op === "close") {
       this.close(value.id);
@@ -22733,7 +22745,7 @@ var LoopbackPreview = class {
     }
   }
   websocket(id5, socket) {
-    let input2 = Promise.resolve();
+    let input3 = Promise.resolve();
     let queued = 0;
     let count = 0;
     const controller = new AbortController();
@@ -22753,7 +22765,7 @@ var LoopbackPreview = class {
         close();
         return;
       }
-      input2 = input2.then(async () => {
+      input3 = input3.then(async () => {
         await this.client.rpc("loopback.call", { op: "ws.send", id: id5, data: bytes.toString("base64"), binary }, signal);
         queued -= bytes.length;
         count -= 1;
@@ -22832,10 +22844,10 @@ var PluginRouteBridge = class {
     this.dispatch = dispatch;
     this.logger = logger;
   }
-  async call(input2) {
+  async call(input3) {
     let params;
     try {
-      params = callSchema.parse(input2);
+      params = callSchema.parse(input3);
     } catch (error) {
       if (error instanceof external_exports.ZodError) {
         throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
@@ -23607,14 +23619,14 @@ function imageContentBlock(block, attachmentSeed, index) {
   if (!isImageContent2(block)) return void 0;
   const image = parseImageBlock(block);
   if (image === void 0) return void 0;
-  const dimensions = imageDimensions2(image.mediaType, image.data);
+  const dimensions2 = imageDimensions2(image.mediaType, image.data);
   const name2 = string3(block.name);
   const attachment = {
     attachmentId: `${CODEX_IMAGE_ATTACHMENT_PREFIX}${hashString2(`${attachmentSeed}:${index}`)}:${index}`,
     mediaType: image.mediaType,
     bytes: base64ByteLength(image.data),
-    width: dimensions.width,
-    height: dimensions.height,
+    width: dimensions2.width,
+    height: dimensions2.height,
     ...name2 === void 0 ? {} : { name: name2 }
   };
   return {
@@ -23810,22 +23822,22 @@ function isHostWorkspaceStreamEndpoint(endpoint) {
 }
 function codexPromptInput(content) {
   if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return void 0;
-  const input2 = [];
+  const input3 = [];
   for (const value of content) {
     if (!isRecord5(value)) return void 0;
     if (value.type === "text") {
       if (typeof value.text !== "string" || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return void 0;
-      input2.push({ type: "text", text: value.text });
+      input3.push({ type: "text", text: value.text });
       continue;
     }
     if (value.type === "image") {
       if (typeof value.mediaType !== "string" || !CODEX_IMAGE_MEDIA_TYPES3.has(value.mediaType) || typeof value.data !== "string" || value.data.length > MAX_CODEX_IMAGE_BASE642 || !isCanonicalBase642(value.data)) return void 0;
-      input2.push({ type: "image", mediaType: value.mediaType, data: value.data });
+      input3.push({ type: "image", mediaType: value.mediaType, data: value.data });
       continue;
     }
     return void 0;
   }
-  return input2;
+  return input3;
 }
 function codexPermissionsProjection(preset) {
   return {
@@ -24017,21 +24029,21 @@ var CodexEventCarrier = class {
       });
     }
   }
-  emitApproval(input2) {
+  emitApproval(input3) {
     for (const queue of this.context.eventStreams.values()) queue.push({
       type: "waterfall",
       event: "approval/request",
-      eventId: input2.eventId,
-      agentId: input2.agentId,
-      request: input2.request
+      eventId: input3.eventId,
+      agentId: input3.agentId,
+      request: input3.request
     });
     this.broadcastRcMux({
       type: "approval/requested",
-      sessionId: input2.agentId,
-      approvalId: input2.eventId,
-      toolName: string2(input2.request.toolName) ?? "CodeX",
-      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
-    }, input2.eventId);
+      sessionId: input3.agentId,
+      approvalId: input3.eventId,
+      toolName: string2(input3.request.toolName) ?? "CodeX",
+      ...typeof input3.request.reason === "string" ? { reason: input3.request.reason } : {}
+    }, input3.eventId);
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string2(args.eventId);
@@ -25353,6 +25365,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
           return business2(await this.archiveSession(requestArg2(args), signal));
         case "session/list":
           return business2(success2({ items: await this.sessionSummaries(signal) }));
+        case "session/projections":
+          return business2(await this.sessionProjections(requestArg2(args), signal));
         case "session/search":
           return business2(await this.searchSessions(requestArg2(args), signal));
         case "session/create":
@@ -25749,8 +25763,8 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
   async prompt(request, signal) {
     const sessionId = requiredString2(request.sessionId, "sessionId");
     const content = array2(request.content);
-    const input2 = codexPromptInput(content);
-    if (input2 === void 0) return failure2("attachment-error", "CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.");
+    const input3 = codexPromptInput(content);
+    if (input3 === void 0) return failure2("attachment-error", "CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.");
     const threadId = nativeThreadId(sessionId);
     const selection = this.modelSelection(sessionId, await this.models(signal));
     const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId);
@@ -25770,11 +25784,11 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     if (mode2 === "turn/steer") {
       const active = this.activeTurnId(threadId);
       if (active === void 0) return failure2("steer-unavailable", "The CodeX Thread has no active turn to steer.");
-      await this.client.request(mode2, { threadId, expectedTurnId: active, input: input2 }, signal);
+      await this.client.request(mode2, { threadId, expectedTurnId: active, input: input3 }, signal);
     } else {
       await this.client.request(mode2, {
         threadId,
-        input: input2,
+        input: input3,
         ...codexModelParams(selection)
       }, signal);
     }
@@ -25817,6 +25831,20 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     this.events.publishProjection(sessionId, "title", title, seq);
     await this.refreshAndPublishWorkspaces();
     return success2({ title, seq });
+  }
+  async sessionProjections(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const catalog = await this.currentCatalog(signal);
+    const session = catalog.sessions.find((item) => item.id === sessionId);
+    if (session === void 0) return success2(null);
+    const history = await this.readHistoryPage(nativeThreadId(sessionId), { maxMessages: 1 }, signal);
+    const directory = await this.models(signal).catch(() => void 0);
+    return success2(record4(this.sessionSummary(session, {
+      blank: history.cursor < 0,
+      modelSelection: this.modelSelection(sessionId, directory),
+      lastPromptAt: session.updatedAt || null,
+      asOfSeq: history.cursor
+    })).projections);
   }
   async sessionPage(request, signal) {
     const sessionId = sessionIdFromAddress2(record4(request.address));
@@ -26656,7 +26684,7 @@ var RemoteTypertGateway2 = class {
     if (settingsResult !== void 0) return settingsResult;
     if (result.ok) {
       const value = this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, result.value) : normalizeAssistantMessageStreamValue(endpoint, result.value);
-      return { ...result, value: normalizeWorkspaceBinaryResult(endpoint, value) };
+      return { ...result, value: normalizeProjectionResult(endpoint, normalizeWorkspaceBinaryResult(endpoint, value)) };
     }
     return result;
   }
@@ -26905,6 +26933,10 @@ function patchWelcomeDescribe2(value) {
   });
   return { ...value, namespaces };
 }
+function normalizeProjectionResult(endpoint, value) {
+  if (endpoint !== "session/projections" || !isRecord9(value) || value.kind !== void 0) return value;
+  return Number.isSafeInteger(value.asOfSeq) && isRecord9(value.values) ? { ...value, kind: "sequenced" } : value;
+}
 
 // src/server-api.ts
 import { platform } from "node:os";
@@ -27074,8 +27106,8 @@ var configSchema = external_exports.object({
   }).strict().optional(),
   acp: external_exports.object({ enabled: external_exports.boolean().optional(), backends: external_exports.array(external_exports.object({ id: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled: external_exports.boolean().optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict()).max(12).optional(), backend: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict().optional()
 }).strict();
-function resolveConfig(input2 = {}, env = process.env) {
-  const parsed = configSchema.parse(input2);
+function resolveConfig(input3 = {}, env = process.env) {
+  const parsed = configSchema.parse(input3);
   const configuredCursorBackend = parsed.acp?.backends?.find((item) => item.id === "cursor");
   const legacyCursorEnabled = parsed.acp?.backend === "cursor" ? parsed.acp.enabled : void 0;
   const cursorEnabled = configuredCursorBackend?.enabled ?? parsed.cursor?.enabled ?? legacyCursorEnabled ?? false;
@@ -27152,7 +27184,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.9";
+var PLUGIN_VERSION = "0.5.10";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
@@ -27169,8 +27201,8 @@ var HostServerApi = class {
   credentialsPromise;
   harnessVersion;
   lifetime = new AbortController();
-  bindIdentity(identity) {
-    this.identity = identity;
+  bindIdentity(identity2) {
+    this.identity = identity2;
   }
   setHarnessVersion(version) {
     this.harnessVersion = version;
@@ -27188,8 +27220,8 @@ var HostServerApi = class {
   }
   /** Check the persisted device credential without issuing or refreshing one. */
   async hasStoredAuthorization() {
-    const identity = this.requireIdentity();
-    return await this.store.load(this.baseUrl, identity.deviceId) !== void 0;
+    const identity2 = this.requireIdentity();
+    return await this.store.load(this.baseUrl, identity2.deviceId) !== void 0;
   }
   async clearAuthorization() {
     this.credentials = void 0;
@@ -27197,8 +27229,8 @@ var HostServerApi = class {
     await this.store.clear();
   }
   async revokeCurrentDevice() {
-    const identity = this.requireIdentity();
-    if (await this.store.load(this.baseUrl, identity.deviceId) === void 0) {
+    const identity2 = this.requireIdentity();
+    if (await this.store.load(this.baseUrl, identity2.deviceId) === void 0) {
       await this.clearAuthorization();
       return;
     }
@@ -27208,8 +27240,8 @@ var HostServerApi = class {
       await this.clearAuthorization();
     }
   }
-  async authorizeWithAccount(identity, email, password, recoverIdentity) {
-    this.bindIdentity(identity);
+  async authorizeWithAccount(identity2, email, password, recoverIdentity) {
+    this.bindIdentity(identity2);
     const account = email.trim();
     if (account.length === 0 || password.length === 0) {
       throw new ServerApiError("INVALID_MESSAGE", "Email and password are required.", false);
@@ -27224,7 +27256,7 @@ var HostServerApi = class {
       authorizationMethod: "account"
     };
     try {
-      await this.register(identity, authorization);
+      await this.register(identity2, authorization);
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== "DEVICE_REVOKED" || recoverIdentity === void 0) throw error;
       const nextIdentity = await recoverIdentity();
@@ -27290,8 +27322,8 @@ var HostServerApi = class {
     }
     return { qrId: value.qrId, scanUrl, expiresIn: value.expiresIn };
   }
-  async pollOAuthQrLogin(identity, qrId, recoverIdentity) {
-    this.bindIdentity(identity);
+  async pollOAuthQrLogin(identity2, qrId, recoverIdentity) {
+    this.bindIdentity(identity2);
     const value = requireRecord(await this.publicRequest(
       `/api/v1/auth/oauth/qr/${encodeURIComponent(qrId)}`,
       { method: "GET" }
@@ -27314,7 +27346,7 @@ var HostServerApi = class {
       authorizationMethod: "account"
     };
     try {
-      await this.register(identity, authorization);
+      await this.register(identity2, authorization);
     } catch (error) {
       if (!(error instanceof ServerApiError) || error.code !== "DEVICE_REVOKED" || recoverIdentity === void 0) throw error;
       const nextIdentity = await recoverIdentity();
@@ -27326,7 +27358,7 @@ var HostServerApi = class {
       authorization: { method: "account", account: account.account, isAdmin: account.isAdmin }
     };
   }
-  async authorizeHostWithCode(identity, code) {
+  async authorizeHostWithCode(identity2, code) {
     if (this.role !== "host") {
       throw new ServerApiError("METHOD_NOT_ALLOWED", "Host registration codes can only authorize a Host device.", false);
     }
@@ -27334,23 +27366,23 @@ var HostServerApi = class {
     if (registrationCode.length === 0) {
       throw new ServerApiError("INVALID_MESSAGE", "A Host registration code is required.", false);
     }
-    this.bindIdentity(identity);
+    this.bindIdentity(identity2);
     const tokens = await this.publicRequest("/api/v1/devices/register-with-code", {
       method: "POST",
-      body: JSON.stringify({ v: 1, code: registrationCode, device: this.deviceDescriptor(identity) })
+      body: JSON.stringify({ v: 1, code: registrationCode, device: this.deviceDescriptor(identity2) })
     });
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity2, validateTokens(tokens), {
       authorizationMethod: "host_registration_code"
     });
     return { method: "host_registration_code" };
   }
-  async authorizeOwnedRole(identity, authorizingAccessToken, account) {
-    this.bindIdentity(identity);
+  async authorizeOwnedRole(identity2, authorizingAccessToken, account) {
+    this.bindIdentity(identity2);
     const tokens = await this.publicRequest("/api/v1/devices/register-owned-role", {
       method: "POST",
-      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity) })
+      body: JSON.stringify({ v: 1, device: this.deviceDescriptor(identity2) })
     }, authorizingAccessToken);
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity2, validateTokens(tokens), {
       authorizationMethod: "owned_device",
       ...account === void 0 ? {} : { account }
     });
@@ -27359,26 +27391,26 @@ var HostServerApi = class {
       ...account === void 0 ? {} : { account }
     };
   }
-  async authenticate(identity = this.requireIdentity()) {
-    this.bindIdentity(identity);
+  async authenticate(identity2 = this.requireIdentity()) {
+    this.bindIdentity(identity2);
     if (this.credentials !== void 0 && this.credentials.accessTokenExpiresAt > Date.now() + 3e4) {
       return this.credentials;
     }
-    this.credentialsPromise ??= this.loadOrIssue(identity).finally(() => {
+    this.credentialsPromise ??= this.loadOrIssue(identity2).finally(() => {
       this.credentialsPromise = void 0;
     });
     this.credentials = await this.credentialsPromise;
     return this.credentials;
   }
   async refreshCredentials(rejectedAccessToken = this.credentials?.accessToken) {
-    const identity = this.requireIdentity();
+    const identity2 = this.requireIdentity();
     this.credentials = await this.withRefreshLock(async () => {
-      const stored = await this.store.load(this.baseUrl, identity.deviceId);
-      if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity);
+      const stored = await this.store.load(this.baseUrl, identity2.deviceId);
+      if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now()) return this.register(identity2);
       if (stored.accessToken !== rejectedAccessToken && stored.accessTokenExpiresAt > Date.now() + 3e4) {
         return stored;
       }
-      return this.rotateCredentials(identity, stored);
+      return this.rotateCredentials(identity2, stored);
     });
     return this.credentials;
   }
@@ -27392,12 +27424,12 @@ var HostServerApi = class {
       throw error;
     }
   }
-  async rotateCredentials(identity, stored) {
+  async rotateCredentials(identity2, stored) {
     let tokens;
     try {
       tokens = await this.publicRequest("/api/v1/auth/refresh", {
         method: "POST",
-        body: JSON.stringify({ deviceId: identity.deviceId, refreshToken: stored.refreshToken })
+        body: JSON.stringify({ deviceId: identity2.deviceId, refreshToken: stored.refreshToken })
       });
     } catch (error) {
       if (error instanceof ServerApiError) {
@@ -27407,7 +27439,7 @@ var HostServerApi = class {
     }
     return this.store.save({
       serverUrl: this.baseUrl,
-      deviceId: identity.deviceId,
+      deviceId: identity2.deviceId,
       authorizationMethod: stored.authorizationMethod,
       ...stored.account === void 0 ? {} : { account: stored.account },
       ...validateTokens(tokens)
@@ -27436,45 +27468,45 @@ var HostServerApi = class {
     }
     return { online: result.online, ...typeof result.lastSeenAt === "number" ? { lastSeenAt: result.lastSeenAt } : {} };
   }
-  async loadOrIssue(identity) {
+  async loadOrIssue(identity2) {
     return this.withRefreshLock(async () => {
-      const stored = await this.store.load(this.baseUrl, identity.deviceId);
+      const stored = await this.store.load(this.baseUrl, identity2.deviceId);
       if (stored === void 0 || stored.refreshTokenExpiresAt <= Date.now() + 3e4) {
-        return this.register(identity);
+        return this.register(identity2);
       }
       if (stored.accessTokenExpiresAt > Date.now() + 3e4) return stored;
-      return this.rotateCredentials(identity, stored);
+      return this.rotateCredentials(identity2, stored);
     });
   }
-  async register(identity, authorization) {
+  async register(identity2, authorization) {
     const tokens = await this.publicRequest("/api/v1/devices/register", {
       method: "POST",
       body: JSON.stringify({
         v: 1,
-        device: this.deviceDescriptor(identity)
+        device: this.deviceDescriptor(identity2)
       })
     }, authorization?.accountToken);
-    this.credentials = await this.saveTokens(identity, validateTokens(tokens), {
+    this.credentials = await this.saveTokens(identity2, validateTokens(tokens), {
       authorizationMethod: authorization?.authorizationMethod ?? "account",
       ...authorization?.account === void 0 ? {} : { account: authorization.account }
     });
     return this.credentials;
   }
-  deviceDescriptor(identity) {
+  deviceDescriptor(identity2) {
     return {
-      deviceId: identity.deviceId,
-      name: identity.name,
+      deviceId: identity2.deviceId,
+      name: identity2.name,
       role: this.role,
       platform: platform(),
-      identityKey: identity.publicKey,
+      identityKey: identity2.publicKey,
       clientVersion: PLUGIN_VERSION,
       ...this.role === "host" && this.harnessVersion !== void 0 ? { harnessVersion: this.harnessVersion } : {}
     };
   }
-  saveTokens(identity, tokens, authorization) {
+  saveTokens(identity2, tokens, authorization) {
     return this.store.save({
       serverUrl: this.baseUrl,
-      deviceId: identity.deviceId,
+      deviceId: identity2.deviceId,
       authorizationMethod: authorization.authorizationMethod,
       ...authorization.account === void 0 ? {} : { account: authorization.account },
       ...tokens
@@ -27653,6 +27685,230 @@ function requireRecord(value, name2) {
   return value;
 }
 
+// src/terminal-carrier-compat.ts
+var identity = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var attachmentArgs = external_exports.object({ agentId: identity, id: identity, attachmentId: identity }).strict();
+var dimensions = { cols: external_exports.number().int().min(1).max(1e3), rows: external_exports.number().int().min(1).max(1e3) };
+var input = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("write"), sequence: external_exports.number().int().positive().safe(), data: external_exports.string().max(64 * 1024) }).strict(),
+  external_exports.object({ type: external_exports.literal("resize"), sequence: external_exports.number().int().positive().safe(), ...dimensions }).strict()
+]);
+function usesDuplexTerminal(version) {
+  const match = /^(?:dsh-)?v?0\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(version ?? "");
+  if (!match) return false;
+  const minor = Number(match[1]), patch = Number(match[2]);
+  if (minor > 2 || minor === 2 && patch > 1) return true;
+  if (minor !== 2 || patch !== 1) return false;
+  return match[3] === void 0 || !match[3].startsWith("alpha.") || Number(match[3].slice(6)) >= 3;
+}
+var Queue = class {
+  constructor(maxBytes = 256 * 1024, maxItems = 64) {
+    this.maxBytes = maxBytes;
+    this.maxItems = maxItems;
+  }
+  values = [];
+  bytes = 0;
+  wake;
+  closed = false;
+  error;
+  push(value) {
+    if (this.closed) throw new RpcError("TRANSPORT_CLOSED", "The terminal attachment closed.");
+    const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
+    if (this.values.length >= this.maxItems || this.bytes + bytes > this.maxBytes) throw new RpcError("RATE_LIMITED", "The terminal attachment buffer is full.");
+    this.values.push({ value, bytes });
+    this.bytes += bytes;
+    this.wake?.();
+  }
+  close(error, discard = false) {
+    if (this.closed) return;
+    this.closed = true;
+    this.error = error;
+    if (discard) {
+      this.values = [];
+      this.bytes = 0;
+    }
+    this.wake?.();
+  }
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      const entry = this.values.shift();
+      if (entry) {
+        this.bytes -= entry.bytes;
+        yield entry.value;
+      } else if (this.closed) break;
+      else await new Promise((resolve6) => {
+        this.wake = resolve6;
+      });
+    }
+    if (this.error) throw this.error;
+  }
+};
+var TerminalCarrierCompat = class {
+  constructor(gateway) {
+    this.gateway = gateway;
+  }
+  attachments = /* @__PURE__ */ new Map();
+  async open(payload, signal) {
+    signal.throwIfAborted();
+    const args = attachmentArgs.parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+    const key = `${args.agentId}/${args.id}`;
+    this.attachments.get(key)?.control.abort();
+    const control = new AbortController();
+    const queue = new Queue();
+    const entry = { args, control, queue, sequence: 0, writable: false, pending: /* @__PURE__ */ new Map() };
+    const lifetime = AbortSignal.any([signal, control.signal]);
+    const close = () => {
+      queue.close(void 0, true);
+      for (const pending of entry.pending.values()) pending.reject(new RpcError("TRANSPORT_CLOSED", "The terminal attachment closed. Input will not be replayed."));
+      entry.pending.clear();
+      if (this.attachments.get(key) === entry) this.attachments.delete(key);
+    };
+    lifetime.addEventListener("abort", close, { once: true });
+    lifetime.throwIfAborted();
+    this.attachments.set(key, entry);
+    let source;
+    try {
+      source = await this.gateway.open("terminal/attach", { args: { agentId: args.agentId, id: args.id } }, lifetime, queue);
+    } catch (error) {
+      control.abort();
+      throw error;
+    }
+    return (async function* () {
+      try {
+        for await (const value of source) {
+          if (lifetime.aborted) break;
+          if (isRecord10(value) && value.type === "ack") {
+            const pending = entry.pending.get(Number(value.sequence));
+            if (!pending) throw new RpcError("INVALID_MESSAGE", "Unexpected terminal input acknowledgement.");
+            entry.pending.delete(Number(value.sequence));
+            if (value.refusal) pending.reject(new RpcError("PERMISSION_DENIED", "Terminal input was refused."));
+            else pending.resolve();
+          } else if (isRecord10(value) && (value.type === "snapshot" || value.type === "state") && isRecord10(value.info)) {
+            entry.writable = value.writable === true;
+            yield { ...value, info: { ...value.info, ...entry.writable ? { controllerId: args.attachmentId } : {} } };
+          } else yield value;
+        }
+      } finally {
+        control.abort();
+        lifetime.removeEventListener("abort", close);
+      }
+    })();
+  }
+  async call(endpoint, payload, signal) {
+    const fields = endpoint === "terminal/write" ? { data: external_exports.string().max(64 * 1024) } : dimensions;
+    const args = attachmentArgs.extend(fields).parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+    const entry = this.attachments.get(`${args.agentId}/${args.id}`);
+    if (!entry || entry.args.attachmentId !== args.attachmentId || !entry.writable) throw new RpcError("PERMISSION_DENIED", "This terminal input attachment is not writable.");
+    if (entry.pending.size >= 32) throw new RpcError("RATE_LIMITED", "Too many unacknowledged terminal inputs.");
+    signal.throwIfAborted();
+    const sequence = ++entry.sequence;
+    const value = input.parse({
+      type: endpoint === "terminal/write" ? "write" : "resize",
+      sequence,
+      ..."data" in args ? { data: args.data } : { cols: args.cols, rows: args.rows }
+    });
+    const abort = () => entry.control.abort();
+    signal.addEventListener("abort", abort, { once: true });
+    try {
+      await new Promise((resolve6, reject) => {
+        entry.pending.set(sequence, { resolve: resolve6, reject });
+        try {
+          entry.queue.push(value);
+        } catch (error) {
+          entry.pending.delete(sequence);
+          entry.control.abort();
+          reject(error);
+        }
+      });
+      return { ok: true };
+    } finally {
+      signal.removeEventListener("abort", abort);
+    }
+  }
+};
+async function openRemoteTerminal(target2, payload, signal, uplink) {
+  const args = external_exports.object({ agentId: identity, id: identity }).strict().parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
+  const attachmentId = uuidV7();
+  const control = new AbortController();
+  const lifetime = AbortSignal.any([signal, control.signal]);
+  const output = new Queue(4 * 1024 * 1024, 256);
+  let writable = false;
+  const iterator = uplink[Symbol.asyncIterator]();
+  const abort = () => {
+    output.close();
+    void iterator.return?.().catch(() => void 0);
+  };
+  lifetime.addEventListener("abort", abort, { once: true });
+  lifetime.throwIfAborted();
+  let source;
+  try {
+    source = await target2.open("terminal/follow", { args: { ...args, attachmentId } }, lifetime);
+  } catch (error) {
+    control.abort();
+    throw error;
+  }
+  let startInput;
+  const ready = new Promise((resolve6) => {
+    startInput = resolve6;
+  });
+  lifetime.addEventListener("abort", startInput, { once: true });
+  if (lifetime.aborted) startInput();
+  void (async () => {
+    try {
+      for await (const value of source) {
+        if (lifetime.aborted) break;
+        if (isRecord10(value) && (value.type === "snapshot" || value.type === "state") && isRecord10(value.info)) {
+          writable = value.info.controllerId === attachmentId;
+          output.push({ ...value, writable });
+          if (value.type === "snapshot") startInput();
+        } else output.push(value);
+      }
+    } catch (error) {
+      output.close(error);
+    } finally {
+      control.abort();
+    }
+  })();
+  void (async () => {
+    let sequence = 0;
+    try {
+      await ready;
+      while (!lifetime.aborted) {
+        const next = await iterator.next();
+        if (next.done || lifetime.aborted) break;
+        const value = input.parse(next.value);
+        if (value.sequence !== ++sequence) throw new RpcError("INVALID_MESSAGE", "Terminal input sequence is invalid.");
+        if (!writable) {
+          output.push({ type: "ack", sequence, refusal: "read-only" });
+          continue;
+        }
+        const result = await target2.dispatch(`terminal/${value.type}`, { args: {
+          ...args,
+          attachmentId,
+          ...value.type === "write" ? { data: value.data } : { cols: value.cols, rows: value.rows }
+        } }, lifetime);
+        if (!result.ok) throw Object.assign(new Error(result.error.message), result.error);
+        if (!lifetime.aborted) output.push({ type: "ack", sequence });
+      }
+    } catch (error) {
+      output.close(error);
+      control.abort();
+    }
+  })();
+  return (async function* () {
+    try {
+      yield* output;
+    } finally {
+      control.abort();
+      lifetime.removeEventListener("abort", abort);
+      lifetime.removeEventListener("abort", startInput);
+    }
+  })();
+}
+function isRecord10(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // src/typert-gateway-switch.ts
 var REMOTE_COMMAND_METHODS = ["execute", "list"];
 var LOCAL_ONLY_NAMESPACES = /* @__PURE__ */ new Set(["dynamicCordisRunner"]);
@@ -27684,22 +27940,24 @@ var TypertGatewaySwitch = class {
     this.localOpen = createLocalOpen(gateway, this.runtime);
   }
   /** Original local dispatcher, used by the Host bridge without switch recursion. */
-  local() {
-    const dispatch = this.localDispatch ?? (async (endpoint, payload, signal) => {
+  local(peer) {
+    const invoke = (request) => this.localInvoke({ ...request, ...peer === void 0 ? {} : { peer } });
+    const dispatch = this.localDispatch === void 0 ? (async (endpoint, payload, signal) => {
       try {
         const request = requestFromCarrier(endpoint, payload, signal);
-        return { ok: true, value: await this.localInvoke(request) };
+        return { ok: true, value: await invoke(request) };
       } catch (error) {
         return { ok: false, error: this.failure(error) };
       }
-    });
-    const open = this.localOpen ?? (async (endpoint, payload, signal) => {
+    }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
+    const open = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
-      return this.localStream(requestFromCarrier(endpoint, payload, signal));
-    });
+      return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
+    }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
     return {
-      invoke: this.localInvoke,
-      ...this.localStream === void 0 ? {} : { stream: this.localStream },
+      invoke,
+      peer,
+      ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
       open,
       failure: (error) => this.failure(error),
@@ -27716,7 +27974,7 @@ var TypertGatewaySwitch = class {
     if (this.installed) return;
     this.runtime.invoke = (request) => this.selectInvoke(request);
     if (this.originalStream !== void 0) {
-      this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.remoteTarget.open(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal);
+      this.runtime.stream = (request) => this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpointOf(request)) ? this.localStream(request) : this.openRemote(endpointOf(request), { args: request.args }, request.signal ?? new AbortController().signal, request.uplink);
     }
     if (this.originalDispatch !== void 0) {
       this.runtime.dispatchRpc = (...args) => {
@@ -27736,7 +27994,7 @@ var TypertGatewaySwitch = class {
           return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
-        return this.remoteTarget.open(endpoint, callArgs[1], signal ?? new AbortController().signal);
+        return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
       };
     }
     this.installed = true;
@@ -27782,9 +28040,12 @@ var TypertGatewaySwitch = class {
     if (this.originalOpen !== void 0) this.runtime.openWireStream = this.originalOpen;
     this.installed = false;
   }
+  openRemote(endpoint, payload, signal, uplink) {
+    return endpoint === "terminal/attach" ? openRemoteTerminal(this.remoteTarget, payload, signal, uplink ?? endedUplink()) : this.remoteTarget.open(endpoint, payload, signal);
+  }
   selectInvoke(request) {
     if (isLocalOnlyEndpoint(endpointOf(request))) return this.localInvoke(request);
-    if (this.remoteTarget !== void 0) return this.remoteTarget.invoke(request);
+    if (this.remoteTarget !== void 0) return this.remoteTarget.invoke(request).then((value) => normalizeTerminalEnvironment(endpointOf(request), value));
     if (request.namespace !== "commands" || !isRemoteCommandMethod(request.method) || this.remoteInvoke === void 0) {
       return this.localInvoke(request);
     }
@@ -27797,13 +28058,14 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details = "details" in source && isRecord10(source.details) ? source.details : {};
+    const details = "details" in source && isRecord11(source.details) ? source.details : {};
     return { code, message: source.message, details };
   }
 };
 function workspaceConnectionResult(endpoint, result) {
+  if (endpoint === "terminal/environment" && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) };
   if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
-  if (!result.ok || !isRecord10(result.value) || !(result.value.data instanceof Uint8Array)) return result;
+  if (!result.ok || !isRecord11(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
     value: { ...result.value, data: null },
@@ -27832,14 +28094,14 @@ function linkControl(signal) {
 function createLocalOpen(gateway, runtime) {
   const open = runtime.openWireStream;
   if (open !== void 0) {
-    return usesRc1Arity(open) ? (endpoint, payload, signal) => open.call(runtime, endpoint, payload, endedUplink(), void 0, signal, linkControl(signal)) : (endpoint, payload, signal) => open.call(runtime, endpoint, payload, signal);
+    return usesRc1Arity(open) ? (endpoint, payload, signal, uplink, peer) => open.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
   const wireOpen = wire.open;
   if (usesRc1Arity(wireOpen)) {
     const rc1 = wireOpen;
-    return (endpoint, payload, signal) => rc1.call(wire, endpoint, payload, endedUplink(), void 0, signal);
+    return (endpoint, payload, signal, uplink, peer) => rc1.call(wire, endpoint, payload, uplink ?? endedUplink(), peer, signal);
   }
   const legacy = wireOpen;
   return (endpoint, payload, signal) => legacy.call(wire, endpoint, payload, signal);
@@ -27849,7 +28111,7 @@ function requestFromCarrier(endpoint, payload, signal) {
   if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error("The Harness Gateway endpoint is invalid.");
   }
-  if (!isRecord10(payload) || !isRecord10(payload.args)) {
+  if (!isRecord11(payload) || !isRecord11(payload.args)) {
     throw new Error("The Harness Gateway payload is invalid.");
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
@@ -27864,8 +28126,12 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
-function isRecord10(value) {
+function isRecord11(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function normalizeTerminalEnvironment(endpoint, value) {
+  if (endpoint !== "terminal/environment" || !isRecord11(value) || value.maxBufferedBytes !== void 0) return value;
+  return { ...value, maxBufferedBytes: 256 * 1024 };
 }
 
 // src/werift-rtc.ts
@@ -29750,11 +30016,11 @@ var IdentityStore = class {
   isTrusted(deviceId, publicKey) {
     return this.peers.get(deviceId)?.publicKey === publicKey;
   }
-  async trustPeer(input2) {
+  async trustPeer(input3) {
     this.current();
     const peer = {
-      ...input2,
-      fingerprint: fingerprint(input2.publicKey),
+      ...input3,
+      fingerprint: fingerprint(input3.publicKey),
       trustedAt: Date.now()
     };
     this.peers.set(peer.deviceId, peer);
@@ -30167,7 +30433,7 @@ var CodexAppServerClient = class {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
       return;
     }
-    if (!isRecord11(value)) {
+    if (!isRecord12(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
       return;
     }
@@ -30212,13 +30478,13 @@ var CodexAppServerClient = class {
   }
 };
 function safeUpstreamError(value) {
-  if (!isRecord11(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  if (!isRecord12(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("active writer")) return "Codex thread already has an active writer.";
   if (message.includes("no rollout found")) return "Codex thread state is not persisted yet.";
   return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
 }
-function isRecord11(value) {
+function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -30238,7 +30504,7 @@ var imageInput = external_exports.object({
   mediaType: imageMediaType,
   data: canonicalBase64
 }).strict();
-var input = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var input2 = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
 var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
 var projectRoot = external_exports.object({
   path: external_exports.string().min(1).max(4096)
@@ -30308,14 +30574,14 @@ var schemas = {
   "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
   "turn/start": external_exports.object({
     threadId: id2,
-    input,
+    input: input2,
     model: external_exports.string().min(1).max(128).optional(),
     effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
     summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
     personality: external_exports.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "turn/steer": external_exports.object({ threadId: id2, input, expectedTurnId: id2 }).strict(),
+  "turn/steer": external_exports.object({ threadId: id2, input: input2, expectedTurnId: id2 }).strict(),
   "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
 };
 var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
@@ -30368,30 +30634,30 @@ var CodexPeerBridge = class {
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   closed = false;
-  async call(input2) {
-    return this.callDomain(input2, true);
+  async call(input3) {
+    return this.callDomain(input3, true);
   }
-  async callDomain(input2, logFailure) {
+  async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
-      return await this.domain.call(this.context.connectionId, input2);
+      return await this.domain.call(this.context.connectionId, input3);
     } catch (error) {
       if (logFailure) {
         this.logger?.warn("Codex call failed", {
-          method: safeMethod(input2),
+          method: safeMethod(input3),
           code: safeErrorCode2(error)
         });
       }
       throw error;
     }
   }
-  respond(input2) {
+  respond(input3) {
     this.requireOpen();
-    return this.domain.respond(this.context.connectionId, input2);
+    return this.domain.respond(this.context.connectionId, input3);
   }
-  async openStream(input2) {
+  async openStream(input3) {
     this.requireOpen();
-    const params = streamOpenSchema.parse(input2);
+    const params = streamOpenSchema.parse(input3);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Codex stream id is already active.");
     if (this.streams.size >= MAX_ACTIVE_STREAMS) {
       throw new RpcError("RATE_LIMITED", "Too many Codex streams are active for this connection.", void 0, true);
@@ -30403,15 +30669,15 @@ var CodexPeerBridge = class {
     this.streams.set(params.streamId, params.threadId);
     return { opened: true, streamId: params.streamId, threadId: params.threadId };
   }
-  closeStream(input2) {
-    const params = streamCloseSchema.parse(input2);
+  closeStream(input3) {
+    const params = streamCloseSchema.parse(input3);
     this.streams.delete(params.streamId);
     return { closed: true, streamId: params.streamId };
   }
-  openTransfer(input2) {
+  openTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferOpenSchema.parse(input2);
+    const params = transferOpenSchema.parse(input3);
     if (params.totalChunks !== Math.ceil(params.totalBytes / CODEX_APP_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Codex transfer chunk count is invalid.");
     }
@@ -30430,10 +30696,10 @@ var CodexPeerBridge = class {
     });
     return { opened: true, transferId: params.transferId };
   }
-  appendTransfer(input2) {
+  appendTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferChunkSchema.parse(input2);
+    const params = transferChunkSchema.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -30454,10 +30720,10 @@ var CodexPeerBridge = class {
     transfer.touchedAt = Date.now();
     return { accepted: true, transferId: params.transferId, index: params.index };
   }
-  async commitTransfer(input2) {
+  async commitTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferIdSchema.parse(input2);
+    const params = transferIdSchema.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -30497,10 +30763,10 @@ var CodexPeerBridge = class {
     });
     return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
   }
-  readTransfer(input2) {
+  readTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferReadSchema.parse(input2);
+    const params = transferReadSchema.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Codex response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -30517,8 +30783,8 @@ var CodexPeerBridge = class {
       data: Buffer3.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
-  closeTransfer(input2) {
-    const params = transferIdSchema.parse(input2);
+  closeTransfer(input3) {
+    const params = transferIdSchema.parse(input3);
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
@@ -30591,15 +30857,15 @@ function decodeCanonicalBase64(value) {
   }
   return decoded;
 }
-function isRecord12(value) {
+function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode2(error) {
-  if (isRecord12(error) && typeof error.code === "string") return error.code;
+  if (isRecord13(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
-function safeMethod(input2) {
-  return isRecord12(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+function safeMethod(input3) {
+  return isRecord13(input3) && typeof input3.method === "string" ? input3.method : "invalid";
 }
 function concatChunks(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -30693,8 +30959,8 @@ var CodexRemoteDomain = class {
     this.peerDeviceIds.set(context.connectionId, context.peerDeviceId);
     return bridge;
   }
-  async call(connectionId, input2) {
-    const envelope = parseCallEnvelope(input2);
+  async call(connectionId, input3) {
+    const envelope = parseCallEnvelope(input3);
     const call = parseCodexCall(envelope.method, envelope.params);
     this.requireAppServer();
     if (call.method === "account/read") {
@@ -30844,9 +31110,9 @@ var CodexRemoteDomain = class {
       throw mapAppServerError(error);
     }
   }
-  async respond(connectionId, input2) {
+  async respond(connectionId, input3) {
     await this.expireApprovals();
-    const params = parseRespond(input2);
+    const params = parseRespond(input3);
     const approval = this.approvals.get(params.requestHandle);
     if (approval === void 0 || approval.connectionId !== connectionId) {
       throw new RpcError("CODEX_APPROVAL_NOT_FOUND", "The Codex approval is missing, expired, or belongs to another connection.");
@@ -31076,14 +31342,14 @@ var CodexRemoteDomain = class {
       await this.assertResultThreadAllowed(result);
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
-        result = { ...isRecord13(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+        result = { ...isRecord14(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
     await this.publishPermission(threadId, result);
     return result;
   }
   async publishPermission(threadId, value) {
-    const source = isRecord13(value) ? value : {};
+    const source = isRecord14(value) ? value : {};
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
     await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
   }
@@ -31161,7 +31427,7 @@ var CodexRemoteDomain = class {
       if (legacyThread === void 0 || legacyThread.id !== threadId || !Array.isArray(legacyThread.turns)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
       }
-      if (legacyThread.turns.some((turn) => !isRecord13(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord13(item)))) {
+      if (legacyThread.turns.some((turn) => !isRecord14(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord14(item)))) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid Thread history content.");
       }
       return legacyThread;
@@ -31182,17 +31448,17 @@ var CodexRemoteDomain = class {
         itemsView,
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      if (!isRecord13(result) || !Array.isArray(result.data)) {
+      if (!isRecord14(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Turn page.");
       }
       const pageResult = result;
       for (const rawTurn of result.data) {
-        if (!isRecord13(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
+        if (!isRecord14(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Turn.");
         }
         const inlineFull = rawTurn.itemsView === "full" || rawTurn.itemsView === void 0 && itemsView === "full" && Array.isArray(rawTurn.items);
         const items = inlineFull ? rawTurn.items : await this.readThreadItems(threadId, rawTurn.id);
-        if (items.some((item) => !isRecord13(item))) {
+        if (items.some((item) => !isRecord14(item))) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         turns.push({ ...rawTurn, items });
@@ -31213,11 +31479,11 @@ var CodexRemoteDomain = class {
         sortDirection: "asc",
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      if (!isRecord13(result) || !Array.isArray(result.data)) {
+      if (!isRecord14(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Item page.");
       }
       for (const entry of result.data) {
-        if (!isRecord13(entry) || !isRecord13(entry.item)) {
+        if (!isRecord14(entry) || !isRecord14(entry.item)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         items.push(entry.item);
@@ -31279,7 +31545,7 @@ var CodexRemoteDomain = class {
     return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
   }
   resolveUpstreamApproval(params) {
-    if (!isRecord13(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
     }
@@ -31502,8 +31768,8 @@ function findImageBlock(value, attachmentId) {
     }
     return void 0;
   }
-  if (!isRecord13(value)) return void 0;
-  if (value.type === "image" && isRecord13(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
+  if (!isRecord14(value)) return void 0;
+  if (value.type === "image" && isRecord14(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
     return { attachment: value.attachment, data: value.data };
   }
   for (const child of Object.values(value)) {
@@ -31521,7 +31787,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
       const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
-      if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+      if (!isRecord14(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
       const candidate = join5(codexCli, manifest.entrypoint);
@@ -31539,25 +31805,25 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     configured
   ])];
 }
-function parseCallEnvelope(input2) {
-  if (!isRecord13(input2) || typeof input2.method !== "string" || !("params" in input2) || Object.keys(input2).some((key) => key !== "method" && key !== "params")) {
+function parseCallEnvelope(input3) {
+  if (!isRecord14(input3) || typeof input3.method !== "string" || !("params" in input3) || Object.keys(input3).some((key) => key !== "method" && key !== "params")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
   }
-  return { method: input2.method, params: input2.params };
+  return { method: input3.method, params: input3.params };
 }
-function parseRespond(input2) {
-  if (!isRecord13(input2) || typeof input2.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input2.decision)) || Object.keys(input2).some((key) => key !== "requestHandle" && key !== "decision")) {
+function parseRespond(input3) {
+  if (!isRecord14(input3) || typeof input3.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input3.decision)) || Object.keys(input3).some((key) => key !== "requestHandle" && key !== "decision")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
   }
-  return input2;
+  return input3;
 }
 function accountCanRun(result) {
-  if (!isRecord13(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord13(result.account);
+  if (!isRecord14(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord14(result.account);
 }
 function sanitizeAccount(result) {
-  if (!isRecord13(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord13(result.account) ? result.account : void 0;
+  if (!isRecord14(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord14(result.account) ? result.account : void 0;
   return {
     authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
     requiresOpenaiAuth: result.requiresOpenaiAuth === true,
@@ -31570,11 +31836,11 @@ function sanitizeAccount(result) {
   };
 }
 function sanitizeThreadList(result) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   const data2 = result.data.flatMap((value) => {
-    if (!isRecord13(value) || typeof value.id !== "string") return [];
+    if (!isRecord14(value) || typeof value.id !== "string") return [];
     return [{
       id: value.id,
       ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
@@ -31586,7 +31852,7 @@ function sanitizeThreadList(result) {
       ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
       ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
       ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord13(value.status) ? { status: value.status } : {}
+      ...isRecord14(value.status) ? { status: value.status } : {}
     }];
   });
   return {
@@ -31596,18 +31862,18 @@ function sanitizeThreadList(result) {
   };
 }
 function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record8) => isRecord13(record8) ? record8 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record8) => isRecord14(record8) ? record8 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
-  if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  if (!isRecord14(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    const path = isRecord14(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
     return path === void 0 || !isAbsolute2(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -31621,7 +31887,7 @@ function sanitizeProject(value) {
   };
 }
 function sanitizeProjectList(result) {
-  if (!isRecord13(result) || !Array.isArray(result.data)) {
+  if (!isRecord14(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
   }
   const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
@@ -31631,7 +31897,7 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project = isRecord13(result) ? sanitizeProject(result.project) : void 0;
+  const project = isRecord14(result) ? sanitizeProject(result.project) : void 0;
   if (project === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
@@ -31663,19 +31929,19 @@ function codexDirectoryCrumbs(root, path) {
   return crumbs2;
 }
 function extractThread(result) {
-  return isRecord13(result) && isRecord13(result.thread) ? result.thread : void 0;
+  return isRecord14(result) && isRecord14(result.thread) ? result.thread : void 0;
 }
 function extractTurnId(result) {
-  if (!isRecord13(result)) return void 0;
+  if (!isRecord14(result)) return void 0;
   if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord13(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  if (isRecord14(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
   return void 0;
 }
 function extractThreadId(params) {
-  if (!isRecord13(params)) return void 0;
+  if (!isRecord14(params)) return void 0;
   if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord13(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord13(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
 }
 function optionalInteger3(value) {
@@ -31717,13 +31983,13 @@ function mapCodexImageInputs(params) {
   return {
     ...params,
     input: params.input.map((value) => {
-      if (!isRecord13(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      if (!isRecord14(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
       return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
     })
   };
 }
 function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord13(params)) return { requestHandle };
+  if (!isRecord14(params)) return { requestHandle };
   const safe = { ...params };
   delete safe.proposedExecpolicyAmendment;
   delete safe.additionalPermissions;
@@ -31764,7 +32030,7 @@ function isProjectListFallbackError(error) {
 function canTryNextBinary(error) {
   return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
 }
-function isRecord13(value) {
+function isRecord14(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function maskId(value) {
@@ -32557,8 +32823,8 @@ var WorkspaceBridge = class {
   }
 };
 function argsOf(payload) {
-  const value = isRecord14(payload) ? payload : {};
-  return isRecord14(value.args) ? value.args : value;
+  const value = isRecord15(payload) ? payload : {};
+  return isRecord15(value.args) ? value.args : value;
 }
 function toolScope(endpoint, args) {
   const session = args.agentId ?? args.sessionId;
@@ -32568,13 +32834,13 @@ function toolScope(endpoint, args) {
   }
   return session;
 }
-function isRecord14(value) {
+function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function byteOrLineRange(args) {
-  const options = isRecord14(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord14(options.range)) return options.range;
-  return isRecord14(args.range) ? args.range : args;
+  const options = isRecord15(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord15(options.range)) return options.range;
+  return isRecord15(args.range) ? args.range : args;
 }
 function readOffset(args) {
   const range = byteOrLineRange(args);
@@ -32924,7 +33190,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord15(value)) {
+    if (!isRecord16(value)) {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
       return;
     }
@@ -32969,7 +33235,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value) {
-  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  if (!isRecord16(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "Cursor ACP authentication failed.";
@@ -32977,7 +33243,7 @@ function safeUpstreamError2(value) {
   if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
   return "Cursor ACP rejected the request.";
 }
-function isRecord15(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -34692,7 +34958,7 @@ var OpencodeAcpClient = class {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord16(value)) {
+    if (!isRecord17(value)) {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted an invalid message."));
       return;
     }
@@ -34737,7 +35003,7 @@ var OpencodeAcpClient = class {
   }
 };
 function safeUpstreamError3(value) {
-  if (!isRecord16(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
+  if (!isRecord17(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "OpenCode ACP authentication failed.";
@@ -34745,7 +35011,7 @@ function safeUpstreamError3(value) {
   if (message.includes("not initialized")) return "OpenCode ACP is not initialized.";
   return "OpenCode ACP rejected the request.";
 }
-function isRecord16(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -35193,30 +35459,30 @@ var AcpPeerBridge = class {
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
   closed = false;
-  async call(input2) {
-    return this.callDomain(input2, true);
+  async call(input3) {
+    return this.callDomain(input3, true);
   }
-  async callDomain(input2, logFailure) {
+  async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
-      return await this.domain.call(this.context.connectionId, input2);
+      return await this.domain.call(this.context.connectionId, input3);
     } catch (error) {
       if (logFailure) {
         this.logger?.warn("Cursor call failed", {
-          method: safeMethod2(input2),
+          method: safeMethod2(input3),
           code: safeErrorCode3(error)
         });
       }
       throw error;
     }
   }
-  respond(input2) {
+  respond(input3) {
     this.requireOpen();
-    return this.domain.respond(this.context.connectionId, input2);
+    return this.domain.respond(this.context.connectionId, input3);
   }
-  async openStream(input2) {
+  async openStream(input3) {
     this.requireOpen();
-    const params = streamOpenSchema2.parse(input2);
+    const params = streamOpenSchema2.parse(input3);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The ACP stream id is already active.");
     if (this.streams.size >= MAX_ACTIVE_STREAMS2) {
       throw new RpcError("RATE_LIMITED", "Too many ACP streams are active for this connection.", void 0, true);
@@ -35274,17 +35540,17 @@ var AcpPeerBridge = class {
     }
     return false;
   }
-  closeStream(input2) {
-    const params = streamCloseSchema2.parse(input2);
+  closeStream(input3) {
+    const params = streamCloseSchema2.parse(input3);
     this.streams.delete(params.streamId);
     this.toolControllers.get(params.streamId)?.abort();
     this.toolControllers.delete(params.streamId);
     return { closed: true, streamId: params.streamId };
   }
-  openTransfer(input2) {
+  openTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferOpenSchema2.parse(input2);
+    const params = transferOpenSchema2.parse(input3);
     if (params.totalChunks !== Math.ceil(params.totalBytes / AGENT_ACP_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The ACP transfer chunk count is invalid.");
     }
@@ -35303,10 +35569,10 @@ var AcpPeerBridge = class {
     });
     return { opened: true, transferId: params.transferId };
   }
-  appendTransfer(input2) {
+  appendTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferChunkSchema2.parse(input2);
+    const params = transferChunkSchema2.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -35327,10 +35593,10 @@ var AcpPeerBridge = class {
     transfer.touchedAt = Date.now();
     return { accepted: true, transferId: params.transferId, index: params.index };
   }
-  async commitTransfer(input2) {
+  async commitTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferIdSchema2.parse(input2);
+    const params = transferIdSchema2.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The ACP transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -35370,10 +35636,10 @@ var AcpPeerBridge = class {
     });
     return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
   }
-  readTransfer(input2) {
+  readTransfer(input3) {
     this.requireOpen();
     this.pruneTransfers();
-    const params = transferReadSchema2.parse(input2);
+    const params = transferReadSchema2.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Cursor response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -35390,8 +35656,8 @@ var AcpPeerBridge = class {
       data: Buffer8.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
-  closeTransfer(input2) {
-    const params = transferIdSchema2.parse(input2);
+  closeTransfer(input3) {
+    const params = transferIdSchema2.parse(input3);
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
@@ -35475,15 +35741,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord17(value) {
+function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error) {
-  if (isRecord17(error) && typeof error.code === "string") return error.code;
+  if (isRecord18(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
-function safeMethod2(input2) {
-  return isRecord17(input2) && typeof input2.method === "string" ? input2.method : "invalid";
+function safeMethod2(input3) {
+  return isRecord18(input3) && typeof input3.method === "string" ? input3.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -35632,8 +35898,8 @@ var AcpRemoteGateway = class {
     ));
     return bridge;
   }
-  async call(connectionId, input2) {
-    const envelope = parseCallEnvelope2(input2);
+  async call(connectionId, input3) {
+    const envelope = parseCallEnvelope2(input3);
     const call = parseAcpCall(envelope.method, envelope.params);
     this.logger.info("ACP call received", {
       method: call.method,
@@ -35782,7 +36048,7 @@ var AcpRemoteGateway = class {
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord19(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
@@ -35883,7 +36149,7 @@ var AcpRemoteGateway = class {
       const acp = this.requireAcp(sessionBackend);
       const result = await acp.call("session/prompt", params);
       await this.inboundChain;
-      const stopReason = isRecord18(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const stopReason = isRecord19(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -35920,8 +36186,8 @@ var AcpRemoteGateway = class {
       this.promptsInProgress.delete(sessionId);
     }
   }
-  async respond(connectionId, input2) {
-    const params = parseRespondEnvelope(input2);
+  async respond(connectionId, input3) {
+    const params = parseRespondEnvelope(input3);
     const pending = this.approvals.get(params.requestHandle);
     if (pending === void 0 || pending.expiresAt <= Date.now()) {
       this.approvals.delete(params.requestHandle);
@@ -36194,7 +36460,7 @@ var AcpRemoteGateway = class {
       await peer.publishInbound(sessionId, {
         method: message.method,
         params: {
-          ...isRecord18(message.params) ? message.params : {},
+          ...isRecord19(message.params) ? message.params : {},
           requestHandle,
           sessionId,
           upstreamMethod: message.method
@@ -36229,8 +36495,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list = this.turnCatchUp.get(sessionId);
     if (list === void 0 || frame.method !== "session/update") return;
-    const params = isRecord18(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord18(params.update) ? params.update : params;
+    const params = isRecord19(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord19(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list.push({ method: frame.method, params: frame.params });
@@ -36366,11 +36632,11 @@ var AcpRemoteGateway = class {
     for (let page = 0; page < 100; page++) {
       const result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor2 ? { cursor: cursor2 } : {} });
       assertCurrent();
-      if (!isRecord18(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+      if (!isRecord19(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
       for (const item of result.sessions) {
-        if (!isRecord18(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        if (!isRecord19(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
         const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
         assertCurrent();
         if (!canonical || cwd2 && canonical !== cwd2) continue;
@@ -36468,25 +36734,25 @@ var AcpRemoteGateway = class {
     this.backendInstances.clear();
   }
 };
-function parseCallEnvelope2(input2) {
-  if (!isRecord18(input2) || typeof input2.method !== "string") {
+function parseCallEnvelope2(input3) {
+  if (!isRecord19(input3) || typeof input3.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
-  return { method: input2.method, params: input2.params ?? {} };
+  return { method: input3.method, params: input3.params ?? {} };
 }
-function parseRespondEnvelope(input2) {
-  if (!isRecord18(input2) || typeof input2.requestHandle !== "string" || input2.requestHandle.length === 0 || Object.keys(input2).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input2.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input2.decision)) {
+function parseRespondEnvelope(input3) {
+  if (!isRecord19(input3) || typeof input3.requestHandle !== "string" || input3.requestHandle.length === 0 || Object.keys(input3).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input3.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input3.decision)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
-  return input2;
+  return input3;
 }
 function permissionOptions(params) {
-  if (!isRecord18(params) || !Array.isArray(params.options) || params.options.length === 0) {
+  if (!isRecord19(params) || !Array.isArray(params.options) || params.options.length === 0) {
     throw new Error("Missing permission options");
   }
   const ids = /* @__PURE__ */ new Set();
   const options = params.options.map((option) => {
-    if (!isRecord18(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    if (!isRecord19(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
     ids.add(option.optionId);
     return { kind: option.kind, optionId: option.optionId };
   });
@@ -36507,21 +36773,21 @@ function mapPermissionDecision(params, pending) {
   }
   const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
   if (params.result !== void 0) {
-    if (!isRecord18(params.result) || Object.keys(params.result).length !== 1 || !isRecord18(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+    if (!isRecord19(params.result) || Object.keys(params.result).length !== 1 || !isRecord19(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
   }
   return { outcome: { outcome } };
 }
 function readSessionId(value) {
-  if (!isRecord18(value)) return void 0;
+  if (!isRecord19(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord18(value)) return void 0;
-  if (isRecord18(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord19(value)) return void 0;
+  if (isRecord19(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord18(value)) return value;
+  if (!isRecord19(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
@@ -36579,7 +36845,7 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list;
 }
-function isRecord18(value) {
+function isRecord19(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -36680,18 +36946,18 @@ var PluginControlRuntime = class {
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, next.serverUrl, value.role)
     });
-    let identity = await identities.loadOrCreate(hostname2());
+    let identity2 = await identities.loadOrCreate(hostname2());
     const api = value.role === "host" ? new HostServerApi(next.serverUrl, new ServerCredentialStore(identities.directory)) : new ClientServerApi(next.serverUrl, new ServerCredentialStore(identities.directory));
     let authorization;
     if (value.role === "host" && typeof value.registrationCode === "string" && value.registrationCode.trim() !== "") {
-      authorization = await api.authorizeHostWithCode(identity, value.registrationCode);
+      authorization = await api.authorizeHostWithCode(identity2, value.registrationCode);
     } else {
       if (typeof value.email !== "string" || typeof value.password !== "string") {
         throw new ClientModeError("INVALID_MESSAGE", "Email and password are required for account authorization.");
       }
-      authorization = await api.authorizeWithAccount(identity, value.email, value.password, async () => {
-        identity = await identities.reset(hostname2());
-        return identity;
+      authorization = await api.authorizeWithAccount(identity2, value.email, value.password, async () => {
+        identity2 = await identities.reset(hostname2());
+        return identity2;
       });
     }
     if (value.role === "client" && resolveConfig(this.settings.get()).hostControl?.enabled !== false) {
@@ -36884,8 +37150,8 @@ var PluginControlRuntime = class {
     const identities = new IdentityStore({
       directory: serverStorageDirectory(this.identityDirectory, serverUrl, role)
     });
-    const identity = await identities.loadOrCreate(hostname2());
-    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity.deviceId);
+    const identity2 = await identities.loadOrCreate(hostname2());
+    const credentials = await new ServerCredentialStore(identities.directory).load(serverUrl, identity2.deviceId);
     if (credentials === void 0) return void 0;
     return {
       method: credentials.authorizationMethod,
@@ -36940,11 +37206,11 @@ function editableConfig(config) {
     ...config.acp === void 0 ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }
   };
 }
-function isRecord19(value) {
+function isRecord20(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record6(value) {
-  if (!isRecord19(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord20(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -37506,8 +37772,8 @@ var RemoteFileViewerBridge = class {
     this.service = service;
     this.logger = logger;
   }
-  async call(input2) {
-    const params = callSchema2.parse(input2);
+  async call(input3) {
+    const params = callSchema2.parse(input3);
     const service = this.service();
     if (service === void 0) {
       throw new RpcError("FILE_VIEWER_UNAVAILABLE", "The Remote Host does not have DSH File Viewer available.");
@@ -37543,11 +37809,11 @@ var RemoteFileViewerBridge = class {
     }
   }
 };
-function parseHostResult(input2) {
-  if (typeof input2 !== "object" || input2 === null || !("ok" in input2) || typeof input2.ok !== "boolean") {
+function parseHostResult(input3) {
+  if (typeof input3 !== "object" || input3 === null || !("ok" in input3) || typeof input3.ok !== "boolean") {
     throw new RpcError("FILE_VIEWER_INVALID_RESPONSE", "The Remote Host File Viewer returned an invalid response.");
   }
-  return input2;
+  return input3;
 }
 function hostFailure(result) {
   const message = result.error?.message ?? "";
@@ -37572,9 +37838,9 @@ function isOversizedListing(value) {
 // src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var HostServerConnection = class {
-  constructor(config, identity, identities, api, connections, logger, createWebSocket = (url) => new WebSocket(url), rtcFactoryProvider, hostCapabilities = () => ["harness.api.v1"], harnessVersion) {
+  constructor(config, identity2, identities, api, connections, logger, createWebSocket = (url) => new WebSocket(url), rtcFactoryProvider, hostCapabilities = () => ["harness.api.v1"], harnessVersion) {
     this.config = config;
-    this.identity = identity;
+    this.identity = identity2;
     this.identities = identities;
     this.api = api;
     this.connections = connections;
@@ -38774,8 +39040,8 @@ var HarnessApiBridge = class {
   mux;
   host;
   answer;
-  async call(input2) {
-    const params = callSchema3.parse(input2);
+  async call(input3) {
+    const params = callSchema3.parse(input3);
     const signal = AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS);
     const method = this.methods.get(params.method);
     if (method === void 0) {
@@ -38843,9 +39109,9 @@ var HarnessApiBridge = class {
       }
     };
   }
-  openTransfer(input2) {
+  openTransfer(input3) {
     this.pruneTransfers();
-    const params = transferOpenSchema3.parse(input2);
+    const params = transferOpenSchema3.parse(input3);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk count is invalid.");
     }
@@ -38864,9 +39130,9 @@ var HarnessApiBridge = class {
     });
     return { opened: true, transferId: params.transferId };
   }
-  appendTransfer(input2) {
+  appendTransfer(input3) {
     this.pruneTransfers();
-    const params = transferChunkSchema3.parse(input2);
+    const params = transferChunkSchema3.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -38893,9 +39159,9 @@ var HarnessApiBridge = class {
     transfer.touchedAt = Date.now();
     return { accepted: true, transferId: params.transferId, index: params.index };
   }
-  async commitTransfer(input2) {
+  async commitTransfer(input3) {
     this.pruneTransfers();
-    const params = transferCommitSchema.parse(input2);
+    const params = transferCommitSchema.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -38931,9 +39197,9 @@ var HarnessApiBridge = class {
     });
     return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
   }
-  readTransfer(input2) {
+  readTransfer(input3) {
     this.pruneTransfers();
-    const params = transferReadSchema3.parse(input2);
+    const params = transferReadSchema3.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -38950,14 +39216,14 @@ var HarnessApiBridge = class {
       data: Buffer.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
-  closeTransfer(input2) {
-    const params = transferCloseSchema.parse(input2);
+  closeTransfer(input3) {
+    const params = transferCloseSchema.parse(input3);
     const incoming = this.incomingTransfers.delete(params.transferId);
     const outgoing = this.outgoingTransfers.delete(params.transferId);
     return { closed: incoming || outgoing, transferId: params.transferId };
   }
-  async respond(input2) {
-    const params = respondSchema.parse(input2);
+  async respond(input3) {
+    const params = respondSchema.parse(input3);
     this.logger?.debug("harness api respond", { rpcId: shortId4(params.message.rpcId) });
     if (!this.respondable.has(params.message.rpcId)) {
       throw new RpcError("PERMISSION_NOT_PENDING", "The response id was not emitted on this peer connection.");
@@ -38966,8 +39232,8 @@ var HarnessApiBridge = class {
     if (receipt.accepted || receipt.reason === "not-pending") this.respondable.delete(params.message.rpcId);
     return receipt;
   }
-  openStream(input2) {
-    const params = streamOpenSchema3.parse(input2);
+  openStream(input3) {
+    const params = streamOpenSchema3.parse(input3);
     if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness event stream is already open.");
     if (this.streams.size >= this.maxStreams) throw new RpcError("RATE_LIMITED", "Too many Harness event streams are open.", void 0, true);
     const controller = new AbortController();
@@ -38983,8 +39249,8 @@ var HarnessApiBridge = class {
     });
     return { opened: true, streamId: params.streamId };
   }
-  closeStream(input2) {
-    const params = streamCloseSchema3.parse(input2);
+  closeStream(input3) {
+    const params = streamCloseSchema3.parse(input3);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -39443,6 +39709,7 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "session/modelCatalog",
   "session/page",
   "session/prompt",
+  "remoteAccess/follow",
   "session/projections",
   "session/initializeDefaultModel",
   "session/workspacePathApplications",
@@ -39493,12 +39760,14 @@ var HarnessRemoteBridge = class {
     this.harnessVersion = harnessVersion;
     this.terminal = terminal;
     this.codexWorkspace = codexWorkspace;
+    this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
-  async call(input2) {
-    const params = callSchema4.parse(input2);
+  terminalCarrier;
+  async call(input3) {
+    const params = callSchema4.parse(input3);
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
@@ -39527,7 +39796,7 @@ var HarnessRemoteBridge = class {
     const signal = AbortSignal.timeout(6e4);
     try {
       const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
-      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
+      const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
       const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
@@ -39559,9 +39828,9 @@ var HarnessRemoteBridge = class {
     const params = directoryListSchema2.parse(args);
     return { ok: true, value: await listRemoteDirectory(params.path, signal) };
   }
-  openTransfer(input2) {
+  openTransfer(input3) {
     this.pruneTransfers();
-    const params = transferOpenSchema4.parse(input2);
+    const params = transferOpenSchema4.parse(input3);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk count is invalid.");
     }
@@ -39580,9 +39849,9 @@ var HarnessRemoteBridge = class {
     });
     return { opened: true, transferId: params.transferId };
   }
-  appendTransfer(input2) {
+  appendTransfer(input3) {
     this.pruneTransfers();
-    const params = transferChunkSchema4.parse(input2);
+    const params = transferChunkSchema4.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
@@ -39603,9 +39872,9 @@ var HarnessRemoteBridge = class {
     transfer.touchedAt = Date.now();
     return { accepted: true, transferId: params.transferId, index: params.index };
   }
-  async commitTransfer(input2) {
+  async commitTransfer(input3) {
     this.pruneTransfers();
-    const params = transferIdSchema4.parse(input2);
+    const params = transferIdSchema4.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -39636,9 +39905,9 @@ var HarnessRemoteBridge = class {
     });
     return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
   }
-  readTransfer(input2) {
+  readTransfer(input3) {
     this.pruneTransfers();
-    const params = transferReadSchema4.parse(input2);
+    const params = transferReadSchema4.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -39655,13 +39924,13 @@ var HarnessRemoteBridge = class {
       data: Buffer.from(transfer.bytes.subarray(start, end)).toString("base64")
     };
   }
-  closeTransfer(input2) {
-    const params = transferIdSchema4.parse(input2);
+  closeTransfer(input3) {
+    const params = transferIdSchema4.parse(input3);
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
-  async openStream(input2) {
-    const params = streamOpenSchema4.parse(input2);
+  async openStream(input3) {
+    const params = streamOpenSchema4.parse(input3);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
@@ -39674,7 +39943,7 @@ var HarnessRemoteBridge = class {
     this.streams.set(params.streamId, { controller });
     let source;
     try {
-      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal);
+      source = (this.codexWorkspace === void 0 ? void 0 : await this.codexWorkspace.open(params.endpoint, params.payload, controller.signal)) ?? await (params.endpoint === "terminal/follow" && this.terminalCarrier !== void 0 ? this.terminalCarrier.open(params.payload, controller.signal) : this.gateway.open(params.endpoint, normalizeWorkspaceChangesPayload(params.endpoint, params.payload, this.harnessVersion), controller.signal));
       controller.signal.throwIfAborted();
     } catch (error) {
       this.streams.delete(params.streamId);
@@ -39684,8 +39953,8 @@ var HarnessRemoteBridge = class {
     void this.pump(params.streamId, source, controller.signal);
     return { opened: true, streamId: params.streamId };
   }
-  closeStream(input2) {
-    const params = streamCloseSchema4.parse(input2);
+  closeStream(input3) {
+    const params = streamCloseSchema4.parse(input3);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -39699,7 +39968,7 @@ var HarnessRemoteBridge = class {
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
     for (const [, stream] of streams) stream.controller.abort(reason);
-    await this.codexWorkspace?.closeAll();
+    await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()]);
   }
   assertAllowed(endpoint) {
     if (!allowedEndpoints.has(endpoint) && !TERMINAL_CALLS.has(endpoint) && !TERMINAL_STREAMS.has(endpoint)) {
@@ -39746,11 +40015,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord20(payload) || !isRecord20(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord21(payload) || !isRecord21(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord20(payload) || !isRecord20(payload.args)) return payload;
+  if (!isRecord21(payload) || !isRecord21(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -39848,13 +40117,13 @@ function needsDirectoryFallback(result) {
 }
 function requestArgs(payload) {
   const root = record7(payload);
-  const args = isRecord20(root.args) ? root.args : root;
+  const args = isRecord21(root.args) ? root.args : root;
   return record7(args.request ?? args._request ?? args);
 }
 function record7(value) {
-  return isRecord20(value) ? value : {};
+  return isRecord21(value) ? value : {};
 }
-function isRecord20(value) {
+function isRecord21(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -39894,16 +40163,17 @@ var HostPluginRuntime = class {
     this.codex = new CodexRemoteDomain(config.codex, logger);
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
     this.connections = new ConnectionController(this.identities, (context, send) => {
+      const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
       const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
         this.apiProxy,
         (event, data2) => send(createEvent(event, data2)),
         void 0,
         this.logger,
-        this.localGateway,
+        peerGateway,
         this.harnessVersion
       );
-      const harnessRemote = this.localGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
-        this.localGateway,
+      const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
+        peerGateway,
         (event, data2) => send(createEvent(event, data2)),
         this.logger,
         this.harnessVersion,
@@ -39927,7 +40197,7 @@ var HostPluginRuntime = class {
         context,
         (event, data2) => send(createEvent(event, data2))
       );
-      const dispatcher = this.pluginRoutes?.();
+      const dispatcher = this.pluginRoutes?.(peerGateway?.peer);
       const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
       return new RpcRouter(
         harnessApi,
@@ -40154,40 +40424,40 @@ var HostPluginRuntime = class {
   codexStatus() {
     return this.codex.status();
   }
-  codexCall(input2) {
-    return this.requireLocalCodexPeer().call(input2);
+  codexCall(input3) {
+    return this.requireLocalCodexPeer().call(input3);
   }
-  codexRespond(input2) {
-    return this.requireLocalCodexPeer().respond(input2);
+  codexRespond(input3) {
+    return this.requireLocalCodexPeer().respond(input3);
   }
-  codexOpenStream(input2, publish) {
+  codexOpenStream(input3, publish) {
     this.localCodexPublish = publish;
-    return this.requireLocalCodexPeer().openStream(input2);
+    return this.requireLocalCodexPeer().openStream(input3);
   }
-  async codexCloseStream(input2) {
+  async codexCloseStream(input3) {
     const peer = this.localCodexPeer;
-    if (peer !== void 0) return peer.closeStream(input2);
-    const streamId = isPlainRecord(input2) && typeof input2.streamId === "string" ? input2.streamId : void 0;
+    if (peer !== void 0) return peer.closeStream(input3);
+    const streamId = isPlainRecord(input3) && typeof input3.streamId === "string" ? input3.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Codex stream is required.");
     return { closed: false, streamId };
   }
   acpStatus() {
     return this.acp.status();
   }
-  acpCall(input2) {
-    return this.requireLocalAcpPeer().call(input2);
+  acpCall(input3) {
+    return this.requireLocalAcpPeer().call(input3);
   }
-  acpRespond(input2) {
-    return this.requireLocalAcpPeer().respond(input2);
+  acpRespond(input3) {
+    return this.requireLocalAcpPeer().respond(input3);
   }
-  acpOpenStream(input2, publish) {
+  acpOpenStream(input3, publish) {
     this.localAcpPublish = publish;
-    return this.requireLocalAcpPeer().openStream(input2);
+    return this.requireLocalAcpPeer().openStream(input3);
   }
-  async acpCloseStream(input2) {
+  async acpCloseStream(input3) {
     const peer = this.localAcpPeer;
-    if (peer !== void 0) return peer.closeStream(input2);
-    const streamId = isPlainRecord(input2) && typeof input2.streamId === "string" ? input2.streamId : void 0;
+    if (peer !== void 0) return peer.closeStream(input3);
+    const streamId = isPlainRecord(input3) && typeof input3.streamId === "string" ? input3.streamId : void 0;
     if (streamId === void 0) throw new RpcError("INVALID_MESSAGE", "A Cursor stream is required.");
     return { closed: false, streamId };
   }
@@ -40224,10 +40494,10 @@ var HostPluginRuntime = class {
       acp: this.acp.status()
     };
   }
-  createServerConnection(identity) {
+  createServerConnection(identity2) {
     return new HostServerConnection(
       this.config,
-      identity,
+      identity2,
       this.identities,
       this.serverApi,
       this.connections,
@@ -40317,10 +40587,10 @@ var HostPluginRuntime = class {
       throw new RpcError("CODEX_UNAVAILABLE", "Local CodeX is disabled or unavailable on this Host.");
     }
     if (this.localCodexPeer !== void 0) return this.localCodexPeer;
-    const identity = this.currentIdentity();
+    const identity2 = this.currentIdentity();
     const peer = this.codex.createPeer({
-      connectionId: `loopback:${identity.deviceId}`,
-      peerDeviceId: identity.deviceId
+      connectionId: `loopback:${identity2.deviceId}`,
+      peerDeviceId: identity2.deviceId
     }, (event, data2) => this.localCodexPublish(event, data2));
     if (peer === void 0) {
       throw new RpcError("CODEX_UNAVAILABLE", "Local CodeX is disabled or unavailable on this Host.");
@@ -40333,10 +40603,10 @@ var HostPluginRuntime = class {
       throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
     }
     if (this.localAcpPeer !== void 0) return this.localAcpPeer;
-    const identity = this.currentIdentity();
+    const identity2 = this.currentIdentity();
     const peer = this.acp.createPeer({
-      connectionId: `loopback:${identity.deviceId}`,
-      peerDeviceId: identity.deviceId
+      connectionId: `loopback:${identity2.deviceId}`,
+      peerDeviceId: identity2.deviceId
     }, (event, data2) => this.localAcpPublish(event, data2));
     if (peer === void 0) {
       throw new RpcError("CURSOR_UNAVAILABLE", "Local Agent ACP is disabled or unavailable on this Host.");
@@ -40353,7 +40623,7 @@ function isPlainRecord(value) {
 }
 
 // src/plugin-route-dispatcher.ts
-function createPluginRouteDispatcher(readConnection, readPort) {
+function createPluginRouteDispatcher(readConnection, readPort, peer) {
   let cookie;
   return async (route, body, signal) => {
     signal.throwIfAborted();
@@ -40366,7 +40636,7 @@ function createPluginRouteDispatcher(readConnection, readPort) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body ?? {}),
         signal
-      })), signal);
+      }), peer), signal);
     } else {
       const port = readPort();
       if (connection?.authenticatedUrl === void 0 || typeof port !== "number") {
@@ -40467,13 +40737,13 @@ async function login(args, runtime) {
 Waiting for authorization...
 `);
   const deadline = runtime.now() + session.expiresIn * 1e3;
-  let identity = context.identity;
+  let identity2 = context.identity;
   while (runtime.now() < deadline) {
     let result;
     try {
-      result = await context.api.pollOAuthQrLogin(identity, session.qrId, async () => {
-        identity = await context.identities.reset(context.deviceName);
-        return identity;
+      result = await context.api.pollOAuthQrLogin(identity2, session.qrId, async () => {
+        identity2 = await context.identities.reset(context.deviceName);
+        return identity2;
       });
     } catch (error) {
       if (!(error instanceof ServerApiError) || !error.retryable) throw error;
@@ -40511,10 +40781,10 @@ Run "ds-harness-remote login" or use "/remote login" in dsh-TUI.
   }
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
-  const identity = await identities.loadOrCreate(deviceName);
+  const identity2 = await identities.loadOrCreate(deviceName);
   const store = new ServerCredentialStore(directory);
-  const stored = await store.load(serverUrl, identity.deviceId);
-  lines.push(`Device: ${identity.name} (${identity.deviceId})`);
+  const stored = await store.load(serverUrl, identity2.deviceId);
+  lines.push(`Device: ${identity2.name} (${identity2.deviceId})`);
   if (stored === void 0) {
     lines.push("Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
@@ -40526,9 +40796,9 @@ Run "ds-harness-remote login" or use "/remote login" in dsh-TUI.
   lines.push(`Authorization: logged in (${authorizationLabel(stored.authorizationMethod)})`);
   if (stored.account !== void 0) lines.push(`Account: ${stored.account}`);
   const api = runtime.createHostApi(serverUrl, store);
-  api.bindIdentity(identity);
+  api.bindIdentity(identity2);
   try {
-    await api.authenticate(identity);
+    await api.authenticate(identity2);
     lines.push("Credential: ready");
     lines.push("Presence: published while dsh-tui is running");
     write(runtime.stdout, `${lines.join("\n")}
@@ -40553,9 +40823,9 @@ async function logout(args, runtime) {
   }
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity = await identities.loadOrCreate(deviceName);
+  const identity2 = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  api.bindIdentity(identity);
+  api.bindIdentity(identity2);
   let revokeFailure;
   try {
     await api.revokeCurrentDevice();
@@ -40575,23 +40845,23 @@ async function hostContext(runtime) {
   const directory = serverStorageDirectory(root, serverUrl, "host");
   const deviceName = runtime.env.DSH_REMOTE_DEVICE_NAME ?? hostname3();
   const identities = runtime.createIdentityStore({ directory, env: runtime.env });
-  const identity = await identities.loadOrCreate(deviceName);
+  const identity2 = await identities.loadOrCreate(deviceName);
   const api = runtime.createHostApi(serverUrl, new ServerCredentialStore(directory));
-  return { api, identities, identity, deviceName };
+  return { api, identities, identity: identity2, deviceName };
 }
 function selectedServer() {
   return normalizeServerUrl(DEFAULT_REMOTE_SERVER_URL);
 }
-function resolveDependencies(input2) {
+function resolveDependencies(input3) {
   return {
-    env: input2.env ?? process.env,
-    stdout: input2.stdout ?? process.stdout,
-    stderr: input2.stderr ?? process.stderr,
-    now: input2.now ?? Date.now,
-    wait: input2.wait ?? ((milliseconds) => new Promise((resolve6) => setTimeout(resolve6, milliseconds))),
-    renderQr: input2.renderQr ?? renderTerminalQr,
-    createIdentityStore: input2.createIdentityStore ?? ((options) => new IdentityStore(options)),
-    createHostApi: input2.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
+    env: input3.env ?? process.env,
+    stdout: input3.stdout ?? process.stdout,
+    stderr: input3.stderr ?? process.stderr,
+    now: input3.now ?? Date.now,
+    wait: input3.wait ?? ((milliseconds) => new Promise((resolve6) => setTimeout(resolve6, milliseconds))),
+    renderQr: input3.renderQr ?? renderTerminalQr,
+    createIdentityStore: input3.createIdentityStore ?? ((options) => new IdentityStore(options)),
+    createHostApi: input3.createHostApi ?? ((serverUrl, store) => new HostServerApi(serverUrl, store))
   };
 }
 async function renderTerminalQr(url) {
@@ -40987,8 +41257,8 @@ function createRemoteLoginScene(controller) {
         controller.cancel();
       };
     }, []);
-    ui.useInput((input2, key) => {
-      if (key.escape === true || input2.toLowerCase() === "q") {
+    ui.useInput((input3, key) => {
+      if (key.escape === true || input3.toLowerCase() === "q") {
         controller.cancel();
         close();
       }
@@ -41042,8 +41312,8 @@ function createRemoteLoginScene(controller) {
 function createRemoteStatusScene(resolveTarget) {
   return function RemoteStatusScene({ React, ui, close }) {
     const terminal = ui.useTerminalSize();
-    ui.useInput((input2, key) => {
-      if (key.escape === true || input2.toLowerCase() === "q") close();
+    ui.useInput((input3, key) => {
+      if (key.escape === true || input3.toLowerCase() === "q") close();
     });
     const children = [
       React.createElement(ui.Text, { key: "title", bold: true, color: "accent" }, "Remote Host status"),
@@ -41282,7 +41552,14 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
   });
   const apiProxy = ctx.get("apiProxy");
   const nativeTypertGateway = ctx.get("typertGateway");
-  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local();
+  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway);
+  const localTypertGateway = hostGateway.local();
+  if (typeof DshConnection.Peer === "function") {
+    localTypertGateway.createPeer = () => {
+      const peer = new DshConnection.Peer(ctx, { principal: { kind: "owner" } });
+      return { ...hostGateway.local(peer), dispose: () => peer.dispose() };
+    };
+  }
   const subprocess = ctx.get("subprocess", false);
   const runtime = new HostPluginRuntime(
     config,
@@ -41292,9 +41569,10 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     localTypertGateway,
     () => ctx.get("fileViewerHost"),
     subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
-    () => createPluginRouteDispatcher(
+    (peer) => createPluginRouteDispatcher(
       () => ctx.get("connection"),
-      () => ctx.get("webServer")?.port
+      () => ctx.get("webServer")?.port,
+      peer
     )
   );
   let clientRuntime;

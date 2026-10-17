@@ -1,5 +1,11 @@
 ## Unreleased
 
+- Local build `0.5.10` (2026-10-17) packages the current Plugin for Harness `0.2.1-rc.1` installation checks; not published to npm. Android remains `0.5.9`.
+- 本地安装包 `0.5.10`（2026-10-17）用于 Harness `0.2.1-rc.1` 安装验收，包含当前 Plugin 改动，未发布到 npm；Android 仍为 `0.5.9`。
+
+- Updates the Harness baseline to `0.2.1-rc.1` and Cordis to `4.0.5`. Admitted Remote connections own independent Gateway Peers, including event replies and Fetch routes. Adapts native duplex terminals to the existing bounded terminal tunnel with Host acknowledgements and no input replay; supports RC.1 projection results and isolated CodeX/ACP projection reads. Cross-device and native-device acceptance is pending.
+- Harness 开发基线升级至 `0.2.1-rc.1`、Cordis `4.0.5`；已认证连接使用独立 Gateway Peer，覆盖事件回复和 Fetch 路由。官方双向终端接入既有有界终端隧道，按 Host 确认输入且断线不重放；补齐 RC.1 投影结果与 CodeX/ACP 独立投影读取。跨设备与原生真机验收仍待完成。
+
 - Splits the four handwritten source files over 2,000 lines into Plugin client views, CodeX catalog/history projections, Android account/workspace actions and chat components. Existing public entries and protocol behavior are preserved; Harness lifecycle tests no longer start installed Agent CLIs.
 - 四个超过 2000 行的手写源码按领域完成首轮拆分，保留既有入口与协议行为；Harness 生命周期测试隔离本机 Agent CLI。
 - 修复 Android 账号刷新与工作区操作的迟到结果竞态：账号切换立即失效旧刷新，凭据及信任清理按序执行；工作区结果校验连接代次、后端实例和操作归属，旧成功或错误不能覆盖当前目录、错误与忙碌状态。新增 7 个核心契约测试（命名场景矩阵）；全仓 check、647 tests 和 Android Hermes 生产导出通过，未进行原生真机或跨设备验收。

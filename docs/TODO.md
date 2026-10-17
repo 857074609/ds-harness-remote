@@ -1,15 +1,22 @@
 # TODO
 
-更新日期：2026-10-16。Plugin 与 Android 当前版本为 `0.5.8`。
+更新日期：2026-10-17。Plugin 本地构建版本为 `0.5.10`（未发布 npm），Android 当前版本为 `0.5.9`。
 
-Harness `0.2.1-alpha.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
+Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
 peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
 legacy ApiProxy 不再作为兼容维护目标，已有实现仅保留。
 完整 Server、Remote Web 和 Admin 在独立 Server 仓库实现。
 本仓库 `apps/server` 提供最小单账号 Relay Server。
 
 状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
-本次仅核对源码和发布记录，不新增测试通过或真机验收结论。
+RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真机验收。
+
+## Harness 0.2.1-rc.1
+
+- [x] 升级依赖/锁文件；按已认证连接绑定并释放官方 Peer，覆盖 RPC、Remote events 与 Fetch 路由。
+- [x] 兼容官方 terminal/attach 的双向输入确认，保留现有 Remote 终端协议、设备/连接归属及断线不重放；补齐新版 Session projection 结果与 CodeX/ACP 内存读取。
+- [x] RC.1 官方 Gateway/Peer 契约与核心终端回归、全仓 check/test。
+- [ ] Desktop UI、Android APK/真机、独立 Remote Web，以及加密跨设备的 Prompt、审批、终端恢复与文件预览验收。
 
 ## Pi Agent ACP（Issue #97）
 

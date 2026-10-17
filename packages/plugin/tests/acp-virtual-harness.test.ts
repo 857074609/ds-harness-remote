@@ -43,6 +43,8 @@ describe('AcpVirtualHarness', () => {
     const stream = await target.open('session/follow', { args: { request: { address: { kind: 'session', sessionId: 'acp:new' } } } }, signal)
     const iterator = stream[Symbol.asyncIterator]()
     expect((await iterator.next()).value).toMatchObject({ type: 'snapshot', header: { id: 'acp:new' }, records: [], cursor: -1 })
+    await expect(target.dispatch('session/projections', { args: { request: { sessionId: 'acp:new' } } }, signal))
+      .resolves.toMatchObject({ ok: true, value: { kind: 'sequenced', asOfSeq: -1 } })
     expect(client.loadSessionHistory).not.toHaveBeenCalled()
     const calls = client.createSession.mock.calls.length
     expect(await target.dispatch('session/create', { args: { request: { workspaceId: workspace.workspaceId, sessionId: 'acp:new' } } }, signal))

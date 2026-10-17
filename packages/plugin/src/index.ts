@@ -1,3 +1,4 @@
+import * as DshConnection from '@deepseek-ai/dsh-client-connection'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
@@ -207,7 +208,16 @@ async function activate(
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
   // activation dependency so a peer bridge never silently omits commands.
   const nativeTypertGateway = ctx.get('typertGateway') as TypertGatewayLike
-  const localTypertGateway = new TypertGatewaySwitch(nativeTypertGateway).local()
+  const hostGateway = new TypertGatewaySwitch(nativeTypertGateway)
+  const localTypertGateway = hostGateway.local()
+  // Only the authenticated ConnectionController callback creates these owner
+  // peers. Never share a browser Peer or accept a principal from the tunnel.
+  if (typeof DshConnection.Peer === 'function') {
+    localTypertGateway.createPeer = () => {
+      const peer = new DshConnection.Peer(ctx, { principal: { kind: 'owner' } })
+      return { ...hostGateway.local(peer), dispose: () => peer.dispose() }
+    }
+  }
   // The Host `subprocess` service owns PTY allocation, containment, and process
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
@@ -220,9 +230,10 @@ async function activate(
     localTypertGateway,
     () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
     subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
-    () => createPluginRouteDispatcher(
+    peer => createPluginRouteDispatcher(
       () => ctx.get('connection') as PluginRouteConnectionLike | undefined,
       () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
+      peer,
     ),
   )
 

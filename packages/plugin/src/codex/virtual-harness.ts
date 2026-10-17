@@ -260,6 +260,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
         case 'workspace/insertSessionBefore': return business(await this.workspaceForSession(requestArg(args), signal))
         case 'workspace/archiveSession': return business(await this.archiveSession(requestArg(args), signal))
         case 'session/list': return business(success({ items: await this.sessionSummaries(signal) }))
+        case 'session/projections': return business(await this.sessionProjections(requestArg(args), signal))
         case 'session/search': return business(await this.searchSessions(requestArg(args), signal))
         case 'session/create': return business(await this.createSession(requestArg(args), signal))
         case 'session/fork': return business(await this.forkSession(requestArg(args), signal))
@@ -752,6 +753,21 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.events.publishProjection(sessionId, 'title', title, seq)
     await this.refreshAndPublishWorkspaces()
     return success({ title, seq })
+  }
+
+  private async sessionProjections(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
+    const sessionId = requiredString(request.sessionId, 'sessionId')
+    const catalog = await this.currentCatalog(signal)
+    const session = catalog.sessions.find(item => item.id === sessionId)
+    if (session === undefined) return success(null)
+    const history = await this.readHistoryPage(nativeThreadId(sessionId), { maxMessages: 1 }, signal)
+    const directory = await this.models(signal).catch(() => undefined)
+    return success(record(this.sessionSummary(session, {
+      blank: history.cursor < 0,
+      modelSelection: this.modelSelection(sessionId, directory),
+      lastPromptAt: session.updatedAt || null,
+      asOfSeq: history.cursor,
+    })).projections)
   }
 
   private async sessionPage(request: JsonRecord, signal: AbortSignal): Promise<unknown> {

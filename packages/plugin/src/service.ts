@@ -90,13 +90,14 @@ export class HostPluginRuntime {
     private readonly fileViewerHost?: () => FileViewerHostServiceLike | undefined,
     /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
     private readonly terminalSpawner?: RemoteTerminalSpawner,
-    private readonly pluginRoutes?: () => PluginRouteDispatcher | undefined,
+    private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
     this.codex = new CodexRemoteDomain(config.codex, logger)
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, undefined, undefined, () => this.terminalEnabled, this.terminalSpawner)
     this.connections = new ConnectionController(this.identities, (context, send) => {
+      const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway
       const harnessApi = this.apiProxy === undefined
         ? undefined
         : new HarnessApiBridge(
@@ -104,12 +105,12 @@ export class HostPluginRuntime {
             (event, data) => send(createEvent(event, data)),
             undefined,
             this.logger,
-            this.localGateway as TypertGatewayLike | undefined,
+            peerGateway as TypertGatewayLike | undefined,
             this.harnessVersion,
           )
-      const harnessRemote = this.localGateway?.supportsCarrier === true
+      const harnessRemote = peerGateway?.supportsCarrier === true
         ? new HarnessRemoteBridge(
-            this.localGateway,
+            peerGateway,
             (event, data) => send(createEvent(event, data)),
             this.logger,
             this.harnessVersion,
@@ -137,7 +138,7 @@ export class HostPluginRuntime {
       // The dispatcher must resolve inside the callback: the DSH connection
       // service (and its shared fetch handler) may become ready after this
       // plugin is activated.
-      const dispatcher = this.pluginRoutes?.()
+      const dispatcher = this.pluginRoutes?.(peerGateway?.peer)
       const pluginRoute = dispatcher === undefined ? undefined : new PluginRouteBridge(dispatcher, this.logger)
       return new RpcRouter(
         harnessApi,

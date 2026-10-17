@@ -18,7 +18,7 @@ describe('Host plugin route carrier', () => {
         return Response.json({ ok: true, value: { revision: 1 } })
       })
       const unregister = connection.fetch.register({ path: '/api/bot', methods: ['POST'], requestBody: 'buffered', fetch })
-      const bridge = new PluginRouteBridge(createPluginRouteDispatcher(() => connection, readPort))
+      const bridge = new PluginRouteBridge(createPluginRouteDispatcher(() => connection, readPort, connection.createPeer({ principal: { kind: 'owner' } })))
       await expect(bridge.call({ route: 'api/bot', body: { endpoint: 'state', payload: null } }))
         .resolves.toEqual({ status: 200, json: { ok: true, value: { revision: 1 } } })
       await unregister()
@@ -38,7 +38,7 @@ describe('Host plugin route carrier', () => {
       const connection = ctx.get('connection') as HostConnectionService
       const rpc = vi.fn(async () => ({ ok: true as const, value: 'local mutation' }))
       connection.rpc.intercept('/api', () => true, rpc)
-      const bridge = new PluginRouteBridge(createPluginRouteDispatcher(() => connection, () => undefined))
+      const bridge = new PluginRouteBridge(createPluginRouteDispatcher(() => connection, () => undefined, connection.createPeer({ principal: { kind: 'owner' } })))
       await runScenarios(['schedule/create', 'settings/update', 'terminal/write'].map(endpoint => ({
         name: endpoint,
         run: async () => {

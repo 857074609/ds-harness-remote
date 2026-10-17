@@ -221,7 +221,7 @@ OAuth 登录方式由服务端动态提供。使用 `ds-harness-remote login lis
 - [开发进度与路线图](docs/TODO.md)
 - [更新记录](docs/CHANGELOG.md)
 - [隐私说明](docs/PRIVACY.md)
-- 版本兼容详情见[兼容性说明](docs/compatibility.zh.md)。
+- 当前开发适配基线为 `dsh-v0.2.1-rc.1`，验证范围见[兼容性说明](docs/compatibility.zh.md)。
 
 ## 友情链接
 

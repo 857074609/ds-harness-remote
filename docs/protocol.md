@@ -1041,11 +1041,15 @@ Params：
 Result 必须保持官方 Connection RPC 结果：`{ "ok": true, "value"?: ... }` 或
 `{ "ok": false, "error": { "code", "message", "details" } }`。Host 通过启动时捕获的本地
 Gateway dispatcher 调用，禁止回到已切换的 Client facade 形成递归。
+Harness `0.2.1-rc.1` 要求显式 Peer：仅在 ConnectionController 完成账号成员与本地信任认证后，
+为每条连接创建官方 owner Peer。该 Peer 只在 Host 内持有，绑定该连接的 RPC、stream、
+`$events/result` 与插件 Fetch 路由，断线即 dispose；Client 不得提供 principal/Peer，
+不得共享浏览器 Peer 或在重连时复用已销毁 Peer。Remote 固定 allowlist 仍独立生效。
 
 固定 allowlist 包括原生 UI 所需的 Session、Workspace、Commands、Goals、Settings、
 Credentials、LLM、Skills、Subagents、Message Feedback、Plugin Inventory、File References、
 Session Reference、只读 `directoryPicker/list` 与布尔能力探测 `session/canOpenWorkspacePath`
-endpoints，以及 Gateway 内部的 `$events` 和
+endpoints、只读 `remoteAccess/follow`，以及 Gateway 内部的 `$events` 和
 `$events/result`。明确禁止 `directoryPicker/pick`、`directoryPicker/createDirectory`、
 `session/openWorkspacePath`、Settings/native open、动态 Cordis package/source/runtime 操作、
 Agent Preset copy/delete 和任何未列出的 endpoint。endpoint 必须命中代码内固定集合，不能
@@ -1115,6 +1119,14 @@ Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传�
 `terminal.enabled` 默认 true。Host 本地开关切换即保存并更新拦截，在后续加密 capability 探测中宣告 `harness.terminal.v1`。
 只允许 unary `terminal/environment|shells|list|create|write|resize|rename|close` 与 stream
 `terminal/follow|retain`；不允许 wildcard、exec、spawn 或改变官方终端语义。
+Harness 从 `0.2.1-alpha.3` 起将原生输入改为 `terminal/attach` 双向流，RC.1 沿用此契约。
+本仓库不增加通用 uplink RPC：Desktop 在本地将原生 attach 转成既有 follow/write/resize，
+Host 在通过终端策略后将 Harness follow 转成官方 attach；CodeX/ACP 保留各自终端域。
+每个 attachment 的输入 sequence 从 1 递增，Host ack 后才完成 write/resize；拒绝、取消或
+断线不能确认或重放输入。Host 每 attachment 至多 32 个待确认输入，队列上限 64 项/256 KiB；
+原生客户端侧输出缓冲最多 256 项/4 MiB。状态快照按官方 writable 映射既有 controllerId。
+旧 Host 与 CodeX/ACP 的终端环境在本地补充 `maxBufferedBytes=262144`，不扩展 Host 权限。
+
 关闭时，任何终端调用都返回 `TERMINAL_DISABLED`，提示用户在 Host 本地开启开关后重试。
 这个提示不能用于一般登录/连接失败。开关是对受信任 Remote 设备的 Shell 授权，不是 Agent 审批：
 终端继承 Host 执行环境系统用户权限，cwd 不是 filesystem sandbox。

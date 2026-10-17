@@ -217,7 +217,7 @@ OAuth sign-in methods are loaded from the Server. Use `ds-harness-remote login l
 - [Development status and roadmap](docs/TODO.md)
 - [Changelog](docs/CHANGELOG.md)
 - [Privacy policy](docs/PRIVACY.md)
-- Remote compatibility details are maintained in [the compatibility guide](docs/compatibility.md).
+- The current development baseline is `dsh-v0.2.1-rc.1`; validation scope is documented in [the compatibility guide](docs/compatibility.md).
 
 ## Links
 

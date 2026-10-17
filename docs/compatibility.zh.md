@@ -1,14 +1,20 @@
 ## 版本兼容
 
-## 当前兼容目标（2026-10-09）
+## 当前兼容目标（2026-10-17）
 
-当前适配基线为 `dsh-v0.2.1-alpha.1`，保留上一版 `dsh-v0.2.0-rc.2`（以及 rc.1）的官方 Typert / Session V3 接入。peer range 明确接纳 `0.2.1` 与 `0.2.2` 的 alpha/beta/RC 和正式版；后续 `0.2.2` RC 在官方 carrier 契约不变时无需仅为版本号改包。未来版本尚未发布，范围接纳不等于已完成其 runtime 验证。
+当前适配基线为 `dsh-v0.2.1-rc.1`，保留上一版 `dsh-v0.2.0-rc.2`（以及 rc.1）的官方 Typert / Session V3 接入。peer range 明确接纳 `0.2.1` 与 `0.2.2` 的 alpha/beta/RC 和正式版；后续 `0.2.2` RC 在官方 carrier 契约不变时无需仅为版本号改包。未来版本尚未发布，范围接纳不等于已完成其 runtime 验证。
 
 按用户要求，legacy rc.2 ApiProxy 不再作为兼容维护目标；已有实现和历史类型暂时保留，本次没有升级或扩展其接口。旧版 Typert/settings 分支同样不作为本轮验收目标。
 
 新版问答通过固定 `userQuestions/attachWait` stream 认领前台倒计时，通过 `$events/result` 回传窗口内回答或 `ASK_TIMED_OUT`；超时后仅根据官方 `userQuestions` projection 恢复可补答问题，补答走 `userQuestions/answer`，断线不重放输入。上一版 RC 的无限期问答保持原事件路径。
 
 可选 Claude Code Mods 的展示和按钮仅允许 `claudeCodeMods/watchBand` / `pressBand`，不开放动态端点。带路径前缀的 Web 部署中，Remote 状态 SSE 与官方 RPC 都使用文档相对地址；代理仍需按 Harness 文档剥离前缀并配置可信 authority。
+
+RC.1 Gateway 的每条已认证 Remote 连接使用独立的官方 owner Peer；RPC、事件回复、流和插件 Fetch 路由绑定同一 Peer，断线释放，不能借用另一连接的事件流回答审批。现有固定 allowlist 仍先于 Gateway 生效，新增只读 `remoteAccess/follow`。
+
+RC.1 原生终端的 `terminal/attach` 双向流在本地转换为既有 Remote `follow/write/resize` 子集，Host 再对接官方 attach；Android 和旧客户端继续使用既有协议。输入有界排队，收到 Host ack 后才确认，保留设备归属、连接输入权和断线不重放。旧 Host 与 CodeX/ACP 终端为 RC.1 客户端补充输入缓冲上限。`session/projections` 支持新版结果类型标记；CodeX/ACP 的投影仅从各自的内存/历史读取。
+
+验证覆盖 RC.1 npm 实现的真实 Gateway/Peer 隔离、核心终端状态转换、全仓类型检查、自动化测试、生产构建（含 Android Hermes 导出）与 DSH bundle 校验。Desktop UI、Android APK/原生真机、独立 Remote Web 和加密跨设备 E2E 尚待验收。
 
 ## 历史实现记录（不代表当前维护承诺）
 

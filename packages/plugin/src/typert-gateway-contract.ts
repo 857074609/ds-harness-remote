@@ -4,6 +4,8 @@ export interface TypertGatewayRequest {
   /** Typert Remote payloads require one plain object under `args`. */
   args: Readonly<Record<string, unknown>>
   signal?: AbortSignal
+  peer?: unknown
+  uplink?: AsyncIterable<unknown>
 }
 
 export type TypertRpcResult =
@@ -48,9 +50,12 @@ export interface TypertGatewayLike {
 /** Carrier-level face captured from the alpha Gateway before target switching. */
 export interface LocalTypertGateway extends TypertGatewayLike {
   dispatch(endpoint: string, payload: unknown, signal: AbortSignal): Promise<TypertRpcResult>
-  open(endpoint: string, payload: unknown, signal: AbortSignal): Promise<AsyncIterable<unknown>>
+  open(endpoint: string, payload: unknown, signal: AbortSignal, uplink?: AsyncIterable<unknown>): Promise<AsyncIterable<unknown>>
   failure(error: unknown): { code: string; message: string; details: Record<string, unknown> }
   supportsCarrier: boolean
+  peer?: unknown
+  createPeer?(): LocalTypertGateway
+  dispose?(): Promise<void>
 }
 
 export interface RemoteTypertGatewayTarget {

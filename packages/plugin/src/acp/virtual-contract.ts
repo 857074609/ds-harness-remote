@@ -92,8 +92,8 @@ export interface PendingApproval {
 }
 
 export interface AcpClientLike {
-  sessionModels?(sessionId: string, backend: "antigravity" | "pi", signal?: AbortSignal): Promise<AcpSessionModels>
-  selectModel?(sessionId: string, backend: "antigravity" | "pi", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
+  sessionModels?(sessionId: string, backend: "antigravity" | "pi" | "opencode", signal?: AbortSignal): Promise<AcpSessionModels>
+  selectModel?(sessionId: string, backend: "antigravity" | "pi" | "opencode", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
   workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>
   createSession(
     cwd: string,

@@ -21,7 +21,7 @@ import {
   mergeAcpHistoryAndLive,
 } from '../services/cursor'
 import { forkMessage } from '../services/message-actions'
-import { readOpencodeHistory } from '../services/opencode'
+import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
 import type { RemoteSession } from '../types'
@@ -220,6 +220,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             busyAction: undefined,
           }))
           if (session.backend === 'pi') void runtime.refreshPiModels(session, current)
+          if (session.backend === 'opencode') void runtime.refreshOpencodeModels(session, current)
           return
         }
         await runtime.closeActiveCodexStream()
@@ -573,7 +574,13 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
-        if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'opencode') throw new Error(zhCN.messageActions.unavailable)
+        if (session.backend === 'opencode') {
+          const models = await selectOpencodeModel(runtime.connection.requireOpencode(), cursorNativeId(session), selection)
+          if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
+          set({ sessionModels: models, modelSelecting: false })
+          return true
+        }
+        if (session.backend === 'cursor' || session.backend === 'antigravity') throw new Error(zhCN.messageActions.unavailable)
         const selected = await runtime.connection.requireProxy().sessionSelectModel(session.sessionId, selection)
         set(state => ({
           sessionModels: state.sessionModels === undefined ? undefined : { ...state.sessionModels, current: selected },
@@ -581,7 +588,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }))
         return true
       } catch (error) {
-        if (session.backend === 'pi' && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
+        if ((session.backend === 'pi' || session.backend === 'opencode') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
         set({ modelSelecting: false, error: friendlyError(error) })
         return false
       }

@@ -4,7 +4,7 @@ import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
 import { loadCodexModels } from '../services/codex'
 import { cursorNativeId } from '../services/cursor'
-import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
+import { loadOpencodeCatalog, loadOpencodeModels, mergeOpencodeCatalog } from '../services/opencode'
 import { loadPiCatalog, loadPiModels, mergePiCatalog } from '../services/pi'
 import { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveRecentWorkspaces } from '../services/storage'
@@ -236,6 +236,16 @@ export class SessionRuntime {
     const generation = this.connectionGeneration
     try {
       const models = await loadPiModels(this.connection.requirePi(), cursorNativeId(session))
+      if (!current() || generation !== this.connectionGeneration) return
+      this.store.set(state => state.selectedSession?.sessionId === session.sessionId
+        ? { sessionModels: models } : {})
+    } catch { /* Optional model discovery must not prevent conversation recovery. */ }
+  }
+
+  async refreshOpencodeModels(session: RemoteSession, current: () => boolean): Promise<void> {
+    const generation = this.connectionGeneration
+    try {
+      const models = await loadOpencodeModels(this.connection.requireOpencode(), cursorNativeId(session))
       if (!current() || generation !== this.connectionGeneration) return
       this.store.set(state => state.selectedSession?.sessionId === session.sessionId
         ? { sessionModels: models } : {})

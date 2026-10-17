@@ -1,5 +1,5 @@
 import type { AgentAcpClient } from '@dsh-remote/client-core'
-import type { RemoteSession, WorkspaceView } from '../types'
+import type { ModelSelection, RemoteSession, SessionModels, WorkspaceView } from '../types'
 import { createOpencodeSession, createOpencodeWorkspace } from './cursor'
 
 export interface OpencodeCatalog {
@@ -55,6 +55,36 @@ export async function readOpencodeHistory(client: AgentAcpClient, sessionId: str
   const result = await client.transferCall('dsh/sessionHistory', { sessionId, backend: 'opencode' })
   if (!record(result) || !Array.isArray(result.events)) throw new Error('Invalid OpenCode history response.')
   return result.events
+}
+
+export async function loadOpencodeModels(client: AgentAcpClient, sessionId: string): Promise<SessionModels> {
+  const result = await client.sessionModels(sessionId, 'opencode')
+  if (!record(result) || !record(result.current) || result.current.provider !== 'opencode'
+    || typeof result.current.model !== 'string' || !Array.isArray(result.groups)) throw new Error('Invalid OpenCode model catalog.')
+  const groups = result.groups.flatMap(group => {
+    if (!record(group) || group.id !== 'opencode' || !Array.isArray(group.models)) return []
+    const models = group.models.flatMap(model => {
+      if (!record(model) || typeof model.id !== 'string' || typeof model.name !== 'string') return []
+      return [{ id: model.id, name: model.name }]
+    })
+    return [{ id: 'opencode', name: typeof group.name === 'string' ? group.name : 'OpenCode', models }]
+  })
+  return {
+    current: {
+      provider: 'opencode',
+      model: result.current.model,
+      ...(typeof result.current.reasoningEffort === 'string' ? { reasoningEffort: result.current.reasoningEffort } : {}),
+    },
+    routable: result.routable === true,
+    groups,
+    failures: [],
+  }
+}
+
+export async function selectOpencodeModel(client: AgentAcpClient, sessionId: string, selection: ModelSelection): Promise<SessionModels> {
+  if (selection.provider !== 'opencode') throw new Error('Invalid OpenCode model provider.')
+  await client.selectModel(sessionId, 'opencode', selection)
+  return loadOpencodeModels(client, sessionId)
 }
 
 function record(value: unknown): value is Record<string, unknown> {

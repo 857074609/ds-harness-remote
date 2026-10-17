@@ -4,6 +4,7 @@ import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
+import { modelCatalog } from '../virtual-catalog.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -126,7 +127,26 @@ export class OpencodeAcpClient implements CursorAcpLike {
     }
   }
 
+  private selectedModel?: string
+
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
+    if (method === 'dsh/sessionModels') {
+      const catalog = modelCatalog('opencode')
+      const currentModel = this.selectedModel ?? catalog.default.model
+      return {
+        current: { provider: 'opencode', model: currentModel },
+        routable: true,
+        failures: [],
+        groups: catalog.groups,
+      }
+    }
+    if (method === 'dsh/selectModel') {
+      const p = params as { model?: string }
+      if (typeof p?.model === 'string') {
+        this.selectedModel = p.model
+      }
+      return { selected: { provider: 'opencode', model: this.selectedModel ?? 'opencode/deepseek-v4.1-flash-free' } }
+    }
     if (!this.ready) throw new OpencodeAcpError('OPENCODE_UNAVAILABLE', 'OpenCode ACP is not ready.')
     const budget = timeoutMs
       ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)

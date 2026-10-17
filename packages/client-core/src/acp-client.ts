@@ -63,11 +63,11 @@ export class AgentAcpClient {
     }, signal)
   }
 
-  async sessionModels(sessionId: string, backend: 'antigravity' | 'pi', signal?: AbortSignal): Promise<AcpSessionModels> {
+  async sessionModels(sessionId: string, backend: 'antigravity' | 'pi' | 'opencode', signal?: AbortSignal): Promise<AcpSessionModels> {
     return this.call('dsh/sessionModels', { sessionId, backend }, signal) as Promise<AcpSessionModels>
   }
 
-  async selectModel(sessionId: string, backend: 'antigravity' | 'pi', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
+  async selectModel(sessionId: string, backend: 'antigravity' | 'pi' | 'opencode', selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection> {
     if (selection.provider !== backend) throw new RemoteGatewayError('INVALID_MESSAGE', 'The model provider does not match the ACP backend.')
     if (backend === 'antigravity' && !this.capabilities.includes('agent.acp.antigravity.model-load.v1')) {
       await this.call('session/load', { sessionId, backend }, signal)

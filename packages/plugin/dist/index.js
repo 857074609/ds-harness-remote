@@ -11206,7 +11206,16 @@ var CURSOR_MODELS = [
   { id: "deepseek-r1", name: "DeepSeek R1" }
 ];
 var OPENCODE_MODELS = [
-  { id: "opencode", name: "OpenCode" }
+  { id: "opencode/deepseek-v4.1-flash-free", name: "DeepSeek V4.1 Flash Free" },
+  { id: "opencode/glm-5.3-flash-free", name: "GLM 5.3 Flash Free" },
+  { id: "opencode/mimo-v2.6-flash-free", name: "MiMo V2.6 Flash Free" },
+  { id: "opencode/nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free" },
+  { id: "opencode/nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning Free" },
+  { id: "opencode/nemotron-3.5-super-vl-free", name: "Nemotron 3.5 Super VL Free" },
+  { id: "opencode/longcat-2.5-preview-free", name: "LongCat 2.5 Preview Free" },
+  { id: "opencode/beam-free", name: "Beam Free" },
+  { id: "opencode/big-pickle", name: "Big Pickle" },
+  { id: "opencode/space-bunny-free", name: "Space Bunny Free" }
 ];
 function modelCatalog(backend = "cursor") {
   const provider = backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
@@ -12323,14 +12332,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(await this.attachment(requestArg(args)));
         case "session/modelCatalog": {
           const sessionId = await this.preferredSessionId();
-          if (this.backend === "cursor" || !sessionId) return business(success(modelCatalog(this.backend)));
+          if (this.backend === "cursor" || this.backend === "opencode" || !sessionId) return business(success(modelCatalog(this.backend)));
           const models = await this.hostSessionModels(sessionId);
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
           const rawId = extractSessionId(requestArg(args));
           nativeAcpId(rawId, this.backend);
-          if (this.backend !== "cursor") return business(success(await this.hostSessionModels(rawId)));
+          if (this.backend !== "cursor" && this.backend !== "opencode") return business(success(await this.hostSessionModels(rawId)));
           const catalog = modelCatalog(this.backend);
           return business(success({
             current: this.modelSelection(rawId),
@@ -12816,7 +12825,15 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return { lastUsed: selection, next: selection };
   }
   async hostSessionModels(sessionId) {
-    if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
+    if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) {
+      const catalog = modelCatalog(this.backend);
+      return {
+        current: this.modelSelection(sessionId),
+        routable: true,
+        groups: catalog.groups,
+        failures: []
+      };
+    }
     const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend);
     this.selectedModels.set(sessionId, models.current);
     return models;
@@ -12827,7 +12844,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const provider = requiredString(request.provider, "provider");
     const model = requiredString(request.model, "model");
     const reasoningEffort = string(request.reasoningEffort);
-    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
+    const catalog = this.backend !== "cursor" && this.backend !== "opencode" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
     const group = catalog.groups.find((g) => g.id === provider);
     const targetModel = group?.models.find((m) => m.id === model);
     if (group === void 0 || targetModel === void 0) {
@@ -12846,7 +12863,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       if (!this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
       const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
       this.selectedModels.set(sessionId, confirmed);
-    } else return failure("model-unavailable", `${this.backendLabel()} model selection follows Host settings.`);
+    } else {
+      this.selectedModels.set(sessionId, selected);
+    }
     const seq = this.nextProjectionSeq();
     this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
     return success({ selected: this.modelSelection(sessionId) });
@@ -38930,7 +38949,25 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.historyBusy = false;
     }
   }
+  selectedModel;
   async call(method, params, timeoutMs) {
+    if (method === "dsh/sessionModels") {
+      const catalog = modelCatalog("opencode");
+      const currentModel = this.selectedModel ?? catalog.default.model;
+      return {
+        current: { provider: "opencode", model: currentModel },
+        routable: true,
+        failures: [],
+        groups: catalog.groups
+      };
+    }
+    if (method === "dsh/selectModel") {
+      const p = params;
+      if (typeof p?.model === "string") {
+        this.selectedModel = p.model;
+      }
+      return { selected: { provider: "opencode", model: this.selectedModel ?? "opencode/deepseek-v4.1-flash-free" } };
+    }
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
     return this.request(method, params, budget);
@@ -39144,21 +39181,21 @@ var imageBlock = external_exports2.object({ type: external_exports2.literal("ima
 });
 var promptBlock = external_exports2.union([textBlock, imageBlock]);
 var acpToolStreamSchema = external_exports2.object({
-  backend: external_exports2.enum(["cursor", "antigravity", "pi"]),
+  backend: external_exports2.enum(["cursor", "antigravity", "pi", "opencode"]),
   endpoint: external_exports2.enum(ACP_TOOL_STREAM_ENDPOINTS),
   args: external_exports2.record(external_exports2.unknown())
 }).strict();
 var schemas2 = {
   "dsh/toolCall": external_exports2.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "antigravity", "pi"]),
+    backend: external_exports2.enum(["cursor", "antigravity", "pi", "opencode"]),
     endpoint: external_exports2.enum(ACP_TOOL_CALL_ENDPOINTS),
     args: external_exports2.record(external_exports2.unknown())
   }).strict(),
-  "dsh/sessionModels": external_exports2.object({ sessionId: id4, backend: external_exports2.enum(["antigravity", "pi"]) }).strict(),
+  "dsh/sessionModels": external_exports2.object({ sessionId: id4, backend: external_exports2.enum(["antigravity", "pi", "opencode"]) }).strict(),
   "dsh/selectModel": external_exports2.object({
     sessionId: id4,
-    backend: external_exports2.enum(["antigravity", "pi"]),
+    backend: external_exports2.enum(["antigravity", "pi", "opencode"]),
     model: id4,
     reasoningEffort: id4.optional()
   }).strict(),
@@ -39182,7 +39219,7 @@ var schemas2 = {
   }).strict(),
   "session/prompt": external_exports2.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "antigravity", "pi", "claude"]).optional(),
+    backend: external_exports2.enum(["cursor", "antigravity", "pi", "claude", "opencode"]).optional(),
     prompt: external_exports2.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
   "session/cancel": external_exports2.object({

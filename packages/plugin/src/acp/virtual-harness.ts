@@ -237,14 +237,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'session/attachment': return business(await this.attachment(requestArg(args)))
         case 'session/modelCatalog': {
           const sessionId = await this.preferredSessionId()
-          if (this.backend === 'cursor' || !sessionId) return business(success(modelCatalog(this.backend)))
+          if (this.backend === 'cursor' || this.backend === 'opencode' || !sessionId) return business(success(modelCatalog(this.backend)))
           const models = await this.hostSessionModels(sessionId)
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }))
         }
         case 'session/models': {
           const rawId = extractSessionId(requestArg(args))
           nativeAcpId(rawId, this.backend)
-          if (this.backend !== 'cursor') return business(success(await this.hostSessionModels(rawId)))
+          if (this.backend !== 'cursor' && this.backend !== 'opencode') return business(success(await this.hostSessionModels(rawId)))
           const catalog = modelCatalog(this.backend)
           return business(success({
             current: this.modelSelection(rawId),
@@ -779,7 +779,15 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
-    if (this.backend === 'cursor' || this.backend === 'opencode' || !this.client.sessionModels) return { current: { provider: this.backend, model: 'host-settings' }, routable: true, groups: [], failures: [] }
+    if (this.backend === 'cursor' || this.backend === 'opencode' || !this.client.sessionModels) {
+      const catalog = modelCatalog(this.backend)
+      return {
+        current: this.modelSelection(sessionId),
+        routable: true,
+        groups: catalog.groups,
+        failures: [],
+      }
+    }
     const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend)
     this.selectedModels.set(sessionId, models.current)
     return models
@@ -791,7 +799,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const provider = requiredString(request.provider, 'provider')
     const model = requiredString(request.model, 'model')
     const reasoningEffort = string(request.reasoningEffort)
-    const catalog = this.backend !== 'cursor' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
+    const catalog = this.backend !== 'cursor' && this.backend !== 'opencode' ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend)
     const group = catalog.groups.find(g => g.id === provider)
     const targetModel = group?.models.find(m => m.id === model)
     if (group === undefined || targetModel === undefined) {
@@ -810,7 +818,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       if (!this.client.selectModel) return failure('model-unavailable', 'The Host does not support ACP model selection.')
       const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected)
       this.selectedModels.set(sessionId, confirmed)
-    } else return failure('model-unavailable', `${this.backendLabel()} model selection follows Host settings.`)
+    } else {
+      this.selectedModels.set(sessionId, selected)
+    }
     const seq = this.nextProjectionSeq()
     this.events.publishProjection(sessionId, 'modelSelection', this.modelSelectionProjection(sessionId), seq)
     return success({ selected: this.modelSelection(sessionId) })

@@ -242,8 +242,29 @@ jobs:
       - name: Build workspace packages
         run: pnpm --filter './packages/**' -r build
 
+      - name: Check out Intelligent UI renderer source
+        uses: actions/checkout@v6
+        with:
+          repository: dreamfarer-space/deepseek-harness-intelligent-ui
+          # Pinned upstream PR #24 merge commit; update only after auditing the new artifact.
+          ref: bfb6b35f7ee94291629796d2b5eb577d20d8fa29
+          path: .deps/deepseek-harness-intelligent-ui
+
+      - name: Verify pinned Intelligent UI renderer
+        run: |
+          test "$(git -C .deps/deepseek-harness-intelligent-ui rev-parse HEAD)" = "bfb6b35f7ee94291629796d2b5eb577d20d8fa29" || { echo '::error::Unexpected renderer source commit'; exit 1; }
+          test "$(git -C .deps/deepseek-harness-intelligent-ui hash-object renderer/renderer.js)" = "b8cb5e17bf7e77f3c9ed374edc0f994f358beeac" || { echo '::error::Unexpected renderer file content'; exit 1; }
+
       - name: Bundle local Android renderers
+        env:
+          DSH_INTELLIGENT_UI_RENDERER_BUNDLE: ${{ github.workspace }}/.deps/deepseek-harness-intelligent-ui/renderer/renderer.js
+          DSH_REQUIRE_INTELLIGENT_UI: 'true'
         run: pnpm --dir apps/android run build:renderers
+
+      - name: Verify bundled Android renderers
+        env:
+          DSH_REQUIRE_INTELLIGENT_UI: 'true'
+        run: node apps/android/scripts/verify-intelligent-ui-renderer.mjs
 
       - name: Generate Android project
         run: pnpm --dir apps/android exec expo prebuild --platform android --no-install

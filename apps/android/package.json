@@ -47,7 +47,7 @@
   },
   "scripts": {
     "prepare:workspace": "pnpm --filter '@dsh-remote/android^...' -r build && pnpm run verify:workspace && pnpm run build:renderers",
-    "build:renderers": "node scripts/build-terminal.mjs && node scripts/build-pdf.mjs",
+    "build:renderers": "node scripts/build-terminal.mjs && node scripts/build-pdf.mjs && node scripts/build-intelligent-ui.mjs",
     "verify:workspace": "node scripts/verify-workspace-data-planes.mjs",
     "prestart": "pnpm run prepare:workspace",
     "start": "expo start",
@@ -56,7 +56,7 @@
     "preios": "pnpm run prepare:workspace",
     "ios": "expo run:ios",
     "check": "pnpm run build:renderers && pnpm run verify:workspace && tsc --noEmit",
-    "test": "pnpm run verify:workspace && vitest run",
+    "test": "pnpm run build:renderers && pnpm run verify:workspace && vitest run",
     "prebuild": "pnpm run prepare:workspace",
     "build": "expo export --platform android"
   },

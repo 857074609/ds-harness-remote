@@ -32,6 +32,7 @@ import Svg, { Path } from 'react-native-svg'
 import { strings as zhCN } from '../../locales/i18n'
 import { hasVisibleMessageText } from '../../state/event-reducer'
 import { useAppStore } from '../../state/store'
+import type { UiArtifact } from '../../state/ui-artifacts'
 import type {
   ApprovalActivity,
   ChatImage,
@@ -49,11 +50,15 @@ import { useThemedStyles } from '../../ui/use-themed-styles'
 import type { ProcessActivity } from '../chat-process'
 import { completedProcessTitle, processDetail, processSegments, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
+import { IntelligentUiCard } from '../intelligent-ui-card'
 import { createStyles } from './styles'
 
 /** ui-chat has two independent folds: activity ranges, then a normally ended whole Turn. */
-export const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllowed, busyAction, onApproval, onQuestion }: {
+export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifacts, updatedArtifacts, availableUiIds, foldAllowed, busyAction, onApproval, onQuestion }: {
   items: ChatItem[]
+  artifacts: UiArtifact[]
+  updatedArtifacts: UiArtifact[]
+  availableUiIds: ReadonlySet<string>
   foldAllowed: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
@@ -78,6 +83,11 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllo
   ]
   const segments = useMemo(() => processSegments(process), [items, answer])
   const expanded = !canFold || open
+  const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
+    && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
+    && !availableUiIds.has(item.id)
+    && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
+      || (item.uiResultMeta as { ok?: unknown }).ok !== false))
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   return <View style={styles.processGroup}>
@@ -93,6 +103,9 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, foldAllo
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
     {answer !== undefined && <MessageBubble item={{ ...answer, reasoning: undefined }} compact />}
+    {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}
+    {updatedArtifacts.map(ui => <Text key={'updated:' + ui.uiId} style={[styles.pickerHint, { marginTop: 6 }]}>{ui.title || 'Interactive UI'} updated to version {ui.version}; see its original card above.</Text>)}
+    {unavailableUi.map(item => <Text key={'ui-missing:' + item.id} style={[styles.pickerHint, { color: colors.danger, marginTop: 6 }]}>Interactive UI could not be restored from this Host result. Check the original tool output and history metadata.</Text>)}
   </View>
 })
 

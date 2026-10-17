@@ -36,6 +36,7 @@ import type { AuthenticatedPeerChannel } from './types.js'
 import { CodexRemoteDomain } from './codex/domain.js'
 import { AcpGateway, StdioAcpAdapter } from './acp.js'
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { AcpRemoteGateway } from './acp/gateway.js'
 import type { AcpPeerBridge, PublishAcpFrame } from './acp/peer-bridge.js'
@@ -545,6 +546,11 @@ export class HostPluginRuntime {
   }
 
   private acpAvailable(command: string): boolean {
+    if (command === 'opencode') {
+      try {
+        if (existsSync('/usr/local/bin/opencode') || existsSync('/var/lib/dsh/.opencode/bin/opencode')) return true
+      } catch {}
+    }
     try { execFileSync(process.platform === 'win32' ? 'where' : 'which', [command], { stdio: 'ignore' }); return true } catch { return false }
   }
 

@@ -40148,7 +40148,19 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       if (requestedBackend === "pi" || requestedBackend === "claude" || requestedBackend === "opencode") {
         const sessions = await this.listCatalogSessions(requestedBackend);
-        return [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename4(path) || "workspace" }));
+        const discovered = [...new Set(sessions.map((item) => item.cwd))].map((path) => ({ path, title: basename4(path) || "workspace" }));
+        if (discovered.length > 0 || requestedBackend !== "opencode") return discovered;
+        const defaultCandidates = /* @__PURE__ */ new Set();
+        const cwd3 = process.cwd();
+        if (cwd3) defaultCandidates.add(cwd3);
+        for (const candidate of ["/var/lib/dsh/workspace/ds-harness-remote", "/srv/dsh-workspace", "/var/lib/dsh/local"]) {
+          try {
+            const s2 = await stat5(candidate);
+            if (s2.isDirectory()) defaultCandidates.add(candidate);
+          } catch {
+          }
+        }
+        return [...defaultCandidates].map((path) => ({ path, title: basename4(path) || "workspace" }));
       }
       const candidates = /* @__PURE__ */ new Set();
       const cwd2 = process.cwd();
@@ -44350,6 +44362,7 @@ function isRecord21(value) {
 
 // src/service.ts
 import { execFileSync as execFileSync2 } from "node:child_process";
+import { existsSync as existsSync4 } from "node:fs";
 
 // src/codex-workspace-bridge.ts
 var CodexWorkspaceBridge = class extends WorkspaceBridge {
@@ -44796,6 +44809,12 @@ var HostPluginRuntime = class {
     return types;
   }
   acpAvailable(command) {
+    if (command === "opencode") {
+      try {
+        if (existsSync4("/usr/local/bin/opencode") || existsSync4("/var/lib/dsh/.opencode/bin/opencode")) return true;
+      } catch {
+      }
+    }
     try {
       execFileSync2(process.platform === "win32" ? "where" : "which", [command], { stdio: "ignore" });
       return true;

@@ -261,7 +261,20 @@ export class AcpRemoteGateway {
       const requestedBackend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
       if (requestedBackend === 'pi' || requestedBackend === 'claude' || requestedBackend === 'opencode') {
         const sessions = await this.listCatalogSessions(requestedBackend)
-        return [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
+        const discovered = [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
+        if (discovered.length > 0 || requestedBackend !== 'opencode') return discovered
+        const defaultCandidates = new Set<string>()
+        const cwd = process.cwd()
+        if (cwd) defaultCandidates.add(cwd)
+        for (const candidate of ['/var/lib/dsh/workspace/ds-harness-remote', '/srv/dsh-workspace', '/var/lib/dsh/local']) {
+          try {
+            const s = await stat(candidate)
+            if (s.isDirectory()) defaultCandidates.add(candidate)
+          } catch {
+            // ignore
+          }
+        }
+        return [...defaultCandidates].map(path => ({ path, title: basename(path) || 'workspace' }))
       }
       const candidates = new Set<string>()
       const cwd = process.cwd()

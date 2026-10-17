@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fixes OpenCode workspaces on a Host where the CLI is installed at the official `~/.opencode/bin/opencode` location, and wires OpenCode project/session discovery plus `session/load` history replay so saved conversations load again.
+- 修复 OpenCode CLI 安装在官方 `~/.opencode/bin/opencode` 时 Host 无法发现后端的问题，并接入 OpenCode 的项目/会话发现与 `session/load` 历史回放，已保存的会话可以重新加载。
+
 - Fixes RC.1 Desktop web boot against older Harness Hosts whose `ui-theme` settings omit the new font fields. Remote supplies missing display defaults in received settings views while preserving Host schemas, revisions and write refusals.
 - 修复 RC.1 Desktop 连接旧 Harness Host 时，`ui-theme` 缺少新字体字段导致主题初始化失败、界面模块无法激活的问题。Remote 仅为接收到的设置视图补齐显示默认值，保留 Host schema、revision 和写入拒绝结果。
 

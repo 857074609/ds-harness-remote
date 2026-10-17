@@ -283,6 +283,11 @@ describe('AntigravityAcpClient', () => {
     expect(candidates).not.toContain('agy')
     expect(candidates).toContain('agent')
     expect(cursorBinaryCandidates('agy')).toEqual([expect.stringContaining('agy'), 'agy'])
+    expect(cursorBinaryCandidates('opencode')).toEqual([
+      expect.stringContaining('.opencode'),
+      expect.stringContaining('.local'),
+      'opencode',
+    ])
     expect(cursorBinaryCandidates('custom-bin')).toEqual(['custom-bin'])
     const adapter = createAntigravityAcpAdapter('agy-test', logger(), () => fakeProcess().child as any)
     expect(adapter.id).toBe('antigravity')

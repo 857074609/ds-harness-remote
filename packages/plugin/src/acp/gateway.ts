@@ -233,7 +233,7 @@ export class AcpRemoteGateway {
     })
 
     if (typeof call.params.backend === 'string') {
-      const prefix = typeof call.params.sessionId === 'string' ? /^(acp|cursor|pi|claude):/.exec(call.params.sessionId)?.[1] : undefined
+      const prefix = typeof call.params.sessionId === 'string' ? /^(acp|cursor|pi|claude|opencode):/.exec(call.params.sessionId)?.[1] : undefined
       if (prefix && (prefix === 'acp' ? 'antigravity' : prefix) !== call.params.backend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
@@ -259,7 +259,7 @@ export class AcpRemoteGateway {
 
     if (call.method === 'dsh/workspaceList') {
       const requestedBackend = typeof call.params.backend === 'string' ? call.params.backend : this.defaultBackend()
-      if (requestedBackend === 'pi' || requestedBackend === 'claude') {
+      if (requestedBackend === 'pi' || requestedBackend === 'claude' || requestedBackend === 'opencode') {
         const sessions = await this.listCatalogSessions(requestedBackend)
         return [...new Set(sessions.map(item => item.cwd))].map(path => ({ path, title: basename(path) || 'workspace' }))
       }
@@ -324,7 +324,7 @@ export class AcpRemoteGateway {
         this.logger.info('ACP session list fetched', { count: items.length })
         return { items }
       }
-      if (backend === 'pi' || backend === 'claude') {
+      if (backend === 'pi' || backend === 'claude' || backend === 'opencode') {
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
         const sessions = await this.listCatalogSessions(backend, cwd)
         return { items: sessions.slice(0, limit).map(item => ({ conversationId: item.sessionId, title: item.title ?? 'Untitled Session', createdAt: Date.parse(item.updatedAt ?? '') || 0, updatedAt: Date.parse(item.updatedAt ?? '') || 0, cwd: item.cwd })) }
@@ -352,7 +352,7 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       this.requireAcp(backend)
-      if (backend === 'pi' || backend === 'claude') {
+      if (backend === 'pi' || backend === 'claude' || backend === 'opencode') {
         const cwd = await this.catalogSessionCwd(backend, conversationId)
         this.requireSessionOwner(connectionId, conversationId)
         const client = this.requireAcp(backend) as CursorAcpLike & { history?: (sessionId: string, cwd: string) => Promise<unknown[]> }
@@ -417,7 +417,7 @@ export class AcpRemoteGateway {
       if (boundBackend !== undefined && targetBackend !== boundBackend) {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
-      if (targetBackend === 'pi' || targetBackend === 'claude') await this.catalogSessionCwd(targetBackend, sessionId!)
+      if (targetBackend === 'pi' || targetBackend === 'claude' || targetBackend === 'opencode') await this.catalogSessionCwd(targetBackend, sessionId!)
       this.requireSessionOwner(connectionId, sessionId!)
       const acp = this.requireAcp(targetBackend)
       const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd, mcpServers: [] } : {}) })
@@ -1018,7 +1018,7 @@ export class AcpRemoteGateway {
     this.claimSession(connectionId, sessionId)
   }
 
-  private captureCatalogClient(backend: 'pi' | 'claude') {
+  private captureCatalogClient(backend: 'pi' | 'claude' | 'opencode') {
     const client = this.requireAcp(backend)
     const instance = this.backendInstances.get(backend)
     return { client, assertCurrent: () => {
@@ -1028,7 +1028,7 @@ export class AcpRemoteGateway {
     } }
   }
 
-  private async listCatalogSessions(backend: 'pi' | 'claude', cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
+  private async listCatalogSessions(backend: 'pi' | 'claude' | 'opencode', cwd?: string): Promise<Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }>> {
     const { client, assertCurrent } = this.captureCatalogClient(backend)
     const items: Array<{ sessionId: string; cwd: string; title?: string; updatedAt?: string }> = []
     let cursor: string | undefined
@@ -1067,7 +1067,7 @@ export class AcpRemoteGateway {
 
   private piSessionCwd(sessionId: string): Promise<string> { return this.catalogSessionCwd('pi', sessionId) }
 
-  private async catalogSessionCwd(backend: 'pi' | 'claude', sessionId: string): Promise<string> {
+  private async catalogSessionCwd(backend: 'pi' | 'claude' | 'opencode', sessionId: string): Promise<string> {
     const { assertCurrent } = this.captureCatalogClient(backend)
     if (!this.sessionCwds.has(sessionId)) await this.listCatalogSessions(backend)
     assertCurrent()
@@ -1266,6 +1266,8 @@ export function cursorBinaryCandidates(configured: string): string[] {
   }
   if (configured === 'opencode') {
     return [
+      // Official installer location (curl -fsSL https://opencode.ai/install | bash).
+      join(userHome, '.opencode', 'bin', 'opencode'),
       join(userHome, '.local', 'bin', 'opencode'),
       'opencode',
     ]

@@ -212,10 +212,19 @@ async function activate(
   const localTypertGateway = hostGateway.local()
   // Only the authenticated ConnectionController callback creates these owner
   // peers. Never share a browser Peer or accept a principal from the tunnel.
-  if (typeof DshConnection.Peer === 'function') {
+  const connectionExports = DshConnection as Record<string, unknown>
+  const PeerConstructor = (typeof connectionExports.Peer === 'function'
+    ? connectionExports.Peer
+    : connectionExports.OperatorPeer) as (new (ctx: Context, options?: unknown) => { dispose(): unknown }) | undefined
+  if (typeof PeerConstructor === 'function') {
     localTypertGateway.createPeer = () => {
-      const peer = new DshConnection.Peer(ctx, { principal: { kind: 'owner' } })
-      return { ...hostGateway.local(peer), dispose: () => peer.dispose() }
+      const peer = new PeerConstructor(ctx, { principal: { kind: 'owner' } })
+      return {
+        ...hostGateway.local(peer),
+        dispose: async () => {
+          await peer.dispose?.()
+        },
+      }
     }
   }
   // The Host `subprocess` service owns PTY allocation, containment, and process

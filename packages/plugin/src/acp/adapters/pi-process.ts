@@ -1,6 +1,6 @@
 import { CursorAcpClient, CursorAcpError, type CursorAcpLike, type CursorAcpInbound, type CursorAcpInboundHandler, type CursorAcpUnavailableHandler } from './cursor-process.js'
 import type { SafeLogger } from '../../logging.js'
-import { piToolResult } from '../pi-tool-result.js'
+import { acpHistoryEvents } from '../history-events.js'
 
 /** pi itself is NOT ACP. Each session uses the published pi-acp wrapper. */
 export class PiAcpClient implements CursorAcpLike {
@@ -183,7 +183,7 @@ export class PiAcpClient implements CursorAcpLike {
       const loadedId = (result as { sessionId?: unknown } | null)?.sessionId
       if (loadedId !== undefined && loadedId !== sessionId) throw new CursorAcpError('ACP_INVALID_SESSION', 'PI returned an invalid history session.')
       if (bytes > 8 * 1024 * 1024 || count > 10000) throw new CursorAcpError('ACP_HISTORY_TOO_LARGE', 'PI history exceeds the transfer limit.')
-      return historyEvents(updates, sessionId)
+      return acpHistoryEvents(updates, sessionId, 'pi')
     }
     finally { try { await this.dispose(client) } finally { this.historyBusy = false } }
   }
@@ -212,92 +212,4 @@ export class PiAcpClient implements CursorAcpLike {
     this.all.clear()
     this.callbacks.clear()
   }
-}
-
-// pi-acp 0.0.34 does not replay original timestamps/IDs, thinking, or tool
-// arguments. Use deterministic projection IDs and an unknown (epoch) time rather
-// than presenting the time of this history read as the time of the conversation.
-function historyEvents(messages: CursorAcpInbound[], sessionId: string): unknown[] {
-  type Block = { type: string; text: string }
-  type Tool = { id: string; name: string; input: unknown; output: Block[]; failed: boolean; terminal: boolean; emitted: boolean }
-  const events: any[] = []
-  const tools = new Map<string, Tool>()
-  let turn = 0
-  let step = 1
-  let afterTools = false
-  let pending: { role: 'user' | 'assistant'; content: Block[] } | undefined
-  const push = (type: string, data: unknown, surface = false) => events.push({ type: 'event', event: {
-    type, seq: events.length, time: 0, data, ...(surface ? { surfaceOp: 'append' } : {}),
-  } })
-  const id = () => `pi-history:${sessionId}:${events.length}`
-  const flushMessage = () => {
-    if (!pending) return
-    const message = { id: id(), role: pending.role, content: pending.content }
-    if (pending.role === 'user') push('user/message', { ...message, source: { kind: 'user' } }, true)
-    else push('assistant/message', { turn, step, message: { ...message, source: { kind: 'model', provider: 'pi', model: '' } }, stream: [] }, true)
-    pending = undefined
-  }
-  const result = (tool: Tool) => {
-    if (tool.emitted || !tool.terminal) return
-    tool.emitted = true
-    push('tool/result', { turn, step, message: { id: id(), role: 'user', source: { kind: 'tool', callId: tool.id }, content: [{
-      type: 'tool-result', toolCallId: tool.id, content: tool.output, ...(tool.failed ? { isError: true } : {}),
-    }] } }, true)
-  }
-  const flushTools = () => { for (const tool of tools.values()) result(tool) }
-  const endTurn = () => {
-    flushMessage(); flushTools()
-    if (turn) { push('step/end', { turn, step }); push('turn/end', { turn, reason: { kind: 'completed' } }) }
-    tools.clear()
-    afterTools = false
-  }
-  for (const message of messages) {
-    const params = message.params as { sessionId?: string; update?: Record<string, any> } | undefined
-    if (message.kind !== 'notification' || message.method !== 'session/update' || params?.sessionId !== sessionId) continue
-    const update = params.update
-    if (!update) continue
-    const kind = update.sessionUpdate
-    if (kind === 'user_message_chunk' || kind === 'agent_message_chunk' || kind === 'agent_thought_chunk') {
-      if (update.content?.type !== 'text' || typeof update.content.text !== 'string') continue
-      const role = kind === 'user_message_chunk' ? 'user' : 'assistant'
-      if (role === 'user' && pending?.role !== 'user') {
-        endTurn(); turn++; step = 1
-        push('turn/start', { turn }); push('step/start', { turn, step })
-      } else if (!turn) {
-        turn++; push('turn/start', { turn }); push('step/start', { turn, step })
-      }
-      if (pending && pending.role !== role) flushMessage()
-      flushTools()
-      if (role === 'assistant' && afterTools) {
-        push('step/end', { turn, step }); step++; push('step/start', { turn, step })
-        afterTools = false
-      }
-      pending ??= { role, content: [] }
-      const type = kind === 'agent_thought_chunk' ? 'reasoning' : 'text'
-      const previous = pending.content.at(-1)
-      if (previous?.type === type) previous.text += update.content.text
-      else pending.content.push({ type, text: update.content.text })
-    } else if ((kind === 'tool_call' || kind === 'tool_call_update') && typeof update.toolCallId === 'string') {
-      flushMessage()
-      afterTools = true
-      if (!turn) { turn++; push('turn/start', { turn }); push('step/start', { turn, step }) }
-      let tool = tools.get(update.toolCallId)
-      if (!tool) {
-        tool = { id: update.toolCallId, name: typeof update.title === 'string' ? update.title : 'tool', input: update.rawInput,
-          output: [], failed: false, terminal: false, emitted: false }
-        tools.set(tool.id, tool)
-        push('tool/call', { turn, step, callId: tool.id, name: tool.name,
-          arguments: typeof tool.input === 'string' ? tool.input : JSON.stringify(tool.input ?? {}) })
-      }
-      const decoded = piToolResult(update)
-      if (decoded.content.length) tool.output = decoded.content
-      tool.failed ||= decoded.isError
-      tool.terminal ||= update.status === 'completed' || update.status === 'failed'
-      // Published load emits a provisional completed tool_call followed by the
-      // authoritative tool_call_update (which can be failed and hold all output).
-      if (kind === 'tool_call_update') result(tool)
-    }
-  }
-  endTurn()
-  return events
 }

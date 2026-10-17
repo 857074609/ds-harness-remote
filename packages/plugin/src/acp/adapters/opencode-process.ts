@@ -3,6 +3,7 @@ import { Buffer } from 'node:buffer'
 import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
+import { acpHistoryEvents } from '../history-events.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -62,6 +63,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
   private closed = false
   private failureNotified = false
   private startPromise?: Promise<void>
+  private historyBusy = false
 
   constructor(
     private readonly binary: string = 'opencode',
@@ -72,7 +74,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
       windowsHide: true,
       env: process.env,
     }),
-    options: { args?: string[]; cwd?: string } = {},
+    private readonly options: { args?: string[]; cwd?: string } = {},
   ) {}
 
   start(): Promise<void> {
@@ -83,6 +85,46 @@ export class OpencodeAcpClient implements CursorAcpLike {
   }
 
   isReady(): boolean { return this.ready }
+
+  /**
+   * Replay a saved session in one temporary ACP process so a history read never
+   * interrupts a live turn. OpenCode emits the transcript as `session/update`
+   * notifications before `session/load` resolves.
+   */
+  async history(sessionId: string, cwd: string): Promise<unknown[]> {
+    if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'The OpenCode domain is closed.')
+    if (this.historyBusy) throw new OpencodeAcpError('OPENCODE_HISTORY_BUSY', 'An OpenCode history read is already in progress.')
+    this.historyBusy = true
+    const client = new OpencodeAcpClient(this.binary, this.logger, undefined, this.options)
+    const updates: CursorAcpInbound[] = []
+    let bytes = 0
+    let count = 0
+    let overflow = false
+    const unsubscribe = client.onInbound(message => {
+      // A history reader has no authority to run tools or wait for approval.
+      if (message.kind === 'request') {
+        void client.respondError(message.id, -32601, 'History reader does not support requests.').catch(() => undefined)
+        return
+      }
+      if (message.method !== 'session/update'
+        || (message.params as { sessionId?: string } | null)?.sessionId !== sessionId
+        || overflow) return
+      count++
+      bytes += Buffer.byteLength(JSON.stringify(message))
+      if (bytes > 8 * 1024 * 1024 || count > 10_000) overflow = true
+      else updates.push(message)
+    })
+    try {
+      await client.start()
+      await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      if (overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
+      return acpHistoryEvents(updates, sessionId, 'opencode')
+    } finally {
+      unsubscribe()
+      await client.close().catch(() => undefined)
+      this.historyBusy = false
+    }
+  }
 
   async call(method: string, params: unknown, timeoutMs?: number): Promise<unknown> {
     if (!this.ready) throw new OpencodeAcpError('OPENCODE_UNAVAILABLE', 'OpenCode ACP is not ready.')

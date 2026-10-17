@@ -1,205 +1,72 @@
-import { LoopbackPreview } from './loopback-preview.js'
 import type { ApiProxy, RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
+import { AgentAcpClient, CodexRemoteClient } from '@dsh-remote/client-core'
+import type { PluginRouteCallResult } from '@dsh-remote/protocol'
+import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
+import type { AcpVirtualWorkspaceView } from './acp/virtual-harness.js'
+import { AcpVirtualHarness, discoverAcpVirtualWorkspaces } from './acp/virtual-harness.js'
+import type { HarnessMode } from './api-proxy-switch.js'
+import { ApiProxySwitch } from './api-proxy-switch.js'
+import { probeRemoteHostFeatures, remoteHostFeatures } from './client-capabilities.js'
+import { ClientCodexStreams } from './client-codex-streams.js'
+import { ClientConnection } from './client-connection.js'
+import { ClientControl } from './client-control.js'
+import type {
+  CodexLoopbackStream,
+  ConnectedRemote,
+  ConnectionProgressState,
+  HarnessRemoteTransport,
+  HostAuthorizationControl,
+  HostConnectionHandle,
+  RemoteDeviceView,
+  RemoteDirectoryListing,
+  RemoteWorkspaceSelection,
+  RemoteWorkspaceView,
+} from './client-runtime-contract.js'
+import { ClientModeError, HOST_AUTHORIZATION_ERRORS, record, shortId } from './client-runtime-contract.js'
 import {
-  parseRemoteWorkspaceTypes,
-  type CodexAppFrameData,
-  type PluginRouteCallResult,
-  type CodexAppStreamClosedData,
-  type RemoteWorkspaceTypeDescription,
-} from '@dsh-remote/protocol'
-import { AgentAcpClient, CodexRemoteClient, RemoteClientCore, remoteWorkspaceTypeAvailable } from '@dsh-remote/client-core'
-import {
-  AdaptiveTransport,
-  stunOnlyIceServers,
-  type RtcConnectionDiagnostics,
-  type RtcIceServer,
-  type RtcPeerConnectionFactory,
-} from '@dsh-remote/webrtc'
-import { ApiProxySwitch, type HarnessMode } from './api-proxy-switch.js'
-import { ClientSecureTransport } from './client-secure-transport.js'
-import type { ResolvedConfig } from './config.js'
-import { registerControlRoute, type HostWebServerLike } from './control-route.js'
-import type { HostIdentity, IdentityStore, TrustedPeer } from './identity-store.js'
-import type { TypertGatewayLike } from './typert-gateway-contract.js'
-import { uuidV7 } from './ids.js'
-import type { SafeLogger } from './logging.js'
-import { harnessSessionGeneration } from './harness-version.js'
-import { isAllowedPluginRoute } from './plugin-route-bridge.js'
-import { RemoteHarnessApiProxy } from './remote-api-proxy.js'
-import { RemoteTypertGateway } from './remote-typert-gateway.js'
+  invokeRemoteCommand,
+  readRemoteWorkspaceBaseline,
+  remoteWorkspaceTitle,
+  unwrapNativeResult,
+  workspaceRecordId,
+} from './client-workspace-queries.js'
+import type { CodexVirtualWorkspaceView } from './codex/virtual-harness.js'
 import {
   codexProjectWorkspaceId,
   CodexVirtualHarness,
   discoverCodexVirtualWorkspaces,
-  type CodexVirtualWorkspaceView,
 } from './codex/virtual-harness.js'
-import {
-  AcpVirtualHarness,
-  discoverAcpVirtualWorkspaces,
-  type AcpVirtualWorkspaceView,
-} from './acp/virtual-harness.js'
-import {
-  ClientServerApi,
-  ServerApiError,
-  type AuthorizedPeerDevice,
-  type OAuthProvider,
-  type ServerHostDevice,
-} from './server-api.js'
-import { TypertGatewaySwitch } from './typert-gateway-switch.js'
+import type { ResolvedConfig } from './config.js'
+import type { HostWebServerLike } from './control-route.js'
+import { registerControlRoute } from './control-route.js'
 import type { RemoteFileViewerEndpoint } from './file-viewer-contract.js'
-import { loadNodeRtcFactory, type WeriftFactoryOptions } from './werift-rtc.js'
+import { harnessSessionGeneration } from './harness-version.js'
+import type { HostIdentity, IdentityStore } from './identity-store.js'
+import { uuidV7 } from './ids.js'
+import type { SafeLogger } from './logging.js'
+import { LoopbackPreview } from './loopback-preview.js'
+import { RemoteHarnessApiProxy } from './remote-api-proxy.js'
+import { RemoteTypertGateway } from './remote-typert-gateway.js'
 import { safeErrorCode } from './safe-error.js'
-
-interface ConnectedRemote {
-  client: RemoteClientCore
-  target: TrustedPeer
-  transport: AdaptiveTransport
-  features: RemoteHostFeatures
-  progressRunId: number
-  clientVersion?: string
-  harnessVersion?: string
-}
-
-export interface RemoteHostFeatures {
-  commandList: boolean
-  fileViewer: boolean
-  terminal: boolean
-  apiProxy: boolean
-  remoteGateway: boolean
-  sessionFormat?: 3
-  codex: boolean
-  cursor: boolean
-  antigravity: boolean
-  pi?: boolean
-  opencode: boolean
-  acpModelLoadsSession?: boolean
-  workspaceTypes?: readonly RemoteWorkspaceTypeDescription[]
-  pluginRoute: boolean
-}
-
-interface CodexLoopbackStream {
-  target: { kind: 'remote'; client: RemoteClientCore } | { kind: 'local' }
-  frames: Array<{ method: string; params: unknown }>
-  closed?: string
-  unsubscribe: () => void
-  close: () => Promise<void>
-  wake: () => void
-}
-
-const REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16] as const
-const REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17] as const
-const DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12_000
-const DIRECT_LAN_PROGRESS_DISPLAY_MS = 1_400
-const HOST_AUTHORIZATION_ERRORS = new Set([
-  'ACCOUNT_AUTH_REQUIRED',
-  'AUTH_INVALID',
-  'DEVICE_OWNERSHIP_REQUIRED',
-  'DEVICE_REVOKED',
-  'TOKEN_EXPIRED',
-])
-
-type TransportAttempt = 'direct' | 'turn' | 'relay'
-
-interface ConnectionProgressState {
-  runId: number
-  targetDeviceId: string
-  phase: 'checking-host' | 'authorizing-peer' | 'probing' | 'connected'
-  activeTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
-}
-
-export interface RemoteDirectoryEntry {
-  name: string
-  path: string
-  hidden: boolean
-}
-
-export interface RemoteDirectoryListing {
-  path: string
-  home: string
-  crumbs: RemoteDirectoryEntry[]
-  entries: RemoteDirectoryEntry[]
-  truncated: boolean
-}
-
-export interface RemoteWorkspaceView {
-  workspaceId: string
-  path: string
-  title: string
-}
-
-interface RemoteWorkspaceSelection {
-  targetDeviceId: string
-  workspaceId: string
-  backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode'
-  sessionId?: string
-}
-
-type HarnessRemoteTransport = 'remoteGateway' | 'apiProxy'
-
-export interface RemoteDeviceView {
-  deviceId: string
-  name: string
-  platform: string
-  membershipId: string
-  online: boolean
-  lastSeenAt?: number
-  clientVersion?: string
-  harnessVersion?: string
-}
-
-export interface HostConnectionRpc {
-  handle(
-    channel: string,
-    handler: (endpoint: string, payload: unknown, signal: AbortSignal) => Promise<RpcResult<unknown>>,
-    options: { authority: 'loopback' | 'trusted-host' },
-  ): () => Promise<void>
-}
-
-export interface HostConnectionHandle {
-  requestRejection?(request: { headers: Record<string, string | string[] | undefined> }): number | undefined
-  rpc: HostConnectionRpc
-}
-
-export interface HostAuthorizationControl {
-  setAgentBackends?(config: ResolvedConfig): Promise<void>
-  setTerminalEnabled?(enabled: boolean): void
-  setLoopbackPorts?(ports: readonly number[]): void
-  hostStatus(): {
-    deviceId?: string
-    configured: boolean
-    online: boolean
-    reconnecting: boolean
-    lastActiveAt?: number
-    error?: string
-    account?: string
-    authorized: boolean
-    accountRequired: boolean
-    connectedClients?: Array<{
-      deviceId: string
-      name: string
-      platform?: string
-      mode?: 'LAN' | 'P2P' | 'TURN' | 'Relay'
-    }>
-  }
-  hasStoredAuthorization?(): Promise<boolean>
-  reconnectHost(): void
-  clearHostAuthorization(): Promise<void>
-  localHarnessVersion?(): string | undefined
-  authorizeHostAsOwned(accessToken: string, account?: string): Promise<unknown>
-  authorizeHostWithAccount(email: string, password: string): Promise<unknown>
-  authorizeHostWithCode(code: string): Promise<unknown>
-  codexStatus?(): { available: boolean }
-  codexCall?(input: unknown, signal?: AbortSignal): Promise<unknown>
-  codexRespond?(input: unknown, signal?: AbortSignal): Promise<{ resolved: true }>
-  codexOpenStream?(
-    input: unknown,
-    publish: (event: 'codex.app.frame' | 'codex.app.stream.closed', data: CodexAppFrameData | CodexAppStreamClosedData) => Promise<void>,
-    signal?: AbortSignal,
-  ): Promise<unknown>
-  codexCloseStream?(input: unknown): Promise<unknown>
-}
+import type { OAuthProvider } from './server-api.js'
+import { ClientServerApi, ServerApiError } from './server-api.js'
+import type { TypertGatewayLike } from './typert-gateway-contract.js'
+import { TypertGatewaySwitch } from './typert-gateway-switch.js'
+import type { WeriftFactoryOptions } from './werift-rtc.js'
+import { loadNodeRtcFactory } from './werift-rtc.js'
 
 export class ClientModeRuntime {
+  private connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+    return this.connection.connect(targetDeviceId, signal)
+  }
+
+  handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
+    return this.control.handleControl(endpoint, payload, signal)
+  }
+  private readonly connection: ClientConnection
+  private readonly control: ClientControl
+  private readonly codexStreamBridge: ClientCodexStreams
+
   private preview?: LoopbackPreview
   private identity?: HostIdentity
   private connected?: ConnectedRemote
@@ -227,6 +94,66 @@ export class ClientModeRuntime {
     private readonly host?: HostAuthorizationControl,
     private readonly rtcFactoryProvider: (options?: WeriftFactoryOptions) => Promise<RtcPeerConnectionFactory | undefined> = loadNodeRtcFactory,
   ) {
+    const owner = this
+    this.connection = new ClientConnection({
+      get connectionProgressRun() { return owner.connectionProgressRun },
+      set connectionProgressRun(value) { owner.connectionProgressRun = value },
+      get connectionProgress() { return owner.connectionProgress },
+      set connectionProgress(value) { owner.connectionProgress = value },
+      requireIdentity: (...args) => owner.requireIdentity(...args),
+      get server() { return owner.server },
+      get config() { return owner.config },
+      get rtcFactoryProvider() { return owner.rtcFactoryProvider },
+      get logger() { return owner.logger },
+      get connected() { return owner.connected },
+      set connected(value) { owner.connected = value },
+      closePreview: (...args) => owner.closePreview(...args),
+      get pendingWorkspaceSelection() { return owner.pendingWorkspaceSelection },
+      set pendingWorkspaceSelection(value) { owner.pendingWorkspaceSelection = value },
+      closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
+      closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
+      get proxySwitch() { return owner.proxySwitch },
+      get gatewaySwitch() { return owner.gatewaySwitch },
+      get identities() { return owner.identities },
+    })
+    this.control = new ClientControl({
+      detailedStatus: (...args) => owner.detailedStatus(...args),
+      devices: (...args) => owner.devices(...args),
+      get server() { return owner.server },
+      authorizeClientWithAccount: (...args) => owner.authorizeClientWithAccount(...args),
+      startClientOAuthQrLogin: (...args) => owner.startClientOAuthQrLogin(...args),
+      pollClientOAuthQrLogin: (...args) => owner.pollClientOAuthQrLogin(...args),
+      activeRemote: (...args) => owner.activeRemote(...args),
+      get preview() { return owner.preview },
+      set preview(value) { owner.preview = value },
+      listRemoteDirectory: (...args) => owner.listRemoteDirectory(...args),
+      listRemoteWorkspaces: (...args) => owner.listRemoteWorkspaces(...args),
+      listCodexWorkspaces: (...args) => owner.listCodexWorkspaces(...args),
+      openRemoteWorkspace: (...args) => owner.openRemoteWorkspace(...args),
+      openCodexWorkspace: (...args) => owner.openCodexWorkspace(...args),
+      createCodexWorkspace: (...args) => owner.createCodexWorkspace(...args),
+      listCursorWorkspaces: (...args) => owner.listCursorWorkspaces(...args),
+      openCursorWorkspace: (...args) => owner.openCursorWorkspace(...args),
+      createCursorWorkspace: (...args) => owner.createCursorWorkspace(...args),
+      consumeWorkspaceSelection: (...args) => owner.consumeWorkspaceSelection(...args),
+      callRemoteFileViewer: (...args) => owner.callRemoteFileViewer(...args),
+      activeCodexRemote: (...args) => owner.codexStreamBridge.activeCodexRemote(...args),
+      requireLocalCodex: (...args) => owner.codexStreamBridge.requireLocalCodex(...args),
+      localCodexAvailable: (...args) => owner.codexStreamBridge.localCodexAvailable(...args),
+      pluginRoute: (...args) => owner.pluginRoute(...args),
+      openCodexStream: (...args) => owner.codexStreamBridge.openCodexStream(...args),
+      nextCodexFrames: (...args) => owner.codexStreamBridge.nextCodexFrames(...args),
+      closeCodexStream: (...args) => owner.codexStreamBridge.closeCodexStream(...args),
+      get host() { return owner.host },
+      setHostAuthorization: (...args) => owner.setHostAuthorization(...args),
+      setMode: (...args) => owner.setMode(...args),
+    })
+    this.codexStreamBridge = new ClientCodexStreams({
+      activeRemote: (...args) => owner.activeRemote(...args),
+      get codexStreams() { return owner.codexStreams },
+      get host() { return owner.host },
+    })
+
     this.proxySwitch = apiProxy === undefined ? undefined : new ApiProxySwitch(apiProxy)
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway)
   }
@@ -272,7 +199,7 @@ export class ClientModeRuntime {
   }
 
   registerControl(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
-    return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer)
+    return registerControlRoute(connection, (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal), webServer)
   }
 
   status(): Record<string, unknown> {
@@ -345,7 +272,7 @@ export class ClientModeRuntime {
     const serverDevices = await this.server.listDevices()
     const remoteDevices = serverDevices.filter(device => device.deviceId !== this.host?.hostStatus().deviceId)
     return Promise.all(remoteDevices.map(async device => {
-      await this.authorizeHostPeer(device)
+      await this.connection.authorizeHostPeer(device)
       const presence = await this.server.presenceFor(device.deviceId).catch(() => ({ online: false }))
       return { ...device, ...presence }
     }))
@@ -410,7 +337,7 @@ export class ClientModeRuntime {
     this.proxySwitch?.selectLocal()
     await this.closePreview()
     this.gatewaySwitch.selectLocal()
-    await this.closeCodexStreams(previous?.client)
+    await this.codexStreamBridge.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
     await this.server.revokeCurrentDevice()
     this.identity = await this.identities.reset(this.config.deviceName)
@@ -439,7 +366,7 @@ export class ClientModeRuntime {
       this.connected = undefined
       this.connectionProgress = undefined
       this.pendingWorkspaceSelection = undefined
-      await this.closeCodexStreams(previous?.client)
+      await this.codexStreamBridge.closeCodexStreams(previous?.client)
       await previous?.client.close().catch(() => undefined)
       this.logger.info('Harness target switched', { mode: 'local' })
       return this.status()
@@ -451,19 +378,19 @@ export class ClientModeRuntime {
     try {
       this.assertRemoteCompatible(next)
     } catch (error) {
-      this.clearConnectionProgress(next.progressRunId)
+      this.connection.clearConnectionProgress(next.progressRunId)
       await next.client.close().catch(() => undefined)
       throw error
     }
     const previous = this.connected
     await this.closePreview()
     this.connected = next
-    this.clearConnectionProgress(next.progressRunId)
+    this.connection.clearConnectionProgress(next.progressRunId)
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
     this.selectRemoteTarget(next)
-    await this.closeCodexStreams(previous?.client)
+    await this.codexStreamBridge.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
     this.logger.info('Harness target switched', { mode: 'remote', targetDeviceId: shortId(next.target.deviceId) })
     return this.status()
@@ -728,7 +655,7 @@ export class ClientModeRuntime {
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
     await this.closeCursorVirtual()
-    await this.closeCodexStreams(this.connected?.client)
+    await this.codexStreamBridge.closeCodexStreams(this.connected?.client)
     await this.connected?.client.close().catch(() => undefined)
     this.connected = undefined
     this.connectionProgress = undefined
@@ -764,158 +691,6 @@ export class ClientModeRuntime {
 
   private activeRemote(): ConnectedRemote | undefined {
     return this.connected
-  }
-
-  private activeCodexRemote(): ConnectedRemote | undefined {
-    const remote = this.activeRemote()
-    if (remote === undefined) return undefined
-    if (!remote.features.codex) {
-      return undefined
-    }
-    return remote
-  }
-
-  private async openCodexStream(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-    const remote = this.activeCodexRemote()
-    const value = record(payload)
-    if (typeof value.streamId !== 'string' || value.streamId.length === 0 || value.streamId.length > 128
-      || typeof value.threadId !== 'string' || value.threadId.length === 0) {
-      throw new ClientModeError('INVALID_MESSAGE', 'A Codex stream and thread are required.')
-    }
-    if (this.codexStreams.has(value.streamId)) throw new ClientModeError('REQUEST_CONFLICT', 'The Codex stream is already open.')
-    let wake = () => undefined
-    const stream: CodexLoopbackStream = {
-      target: remote === undefined ? { kind: 'local' } : { kind: 'remote', client: remote.client },
-      frames: [],
-      unsubscribe: () => undefined,
-      close: async () => {
-        if (remote === undefined) {
-          await this.host?.codexCloseStream?.({ streamId: value.streamId }).catch(() => undefined)
-          return
-        }
-        await remote.client.rpc('codex.app.stream.close', { streamId: value.streamId }).catch(() => undefined)
-      },
-      wake: () => wake(),
-    }
-    if (remote === undefined) {
-      const host = this.requireLocalCodex()
-      this.codexStreams.set(value.streamId, stream)
-      try {
-        const result = await host.codexOpenStream({ streamId: value.streamId, threadId: value.threadId }, this.publishLocalCodexFrame, signal)
-        return result
-      } catch (error) {
-        this.codexStreams.delete(value.streamId)
-        stream.wake()
-        throw error
-      }
-    }
-    stream.unsubscribe = remote.client.onEvent(event => {
-      if (event.event === 'codex.app.frame' && isRecord(event.data) && event.data.streamId === value.streamId) {
-        this.appendCodexFrame(stream, event.data)
-      }
-      if (event.event === 'codex.app.stream.closed' && isRecord(event.data) && event.data.streamId === value.streamId) {
-        stream.closed = typeof event.data.reason === 'string' ? event.data.reason : 'closed'
-        stream.wake()
-      }
-    })
-    try {
-      // Subscribe before opening the Host stream so the first App Server
-      // notification cannot race past the loopback listener.
-      await remote.client.rpc('codex.app.stream.open', { streamId: value.streamId, threadId: value.threadId }, signal)
-    } catch (error) {
-      stream.unsubscribe()
-      throw error
-    }
-    this.codexStreams.set(value.streamId, stream)
-    return { opened: true, streamId: value.streamId, threadId: value.threadId }
-  }
-
-  private readonly publishLocalCodexFrame = async (
-    event: 'codex.app.frame' | 'codex.app.stream.closed',
-    data: CodexAppFrameData | CodexAppStreamClosedData,
-  ): Promise<void> => {
-    const streamId = data.streamId
-    const stream = this.codexStreams.get(streamId)
-    if (stream === undefined || stream.target.kind !== 'local') return
-    if (event === 'codex.app.frame') {
-      this.appendCodexFrame(stream, data)
-      return
-    }
-    const closed = data as CodexAppStreamClosedData
-    stream.closed = typeof closed.reason === 'string' ? closed.reason : 'closed'
-    stream.wake()
-  }
-
-  private appendCodexFrame(stream: CodexLoopbackStream, data: unknown): void {
-    if (!isRecord(data) || !isRecord(data.frame) || typeof data.frame.method !== 'string') return
-    if (stream.frames.length >= 256) {
-      stream.closed = 'overflow'
-    } else {
-      stream.frames.push({ method: data.frame.method, params: data.frame.params })
-    }
-    stream.wake()
-  }
-
-  private localCodexAvailable(): boolean {
-    return this.host?.codexStatus?.().available === true
-  }
-
-  private requireLocalCodex(): Required<Pick<HostAuthorizationControl,
-    'codexCall' | 'codexRespond' | 'codexOpenStream' | 'codexCloseStream'
-  >> {
-    if (!this.localCodexAvailable()
-      || this.host?.codexCall === undefined
-      || this.host.codexRespond === undefined
-      || this.host.codexOpenStream === undefined
-      || this.host.codexCloseStream === undefined) {
-      throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'Local CodeX is disabled or unavailable on this Host.')
-    }
-    return {
-      codexCall: this.host.codexCall.bind(this.host),
-      codexRespond: this.host.codexRespond.bind(this.host),
-      codexOpenStream: this.host.codexOpenStream.bind(this.host),
-      codexCloseStream: this.host.codexCloseStream.bind(this.host),
-    }
-  }
-
-  private async nextCodexFrames(payload: unknown, signal?: AbortSignal): Promise<unknown> {
-    const value = record(payload)
-    if (typeof value.streamId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Codex stream is required.')
-    const stream = this.codexStreams.get(value.streamId)
-    if (stream === undefined) throw new ClientModeError('STREAM_NOT_FOUND', 'The Codex stream is not open.')
-    if (stream.frames.length === 0 && stream.closed === undefined) await waitForCodexFrames(stream, signal)
-    const frames = stream.frames.splice(0, 100)
-    return {
-      streamId: value.streamId,
-      frames,
-      closed: stream.closed !== undefined,
-      ...(stream.closed === undefined ? {} : { reason: stream.closed }),
-    }
-  }
-
-  private async closeCodexStream(payload: unknown): Promise<unknown> {
-    const value = record(payload)
-    if (typeof value.streamId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Codex stream is required.')
-    const stream = this.codexStreams.get(value.streamId)
-    if (stream === undefined) return { closed: false, streamId: value.streamId }
-    this.codexStreams.delete(value.streamId)
-    stream.unsubscribe()
-    stream.wake()
-    await stream.close()
-    return { closed: true, streamId: value.streamId }
-  }
-
-  private async closeCodexStreams(client?: RemoteClientCore): Promise<void> {
-    const targets = [...this.codexStreams.entries()].filter(([, stream]) => (
-      client === undefined || (stream.target.kind === 'remote' && stream.target.client === client)
-    ))
-    await Promise.all(targets.map(async ([streamId, stream]) => {
-      this.codexStreams.delete(streamId)
-      stream.unsubscribe()
-      stream.closed = 'peer-disconnected'
-      stream.wake()
-      await stream.close()
-    }))
   }
 
   private selectRemoteTarget(remote: ConnectedRemote, transport = this.selectHarnessRemoteTransport(remote)): void {
@@ -1018,155 +793,6 @@ export class ClientModeRuntime {
     )
   }
 
-  private async connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
-    signal?.throwIfAborted()
-    const progressRunId = this.connectionProgressRun + 1
-    this.connectionProgressRun = progressRunId
-    this.connectionProgress = { runId: progressRunId, targetDeviceId, phase: 'checking-host' }
-    const identity = this.requireIdentity()
-    let client: RemoteClientCore | undefined
-    try {
-      const serverDevice = (await this.server.listDevices()).find(device => device.deviceId === targetDeviceId)
-      if (serverDevice === undefined) {
-        throw new ClientModeError('MEMBERSHIP_REQUIRED', 'The selected Host is not authorized for this account.')
-      }
-      this.updateConnectionProgress(progressRunId, 'authorizing-peer')
-      const target = await this.authorizeHostPeer(serverDevice)
-      const presence = await this.server.presenceFor(targetDeviceId)
-      if (!presence.online) throw new ClientModeError('HOST_OFFLINE', 'The selected Host is offline.', true)
-      const credentials = await this.server.authenticate(identity)
-      const rtcFactory = this.config.forceRelay
-        ? undefined
-        : await this.rtcFactoryProvider({ routeTargets: [this.server.baseUrl] }).catch(() => undefined)
-      if (!this.config.forceRelay && rtcFactory === undefined) {
-        this.logger.warn('remote Harness WebRTC backend unavailable; using relay', {
-          targetDeviceId: shortId(target.deviceId),
-        })
-      }
-      let webRtcFallback = false
-      const createTransport = (attempt: TransportAttempt): AdaptiveTransport => new AdaptiveTransport(
-        websocketUrl(this.server.baseUrl),
-        {
-          role: 'client',
-          deviceId: identity.deviceId,
-          accessToken: credentials.accessToken,
-          targetDeviceId,
-          forceRelay: this.config.forceRelay || attempt === 'relay',
-          preferredTransports: preferredTransportsForAttempt(attempt),
-          negotiateTimeoutMs: attempt === 'direct' ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : undefined,
-          ...(rtcFactory === undefined || attempt === 'relay' ? {} : { rtcFactory }),
-          fetchIceServers: async connectionId => iceServersForAttempt(attempt, await this.server.turnCredentials(connectionId)),
-          onWebRtcFallback: (error, diagnostics) => {
-            webRtcFallback = true
-            this.logger.warn(attempt === 'direct'
-              ? 'remote Harness direct WebRTC failed; trying TURN'
-              : 'remote Harness TURN WebRTC failed; using relay', {
-              targetDeviceId: shortId(target.deviceId),
-              attempt,
-              reason: diagnosticReason(error),
-            })
-            if (diagnostics !== undefined) {
-              this.logger.debug('remote Harness WebRTC fallback diagnostics', {
-                targetDeviceId: shortId(target.deviceId),
-                attempt,
-                ...webrtcDiagnosticsLogFields(diagnostics),
-              })
-            }
-          },
-        },
-      )
-      const attempts: TransportAttempt[] = this.config.forceRelay || rtcFactory === undefined
-        ? ['relay']
-        : ['direct', 'turn', 'relay']
-      let transport: AdaptiveTransport | undefined
-      for (const attempt of attempts) {
-        webRtcFallback = false
-        const stopProgressTimer = this.beginAttemptProgress(progressRunId, attempt)
-        try {
-          transport = createTransport(attempt)
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target), 60_000)
-          const attemptClient = client
-          const onAbort = () => { void attemptClient.close() }
-          signal?.addEventListener('abort', onAbort, { once: true })
-          try {
-            signal?.throwIfAborted()
-            await attemptClient.connect()
-          } finally {
-            signal?.removeEventListener('abort', onAbort)
-          }
-          signal?.throwIfAborted()
-        } finally {
-          stopProgressTimer()
-        }
-        if (attempt === 'relay' || !webRtcFallback) break
-        await client.close()
-        client = undefined
-        transport = undefined
-        if (attempt === 'turn') {
-          this.logger.info('remote Harness relay fallback re-established', {
-            targetDeviceId: shortId(target.deviceId),
-          })
-        }
-      }
-      if (client === undefined || transport === undefined) {
-        throw new ClientModeError('CONNECTION_FAILED', 'Unable to establish a remote transport.', true)
-      }
-      const connectedClient = client
-      const connectedTransport = transport
-      const connectedPreference = transportPreferenceForMode(connectedClient.getStats().mode)
-      this.updateConnectionProgress(
-        progressRunId,
-        'connected',
-        connectedPreference === undefined ? undefined : [connectedPreference],
-      )
-      connectedClient.onClose(() => {
-        if (this.connected?.client !== connectedClient) return
-        void this.closePreview()
-        this.connected = undefined
-        this.connectionProgress = undefined
-        this.pendingWorkspaceSelection = undefined
-        void this.closeCodexVirtual()
-        void this.closeCursorVirtual()
-        this.proxySwitch?.disconnectRemote()
-        this.gatewaySwitch.disconnectRemote()
-        void connectedClient.close().catch(() => undefined)
-        this.logger.warn('remote Harness transport closed; keeping Remote authority disconnected', {
-          targetDeviceId: shortId(target.deviceId),
-        })
-      })
-      const connectionDetails = await connectedTransport.connectionDetails().catch(() => undefined)
-      this.logger.info('remote Harness transport ready', {
-        targetDeviceId: shortId(target.deviceId),
-        transport: connectedClient.getStats().mode,
-        ...(connectionDetails === undefined ? {} : {
-          preferredTransports: connectionDetails.preferredTransports,
-          negotiatedCapabilities: connectionDetails.negotiatedCapabilities,
-          webRtcEnabled: connectionDetails.webRtcEnabled,
-        }),
-      })
-      if (connectionDetails?.webRtc?.diagnostics !== undefined) {
-        this.logger.debug('remote Harness transport diagnostics', {
-          targetDeviceId: shortId(target.deviceId),
-          ...webrtcDiagnosticsLogFields(connectionDetails.webRtc.diagnostics),
-        })
-      }
-      const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion)
-      return {
-        client: connectedClient,
-        target,
-        transport: connectedTransport,
-        features,
-        progressRunId,
-        ...(serverDevice.clientVersion === undefined ? {} : { clientVersion: serverDevice.clientVersion }),
-        ...(serverDevice.harnessVersion === undefined ? {} : { harnessVersion: serverDevice.harnessVersion }),
-      }
-    } catch (error) {
-      this.clearConnectionProgress(progressRunId)
-      await client?.close().catch(() => undefined)
-      throw error
-    }
-  }
-
   private async ensureConnected(
     targetDeviceId: string,
     signal?: AbortSignal,
@@ -1187,593 +813,23 @@ export class ClientModeRuntime {
       await this.closePreview()
       assertCurrent()
     } catch (error) {
-      this.clearConnectionProgress(next.progressRunId)
+      this.connection.clearConnectionProgress(next.progressRunId)
       await next.client.close().catch(() => undefined)
       throw error
     }
     const previous = this.connected
     this.connected = next
-    this.clearConnectionProgress(next.progressRunId)
+    this.connection.clearConnectionProgress(next.progressRunId)
     await previous?.client.close().catch(() => undefined)
     return next
-  }
-
-  private beginAttemptProgress(runId: number, attempt: TransportAttempt): () => void {
-    if (attempt !== 'direct') {
-      this.updateConnectionProgress(runId, 'probing', [attempt])
-      return () => undefined
-    }
-    this.updateConnectionProgress(runId, 'probing', ['lan'])
-    // LAN and public P2P candidates are gathered inside one ICE attempt. The
-    // linear Remote UI still needs a single active route, so advance the
-    // visible cue if direct negotiation takes longer than a local probe.
-    const timer = setTimeout(() => {
-      if (this.connectionProgress?.runId === runId && this.connectionProgress.phase === 'probing') {
-        this.updateConnectionProgress(runId, 'probing', ['p2p'])
-      }
-    }, DIRECT_LAN_PROGRESS_DISPLAY_MS)
-    return () => clearTimeout(timer)
-  }
-
-  private updateConnectionProgress(
-    runId: number,
-    phase: ConnectionProgressState['phase'],
-    activeTransports?: ConnectionProgressState['activeTransports'],
-  ): void {
-    if (this.connectionProgress?.runId !== runId) return
-    this.connectionProgress = {
-      runId,
-      targetDeviceId: this.connectionProgress.targetDeviceId,
-      phase,
-      ...(activeTransports === undefined ? {} : { activeTransports }),
-    }
-  }
-
-  private clearConnectionProgress(runId: number): void {
-    if (this.connectionProgress?.runId === runId) this.connectionProgress = undefined
-  }
-
-  async handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
-    try {
-      if (endpoint === 'status') return ok(await this.detailedStatus())
-      if (endpoint === 'devices') return ok(await this.devices())
-      if (endpoint === 'client.account.providers') return ok(await this.server.oauthProviders())
-      if (endpoint === 'client.account.login') {
-        const value = record(payload)
-        if (typeof value.email !== 'string' || typeof value.password !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
-        }
-        return ok(await this.authorizeClientWithAccount(value.email, value.password))
-      }
-      if (endpoint === 'client.account.qr.start') {
-        const value = record(payload)
-        const provider = value.provider ?? 'zhihu'
-        if (typeof provider !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
-          throw new ClientModeError('INVALID_MESSAGE', 'An OAuth provider ID is required.')
-        }
-        return ok(await this.startClientOAuthQrLogin(provider))
-      }
-      if (endpoint === 'client.account.qr.poll') {
-        const value = record(payload)
-        if (typeof value.qrId !== 'string' || value.qrId.length < 20) {
-          throw new ClientModeError('INVALID_MESSAGE', 'A QR login session is required.')
-        }
-        return ok(await this.pollClientOAuthQrLogin(value.qrId))
-      }
-      if (endpoint === 'preview.open') {
-        const remote = this.activeRemote()
-        if (remote === undefined) throw new ClientModeError('TRANSPORT_CLOSED', 'Connect to a Remote Host first.')
-        this.preview ??= new LoopbackPreview(remote.client)
-        return ok(await this.preview.open(record(payload).port as number))
-      }
-      if (endpoint === 'directory.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listRemoteDirectory(
-          value.targetDeviceId,
-          typeof value.path === 'string' ? value.path : undefined,
-          signal,
-        ))
-      }
-      if (endpoint === 'workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listRemoteWorkspaces(value.targetDeviceId, signal))
-      }
-      if (endpoint === 'codex.workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCodexWorkspaces(value.targetDeviceId, signal))
-      }
-      if (endpoint === 'workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and working directory are required.')
-        }
-        return ok(await this.openRemoteWorkspace(value.targetDeviceId, value.path, signal))
-      }
-      if (endpoint === 'codex.workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and CodeX Workspace are required.')
-        }
-        return ok(await this.openCodexWorkspace(value.targetDeviceId, value.workspaceId, signal))
-      }
-      if (endpoint === 'codex.workspace.create') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and CodeX project directory are required.')
-        }
-        return ok(await this.createCodexWorkspace(value.targetDeviceId, value.path, signal))
-      }
-      if (endpoint === 'cursor.workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'cursor'))
-      }
-      if (endpoint === 'cursor.workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Cursor Workspace are required.')
-        }
-        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'cursor'))
-      }
-      if (endpoint === 'cursor.workspace.create') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Cursor project directory are required.')
-        }
-        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'cursor'))
-      }
-      if (endpoint === 'antigravity.workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'antigravity'))
-      }
-      if (endpoint === 'antigravity.workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Antigravity Workspace are required.')
-        }
-        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'antigravity'))
-      }
-      if (endpoint === 'antigravity.workspace.create') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Antigravity project directory are required.')
-        }
-        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'antigravity'))
-      }
-      if (endpoint === 'pi.workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'pi'))
-      }
-      if (endpoint === 'pi.workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and PI Workspace are required.')
-        }
-        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'pi'))
-      }
-      if (endpoint === 'pi.workspace.create') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and PI project directory are required.')
-        }
-        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'pi'))
-      }
-      if (endpoint === 'opencode.workspaces.list') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string') throw new ClientModeError('INVALID_MESSAGE', 'A Host is required.')
-        return ok(await this.listCursorWorkspaces(value.targetDeviceId, signal, 'opencode'))
-      }
-      if (endpoint === 'opencode.workspace.open') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and OpenCode Workspace are required.')
-        }
-        return ok(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, 'opencode'))
-      }
-      if (endpoint === 'opencode.workspace.create') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.path !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and OpenCode project directory are required.')
-        }
-        return ok(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, 'opencode'))
-      }
-      if (endpoint === 'workspace.selection.consume') {
-        const value = record(payload)
-        if (typeof value.targetDeviceId !== 'string' || typeof value.workspaceId !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host and Workspace are required.')
-        }
-        return ok(this.consumeWorkspaceSelection({
-          targetDeviceId: value.targetDeviceId,
-          workspaceId: value.workspaceId,
-          ...(value.backend === 'codex' || value.backend === 'cursor' || value.backend === 'antigravity' || value.backend === 'pi' || value.backend === 'opencode' ? { backend: value.backend } : {}),
-          ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
-        }))
-      }
-      if (endpoint === 'fileviewer.stat' || endpoint === 'fileviewer.readRange' || endpoint === 'fileviewer.list') {
-        const method = endpoint === 'fileviewer.stat'
-          ? 'stat'
-          : endpoint === 'fileviewer.readRange' ? 'readRange' : 'list'
-        return ok(await this.callRemoteFileViewer(method, payload, signal))
-      }
-      if (endpoint === 'codex.call') {
-        const value = record(payload)
-        if (typeof value.method !== 'string' || !('params' in value)) {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Codex method and params are required.')
-        }
-        const remote = this.activeCodexRemote()
-        if (remote !== undefined) return ok(await new CodexRemoteClient(remote.client).request(value.method, value.params, signal))
-        const host = this.requireLocalCodex()
-        return ok(await host.codexCall(value, signal))
-      }
-      if (endpoint === 'codex.probe') {
-        const local = this.localCodexAvailable()
-        let remoteSupported = false
-        const remote = this.activeRemote()
-        if (remote !== undefined) {
-          try {
-            remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion)
-            remoteSupported = remote.features.codex
-          } catch (error) {
-            if (!local) throw error
-          }
-        }
-        return ok({ supported: local || remoteSupported, local, remote: remoteSupported })
-      }
-      if (endpoint === 'codex.respond') {
-        const value = record(payload)
-        const remote = this.activeCodexRemote()
-        if (remote !== undefined) return ok(await remote.client.rpc('codex.app.respond', value, signal))
-        const host = this.requireLocalCodex()
-        return ok(await host.codexRespond(value, signal))
-      }
-      if (endpoint === 'plugin.route') {
-        const value = record(payload)
-        if (typeof value.route !== 'string' || !isAllowedPluginRoute(value.route)) {
-          throw new ClientModeError('INVALID_MESSAGE', 'A valid plugin route is required.')
-        }
-        if (!isRecord(value.body)) throw new ClientModeError('INVALID_MESSAGE', 'A plugin route body object is required.')
-        return ok(await this.pluginRoute(value.route, value.body, signal))
-      }
-      if (endpoint === 'codex.stream.open') return ok(await this.openCodexStream(payload, signal))
-      if (endpoint === 'codex.stream.next') return ok(await this.nextCodexFrames(payload, signal))
-      if (endpoint === 'codex.stream.close') return ok(await this.closeCodexStream(payload))
-      if (endpoint === 'host.account.login') {
-        if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
-        const value = record(payload)
-        if (typeof value.email !== 'string' || typeof value.password !== 'string') {
-          throw new ClientModeError('INVALID_MESSAGE', 'Email and password are required.')
-        }
-        return ok(await this.host.authorizeHostWithAccount(value.email, value.password))
-      }
-      if (endpoint === 'host.authorization.set') {
-        const value = record(payload)
-        if (typeof value.enabled !== 'boolean') {
-          throw new ClientModeError('INVALID_MESSAGE', 'Host authorization state is required.')
-        }
-        return ok(await this.setHostAuthorization(value.enabled))
-      }
-      if (endpoint === 'host.registration-code.submit') {
-        if (this.host === undefined) throw new ClientModeError('METHOD_NOT_ALLOWED', 'This plugin is not running as a Host.')
-        const value = record(payload)
-        if (typeof value.code !== 'string' || value.code.trim() === '') {
-          throw new ClientModeError('INVALID_MESSAGE', 'A Host registration code is required.')
-        }
-        return ok(await this.host.authorizeHostWithCode(value.code))
-      }
-      if (endpoint === 'mode.set') {
-        const value = record(payload)
-        if (value.mode !== 'local' && value.mode !== 'remote') throw new ClientModeError('INVALID_MESSAGE', 'Mode must be local or remote.')
-        return ok(await this.setMode(value.mode, typeof value.targetDeviceId === 'string' ? value.targetDeviceId : undefined, signal))
-      }
-      throw new ClientModeError('METHOD_NOT_FOUND', 'The remote-mode control method does not exist.')
-    } catch (error) {
-      return fail(error)
-    }
   }
 
   private requireIdentity(): HostIdentity {
     if (this.identity === undefined) throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
     return this.identity
   }
-
-  private async authorizeHostPeer(serverDevice: ServerHostDevice): Promise<TrustedPeer> {
-    const descriptor = await this.server.deviceFor(serverDevice.deviceId)
-    assertAuthorizedHost(serverDevice, descriptor)
-    const existing = this.identities.trustedPeer(descriptor.deviceId)
-    if (existing !== undefined && existing.publicKey !== descriptor.identityKey) {
-      throw new ClientModeError('PEER_IDENTITY_MISMATCH', 'The authorized Host identity key changed unexpectedly.')
-    }
-    if (existing !== undefined
-      && existing.membershipId === descriptor.membershipId
-      && existing.name === descriptor.name
-      && existing.platform === descriptor.platform) {
-      return existing
-    }
-    return this.identities.trustPeer({
-      deviceId: descriptor.deviceId,
-      name: descriptor.name,
-      platform: descriptor.platform,
-      publicKey: descriptor.identityKey,
-      membershipId: descriptor.membershipId,
-    })
-  }
 }
 
-export class ClientModeError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable = false) { super(message) }
-}
-
-function assertAuthorizedHost(listed: ServerHostDevice, descriptor: AuthorizedPeerDevice): void {
-  if (descriptor.role !== 'host' || descriptor.deviceId !== listed.deviceId
-    || descriptor.membershipId !== listed.membershipId) {
-    throw new ClientModeError('PEER_IDENTITY_MISMATCH', 'Server Host details do not match the authorized device list.')
-  }
-}
-
-function websocketUrl(baseUrl: string): string {
-  const url = new URL(baseUrl)
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-  url.pathname = `${url.pathname.replace(/\/$/, '')}/ws/v1/connect`
-  return url.toString()
-}
-
-function webrtcDiagnosticsLogFields(diagnostics: RtcConnectionDiagnostics | undefined): Record<string, unknown> {
-  if (diagnostics === undefined) return {}
-  return {
-    rtcConnectionState: diagnostics.connectionState,
-    rtcIceConnectionState: diagnostics.iceConnectionState,
-    rtcIceGatheringState: diagnostics.iceGatheringState,
-    rtcLocalCandidates: diagnostics.localCandidates,
-    rtcRemoteCandidates: diagnostics.remoteCandidates,
-    rtcCandidatePairs: diagnostics.candidatePairs,
-    rtcFilteredLocalCandidates: diagnostics.filteredLocalCandidates,
-    rtcFilteredCandidatePairs: diagnostics.filteredCandidatePairs,
-    ...(diagnostics.selectedPath === undefined ? {} : { rtcSelectedPath: diagnostics.selectedPath }),
-  }
-}
-
-function record(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The control request payload is invalid.')
-  }
-  return value as Record<string, unknown>
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function ok(value: unknown): RpcResult<unknown> { return { ok: true, value } }
-
-async function invokeRemoteCommand(
-  client: RemoteClientCore,
-  request: Parameters<TypertGatewayLike['invoke']>[0],
-): Promise<unknown> {
-  const rpcId = uuidV7()
-  const response = await client.rpc<{ rpcId: string; result: unknown }>('harness.api.call', {
-    method: `${request.namespace}.${request.method}`,
-    rpcId,
-    payload: request.args,
-  }, request.signal)
-  if (response.rpcId !== rpcId) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned an invalid command response.')
-  }
-  return unwrapNativeResult(response)
-}
-
-async function readRemoteWorkspaceBaseline(
-  gateway: RemoteTypertGateway,
-  signal?: AbortSignal,
-): Promise<RemoteWorkspaceView[]> {
-  const lifetime = new AbortController()
-  const activeSignal = signal === undefined
-    ? lifetime.signal
-    : AbortSignal.any([signal, lifetime.signal])
-  const source = await gateway.open('workspace/follow', { args: {} }, activeSignal)
-  const iterator = source[Symbol.asyncIterator]()
-  try {
-    const first = await iterator.next()
-    if (first.done || !isRecord(first.value) || first.value.type !== 'baseline'
-      || !isRecord(first.value.value) || !Array.isArray(first.value.value.items)) {
-      throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned an invalid Workspace baseline.')
-    }
-    return first.value.value.items.map((item: unknown) => {
-      if (!isRecord(item) || typeof item.workspaceId !== 'string'
-        || typeof item.path !== 'string' || typeof item.title !== 'string') {
-        throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned an invalid Workspace row.')
-      }
-      return { workspaceId: item.workspaceId, path: item.path, title: item.title }
-    })
-  } finally {
-    lifetime.abort('workspace-baseline-read')
-    await iterator.return?.()
-  }
-}
-
-function unwrapNativeResult<T>(response: { result: unknown }): T {
-  const result = response.result
-  if (typeof result !== 'object' || result === null || !('ok' in result)) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned an invalid response.')
-  }
-  if (result.ok !== true || !('value' in result)) {
-    const message = 'error' in result && typeof result.error === 'object' && result.error !== null
-      && 'message' in result.error && typeof result.error.message === 'string'
-      ? result.error.message
-      : 'The remote Host rejected the request.'
-    throw new ClientModeError('REMOTE_API_ERROR', message)
-  }
-  return result.value as T
-}
-
-function workspaceRecordId(value: unknown): string {
-  if (typeof value !== 'object' || value === null || !('workspaceId' in value)
-    || typeof value.workspaceId !== 'string' || value.workspaceId.length === 0) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned an invalid Workspace.')
-  }
-  return value.workspaceId
-}
-
-function remoteWorkspaceTitle(path: string): string {
-  const normalized = path.replace(/[\\/]+$/u, '')
-  return normalized.split(/[\\/]+/u).filter(Boolean).at(-1) ?? path
-}
-
-function fail(error: unknown): RpcResult<unknown> {
-  const source = error instanceof Error ? error : undefined
-  const remoteCode = source !== undefined && 'code' in source && typeof source.code === 'string'
-    ? source.code
-    : source instanceof ClientModeError ? source.code : undefined
-  const retryable = source !== undefined && 'retryable' in source && typeof source.retryable === 'boolean'
-    ? source.retryable
-    : source instanceof ClientModeError ? source.retryable : false
-  return {
-    ok: false,
-    error: {
-      code: 'internal',
-      message: source?.message ?? 'The remote-mode operation failed.',
-      details: remoteCode === undefined ? {} : { remoteCode, retryable },
-    },
-  }
-}
-
-function shortId(value: string): string { return value.length <= 12 ? value : `${value.slice(0, 8)}…${value.slice(-4)}` }
-
-/** Conservative feature profile for Hosts that predate fine-grained capability discovery. */
-export function remoteHostFeatures(clientVersion?: string): RemoteHostFeatures {
-  return {
-    commandList: isVersionAtLeast(clientVersion, REMOTE_COMMAND_LIST_MIN_VERSION),
-    fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
-    terminal: false,
-    apiProxy: true,
-    remoteGateway: false,
-    codex: false,
-    cursor: false,
-    antigravity: false,
-    opencode: false,
-    pluginRoute: false,
-  }
-}
-
-export async function probeRemoteHostFeatures(
-  client: RemoteClientCore,
-  clientVersion?: string,
-): Promise<RemoteHostFeatures> {
-  const fallback = remoteHostFeatures(clientVersion)
-  let value: unknown
-  try {
-    value = await client.rpc('harness.transport.describe', {})
-  } catch (error) {
-    if (error instanceof Error && 'code' in error && error.code === 'METHOD_NOT_FOUND') return fallback
-    throw error
-  }
-  if (!isRecord(value) || !Array.isArray(value.capabilities)
-    || value.capabilities.some(capability => typeof capability !== 'string')) {
-  throw new ClientModeError('INVALID_MESSAGE', 'The remote Host returned invalid transport capabilities.')
-  }
-  const capabilities = new Set(value.capabilities as string[])
-  const apiProxy = capabilities.has('harness.api.v1')
-  const remoteV1 = capabilities.has('harness.remote.v1')
-  const remoteV3 = capabilities.has('harness.remote.v3')
-  const terminal = capabilities.has('harness.terminal.v1')
-  const workspaceTypes = 'workspaceTypes' in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : undefined
-  const available = (id: string, capability: string) => remoteWorkspaceTypeAvailable(value.capabilities as string[], workspaceTypes, id, capability)
-  const codex = available('codex', 'codex.appserver.v1')
-  const cursor = available('cursor', 'agent.acp.cursor.v1')
-  const antigravity = available('antigravity', 'agent.acp.antigravity.v1')
-  const pi = available('pi', 'agent.acp.pi.v1')
-  const opencode = available('opencode', 'agent.acp.opencode.v1')
-  if (remoteV1 && remoteV3) {
-    throw new ClientModeError('INVALID_MESSAGE', 'The remote Host advertised conflicting Harness Session formats.')
-  }
-  const sessionFormat = remoteV3 ? 3 as const : undefined
-  const remoteGateway = remoteV3 || remoteV1
-  if (!apiProxy && !remoteGateway && !codex && !cursor && !antigravity && !pi && !opencode) {
-    throw new ClientModeError('FEATURE_NOT_SUPPORTED', 'The remote Host exposes no supported Harness transport.')
-  }
-  return {
-    commandList: remoteGateway || (apiProxy && fallback.commandList),
-    fileViewer: capabilities.has('fileviewer.read.v1'),
-    terminal,
-    apiProxy,
-    remoteGateway,
-    ...(sessionFormat === undefined ? {} : { sessionFormat }),
-    codex,
-    cursor,
-    antigravity,
-    ...(pi ? { pi: true } : {}),
-    opencode,
-    ...(capabilities.has('agent.acp.antigravity.model-load.v1') ? { acpModelLoadsSession: true } : {}),
-    ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
-    pluginRoute: capabilities.has('plugin.route.v1'),
-  }
-}
-
-async function waitForCodexFrames(stream: CodexLoopbackStream, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted) throw new ClientModeError('RPC_ABORTED', 'The Codex event poll was cancelled.')
-  await new Promise<void>((resolve, reject) => {
-    const previousWake = stream.wake
-    const timer = setTimeout(done, 25_000)
-    const onAbort = () => {
-      cleanup()
-      reject(new ClientModeError('RPC_ABORTED', 'The Codex event poll was cancelled.'))
-    }
-    function cleanup() {
-      clearTimeout(timer)
-      stream.wake = previousWake
-      signal?.removeEventListener('abort', onAbort)
-    }
-    function done() {
-      cleanup()
-      resolve()
-    }
-    stream.wake = () => {
-      previousWake()
-      done()
-    }
-    signal?.addEventListener('abort', onAbort, { once: true })
-  })
-}
-
-function isVersionAtLeast(value: string | undefined, minimum: readonly [number, number, number]): boolean {
-  const match = value?.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/)
-  if (match === undefined || match === null) return false
-  const version = match.slice(1, 4).map(part => Number(part))
-  for (let index = 0; index < minimum.length; index += 1) {
-    const part = version[index] ?? 0
-    const expected = minimum[index] ?? 0
-    if (part > expected) return true
-    if (part < expected) return false
-  }
-  return true
-}
-
-function diagnosticReason(error: Error): string {
-  const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined
-  const message = error.message.replace(/[\r\n\t]+/g, ' ').slice(0, 240)
-  return code === undefined ? message : `${code}: ${message}`
-}
-
-function preferredTransportsForAttempt(attempt: TransportAttempt): Array<'lan' | 'p2p' | 'turn' | 'relay'> {
-  if (attempt === 'direct') return ['lan', 'p2p', 'relay']
-  if (attempt === 'turn') return ['turn', 'relay']
-  return ['relay']
-}
-
-function transportPreferenceForMode(
-  mode: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected',
-): 'lan' | 'p2p' | 'turn' | 'relay' | undefined {
-  if (mode === 'LAN') return 'lan'
-  if (mode === 'P2P') return 'p2p'
-  if (mode === 'TURN') return 'turn'
-  if (mode === 'Relay') return 'relay'
-  return undefined
-}
-
-function iceServersForAttempt(attempt: TransportAttempt, iceServers: RtcIceServer[]): RtcIceServer[] {
-  return attempt === 'direct' ? stunOnlyIceServers(iceServers) : iceServers
-}
+export { probeRemoteHostFeatures, remoteHostFeatures } from './client-capabilities.js'
+export { ClientModeError } from './client-runtime-contract.js'
+export type { HostAuthorizationControl, HostConnectionHandle, HostConnectionRpc, RemoteDeviceView, RemoteDirectoryEntry, RemoteDirectoryListing, RemoteHostFeatures, RemoteWorkspaceView } from './client-runtime-contract.js'

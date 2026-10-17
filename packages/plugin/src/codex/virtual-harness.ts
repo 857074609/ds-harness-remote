@@ -1,241 +1,75 @@
-import type { ApiProxy, RpcRequest, RpcResponse } from '@deepseek-ai/dsh-host-apiproxy/api'
-import {
-  CodexRemoteClient,
-  deriveCodexCwdWorkspaces,
-  projectCodexThread,
-  type DisplaySession,
-} from '@dsh-remote/client-core'
-import type {
-  RemoteTypertGatewayTarget,
-  TypertGatewayRequest,
-  TypertRpcResult,
-} from '../typert-gateway-contract.js'
-import { codexPermissionPresetFromResponse } from './permissions.js'
-import type { CodexPermissionPreset, CodexPermissionSnapshot } from '@dsh-remote/protocol'
+import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
+import type { DisplaySession } from '@dsh-remote/client-core'
+import { CodexRemoteClient, projectCodexThread } from '@dsh-remote/client-core'
+import type { CodexPermissionPreset } from '@dsh-remote/protocol'
 import type { HarnessSessionGeneration } from '../harness-version.js'
+import type { RemoteTypertGatewayTarget, TypertGatewayRequest, TypertRpcResult } from '../typert-gateway-contract.js'
+import { codexPermissionPresetFromResponse } from './permissions.js'
+import type {
+  CatalogState,
+  CodexModelDirectory,
+  CodexModelSelection,
+  CodexVirtualWorkspaceView,
+} from './virtual-catalog.js'
 import {
-  collectImageBlocks,
-  contentBlocks,
-  isCanonicalBase64,
-  toolOutputImageBlocks,
-} from './codex-image-codec.js'
-
-const CODEX_SESSION_PREFIX = 'codex:'
-const CODEX_WORKSPACE_PREFIX = 'codex-workspace:'
-const CODEX_PROVIDER = 'codex'
-const CODEX_MODEL = 'codex'
-const CODEX_PAGE_LIMIT = 100
-const MAX_CODEX_PAGES = 32
-const MAX_LIVE_TOOL_OUTPUT = 128 * 1024
-const DEFAULT_HISTORY_MESSAGES = 50
-const SESSION_SEARCH_RESULT_LIMIT = 20
-const SESSION_SEARCH_SNIPPET_CODE_POINTS = 240
-const CODEX_DEFAULT_PERMISSION = 'workspace-write'
-const MAX_CODEX_PROMPT_PARTS = 16
-const MAX_CODEX_PROMPT_TEXT = 256 * 1024
-const MAX_CODEX_IMAGE_BASE64 = 288 * 1024 * 1024
-const CODEX_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
-const CODEX_IMAGE_ATTACHMENT_PREFIX = 'codex-image:'
-
-const HOST_WORKSPACE_ENDPOINTS = new Set([
-  'workspaceFiles/list', 'workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes',
-  'workspaceFiles/readAll', 'workspaceFiles/readRelated', 'terminal/environment', 'terminal/shells',
-  'terminal/list', 'terminal/create', 'terminal/write', 'terminal/resize', 'terminal/rename', 'terminal/close',
-])
-const HOST_WORKSPACE_STREAM_ENDPOINTS = new Set(['workspaceFiles/changes', 'terminal/follow', 'terminal/retain'])
-
-function isHostWorkspaceEndpoint(endpoint: string): boolean {
-  return HOST_WORKSPACE_ENDPOINTS.has(endpoint)
-}
-
-function isHostWorkspaceStreamEndpoint(endpoint: string): boolean {
-  return HOST_WORKSPACE_STREAM_ENDPOINTS.has(endpoint)
-}
-
-type JsonRecord = Record<string, unknown>
-
-export interface CodexVirtualWorkspaceView {
-  workspaceId: string
-  path: string
-  title: string
-  sessionIds: string[]
-  sessionCount: number
-  createdAt: string
-  updatedAt: string
-}
-
-export function codexProjectWorkspaceId(projectId: string): string {
-  return `${CODEX_WORKSPACE_PREFIX}project:${projectId}`
-}
-
-interface CodexProjectRoot {
-  path: string
-}
-
-interface CodexProject {
-  id: string
-  name: string
-  roots: CodexProjectRoot[]
-  position: number
-  createdAt: number
-  updatedAt: number
-}
-
-interface CodexDirectoryEntry {
-  name: string
-  path: string
-  hidden: boolean
-}
-
-interface CodexDirectoryListing {
-  path: string
-  home: string
-  crumbs: CodexDirectoryEntry[]
-  entries: CodexDirectoryEntry[]
-  truncated: boolean
-}
-
-interface CodexClientLike {
-  request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown>
-  subscribe(
-    threadId: string,
-    onFrame: (frame: { method: string; params: unknown }) => void,
-    signal?: AbortSignal,
-    onClose?: (reason: 'cancelled' | 'completed' | 'failed' | 'peer-disconnected') => void,
-  ): Promise<{ close(): Promise<void> }>
-  respond(requestHandle: string, decision: 'accept' | 'decline' | 'cancel', signal?: AbortSignal): Promise<void>
-}
-
-interface CatalogState {
-  threads: JsonRecord[]
-  sessions: DisplaySession[]
-  projects: CodexProject[]
-  workspaces: CodexVirtualWorkspaceView[]
-}
-
-interface CodexModelSelection {
-  provider: string
-  model: string
-  reasoningEffort?: string
-}
-
-interface CodexModelView {
-  id: string
-  name: string
-  description?: string
-  reasoning?: {
-    efforts: Array<{ id: string; name: string; description?: string }>
-    defaultEffort?: string
-  }
-}
-
-interface CodexModelDirectory {
-  default: CodexModelSelection
-  groups: Array<{ id: string; name: string; models: CodexModelView[] }>
-  models: Map<string, CodexModelView>
-}
-
-interface NativeEvent {
-  type: string
-  seq: number
-  time: number
-  data: unknown
-  sourceEventSeqs?: number[]
-  surfaceOp?: 'append'
-    | { op: 'replace'; start: number; end: number }
-    | { op: 'replace'; startSeq: number; endSeq: number }
-}
-
-export interface CodexNativeHistory {
-  header: {
-    version: number
-    id: string
-    createdAt: number
-    cwd?: string
-    isSeeded?: boolean
-  }
-  entries: Array<{ type: 'event'; event: NativeEvent; view?: ToolEventView }>
-  lastSeq: number
-  nextTurn: number
-  activeTurnId?: string
-}
-
-export interface CodexNativeHistoryPage extends CodexPermissionSnapshot {
-  header: CodexNativeHistory['header']
-  cursor: number
-  nextTurn: number
-  records: CodexNativeHistory['entries']
-  hasMore: boolean
-  activeTurnId?: string
-}
-
-interface StreamedBlock {
-  itemId: string
-  index: number
-  kind: 'text' | 'reasoning'
-  text: string
-}
-
-interface AssistantStreamAttempt {
-  attemptId: string
-  startedAfterSeq: number
-  nextIndex: number
-  stream: Array<{ time: number; chunk: JsonRecord }>
-}
-
-interface FollowState {
-  sessionId: string
-  threadId: string
-  queue: AsyncValueQueue
-  nextSeq: number
-  turn: number
-  stepOpen: boolean
-  startedItems: Set<string>
-  completedItems: Set<string>
-  streamedBlocks: Map<string, StreamedBlock>
-  nextBlockIndex: number
-  streamActive: boolean
-  assistantStreamRevision: number
-  assistantAttempt?: AssistantStreamAttempt
-  liveItems: Map<string, JsonRecord>
-  liveToolOutput: Map<string, string>
-  liveToolResultSeq: Map<string, number>
-  pendingToolImages: JsonRecord[]
-  requestId?: string
-  activeTurnId?: string
-  rcOnly?: boolean
-  close?: () => Promise<void>
-}
-
-interface PendingApproval {
-  requestHandle: string
-  sessionId: string
-}
-
-interface ToolEventView {
-  for: 'call' | 'result'
-  view: JsonRecord
-}
-
-interface CodexImageAttachmentEntry {
-  sessionId: string
-  attachment: JsonRecord
-  data: string
-}
-
-interface ProjectedNativeEvent {
-  type: string
-  data: unknown
-  view?: ToolEventView
-}
-
-/** Discover the CodeX projects visible through the Host App Server. */
-export async function discoverCodexVirtualWorkspaces(
-  client: CodexClientLike,
-  signal?: AbortSignal,
-): Promise<CodexVirtualWorkspaceView[]> {
-  return (await loadCatalog(client, signal)).workspaces
-}
+  CODEX_PROVIDER,
+  codexModelParams,
+  containsPath,
+  displayTitle,
+  isCodexDirectoryListing,
+  loadCatalog,
+  loadModelDirectory,
+  modelCatalog,
+  modelSelection,
+  modelSelectionProjection,
+  nativeVisibleWorkspaces,
+  nativeWorkspace,
+} from './virtual-catalog.js'
+import type { CodexImageAttachmentEntry, FollowState, PendingApproval } from './virtual-contract.js'
+import {
+  AsyncValueQueue,
+  business,
+  carrierArgs,
+  CODEX_DEFAULT_PERMISSION,
+  CODEX_IMAGE_ATTACHMENT_PREFIX,
+  codexImageLimitsProjection,
+  codexPermissionsProjection,
+  codexPromptInput,
+  fail,
+  failFrom,
+  failure,
+  isCodexPermissionPreset,
+  isHostWorkspaceEndpoint,
+  isHostWorkspaceStreamEndpoint,
+  isLegacySessionHistoryUnsupported,
+  ok,
+  requestArg,
+  SESSION_SEARCH_RESULT_LIMIT,
+  SESSION_SEARCH_SNIPPET_CODE_POINTS,
+  sessionIdFromAddress,
+  success,
+  truncateCodePoints,
+} from './virtual-contract.js'
+import { CodexEventCarrier } from './virtual-event-carrier.js'
+import type { CodexNativeHistory, CodexNativeHistoryPage } from './virtual-history.js'
+import {
+  adaptCodexHistoryPage,
+  isCodexNativeHistoryPage,
+  paginateCodexNativeHistory,
+  projectCodexNativeHistory,
+} from './virtual-history.js'
+import { CodexLiveProjection } from './virtual-live.js'
+import type { CodexClientLike, JsonRecord } from './virtual-values.js'
+import {
+  array,
+  nativeThreadId,
+  optionalInteger,
+  optionalNonNegativeInteger,
+  optionalPositiveInteger,
+  record,
+  requiredString,
+  string,
+} from './virtual-values.js'
 
 /**
  * A plugin-owned virtual Harness target. It projects CodeX Thread/Turn data at
@@ -243,6 +77,9 @@ export async function discoverCodexVirtualWorkspaces(
  * official Workspace and Session controllers remains native DSH.
  */
 export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
+  private readonly live: CodexLiveProjection
+  private readonly events: CodexEventCarrier
+
   readonly api: ApiProxy
 
   private catalog?: CatalogState
@@ -274,7 +111,48 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     private readonly sessionGeneration: HarnessSessionGeneration = 'legacy',
     private readonly hostCarrier?: RemoteTypertGatewayTarget,
   ) {
-    this.api = this.createApiProxy()
+    const owner = this
+    this.live = new CodexLiveProjection({
+      readHistoryPage: (...args) => owner.readHistoryPage(...args),
+      models: (...args) => owner.models(...args),
+      get pendingRequestIds() { return owner.pendingRequestIds },
+      get follows() { return owner.follows },
+      sessionTitle: (...args) => owner.sessionTitle(...args),
+      modelSelection: (...args) => owner.modelSelection(...args),
+      permissionSelection: (...args) => owner.permissionSelection(...args),
+      get sessionGeneration() { return owner.sessionGeneration },
+      get client() { return owner.client },
+      get closed() { return owner.closed },
+      rememberOpenedSession: (...args) => owner.rememberOpenedSession(...args),
+      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
+      updateThreadName: (...args) => owner.updateThreadName(...args),
+      publishProjection: (...args) => owner.events.publishProjection(...args),
+      setPermissionSelection: (...args) => owner.setPermissionSelection(...args),
+      emitRemoteEvent: (...args) => owner.events.emitRemoteEvent(...args),
+      broadcastRcHost: (...args) => owner.events.broadcastRcHost(...args),
+      get selectedModels() { return owner.selectedModels },
+      refreshAndPublishWorkspaces: (...args) => owner.refreshAndPublishWorkspaces(...args),
+      get pendingApprovals() { return owner.pendingApprovals },
+      emitApproval: (...args) => owner.events.emitApproval(...args),
+      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args),
+      get imageAttachments() { return owner.imageAttachments },
+    })
+    this.events = new CodexEventCarrier({
+      get workspaceStreams() { return owner.workspaceStreams },
+      refreshCatalog: (...args) => owner.refreshCatalog(...args),
+      get selectedWorkspaceId() { return owner.selectedWorkspaceId },
+      get controlStreams() { return owner.controlStreams },
+      get host() { return owner.host },
+      get eventStreams() { return owner.eventStreams },
+      currentCatalog: (...args) => owner.currentCatalog(...args),
+      get pendingApprovals() { return owner.pendingApprovals },
+      get client() { return owner.client },
+      dispatch: (...args) => owner.dispatch(...args),
+      get rcMuxStreams() { return owner.rcMuxStreams },
+      get rcHostStreams() { return owner.rcHostStreams },
+    })
+
+    this.api = this.events.createApiProxy()
   }
 
   static remote(
@@ -339,7 +217,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     // Do not probe Threads here: one busy read can stall workspace recovery.
     return sessions.reduce<DisplaySession | undefined>((latest, session) =>
       latest === undefined || session.updatedAt > latest.updatedAt ? session : latest,
-    undefined)?.id
+      undefined)?.id
   }
 
   async invoke(request: TypertGatewayRequest): Promise<unknown> {
@@ -364,7 +242,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       }
       const args = carrierArgs(payload)
       switch (endpoint) {
-        case '$events/result': return business(await this.answerRemoteEvent(args, signal))
+        case '$events/result': return business(await this.events.answerRemoteEvent(args, signal))
         case 'workspace/list': {
           const catalog = await this.refreshCatalog(signal)
           return business(success({
@@ -434,11 +312,11 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       return this.hostCarrier.open(endpoint, payload, signal)
     }
     const args = carrierArgs(payload)
-    if (endpoint === 'workspace/follow') return this.workspaceFollow(signal)
-    if (endpoint === 'session/control') return this.sessionControl(signal)
-    if (endpoint === 'session/follow') return this.sessionFollow(requestArg(args), signal)
-    if (endpoint === '$events') return this.remoteEvents(signal)
-    if (endpoint === 'job/list' || endpoint === 'job/follow') return this.emptyJobStream(endpoint, signal)
+    if (endpoint === 'workspace/follow') return this.events.workspaceFollow(signal)
+    if (endpoint === 'session/control') return this.events.sessionControl(signal)
+    if (endpoint === 'session/follow') return this.live.sessionFollow(requestArg(args), signal)
+    if (endpoint === '$events') return this.events.remoteEvents(signal)
+    if (endpoint === 'job/list' || endpoint === 'job/follow') return this.events.emptyJobStream(endpoint, signal)
     if (this.hostCarrier !== undefined) return this.hostCarrier.open(endpoint, payload, signal)
     throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
       isDSHRemoteError: true as const,
@@ -511,7 +389,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private setPermissionSelection(sessionId: string, preset: CodexPermissionPreset | undefined): void {
     if (preset === undefined) this.selectedPermissions.delete(sessionId)
     else this.selectedPermissions.set(sessionId, preset)
-    this.publishProjection(sessionId, 'permissions', codexPermissionsProjection(preset), this.nextProjectionSeq())
+    this.events.publishProjection(sessionId, 'permissions', codexPermissionsProjection(preset), this.nextProjectionSeq())
   }
 
   private commandList(args: JsonRecord): unknown[] {
@@ -583,13 +461,8 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     }
     this.selectedModels.set(sessionId, selected)
     const seq = Date.now()
-    this.publishProjection(sessionId, 'modelSelection', modelSelectionProjection(selected), seq)
+    this.events.publishProjection(sessionId, 'modelSelection', modelSelectionProjection(selected), seq)
     return success({ selected })
-  }
-
-  private publishProjection(sessionId: string, key: string, value: unknown, seq: number): void {
-    for (const queue of this.controlStreams) queue.push({ type: 'projection', sessionId, key, value, seq })
-    this.broadcastRcMux({ type: 'session/projection', sessionId, key, value, seq })
   }
 
   private nextProjectionSeq(): number {
@@ -670,626 +543,6 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       items: matches.slice(0, SESSION_SEARCH_RESULT_LIMIT),
       hasMore: matches.length > SESSION_SEARCH_RESULT_LIMIT,
     })
-  }
-
-  private async workspaceFollow(signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const queue = new AsyncValueQueue(signal)
-    this.workspaceStreams.add(queue)
-    const catalog = await this.refreshCatalog(signal)
-    queue.push({
-      type: 'baseline',
-      value: {
-        items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-        archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id),
-        pinnedSessionIds: [],
-      },
-    })
-    return queue.iterate(() => this.workspaceStreams.delete(queue))
-  }
-
-  private async sessionControl(signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const queue = new AsyncValueQueue(signal)
-    this.controlStreams.add(queue)
-    queue.push({ type: 'baseline', value: { queues: {}, jobs: {}, projections: {} } })
-    return queue.iterate(() => this.controlStreams.delete(queue))
-  }
-
-  /**
-   * Background jobs belong to the Host Harness session, not to a CodeX virtual
-   * Workspace. The native session header mounts a job roster stream as soon as a
-   * Session opens, so answer it with an authoritative empty roster instead of a
-   * terminal `method-not-found` failure that tears the page down.
-   */
-  private emptyJobStream(endpoint: 'job/list' | 'job/follow', signal: AbortSignal): AsyncIterable<unknown> {
-    const queue = new AsyncValueQueue(signal)
-    if (endpoint === 'job/list') queue.push({ type: 'rows', jobs: [] })
-    return queue.iterate(() => queue.close())
-  }
-
-  private async remoteEvents(signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const queue = new AsyncValueQueue(signal)
-    const clientId = `codex-events:${this.host.deviceId}:${Date.now().toString(36)}`
-    this.eventStreams.set(clientId, queue)
-    const home = (await this.currentCatalog(signal)).workspaces[0]?.path ?? '/'
-    queue.push({ type: 'ready', clientId, host: { home } })
-    return queue.iterate(() => this.eventStreams.delete(clientId))
-  }
-
-  private async sessionFollow(request: JsonRecord, signal: AbortSignal): Promise<AsyncIterable<unknown>> {
-    const sessionId = sessionIdFromAddress(record(request.address))
-    const threadId = nativeThreadId(sessionId)
-    const history = await this.readHistoryPage(threadId, {
-      maxMessages: optionalPositiveInteger(request.maxMessages),
-    }, signal)
-    const directory = await this.models(signal).catch(() => undefined)
-    const queue = new AsyncValueQueue(signal)
-    const follow: FollowState = {
-      sessionId,
-      threadId,
-      queue,
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== undefined,
-      startedItems: new Set(),
-      completedItems: new Set(),
-      streamedBlocks: new Map(),
-      nextBlockIndex: 0,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      liveItems: new Map(),
-      liveToolOutput: new Map(),
-      liveToolResultSeq: new Map(),
-      pendingToolImages: [],
-      requestId: this.pendingRequestIds.get(sessionId),
-      ...(history.activeTurnId === undefined ? {} : { activeTurnId: history.activeTurnId }),
-    }
-    this.follows.add(follow)
-    queue.push({
-      type: 'snapshot',
-      header: history.header,
-      cursor: history.cursor,
-      records: history.records,
-      hasMore: history.hasMore,
-      projections: {
-        asOfSeq: history.cursor,
-        values: {
-          title: this.sessionTitle(sessionId),
-          sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
-          modelSelection: modelSelectionProjection(this.modelSelection(sessionId, directory)),
-          permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
-          imageLimits: codexImageLimitsProjection(),
-        },
-      },
-      ...(this.sessionGeneration === 'v3' ? { assistantStream: { revision: 0 } } : {}),
-    })
-    try {
-      const stream = await this.client.subscribe(
-        threadId,
-        frame => this.acceptCodexFrame(follow, frame),
-        signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow),
-      )
-      if (this.closed || signal.aborted) {
-        await stream.close().catch(() => undefined)
-        signal.throwIfAborted()
-        throw new Error('The CodeX virtual Harness is closed.')
-      }
-      follow.close = () => stream.close()
-    } catch (error) {
-      this.follows.delete(follow)
-      queue.close()
-      throw error
-    }
-    this.rememberOpenedSession(sessionId)
-    return queue.iterate(() => {
-      this.follows.delete(follow)
-      void follow.close?.().catch(() => undefined)
-    })
-  }
-
-  private acceptCodexFrame(follow: FollowState, frame: { method: string; params: unknown }): void {
-    const params = record(frame.params)
-    if (frame.method === 'thread/name/updated') {
-      const name = string(params.threadName)
-      if (name === undefined) return
-      const seq = this.nextProjectionSeq()
-      this.updateThreadName(follow.threadId, name)
-      const title = name.trim() === '' ? null : name.slice(0, 256)
-      this.publishProjection(follow.sessionId, 'title', title, seq)
-      return
-    }
-    if (frame.method === 'thread/settings/updated') {
-      const preset = codexPermissionPresetFromResponse(params)
-      this.setPermissionSelection(follow.sessionId, preset)
-      return
-    }
-    if (frame.method === 'turn/started') {
-      const turn = record(params.turn)
-      this.endAssistantAttempt(follow, { kind: 'abandoned' })
-      this.resetLiveTurn(follow)
-      follow.turn += 1
-      follow.activeTurnId = string(turn.id)
-      follow.requestId = this.pendingRequestIds.get(follow.sessionId)
-      follow.stepOpen = true
-      this.pushEvent(follow, 'turn/start', { turn: follow.turn })
-      this.pushEvent(follow, 'step/start', { turn: follow.turn, step: 1 })
-      this.emitRemoteEvent('api-session/status', [follow.sessionId, true])
-      for (const item of array(turn.items)) this.acceptCompletedItem(follow, record(item), false)
-      return
-    }
-    if (frame.method === 'item/started' || frame.method === 'item/completed') {
-      const item = record(params.item)
-      const itemId = string(item.id)
-      if (frame.method === 'item/started' && itemId !== undefined) {
-        follow.startedItems.add(itemId)
-        follow.liveItems.set(itemId, item)
-        if (isToolItemType(string(item.type))) this.ensureToolStarted(follow, item)
-      }
-      if (frame.method === 'item/completed') this.acceptCompletedItem(follow, item, true)
-      return
-    }
-    if (frame.method === 'item/agentMessage/delta') {
-      const itemId = string(params.itemId) ?? `assistant:${follow.turn}`
-      const delta = string(params.delta)
-      if (delta === undefined) return
-      this.appendStreamDelta(follow, `agent:${itemId}`, itemId, 'text', delta)
-      return
-    }
-    if (frame.method === 'item/reasoning/summaryPartAdded') {
-      const itemId = string(params.itemId)
-      if (itemId !== undefined) this.ensureStreamBlock(
-        follow,
-        `reasoning-summary:${itemId}:${integer(params.summaryIndex) ?? 0}`,
-        itemId,
-        'reasoning',
-      )
-      return
-    }
-    if (frame.method === 'item/reasoning/summaryTextDelta'
-      || frame.method === 'item/reasoning/textDelta'
-      || frame.method === 'item/plan/delta') {
-      const itemId = string(params.itemId)
-      const delta = string(params.delta)
-      if (itemId === undefined || delta === undefined) return
-      const key = frame.method === 'item/plan/delta'
-        ? `plan:${itemId}`
-        : frame.method === 'item/reasoning/summaryTextDelta'
-          ? `reasoning-summary:${itemId}:${integer(params.summaryIndex) ?? 0}`
-          : `reasoning-content:${itemId}:${integer(params.contentIndex) ?? 0}`
-      this.appendStreamDelta(follow, key, itemId, 'reasoning', delta)
-      return
-    }
-    if (frame.method === 'turn/plan/updated') {
-      const todos = array(params.plan).flatMap(value => {
-        const item = record(value)
-        const content = string(item.step)
-        if (content === undefined) return []
-        const status = item.status === 'inProgress'
-          ? 'in_progress'
-          : item.status === 'completed' ? 'completed' : 'pending'
-        return [{ content, status }]
-      })
-      this.pushEvent(follow, 'todo/write', { todos })
-      return
-    }
-    if (frame.method === 'item/commandExecution/outputDelta'
-      || frame.method === 'item/fileChange/outputDelta'
-      || frame.method === 'item/mcpToolCall/progress') {
-      const itemId = string(params.itemId)
-      const delta = frame.method === 'item/mcpToolCall/progress'
-        ? string(params.message)
-        : string(params.delta)
-      if (itemId === undefined || delta === undefined) return
-      const type = frame.method === 'item/commandExecution/outputDelta'
-        ? 'commandExecution'
-        : frame.method === 'item/fileChange/outputDelta' ? 'fileChange' : 'mcpToolCall'
-      const item = follow.liveItems.get(itemId) ?? { id: itemId, type, status: 'inProgress' }
-      follow.liveItems.set(itemId, item)
-      this.ensureToolStarted(follow, item)
-      const separator = frame.method === 'item/mcpToolCall/progress' && follow.liveToolOutput.has(itemId) ? '\n' : ''
-      const output = appendBoundedText(follow.liveToolOutput.get(itemId) ?? '', `${separator}${delta}`)
-      follow.liveToolOutput.set(itemId, output)
-      this.emitToolResult(follow, item, output)
-      return
-    }
-    if (frame.method === 'item/fileChange/patchUpdated') {
-      const itemId = string(params.itemId)
-      if (itemId === undefined) return
-      const previous = follow.liveItems.get(itemId) ?? { id: itemId, type: 'fileChange', status: 'inProgress' }
-      const item = { ...previous, changes: sanitizedFileChanges(params.changes) }
-      follow.liveItems.set(itemId, item)
-      this.ensureToolStarted(follow, item)
-      this.emitToolResult(follow, item, fileChangeSummary(item))
-      return
-    }
-    if (frame.method === 'thread/status/changed') {
-      const status = record(params.status)
-      const running = status.type === 'active'
-      this.emitRemoteEvent('api-session/status', [follow.sessionId, running])
-      if (status.type === 'systemError') {
-        this.broadcastRcHost({
-          type: 'host/agent-error',
-          sessionId: follow.sessionId,
-          message: 'CodeX reported a thread system error.',
-        })
-      }
-      return
-    }
-    if (frame.method === 'model/rerouted') {
-      const model = string(params.toModel)
-      if (model === undefined) return
-      const previous = this.selectedModels.get(follow.sessionId)
-      const selected: CodexModelSelection = {
-        provider: CODEX_PROVIDER,
-        model,
-        ...(previous?.reasoningEffort === undefined ? {} : { reasoningEffort: previous.reasoningEffort }),
-      }
-      this.selectedModels.set(follow.sessionId, selected)
-      const seq = this.pushEvent(follow, 'request/context', { provider: CODEX_PROVIDER, model })
-      this.publishProjection(follow.sessionId, 'modelSelection', modelSelectionProjection(selected), seq)
-      return
-    }
-    if (frame.method === 'turn/completed') {
-      const turn = record(params.turn)
-      for (const item of array(turn.items)) this.acceptCompletedItem(follow, record(item), true)
-      if (follow.stepOpen) {
-        this.closeAllStreamBlocks(follow)
-        if (follow.streamActive) this.finishStream(follow)
-        this.endAssistantAttempt(follow, { kind: 'abandoned' })
-        this.pushEvent(follow, 'step/end', { turn: follow.turn, step: 1 })
-        follow.stepOpen = false
-      }
-      this.pushEvent(follow, 'turn/end', {
-        turn: follow.turn,
-        reason: turn.status === 'failed' || turn.error !== undefined && turn.error !== null
-          ? { kind: 'error', error: { message: 'CodeX turn failed.', code: 'codex-turn-failed' } }
-          : { kind: 'completed' },
-      })
-      this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
-      this.emitRemoteEvent('api-session/activity', [follow.sessionId, Date.now()])
-      follow.activeTurnId = undefined
-      this.pendingRequestIds.delete(follow.sessionId)
-      void this.refreshAndPublishWorkspaces()
-      return
-    }
-    if (frame.method === 'item/commandExecution/requestApproval'
-      || frame.method === 'item/fileChange/requestApproval') {
-      const requestHandle = string(params.requestHandle)
-      if (requestHandle === undefined) return
-      const command = commandText(params.command)
-      this.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId })
-      this.emitApproval({
-        eventId: requestHandle,
-        agentId: follow.sessionId,
-        request: {
-          toolName: frame.method.includes('fileChange') ? 'CodeX file change' : 'CodeX command',
-          ...(command === undefined ? {} : { reason: command }),
-        },
-      })
-    }
-  }
-
-  private acceptCompletedItem(follow: FollowState, item: JsonRecord, settleAssistant: boolean): void {
-    const itemId = string(item.id) ?? `item:${follow.nextSeq}`
-    if (follow.completedItems.has(itemId)) return
-    const type = string(item.type)
-    if (type === 'agentMessage' && !settleAssistant) return
-    follow.completedItems.add(itemId)
-    this.closeItemStreamBlocks(follow, itemId, itemText(item))
-    if (type === 'agentMessage' && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow)
-    const supplementalImages = type === 'agentMessage' ? follow.pendingToolImages : []
-    let assistantMessageSeq: number | undefined
-    for (const event of itemEvents(
-      item,
-      follow.turn,
-      1,
-      follow.requestId,
-      this.modelSelection(follow.sessionId),
-      follow.sessionId,
-      supplementalImages,
-    )) {
-      if (event.type === 'tool/call' && follow.startedItems.has(itemId)) continue
-      if (event.type === 'tool/result') this.pushToolResult(follow, itemId, event)
-      else {
-        const seq = this.pushEvent(follow, event.type, event.data, event.view)
-        if (event.type === 'assistant/message') assistantMessageSeq = seq
-      }
-    }
-    if (type === 'agentMessage' && assistantMessageSeq !== undefined) {
-      this.endAssistantAttempt(follow, {
-        kind: 'committed',
-        eventType: 'assistant/message',
-        seq: assistantMessageSeq,
-      })
-    }
-    if (type === 'agentMessage' && supplementalImages.length > 0) follow.pendingToolImages = []
-    else if (type !== undefined && isToolItemType(type)) {
-      follow.pendingToolImages.push(...toolOutputImageBlocks(item))
-    }
-    follow.liveItems.delete(itemId)
-    follow.liveToolOutput.delete(itemId)
-    follow.liveToolResultSeq.delete(itemId)
-    follow.liveToolResultSeq.delete(`${itemId}:call`)
-  }
-
-  private pushEvent(
-    follow: FollowState,
-    type: string,
-    data: unknown,
-    view?: ToolEventView,
-    placement?: { replaceSeq: number },
-  ): number {
-    const seq = follow.nextSeq++
-    const event: NativeEvent = {
-      type,
-      seq,
-      time: Date.now(),
-      data: adaptEventData(
-        type,
-        type === 'assistant/message' && this.sessionGeneration === 'v3' && follow.assistantAttempt !== undefined
-          ? { ...record(data), stream: follow.assistantAttempt.stream }
-          : data,
-        this.sessionGeneration,
-      ),
-      ...(isSurfaceEvent(type)
-        ? placement === undefined
-          ? { surfaceOp: 'append' as const }
-          : {
-              surfaceOp: this.sessionGeneration === 'v3'
-                ? { op: 'replace' as const, startSeq: placement.replaceSeq, endSeq: placement.replaceSeq }
-                : { op: 'replace' as const, start: placement.replaceSeq, end: placement.replaceSeq },
-              sourceEventSeqs: [placement.replaceSeq],
-            }
-          : {}),
-    }
-    this.cacheImageBlocks(follow.sessionId, event.data)
-    if (!follow.rcOnly) {
-      follow.queue.push({
-        type: 'event',
-        event,
-        ...(view === undefined ? {} : { view }),
-      })
-    }
-    this.broadcastRcMux({
-      type: 'session/event',
-      sessionId: follow.sessionId,
-      event,
-      ...(view === undefined ? {} : { view }),
-    })
-    return seq
-  }
-
-  private cacheImageBlocks(sessionId: string, value: unknown): void {
-    for (const block of collectImageBlocks(value)) {
-      const attachment = record(block.attachment)
-      const attachmentId = string(attachment.attachmentId)
-      const data = string(block.data)
-      if (attachmentId === undefined || data === undefined || !attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX)) continue
-      this.imageAttachments.set(attachmentId, { sessionId, attachment, data })
-    }
-  }
-
-  private ensureStreamBlock(
-    follow: FollowState,
-    key: string,
-    itemId: string,
-    kind: 'text' | 'reasoning',
-  ): StreamedBlock {
-    const current = follow.streamedBlocks.get(key)
-    if (current !== undefined) return current
-    const block = { itemId, index: follow.nextBlockIndex++, kind, text: '' }
-    follow.streamedBlocks.set(key, block)
-    follow.streamActive = true
-    this.pushAssistantChunk(follow, { type: 'block-start', index: block.index, blockType: kind })
-    return block
-  }
-
-  private appendStreamDelta(
-    follow: FollowState,
-    key: string,
-    itemId: string,
-    kind: 'text' | 'reasoning',
-    delta: string,
-  ): void {
-    const block = this.ensureStreamBlock(follow, key, itemId, kind)
-    block.text = appendBoundedText(block.text, delta)
-    this.pushAssistantChunk(follow, {
-      type: kind === 'reasoning' ? 'reasoning-delta' : 'text-delta', index: block.index, text: delta,
-    })
-  }
-
-  private closeItemStreamBlocks(follow: FollowState, itemId: string, fallback?: string): void {
-    const matches = [...follow.streamedBlocks].filter(([, block]) => block.itemId === itemId)
-    for (const [key, block] of matches) {
-      const text = block.text || fallback || ''
-      this.pushAssistantChunk(follow, {
-        type: 'block-end', index: block.index, block: { type: block.kind, text },
-      })
-      follow.streamedBlocks.delete(key)
-    }
-  }
-
-  private closeAllStreamBlocks(follow: FollowState): void {
-    for (const block of follow.streamedBlocks.values()) {
-      this.pushAssistantChunk(follow, {
-        type: 'block-end', index: block.index, block: { type: block.kind, text: block.text },
-      })
-    }
-    follow.streamedBlocks.clear()
-  }
-
-  private finishStream(follow: FollowState): void {
-    this.pushAssistantChunk(follow, { type: 'finish', reason: { kind: 'stop' } })
-    follow.streamActive = false
-  }
-
-  private pushAssistantChunk(follow: FollowState, chunk: JsonRecord): void {
-    if (this.sessionGeneration !== 'v3' || follow.rcOnly === true) {
-      this.pushEvent(follow, 'assistant/chunk', { turn: follow.turn, step: 1, chunk })
-      return
-    }
-    let attempt = follow.assistantAttempt
-    if (attempt === undefined) {
-      attempt = {
-        attemptId: `codex-attempt:${follow.activeTurnId ?? follow.turn}:${follow.nextSeq}`,
-        startedAfterSeq: follow.nextSeq - 1,
-        nextIndex: 0,
-        stream: [],
-      }
-      follow.assistantAttempt = attempt
-      follow.assistantStreamRevision += 1
-      follow.queue.push({
-        type: 'assistant-stream',
-        frame: {
-          type: 'start',
-          attemptId: attempt.attemptId,
-          revision: follow.assistantStreamRevision,
-          startedAfterSeq: attempt.startedAfterSeq,
-          turn: follow.turn,
-          step: 1,
-        },
-      })
-    }
-    const time = Date.now()
-    const index = attempt.nextIndex++
-    attempt.stream.push({ time, chunk })
-    follow.assistantStreamRevision += 1
-    follow.queue.push({
-      type: 'assistant-stream',
-      frame: {
-        type: 'chunk',
-        attemptId: attempt.attemptId,
-        revision: follow.assistantStreamRevision,
-        index,
-        time,
-        chunk,
-      },
-    })
-  }
-
-  private endAssistantAttempt(
-    follow: FollowState,
-    outcome: { kind: 'abandoned' } | { kind: 'committed'; eventType: 'assistant/message'; seq: number },
-  ): void {
-    const attempt = follow.assistantAttempt
-    if (attempt === undefined) return
-    follow.assistantAttempt = undefined
-    follow.assistantStreamRevision += 1
-    if (this.sessionGeneration === 'v3' && follow.rcOnly !== true) {
-      follow.queue.push({
-        type: 'assistant-stream',
-        frame: {
-          type: 'end',
-          attemptId: attempt.attemptId,
-          revision: follow.assistantStreamRevision,
-          index: attempt.nextIndex,
-          outcome,
-        },
-      })
-    }
-  }
-
-  private ensureToolStarted(follow: FollowState, item: JsonRecord): void {
-    const itemId = string(item.id)
-    if (itemId === undefined) return
-    if (!follow.startedItems.has(itemId)) follow.startedItems.add(itemId)
-    if (follow.liveItems.get(itemId) !== item) follow.liveItems.set(itemId, item)
-    const call = itemEvents(
-      item,
-      follow.turn,
-      1,
-      follow.requestId,
-      this.modelSelection(follow.sessionId),
-      follow.sessionId,
-    ).find(event => event.type === 'tool/call')
-    if (call !== undefined && !follow.liveToolResultSeq.has(`${itemId}:call`)) {
-      this.pushEvent(follow, call.type, call.data, call.view)
-      follow.liveToolResultSeq.set(`${itemId}:call`, -1)
-    }
-  }
-
-  private emitToolResult(follow: FollowState, item: JsonRecord, resultText: string): void {
-    const itemId = string(item.id)
-    if (itemId === undefined) return
-    const result = toolResultEvent(item, follow.turn, 1, itemId, resultText)
-    this.pushToolResult(follow, itemId, result)
-  }
-
-  private pushToolResult(follow: FollowState, itemId: string, event: ProjectedNativeEvent): void {
-    const previous = follow.liveToolResultSeq.get(itemId)
-    const projected = previous === undefined ? event : toolResultContentReplacement(event)
-    const seq = this.pushEvent(
-      follow,
-      projected.type,
-      projected.data,
-      projected.view,
-      previous === undefined ? undefined : { replaceSeq: previous },
-    )
-    follow.liveToolResultSeq.set(itemId, seq)
-  }
-
-  private resetLiveTurn(follow: FollowState): void {
-    follow.startedItems.clear()
-    follow.completedItems.clear()
-    follow.streamedBlocks.clear()
-    follow.nextBlockIndex = 0
-    follow.streamActive = false
-    follow.assistantAttempt = undefined
-    follow.liveItems.clear()
-    follow.liveToolOutput.clear()
-    follow.liveToolResultSeq.clear()
-    follow.pendingToolImages = []
-  }
-
-  private emitRemoteEvent(event: string, args: unknown[]): void {
-    for (const queue of this.eventStreams.values()) queue.push({ type: 'emit', event, args })
-    const sessionId = typeof args[0] === 'string' ? args[0] : undefined
-    if (event === 'api-session/status' && sessionId !== undefined && typeof args[1] === 'boolean') {
-      this.broadcastRcHost({ type: 'host/session-status', sessionId, running: args[1] })
-    } else if (event === 'api-session/removed' && sessionId !== undefined) {
-      this.broadcastRcHost({ type: 'host/session-removed', sessionId })
-    } else if (event === 'api-session/added' && isRecord(args[0])) {
-      const summary = args[0]
-      this.broadcastRcHost({
-        type: 'host/session-added',
-        sessionId: summary.sessionId,
-        blank: summary.blank === true,
-        ...(typeof summary.cwd === 'string' ? { cwd: summary.cwd } : {}),
-      })
-    }
-  }
-
-  private emitApproval(input: { eventId: string; agentId: string; request: JsonRecord }): void {
-    for (const queue of this.eventStreams.values()) queue.push({
-      type: 'waterfall',
-      event: 'approval/request',
-      eventId: input.eventId,
-      agentId: input.agentId,
-      request: input.request,
-    })
-    this.broadcastRcMux({
-      type: 'approval/requested',
-      sessionId: input.agentId,
-      approvalId: input.eventId,
-      toolName: string(input.request.toolName) ?? 'CodeX',
-      ...(typeof input.request.reason === 'string' ? { reason: input.request.reason } : {}),
-    }, input.eventId)
-  }
-
-  private async answerRemoteEvent(args: JsonRecord, signal: AbortSignal): Promise<undefined> {
-    const eventId = string(args.eventId)
-    const outcome = record(args.outcome)
-    if (eventId === undefined) throw new Error('The CodeX approval result is missing its event id.')
-    const pending = this.pendingApprovals.get(eventId)
-    if (pending === undefined) return undefined
-    this.pendingApprovals.delete(eventId)
-    const decision = outcome.kind === 'result' && outcome.value === 'allowed-once'
-      ? 'accept'
-      : outcome.kind === 'result' && outcome.value === 'cancelled'
-        ? 'cancel'
-        : 'decline'
-    await this.client.respond(pending.requestHandle, decision, signal)
-    return undefined
   }
 
   private async createWorkspace(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
@@ -1395,13 +648,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.selectedPermissions.set(projected.id, permissionPreset)
     await this.refreshAndPublishWorkspaces()
     const seq = this.nextProjectionSeq()
-    this.emitRemoteEvent('api-session/added', [this.sessionSummary(projected, {
+    this.events.emitRemoteEvent('api-session/added', [this.sessionSummary(projected, {
       blank: true,
       modelSelection: selection,
       lastPromptAt: null,
       asOfSeq: seq,
     })])
-    this.publishProjection(projected.id, 'title', displayTitle(projected), seq)
+    this.events.publishProjection(projected.id, 'title', displayTitle(projected), seq)
     return success({ sessionId: projected.id })
   }
 
@@ -1417,7 +670,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     this.setPermissionSelection(projected.id, permissionPreset)
     await this.refreshAndPublishWorkspaces()
     const seq = this.nextProjectionSeq()
-    this.publishProjection(projected.id, 'title', displayTitle(projected), seq)
+    this.events.publishProjection(projected.id, 'title', displayTitle(projected), seq)
     return success({ sessionId: projected.id })
   }
 
@@ -1429,7 +682,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     const threadId = nativeThreadId(sessionId)
     const selection = this.modelSelection(sessionId, await this.models(signal))
     const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId)
-    await this.ensureRcFollow(sessionId)
+    await this.live.ensureRcFollow(sessionId)
     if (!isFreshBlankThread) {
       const resumeResult = await this.client.request('thread/resume', {
         threadId,
@@ -1496,7 +749,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     await this.client.request('thread/name/set', { threadId: nativeThreadId(sessionId), name: title }, signal)
     const seq = this.nextProjectionSeq()
     this.updateThreadName(nativeThreadId(sessionId), title)
-    this.publishProjection(sessionId, 'title', title, seq)
+    this.events.publishProjection(sessionId, 'title', title, seq)
     await this.refreshAndPublishWorkspaces()
     return success({ title, seq })
   }
@@ -1558,7 +811,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
   private cacheHistoryImages(history: CodexNativeHistoryPage | CodexNativeHistory): void {
     const sessionId = history.header.id
     const entries = 'entries' in history ? history.entries : history.records
-    for (const entry of entries) this.cacheImageBlocks(sessionId, entry.event.data)
+    for (const entry of entries) this.live.cacheImageBlocks(sessionId, entry.event.data)
   }
 
   private async sessionHistory(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
@@ -1573,7 +826,7 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     // history read is the reliable signal that the native client has opened a
     // Session, so attach the CodeX live stream here before returning its tail.
     if (beforeSeq === undefined) {
-      await this.ensureRcFollow(sessionId, history)
+      await this.live.ensureRcFollow(sessionId, history)
       signal.throwIfAborted()
       if (this.closed) throw new Error('The CodeX virtual Harness is closed.')
       this.rememberOpenedSession(sessionId)
@@ -1599,76 +852,6 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
     })
   }
 
-  private async ensureRcFollow(sessionId: string, seedHistory?: CodexNativeHistoryPage): Promise<void> {
-    if (this.followsHas(sessionId)) return
-    const threadId = nativeThreadId(sessionId)
-    // The Host bounds CodeX streams per connection. rc.2 only renders one
-    // active conversation, so release older rc-only follows when navigation
-    // moves to another Session. Alpha follows own their lifecycle separately.
-    const stale = [...this.follows].filter(follow => follow.rcOnly && follow.sessionId !== sessionId)
-    for (const follow of stale) {
-      this.follows.delete(follow)
-      follow.queue.close()
-      await follow.close?.().catch(() => undefined)
-    }
-    const history = seedHistory ?? await this.readHistoryPage(threadId, {}, undefined)
-    const controller = new AbortController()
-    const follow: FollowState = {
-      sessionId,
-      threadId,
-      queue: new AsyncValueQueue(controller.signal),
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== undefined,
-      startedItems: new Set(),
-      completedItems: new Set(),
-      streamedBlocks: new Map(),
-      nextBlockIndex: 0,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      liveItems: new Map(),
-      liveToolOutput: new Map(),
-      liveToolResultSeq: new Map(),
-      pendingToolImages: [],
-      requestId: this.pendingRequestIds.get(sessionId),
-      rcOnly: true,
-      ...(history.activeTurnId === undefined ? {} : { activeTurnId: history.activeTurnId }),
-    }
-    this.follows.add(follow)
-    try {
-      const stream = await this.client.subscribe(
-        threadId,
-        frame => this.acceptCodexFrame(follow, frame),
-        controller.signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow),
-      )
-      if (this.closed || !this.follows.has(follow)) {
-        await stream.close().catch(() => undefined)
-        throw new Error('The CodeX follow was closed before it opened.')
-      }
-      follow.close = async () => {
-        controller.abort()
-        await stream.close()
-      }
-    } catch (error) {
-      this.follows.delete(follow)
-      controller.abort()
-      follow.queue.close()
-      throw error
-    }
-  }
-
-  private followsHas(sessionId: string): boolean {
-    for (const follow of this.follows) if (follow.sessionId === sessionId) return true
-    return false
-  }
-
-  private closeFollowAfterRemoteStreamClosed(follow: FollowState): void {
-    this.follows.delete(follow)
-    follow.queue.close()
-    this.emitRemoteEvent('api-session/status', [follow.sessionId, false])
-  }
-
   private async refreshAndPublishWorkspaces(): Promise<void> {
     const catalog = await this.refreshCatalog().catch(() => undefined)
     if (catalog !== undefined) this.publishWorkspaceBaseline(catalog)
@@ -1682,1243 +865,13 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       queue.push({ type: 'archived', archivedSessionIds: catalog.sessions.filter(item => item.archived).map(item => item.id) })
     }
   }
-
-  private createApiProxy(): ApiProxy {
-    const call = (endpoint: string) => async (request: RpcRequest<unknown>, signal?: AbortSignal): Promise<RpcResponse<unknown>> => {
-      const payload = endpoint === 'session.prompt' && isRecord(request.payload)
-        ? { ...request.payload, requestId: String(request.rpcId) }
-        : request.payload
-      const result = await this.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal)
-      return {
-        rpcId: request.rpcId,
-        result: (result.ok
-          ? success(result.value)
-          : failure(result.error.code, result.error.message, result.error.details)) as never,
-      }
-    }
-    return {
-      sessions: {
-        list: call('session.list') as never,
-        search: call('session.search') as never,
-        create: call('session.create') as never,
-        history: call('session.history') as never,
-        models: call('session.models') as never,
-        selectModel: call('session.selectModel') as never,
-        rename: call('session.rename') as never,
-        fork: call('session.fork') as never,
-        prompt: call('session.prompt') as never,
-        attachment: call('session.attachment') as never,
-        updateQueue: call('session.updateQueue') as never,
-        cancel: call('session.cancel') as never,
-      },
-      workspace: {
-        list: call('workspace.list') as never,
-        create: call('workspace.create') as never,
-        rename: call('workspace.rename') as never,
-        delete: call('workspace.delete') as never,
-        insertBefore: call('workspace.insertBefore') as never,
-        insertSessionBefore: call('workspace.insertSessionBefore') as never,
-        archiveSession: call('workspace.archiveSession') as never,
-      },
-      subagents: {} as ApiProxy['subagents'],
-      host: {
-        describe: call('host.describe') as never,
-        listDirectory: call('host.listDirectory') as never,
-      } as unknown as ApiProxy['host'],
-      skills: { list: call('skills.list') as never },
-      agentPresets: {} as ApiProxy['agentPresets'],
-      goals: {} as ApiProxy['goals'],
-      settings: {} as ApiProxy['settings'],
-      credentials: {} as ApiProxy['credentials'],
-      llm: {} as ApiProxy['llm'],
-      events: {
-        mux: ((request: RpcRequest<unknown>, signal: AbortSignal) => this.rcMux(request, signal)) as never,
-        host: ((request: RpcRequest<unknown>, signal: AbortSignal) => this.rcHost(request, signal)) as never,
-      },
-      downloads: {} as ApiProxy['downloads'],
-      respond: async message => {
-        const pending = this.pendingApprovals.get(String(message.rpcId))
-        if (pending === undefined) return { accepted: false, reason: 'not-pending' }
-        const result = message.result
-        const outcome = result.ok ? result.value : undefined
-        const decision = outcome === 'allowed-once' ? 'accept' : outcome === 'cancelled' ? 'cancel' : 'decline'
-        await this.client.respond(pending.requestHandle, decision)
-        this.pendingApprovals.delete(pending.requestHandle)
-        return { accepted: true }
-      },
-    }
-  }
-
-  private async *rcMux(request: RpcRequest<unknown>, signal: AbortSignal): AsyncIterable<unknown> {
-    const queue = new AsyncValueQueue(signal)
-    this.rcMuxStreams.add(queue)
-    const catalog = await this.currentCatalog(signal)
-    for (const session of catalog.sessions) queue.push({
-      rpcId: `${String(request.rpcId)}:${session.id}:subscribed`,
-      payload: { type: 'session/subscribed', sessionId: session.id, lastSeq: -1 },
-    })
-    try {
-      yield* queue
-    } finally {
-      this.rcMuxStreams.delete(queue)
-      queue.close()
-    }
-  }
-
-  private async *rcHost(_request: RpcRequest<unknown>, signal: AbortSignal): AsyncIterable<unknown> {
-    const queue = new AsyncValueQueue(signal)
-    this.rcHostStreams.add(queue)
-    try {
-      yield* queue
-    } finally {
-      this.rcHostStreams.delete(queue)
-      queue.close()
-    }
-  }
-
-  private broadcastRcMux(payload: unknown, rpcId = `codex-mux:${Date.now()}:${Math.random()}`): void {
-    for (const queue of this.rcMuxStreams) queue.push({ rpcId, payload })
-  }
-
-  private broadcastRcHost(payload: unknown): void {
-    const frame = { rpcId: `codex-host:${Date.now()}:${Math.random()}`, payload }
-    for (const queue of this.rcHostStreams) queue.push(frame)
-  }
-}
-
-async function loadCatalog(
-  client: CodexClientLike,
-  signal?: AbortSignal,
-  pendingThreads?: Map<string, JsonRecord>,
-): Promise<CatalogState> {
-  let projects = await loadCodexProjects(client, signal)
-  const threads: JsonRecord[] = []
-  let cursor: string | null | undefined
-  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-    const result = record(await client.request('thread/list', {
-      limit: CODEX_PAGE_LIMIT,
-      sortKey: 'updated_at',
-      sortDirection: 'desc',
-      archived: false,
-      ...(cursor === undefined ? {} : { cursor }),
-    }, signal))
-    for (const value of array(result.data)) {
-      const thread = record(value)
-      if (string(thread.id) !== undefined) threads.push(thread)
-    }
-    cursor = typeof result.nextCursor === 'string' && result.nextCursor.length > 0 ? result.nextCursor : undefined
-    if (cursor === undefined) break
-  }
-  if (pendingThreads !== undefined) {
-    const listedIds = new Set(threads.map(thread => string(thread.id)).filter((id): id is string => id !== undefined))
-    for (const [threadId, thread] of pendingThreads) {
-      if (listedIds.has(threadId)) pendingThreads.delete(threadId)
-      else threads.unshift(thread)
-    }
-  }
-  if (projects.length === 0) {
-    projects = deriveCodexCwdWorkspaces(threads).map(workspace => ({
-      id: workspace.id,
-      name: workspace.name,
-      roots: [{ path: workspace.path }],
-      position: workspace.position,
-      createdAt: workspace.createdAt,
-      updatedAt: workspace.updatedAt,
-    }))
-  }
-  const projected = threads.map(thread => {
-    const session = projectCodexThread(thread)
-    return session === undefined ? undefined : { thread, session }
-  }).filter((value): value is { thread: JsonRecord; session: DisplaySession } => value !== undefined)
-  const projectWorkspaces = projects.map(projectWorkspace)
-  const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]!]))
-  const visibleSessionIds = new Set<string>()
-  const visibleThreads: JsonRecord[] = []
-
-  for (const { thread, session } of projected) {
-    const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId)
-    if (projectWorkspaceForSession !== undefined) {
-      addSessionToWorkspace(projectWorkspaceForSession, session)
-      visibleSessionIds.add(session.id)
-      visibleThreads.push(thread)
-    }
-  }
-  const sessions = projected
-    .map(value => value.session)
-    .filter(session => visibleSessionIds.has(session.id))
-
-  return {
-    threads: visibleThreads,
-    sessions,
-    projects,
-    workspaces: projectWorkspaces,
-  }
-}
-
-async function loadCodexProjects(client: CodexClientLike, signal?: AbortSignal): Promise<CodexProject[]> {
-  const projects: CodexProject[] = []
-  let cursor: string | null | undefined
-  try {
-    for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-      const result = record(await client.request('project/list', {
-        limit: CODEX_PAGE_LIMIT,
-        ...(cursor === undefined ? {} : { cursor }),
-      }, signal))
-      for (const value of array(result.data)) {
-        const project = projectCodexProject(value, projects.length)
-        if (project !== undefined && !projects.some(item => item.id === project.id)) projects.push(project)
-      }
-      cursor = typeof result.nextCursor === 'string' && result.nextCursor.length > 0 ? result.nextCursor : undefined
-      if (cursor === undefined) break
-    }
-  } catch (error) {
-    if (isProjectListUnsupported(error)) return []
-    throw error
-  }
-  return projects.sort((left, right) => left.position - right.position || left.name.localeCompare(right.name) || left.id.localeCompare(right.id))
-}
-
-async function loadModelDirectory(client: CodexClientLike, signal?: AbortSignal): Promise<CodexModelDirectory> {
-  const models = new Map<string, CodexModelView>()
-  let defaultModelId: string | undefined
-  let cursor: string | null | undefined
-  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-    const result = record(await client.request('model/list', {
-      limit: CODEX_PAGE_LIMIT,
-      includeHidden: false,
-      ...(cursor === undefined ? {} : { cursor }),
-    }, signal))
-    for (const value of array(result.data)) {
-      const source = record(value)
-      if (source.hidden === true) continue
-      const id = string(source.model) ?? string(source.id)
-      if (id === undefined || models.has(id)) continue
-      const efforts = array(source.supportedReasoningEfforts).map(value => {
-        const effort = record(value)
-        const effortId = string(effort.reasoningEffort)
-        if (effortId === undefined) return undefined
-        const description = string(effort.description)
-        return {
-          id: effortId,
-          name: reasoningEffortName(effortId),
-          ...(description === undefined ? {} : { description }),
-        }
-      }).filter((value): value is NonNullable<typeof value> => value !== undefined)
-      const defaultEffort = string(source.defaultReasoningEffort)
-      const description = string(source.description)
-      const model: CodexModelView = {
-        id,
-        name: string(source.displayName) ?? id,
-        ...(description === undefined ? {} : { description }),
-        ...(efforts.length === 0 ? {} : {
-          reasoning: {
-            efforts,
-            ...(defaultEffort === undefined || !efforts.some(effort => effort.id === defaultEffort)
-              ? {}
-              : { defaultEffort }),
-          },
-        }),
-      }
-      models.set(id, model)
-      if (source.isDefault === true) defaultModelId = id
-    }
-    cursor = typeof result.nextCursor === 'string' && result.nextCursor.length > 0 ? result.nextCursor : undefined
-    if (cursor === undefined) break
-  }
-  const defaultModel = models.get(defaultModelId ?? '') ?? (models.values().next().value as CodexModelView | undefined)
-  if (defaultModel === undefined) throw new Error('CodeX did not advertise any available models.')
-  const defaultEffort = defaultModel.reasoning?.defaultEffort
-  return {
-    default: {
-      provider: CODEX_PROVIDER,
-      model: defaultModel.id,
-      ...(defaultEffort === undefined ? {} : { reasoningEffort: defaultEffort }),
-    },
-    groups: [{ id: CODEX_PROVIDER, name: 'CodeX', models: [...models.values()] }],
-    models,
-  }
-}
-
-export function projectCodexNativeHistory(
-  thread: JsonRecord,
-  sessionId: string,
-  sessionGeneration: HarnessSessionGeneration = 'legacy',
-): CodexNativeHistory {
-  const entries: CodexNativeHistory['entries'] = []
-  let seq = 0
-  let turnNumber = 0
-  const active = activeTurnId(thread.turns)
-  const append = (
-    type: string,
-    data: unknown,
-    time = Date.now(),
-    view?: ToolEventView,
-    sourceEventSeqs?: number[],
-  ): number => {
-    const eventSeq = seq++
-    entries.push({
-      type: 'event',
-      event: {
-        type,
-        seq: eventSeq,
-        time,
-        data: adaptEventData(type, data, sessionGeneration),
-        ...(sourceEventSeqs === undefined ? {} : { sourceEventSeqs }),
-        ...(isSurfaceEvent(type) ? { surfaceOp: 'append' as const } : {}),
-      },
-      ...(view === undefined ? {} : { view }),
-    })
-    return eventSeq
-  }
-  for (const rawTurn of array(thread.turns)) {
-    const turn = record(rawTurn)
-    const turnItems = array(turn.items).map(record)
-    const toolImages = turnItems.flatMap(toolOutputImageBlocks)
-    let imageOwner = -1
-    for (let index = 0; index < turnItems.length; index += 1) {
-      if (turnItems[index]!.type === 'agentMessage') imageOwner = index
-    }
-    turnNumber += 1
-    const turnActive = isActiveCodexTurn(turn)
-    const time = normalizeTime(turn.createdAt) || normalizeTime(turn.startedAt) || normalizeTime(thread.createdAt) || Date.now()
-    append('turn/start', { turn: turnNumber }, time)
-    append('step/start', { turn: turnNumber, step: 1 }, time)
-    for (let itemIndex = 0; itemIndex < turnItems.length; itemIndex += 1) {
-      const item = turnItems[itemIndex]!
-      let toolCallSeq: number | undefined
-      for (const event of itemEvents(
-        item,
-        turnNumber,
-        1,
-        undefined,
-        modelSelection(),
-        sessionId,
-        itemIndex === imageOwner ? toolImages : [],
-      )) {
-        const eventSeq = append(
-          event.type,
-          event.data,
-          normalizeTime(item.createdAt) || time,
-          event.view,
-          event.type === 'tool/result' && toolCallSeq !== undefined ? [toolCallSeq] : undefined,
-        )
-        if (event.type === 'tool/call') toolCallSeq = eventSeq
-      }
-    }
-    if (turnActive) continue
-    append('step/end', { turn: turnNumber, step: 1 }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time)
-    append('turn/end', {
-      turn: turnNumber,
-      reason: turn.status === 'failed' || turn.error !== undefined && turn.error !== null
-        ? { kind: 'error', error: { message: 'CodeX turn failed.', code: 'codex-turn-failed' } }
-        : { kind: 'completed' },
-    }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time)
-  }
-  const projected = projectCodexThread(thread)
-  return {
-    header: {
-      version: sessionGeneration === 'v3' ? 3 : 1,
-      id: sessionId,
-      createdAt: projected?.createdAt ?? Date.now(),
-      ...(projected?.cwd === undefined ? {} : { cwd: projected.cwd }),
-      ...(sessionGeneration === 'v3' ? { isSeeded: false } : {}),
-    },
-    entries,
-    lastSeq: seq - 1,
-    nextTurn: turnNumber,
-    ...(active === undefined ? {} : { activeTurnId: active }),
-  }
-}
-
-export function paginateCodexNativeHistory(
-  history: CodexNativeHistory,
-  request: { beforeSeq?: number; throughSeq?: number; maxMessages?: number },
-): CodexNativeHistoryPage {
-  const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq)
-  const endSeq = Math.min(throughSeq, request.beforeSeq === undefined ? throughSeq : request.beforeSeq - 1)
-  const window = endSeq < 0 ? [] : history.entries.filter(entry => entry.event.seq <= endSeq)
-  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES
-  let messages = 0
-  let cut = 0
-  for (let index = window.length - 1; index >= 0; index -= 1) {
-    const event = window[index]!.event
-    if (!isSurfaceEvent(event.type) || event.surfaceOp !== 'append') continue
-    messages += 1
-    if (messages >= maxMessages) {
-      cut = Math.min(event.seq, ...(event.sourceEventSeqs ?? []))
-      break
-    }
-  }
-  return {
-    header: history.header,
-    cursor: history.lastSeq,
-    nextTurn: history.nextTurn,
-    records: window.filter(entry => entry.event.seq >= cut),
-    hasMore: window.some(entry => entry.event.seq < cut),
-    ...(history.activeTurnId === undefined ? {} : { activeTurnId: history.activeTurnId }),
-  }
-}
-
-function adaptEventData(type: string, data: unknown, sessionGeneration: HarnessSessionGeneration): unknown {
-  if (sessionGeneration !== 'v3' || type !== 'assistant/message') return data
-  const value = record(data)
-  return Array.isArray(value.stream) ? value : { ...value, stream: [] }
-}
-
-function adaptCodexHistoryPage(value: unknown, sessionGeneration: HarnessSessionGeneration): unknown {
-  if (sessionGeneration !== 'v3') return value
-  const page = record(value)
-  const sourceHeader = record(page.header)
-  const { seedLength: _seedLength, ...header } = sourceHeader
-  const records = Array.isArray(page.records)
-    ? page.records.map(raw => {
-        const entry = record(raw)
-        const sourceEvent = record(entry.event)
-        const sourceSurfaceOp = record(sourceEvent.surfaceOp)
-        const surfaceOp = sourceEvent.surfaceOp === 'append'
-          ? 'append'
-          : sourceSurfaceOp.op === 'replace'
-              && integer(sourceSurfaceOp.startSeq) !== undefined
-              && integer(sourceSurfaceOp.endSeq) !== undefined
-            ? sourceSurfaceOp
-            : sourceSurfaceOp.op === 'replace'
-                && integer(sourceSurfaceOp.start) !== undefined
-                && integer(sourceSurfaceOp.end) !== undefined
-              ? {
-                  op: 'replace',
-                  startSeq: sourceSurfaceOp.start,
-                  endSeq: sourceSurfaceOp.end,
-                }
-              : sourceEvent.surfaceOp
-        return {
-          ...entry,
-          event: {
-            ...sourceEvent,
-            data: adaptEventData(string(sourceEvent.type) ?? '', sourceEvent.data, sessionGeneration),
-            ...(surfaceOp === undefined ? {} : { surfaceOp }),
-          },
-        }
-      })
-    : page.records
-  return {
-    ...page,
-    header: { ...header, version: 3, isSeeded: sourceHeader.isSeeded === true },
-    records,
-  }
-}
-
-function itemEvents(
-  item: JsonRecord,
-  turn: number,
-  step: number,
-  requestId?: string,
-  selection: CodexModelSelection = modelSelection(),
-  sessionId = CODEX_SESSION_PREFIX,
-  supplementalImages: JsonRecord[] = [],
-): ProjectedNativeEvent[] {
-  const type = string(item.type)
-  const id = string(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`
-  const text = itemText(item)
-  if (type === 'userMessage') return [{
-    type: 'user/message',
-    data: {
-      id,
-      role: 'user',
-      content: messageContent(item, `${sessionId}:${id}`, 'text', text),
-      source: requestId === undefined || requestId === '' ? { kind: 'user' } : { kind: 'user', rpcId: requestId },
-    },
-  }]
-  if (type === 'agentMessage' || type === 'reasoning' || type === 'plan') return [{
-    type: 'assistant/message',
-    data: {
-      turn,
-      step,
-      message: {
-        id,
-        role: 'assistant',
-        content: messageContent(
-          item,
-          `${sessionId}:${id}`,
-          type === 'reasoning' ? 'reasoning' : 'text',
-          text,
-          type === 'agentMessage' ? supplementalImages : [],
-        ),
-        source: { kind: 'model', provider: selection.provider, model: selection.model },
-      },
-    },
-  }]
-  if (type !== undefined && isToolItemType(type)) {
-    const name = toolEventName(type)
-    const args = toolArguments(item)
-    return [
-      {
-        type: 'tool/call',
-        data: { turn, step, callId: id, name, arguments: JSON.stringify(args) },
-        view: { for: 'call', view: toolCallView(item, type, args) },
-      },
-      toolResultEvent(item, turn, step, id, toolResultText(item, type, text)),
-    ]
-  }
-  if (type === 'error') return [{
-    type: 'assistant/message',
-    data: {
-      turn,
-      step,
-      message: {
-        id,
-        role: 'assistant',
-        content: [{ type: 'text', text: text ?? 'CodeX reported an error.' }],
-        source: { kind: 'model', provider: selection.provider, model: selection.model },
-      },
-    },
-  }]
-  return []
-}
-
-function messageContent(
-  item: JsonRecord,
-  attachmentSeed: string,
-  fallbackType: 'text' | 'reasoning',
-  fallbackText?: string,
-  supplementalImages: JsonRecord[] = [],
-): JsonRecord[] {
-  const source = item.content ?? item.input
-  const blocks = contentBlocks(source, attachmentSeed)
-  const images = contentBlocks(supplementalImages, `${attachmentSeed}:tool-output`)
-  if (blocks.length > 0 || images.length > 0) {
-    return [...(blocks.length > 0 ? blocks : [{ type: fallbackType, text: fallbackText ?? '' }]), ...images]
-  }
-  return [{ type: fallbackType, text: fallbackText ?? '' }]
-}
-
-function toolResultEvent(
-  item: JsonRecord,
-  turn: number,
-  step: number,
-  id: string,
-  resultText: string,
-): ProjectedNativeEvent {
-  const type = string(item.type) ?? 'unknown'
-  return {
-    type: 'tool/result',
-    data: {
-      turn,
-      step,
-      message: {
-        id: `${id}:result`,
-        role: 'user',
-        content: [{
-          type: 'tool-result',
-          toolCallId: id,
-          content: [{ type: 'text', text: resultText }],
-          ...(item.status === 'failed' || item.success === false ? { isError: true } : {}),
-        }],
-        source: { kind: 'tool', callId: id },
-      },
-    },
-    view: { for: 'result', view: toolResultView(item, type, resultText) },
-  }
-}
-
-function toolResultContentReplacement(event: ProjectedNativeEvent): ProjectedNativeEvent {
-  const data = record(event.data)
-  const message = record(data.message)
-  const content = array(message.content)
-  const result = record(content[0])
-  if (result.isError === undefined) return event
-  const { isError: _isError, ...stableResult } = result
-  return {
-    ...event,
-    data: {
-      ...data,
-      message: { ...message, content: [stableResult] },
-    },
-  }
-}
-
-function isToolItemType(type: string | undefined): boolean {
-  return type === 'commandExecution'
-    || type === 'mcpToolCall'
-    || type === 'dynamicToolCall'
-    || type === 'fileChange'
-    || type === 'functionCallOutput'
-    || type === 'hookPrompt'
-    || type === 'collabAgentToolCall'
-    || type === 'subAgentActivity'
-    || type === 'webSearch'
-    || type === 'imageView'
-    || type === 'imageGeneration'
-    || type === 'sleep'
-    || type === 'enteredReviewMode'
-    || type === 'exitedReviewMode'
-    || type === 'contextCompaction'
-}
-
-function toolEventName(type: string): string {
-  if (type === 'fileChange') return 'codex.fileChange'
-  if (type === 'commandExecution') return 'codex.command'
-  if (type === 'webSearch') return 'codex.webSearch'
-  if (type === 'collabAgentToolCall' || type === 'subAgentActivity') return 'codex.subagent'
-  if (type === 'imageView' || type === 'imageGeneration') return 'codex.image'
-  if (type === 'enteredReviewMode' || type === 'exitedReviewMode') return 'codex.reviewMode'
-  if (type === 'contextCompaction') return 'codex.compaction'
-  return `codex.${type}`
-}
-
-function toolResultText(item: JsonRecord, type: string, text?: string): string {
-  if (type === 'fileChange') return fileChangeSummary(item)
-  if (type === 'webSearch') {
-    const count = array(item.results).length
-    return count === 0 ? 'Web search completed.' : `Web search returned ${count} result${count === 1 ? '' : 's'}.`
-  }
-  if (type === 'imageView') return `Viewed image: ${string(item.path) ?? 'image'}`
-  if (type === 'imageGeneration') {
-    const savedPath = string(item.savedPath)
-    return savedPath === undefined ? `Image generation ${string(item.status) ?? 'completed'}.` : `Generated image: ${savedPath}`
-  }
-  if (type === 'contextCompaction') return 'CodeX compacted the conversation context.'
-  if (type === 'enteredReviewMode') return `Entered review mode${string(item.review) ? `: ${string(item.review)}` : '.'}`
-  if (type === 'exitedReviewMode') return `Exited review mode${string(item.review) ? `: ${string(item.review)}` : '.'}`
-  if (type === 'sleep') return `Waited ${integer(item.durationMs) ?? 0} ms.`
-  if (type === 'subAgentActivity') {
-    return [string(record(item.kind).type) ?? string(item.kind) ?? 'Subagent activity', string(item.agentPath)]
-      .filter((value): value is string => value !== undefined).join(': ')
-  }
-  return text ?? itemText(record(item.result)) ?? itemText(record(item.output)) ?? string(item.status) ?? type
-}
-
-function isSurfaceEvent(type: string): boolean {
-  return type === 'user/message' || type === 'assistant/message' || type === 'tool/result'
-}
-
-function toolCallView(item: JsonRecord, type: string, args: JsonRecord): JsonRecord {
-  if (type === 'commandExecution') {
-    return {
-      card: 'terminal',
-      title: commandText(item.command) ?? 'CodeX command',
-      ...(typeof item.cwd === 'string' ? { cwd: item.cwd } : {}),
-    }
-  }
-  const locations = fileLocations(item)
-  if (type === 'fileChange') {
-    return {
-      card: 'generic',
-      title: locations.length === 0 ? 'CodeX file changes' : `Modify ${locations.length} file${locations.length === 1 ? '' : 's'}`,
-      kind: 'edit',
-      rawInput: args,
-      ...(locations.length === 0 ? {} : { locations }),
-    }
-  }
-  if (type === 'webSearch') {
-    return {
-      card: 'generic',
-      title: string(item.query) ?? 'CodeX web search',
-      kind: 'search',
-      rawInput: args,
-    }
-  }
-  if (type === 'imageView' || type === 'imageGeneration') {
-    const path = string(item.path) ?? string(item.savedPath)
-    return {
-      card: 'generic',
-      title: type === 'imageView' ? 'View image' : 'Generate image',
-      kind: type === 'imageView' ? 'read' : 'other',
-      ...(path === undefined ? {} : { locations: [{ path }] }),
-    }
-  }
-  if (type === 'collabAgentToolCall' || type === 'subAgentActivity') {
-    return {
-      card: 'generic',
-      title: type === 'collabAgentToolCall'
-        ? `Subagent: ${string(item.tool) ?? 'collaboration'}`
-        : `Subagent activity: ${string(item.agentPath) ?? string(item.agentThreadId) ?? 'agent'}`,
-      kind: 'other',
-      rawInput: args,
-    }
-  }
-  if (type === 'contextCompaction') return { card: 'generic', title: 'Compact conversation context', kind: 'other' }
-  if (type === 'enteredReviewMode') return { card: 'generic', title: 'Enter review mode', kind: 'other' }
-  if (type === 'exitedReviewMode') return { card: 'generic', title: 'Exit review mode', kind: 'other' }
-  return {
-    card: 'generic',
-    title: toolDisplayName(item, type),
-    kind: 'other',
-  }
-}
-
-function toolResultView(item: JsonRecord, type: string, resultText: string): JsonRecord {
-  if (type === 'commandExecution') {
-    return {
-      card: 'terminal',
-      output: resultText,
-      ...(typeof item.exitCode === 'number' && Number.isSafeInteger(item.exitCode) ? { exitCode: item.exitCode } : {}),
-    }
-  }
-  return {
-    card: 'generic',
-    ...(type === 'fileChange' ? { title: item.status === 'inProgress' ? 'CodeX file changes' : 'CodeX file changes completed' } : {}),
-    ...(type === 'mcpToolCall' && item.status === 'inProgress'
-      ? { title: 'CodeX MCP tool in progress', content: [{ type: 'text', text: resultText }] }
-      : {}),
-  }
-}
-
-function toolDisplayName(item: JsonRecord, type: string): string {
-  return string(item.name)
-    ?? string(item.tool)
-    ?? string(record(item.tool).name)
-    ?? (type === 'mcpToolCall' ? 'CodeX MCP tool' : humanizeItemType(type))
-}
-
-function fileLocations(item: JsonRecord): Array<{ path: string }> {
-  return array(item.changes)
-    .map(value => string(record(value).path))
-    .filter((path): path is string => path !== undefined && path.length > 0)
-    .map(path => ({ path }))
-}
-
-function nativeWorkspace(view: CodexVirtualWorkspaceView): Omit<CodexVirtualWorkspaceView, 'sessionCount'> {
-  const { sessionCount: _sessionCount, ...workspace } = view
-  return workspace
-}
-
-function nativeVisibleWorkspaces(catalog: CatalogState, selectedWorkspaceId?: string): CodexVirtualWorkspaceView[] {
-  return catalog.workspaces.filter(workspace => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId)
-}
-
-function projectWorkspace(project: CodexProject): CodexVirtualWorkspaceView {
-  const root = project.roots[0]!
-  return {
-    workspaceId: codexProjectWorkspaceId(project.id),
-    path: root.path,
-    title: project.name.trim() || basename(root.path),
-    sessionIds: [],
-    sessionCount: 0,
-    createdAt: isoTime(project.createdAt),
-    updatedAt: isoTime(project.updatedAt || project.createdAt),
-  }
-}
-
-function projectCodexProject(value: unknown, fallbackPosition: number): CodexProject | undefined {
-  const source = record(value)
-  const id = string(source.id)
-  if (id === undefined) return undefined
-  const roots = array(source.roots)
-    .map(root => string(record(root).path))
-    .filter((path): path is string => path !== undefined && path.length > 0)
-    .map(path => ({ path }))
-  if (roots.length === 0) return undefined
-  return {
-    id,
-    name: string(source.name) ?? basename(roots[0]!.path),
-    roots,
-    position: finiteNumber(source.position) ?? fallbackPosition,
-    createdAt: normalizeTime(source.createdAt),
-    updatedAt: normalizeTime(source.updatedAt),
-  }
-}
-
-function findProjectWorkspace(
-  thread: JsonRecord,
-  session: DisplaySession,
-  projects: CodexProject[],
-  workspaceByProjectId: Map<string, CodexVirtualWorkspaceView>,
-): CodexVirtualWorkspaceView | undefined {
-  const explicitProjectId = string(thread.projectId)
-  const explicitWorkspace = explicitProjectId === undefined ? undefined : workspaceByProjectId.get(explicitProjectId)
-  if (explicitWorkspace !== undefined) return explicitWorkspace
-  if (session.cwd === undefined) return undefined
-  const match = projects
-    .flatMap(project => project.roots.map(root => ({ project, root })))
-    .filter(value => containsPath(value.root.path, session.cwd!))
-    .sort((left, right) => {
-      const length = right.root.path.length - left.root.path.length
-      if (length !== 0) return length
-      const position = left.project.position - right.project.position
-      if (position !== 0) return position
-      return left.project.id.localeCompare(right.project.id)
-    })[0]
-  return match === undefined ? undefined : workspaceByProjectId.get(match.project.id)
-}
-
-function addSessionToWorkspace(workspace: CodexVirtualWorkspaceView, session: DisplaySession): void {
-  if (!workspace.sessionIds.includes(session.id)) {
-    workspace.sessionIds.push(session.id)
-    workspace.sessionCount = workspace.sessionIds.length
-  }
-  const createdAt = isoTime(session.createdAt)
-  const updatedAt = isoTime(session.updatedAt || session.createdAt)
-  if (createdAt < workspace.createdAt) workspace.createdAt = createdAt
-  if (updatedAt > workspace.updatedAt) workspace.updatedAt = updatedAt
-}
-
-function containsPath(root: string, candidate: string): boolean {
-  const normalizedRoot = normalizePathForCompare(root)
-  const normalizedCandidate = normalizePathForCompare(candidate)
-  return normalizedCandidate === normalizedRoot
-    || normalizedCandidate.startsWith(`${normalizedRoot}/`)
-    || normalizedCandidate.startsWith(`${normalizedRoot}\\`)
-}
-
-function normalizePathForCompare(path: string): string {
-  return path.replace(/[\\/]+$/u, '') || path
-}
-
-function modelSelection(): CodexModelSelection {
-  return { provider: CODEX_PROVIDER, model: CODEX_MODEL }
-}
-
-function codexPromptInput(content: unknown[]): JsonRecord[] | undefined {
-  if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return undefined
-  const input: JsonRecord[] = []
-  for (const value of content) {
-    if (!isRecord(value)) return undefined
-    if (value.type === 'text') {
-      if (typeof value.text !== 'string' || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return undefined
-      input.push({ type: 'text', text: value.text })
-      continue
-    }
-    if (value.type === 'image') {
-      if (typeof value.mediaType !== 'string' || !CODEX_IMAGE_MEDIA_TYPES.has(value.mediaType)
-        || typeof value.data !== 'string' || value.data.length > MAX_CODEX_IMAGE_BASE64
-        || !isCanonicalBase64(value.data)) return undefined
-      input.push({ type: 'image', mediaType: value.mediaType, data: value.data })
-      continue
-    }
-    return undefined
-  }
-  return input
-}
-
-
-
-function modelSelectionProjection(selection: CodexModelSelection): { lastUsed: CodexModelSelection; next: CodexModelSelection } {
-  return { lastUsed: selection, next: selection }
-}
-
-function codexPermissionsProjection(preset: CodexPermissionPreset | undefined): unknown {
-  return {
-    options: [
-      {
-        value: 'workspace-write',
-        name: 'workspace-write',
-        description: 'Write inside the workspace; wider command and file access requires one-time approval.',
-      },
-      {
-        value: 'danger-full-access',
-        name: 'danger-full-access',
-        description: 'Full Host file access without approval prompts for subsequent turns in this virtual Session.',
-      },
-    ],
-    currentValue: preset ?? 'Host settings (not reported)',
-  }
-}
-
-function codexImageLimitsProjection(): unknown {
-  return {
-    maxImageBytes: 20 * 1024 * 1024,
-    maxImagesPerMessage: MAX_CODEX_PROMPT_PARTS,
-    maxMessageImageBytes: 100 * 1024 * 1024,
-    maxImagePixels: 40_000_000,
-    maxImageDimension: 8_192,
-    mediaTypes: [...CODEX_IMAGE_MEDIA_TYPES],
-  }
-}
-
-function isCodexPermissionPreset(value: string): value is CodexPermissionPreset {
-  return value === 'workspace-write' || value === 'danger-full-access'
-}
-
-function modelCatalog(directory: CodexModelDirectory): unknown {
-  return {
-    default: directory.default,
-    routableProviders: [CODEX_PROVIDER],
-    groups: directory.groups,
-    failures: [],
-  }
-}
-
-function codexModelParams(selection: CodexModelSelection): { model: string; effort?: string } {
-  return {
-    model: selection.model,
-    ...(selection.reasoningEffort === undefined ? {} : { effort: selection.reasoningEffort }),
-  }
-}
-
-function reasoningEffortName(effort: string): string {
-  const names: Record<string, string> = {
-    none: 'None',
-    minimal: 'Minimal',
-    low: 'Low',
-    medium: 'Medium',
-    high: 'High',
-    xhigh: 'Extra High',
-    max: 'Max',
-    ultra: 'Ultra',
-  }
-  return names[effort] ?? effort
-}
-
-function displayTitle(session: DisplaySession): string | null {
-  const value = session.title ?? session.preview
-  return value === undefined || value.trim() === '' ? null : value.slice(0, 256)
-}
-
-function itemText(value: JsonRecord): string | undefined {
-  if (typeof value.text === 'string') return value.text
-  if (typeof value.content === 'string') return value.content
-  const content = Array.isArray(value.content)
-    ? value.content
-    : Array.isArray(value.input) ? value.input : undefined
-  if (content !== undefined) {
-    const text = content.map(part => {
-      if (typeof part === 'string') return part
-      const block = record(part)
-      return string(block.text) ?? string(block.content) ?? ''
-    }).filter(Boolean).join('\n')
-    if (text !== '') return text
-  }
-  if (Array.isArray(value.summary)) return value.summary.filter(item => typeof item === 'string').join('\n')
-  if (typeof value.output === 'string') return value.output
-  if (typeof value.aggregatedOutput === 'string') return value.aggregatedOutput
-  return undefined
 }
 
-function toolArguments(item: JsonRecord): JsonRecord {
-  if (item.type === 'commandExecution') return { command: commandText(item.command) ?? item.command ?? '' }
-  if (item.type === 'fileChange') return {
-    changes: array(item.changes).map(value => {
-      const change = record(value)
-      const kind = typeof change.kind === 'string' ? change.kind : string(record(change.kind).type)
-      return {
-        ...(typeof change.path === 'string' ? { path: change.path } : {}),
-        ...(kind === undefined ? {} : { kind }),
-      }
-    }),
-  }
-  if (item.type === 'webSearch') return { query: string(item.query) ?? '' }
-  if (item.type === 'imageView') return { path: string(item.path) ?? '' }
-  if (item.type === 'imageGeneration') return {
-    ...(string(item.revisedPrompt) === undefined ? {} : { prompt: string(item.revisedPrompt) }),
-    transparentBackground: item.transparentBackground === true,
-  }
-  if (item.type === 'collabAgentToolCall') return {
-    tool: string(item.tool) ?? 'collaboration',
-    receiverThreadIds: array(item.receiverThreadIds).filter(value => typeof value === 'string'),
-    ...(string(item.model) === undefined ? {} : { model: string(item.model) }),
-  }
-  if (item.type === 'subAgentActivity') return {
-    agentThreadId: string(item.agentThreadId) ?? '',
-    agentPath: string(item.agentPath) ?? '',
-    kind: string(record(item.kind).type) ?? string(item.kind) ?? 'activity',
-  }
-  if (item.type === 'sleep') return { durationMs: integer(item.durationMs) ?? 0 }
-  if (item.type === 'enteredReviewMode' || item.type === 'exitedReviewMode') return {
-    review: string(item.review) ?? '',
-  }
-  if (item.type === 'contextCompaction') return {}
-  return { name: item.name ?? item.tool ?? item.type ?? 'tool', arguments: item.arguments ?? item.input ?? {} }
-}
-
-function fileChangeSummary(item: JsonRecord): string {
-  const changes = array(item.changes).map(value => {
-    const change = record(value)
-    const path = string(change.path)
-    const kind = typeof change.kind === 'string' ? change.kind : string(record(change.kind).type)
-    return [kind, path].filter((part): part is string => part !== undefined && part.length > 0).join(' ')
-  }).filter(Boolean)
-  return changes.length === 0 ? 'File changes completed.' : changes.join('\n')
-}
-
-function sanitizedFileChanges(value: unknown): JsonRecord[] {
-  return array(value).flatMap(raw => {
-    const change = record(raw)
-    const path = string(change.path)
-    if (path === undefined) return []
-    const kind = typeof change.kind === 'string' ? change.kind : string(record(change.kind).type)
-    return [{ path, ...(kind === undefined ? {} : { kind }) }]
-  })
-}
-
-function appendBoundedText(current: string, delta: string): string {
-  const value = `${current}${delta}`
-  if (value.length <= MAX_LIVE_TOOL_OUTPUT) return value
-  return `… earlier output omitted …\n${value.slice(value.length - MAX_LIVE_TOOL_OUTPUT)}`
-}
-
-function humanizeItemType(type: string): string {
-  const names: Record<string, string> = {
-    functionCallOutput: 'CodeX function output',
-    hookPrompt: 'CodeX hook prompt',
-    dynamicToolCall: 'CodeX tool',
-    collabAgentToolCall: 'CodeX subagent',
-    subAgentActivity: 'CodeX subagent activity',
-    webSearch: 'CodeX web search',
-    imageView: 'CodeX image view',
-    imageGeneration: 'CodeX image generation',
-    sleep: 'CodeX wait',
-    enteredReviewMode: 'CodeX review mode',
-    exitedReviewMode: 'CodeX review mode',
-    contextCompaction: 'CodeX context compaction',
-  }
-  return names[type] ?? 'CodeX tool'
-}
-
-function commandText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.filter(item => typeof item === 'string').join(' ')
-  const source = record(value)
-  return string(source.command) ?? string(source.text)
-}
-
-function sessionIdFromAddress(address: JsonRecord): string {
-  if (address.kind === 'session') return requiredString(address.sessionId, 'sessionId')
-  return requiredString(address.childSessionId, 'childSessionId')
-}
-
-function nativeThreadId(sessionId: string): string {
-  if (!sessionId.startsWith(CODEX_SESSION_PREFIX) || sessionId.length === CODEX_SESSION_PREFIX.length) {
-    throw new Error('The selected Session does not belong to CodeX.')
-  }
-  return sessionId.slice(CODEX_SESSION_PREFIX.length)
-}
-
-function activeTurnId(value: unknown): string | undefined {
-  if (!Array.isArray(value)) return undefined
-  for (let index = value.length - 1; index >= 0; index -= 1) {
-    const turn = record(value[index])
-    if (isActiveCodexTurn(turn) && typeof turn.id === 'string' && turn.id.length > 0) return turn.id
-  }
-  return undefined
-}
-
-function isActiveCodexTurn(turn: JsonRecord): boolean {
-  return turn.status === 'inProgress' || turn.status === 'running'
-}
-
-function carrierArgs(payload: unknown): JsonRecord {
-  return record(record(payload).args)
-}
-
-function requestArg(args: JsonRecord): JsonRecord {
-  return record(args.request ?? args._request ?? args)
-}
-
-function rcEndpoint(endpoint: string): string {
-  if (endpoint === 'workspace.list') return 'workspace/list'
-  return endpoint.replace('.', '/')
-}
-
-function success<T>(value: T): { ok: true; value: T } {
-  return { ok: true, value }
-}
-
-function failure(code: string, message: string, details: JsonRecord = {}): { ok: false; error: { code: string; message: string; details: JsonRecord } } {
-  return { ok: false, error: { code, message, details } }
-}
-
-function ok(value?: unknown): TypertRpcResult {
-  return value === undefined ? { ok: true } : { ok: true, value }
-}
-
-function business(value: unknown): TypertRpcResult {
-  const result = record(value)
-  if (result.ok === true) return ok(result.value)
-  if (result.ok === false) {
-    const error = record(result.error)
-    return fail(string(error.code) ?? 'internal', string(error.message) ?? 'CodeX virtual Harness rejected the request.', record(error.details))
-  }
-  return ok(value)
-}
-
-function isCodexDirectoryListing(value: unknown): value is CodexDirectoryListing {
-  const listing = record(value)
-  return typeof listing.path === 'string'
-    && typeof listing.home === 'string'
-    && Array.isArray(listing.crumbs)
-    && listing.crumbs.every(isCodexDirectoryEntry)
-    && Array.isArray(listing.entries)
-    && listing.entries.every(isCodexDirectoryEntry)
-    && typeof listing.truncated === 'boolean'
-}
-
-function isCodexDirectoryEntry(value: unknown): value is CodexDirectoryEntry {
-  const entry = record(value)
-  return typeof entry.name === 'string'
-    && typeof entry.path === 'string'
-    && typeof entry.hidden === 'boolean'
-}
-
-function fail(code: string, message: string, details: JsonRecord = {}): TypertRpcResult {
-  return { ok: false, error: { code, message, details } }
-}
-
-function failFrom(error: unknown): TypertRpcResult {
-  const source = error instanceof Error ? error : new Error(String(error))
-  return fail(errorCode(source) ?? 'internal', source.message, errorDetails(source))
-}
-
-function isLegacySessionHistoryUnsupported(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  return errorCode(error) === 'METHOD_NOT_ALLOWED'
-    || errorCode(error) === 'METHOD_NOT_FOUND'
-    || error.message.includes('The requested Codex method is not available over Remote.')
-}
-
-function errorCode(error: Error): string | undefined {
-  return 'code' in error && typeof error.code === 'string' ? error.code : undefined
-}
-
-function errorDetails(error: Error): JsonRecord {
-  return 'details' in error && isRecord(error.details) ? error.details : {}
-}
-
-function record(value: unknown): JsonRecord {
-  return isRecord(value) ? value : {}
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function array(value: unknown): unknown[] {
-  return Array.isArray(value) ? value : []
-}
-
-function string(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
-
-function integer(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : undefined
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
-}
-
-function optionalInteger(value: unknown): number | undefined {
-  if (value === undefined) return undefined
-  const parsed = integer(value)
-  if (parsed === undefined) throw new Error('The CodeX History cursor is invalid.')
-  return parsed
-}
-
-function optionalNonNegativeInteger(value: unknown): number | undefined {
-  const parsed = optionalInteger(value)
-  if (parsed !== undefined && parsed < 0) throw new Error('The CodeX History cursor is invalid.')
-  return parsed
-}
+// Keep existing Host and Client imports stable.
+export { codexProjectWorkspaceId, discoverCodexVirtualWorkspaces } from './virtual-catalog.js'
 
-function optionalPositiveInteger(value: unknown): number | undefined {
-  const parsed = optionalInteger(value)
-  if (parsed !== undefined && parsed <= 0) throw new Error('The CodeX History page size is invalid.')
-  return parsed
-}
-
-function isCodexNativeHistoryPage(value: unknown, sessionId: string): value is CodexNativeHistoryPage {
-  const page = record(value)
-  const header = record(page.header)
-  return header.id === sessionId
-    && integer(page.cursor) !== undefined
-    && integer(page.nextTurn) !== undefined
-    && Array.isArray(page.records)
-    && typeof page.hasMore === 'boolean'
-    && (page.activeTurnId === undefined || typeof page.activeTurnId === 'string')
-}
-
-function truncateCodePoints(value: string, maximum: number): string {
-  return [...value].slice(0, maximum).join('')
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) throw new Error(`The CodeX ${field} is required.`)
-  return value
-}
-
-function normalizeTime(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 0
-  return value < 10_000_000_000 ? Math.floor(value * 1000) : Math.floor(value)
-}
-
-function isoTime(value: unknown): string {
-  return new Date(normalizeTime(value) || Date.now()).toISOString()
-}
+export type { CodexVirtualWorkspaceView } from './virtual-catalog.js'
 
-function isProjectListUnsupported(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
-  const code = errorCode(error)
-  return code === 'METHOD_NOT_ALLOWED'
-    || code === 'METHOD_NOT_FOUND'
-    || code === 'CODEX_UPSTREAM_ERROR'
-    || error.message.includes('The requested Codex method is not available over Remote.')
-}
-
-function basename(path: string): string {
-  const normalized = path.replace(/[\\/]+$/u, '')
-  const parts = normalized.split(/[\\/]/u)
-  return parts.at(-1) || path
-}
-
-function hashString(value: string): string {
-  let hash = 0x811c9dc5
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
-  }
-  return (hash >>> 0).toString(36)
-}
+export { paginateCodexNativeHistory, projectCodexNativeHistory } from './virtual-history.js'
 
-class AsyncValueQueue implements AsyncIterable<unknown> {
-  private readonly values: unknown[] = []
-  private readonly waiters: Array<(result: IteratorResult<unknown>) => void> = []
-  private closed = false
-  private readonly onAbort: () => void
-
-  constructor(private readonly signal: AbortSignal) {
-    this.onAbort = () => this.close()
-    signal.addEventListener('abort', this.onAbort, { once: true })
-    if (signal.aborted) this.close()
-  }
-
-  push(value: unknown): void {
-    if (this.closed) return
-    const waiter = this.waiters.shift()
-    if (waiter === undefined) this.values.push(value)
-    else waiter({ done: false, value })
-  }
-
-  close(): void {
-    if (this.closed) return
-    this.closed = true
-    this.signal.removeEventListener('abort', this.onAbort)
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined })
-  }
-
-  iterate(dispose: () => void): AsyncIterable<unknown> {
-    const queue = this
-    return {
-      async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
-        try {
-          yield* queue
-        } finally {
-          dispose()
-          queue.close()
-        }
-      },
-    }
-  }
-
-  async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
-    while (true) {
-      if (this.values.length > 0) {
-        yield this.values.shift()
-        continue
-      }
-      if (this.closed) return
-      const next = await new Promise<IteratorResult<unknown>>(resolve => this.waiters.push(resolve))
-      if (next.done) return
-      yield next.value
-    }
-  }
-}
+export type { CodexNativeHistory, CodexNativeHistoryPage } from './virtual-history.js'

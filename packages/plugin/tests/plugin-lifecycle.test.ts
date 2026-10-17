@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as remotePlugin from '../src/index.js'
 
 const directories: string[] = []
+const disabledAgentDomains = { codex: { enabled: false }, acp: { enabled: false } }
 
 afterEach(async () => {
   vi.unstubAllEnvs()
@@ -17,7 +18,7 @@ afterEach(async () => {
 describe('Cordis plugin lifecycle', () => {
   it('does not block Harness startup while runtime services are unavailable', async () => {
     const ctx = new Context()
-    const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis pending host' })
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis pending host' })
 
     expect(fiber.state).toBe(2)
     expect(fiber.inject).toEqual({})
@@ -45,7 +46,7 @@ describe('Cordis plugin lifecycle', () => {
         identityReadyWhenControlRegistered = false
       }
     }))
-    const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis test host' })
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis test host' })
 
     await vi.waitFor(() => {
       expect(ctx.dshRemote.currentIdentity()).toMatchObject({ name: 'Cordis test host' })
@@ -71,7 +72,7 @@ describe('Cordis plugin lifecycle', () => {
     ctx.provide('settings', settings({ deviceName: 'Cordis delayed connection host' }))
     ctx.provide('apiProxy', apiProxy())
     ctx.provide('typertGateway', typertGateway())
-    const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis delayed connection host' })
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis delayed connection host' })
 
     expect(ctx.get('dshRemote')).toBeUndefined()
     ctx.provide('connection', { rpc: { handle } } as never)
@@ -114,7 +115,7 @@ describe('Cordis plugin lifecycle', () => {
         failure: vi.fn(() => ({ code: 'internal', message: 'failed', details: {} })),
       },
     } as never)
-    const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis alpha host' })
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis alpha host' })
 
     try {
       await vi.waitFor(() => {
@@ -155,7 +156,7 @@ describe('Cordis plugin lifecycle', () => {
         }),
       },
     } as never)
-    const fiber = await ctx.plugin(remotePlugin, { deviceName: 'Cordis delayed rc.2 host' })
+    const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis delayed rc.2 host' })
 
     expect(ctx.get('dshRemote')).toBeUndefined()
     expect(handlers).toHaveLength(1)
@@ -184,7 +185,13 @@ describe('Cordis plugin lifecycle', () => {
 function settings(value: Record<string, unknown>) {
   return {
     configure: () => () => undefined,
-    describe: () => [{ ns: 'ds-harness-remote', value }],
+    // These tests exercise Harness registration/disposal, not installed Agent
+    // CLIs. Keep optional processes out of the fixture (including the bundled
+    // CodeX fallback, which is discoverable even with an isolated PATH).
+    describe: () => [{ ns: 'ds-harness-remote', value: {
+      ...disabledAgentDomains,
+      ...value,
+    } }],
     replace: vi.fn(async () => undefined),
   } as never
 }

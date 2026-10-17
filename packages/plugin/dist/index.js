@@ -5439,11 +5439,6 @@ var require_addon_serialize = __commonJS({
   }
 });
 
-// src/loopback-preview.ts
-import { randomBytes, randomUUID } from "node:crypto";
-import { createServer } from "node:http";
-import { WebSocketServer } from "ws";
-
 // node_modules/zod/v3/external.js
 var external_exports = {};
 __export(external_exports, {
@@ -10084,515 +10079,6 @@ function cryptoRandomId() {
   return `msg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
 }
 
-// src/loopback-host.ts
-import { request as httpRequest } from "node:http";
-import { WebSocket as WebSocket2 } from "ws";
-
-// src/safe-error.ts
-var RpcError = class extends Error {
-  constructor(code, message, details, retryable = false) {
-    super(message);
-    this.code = code;
-    this.details = details;
-    this.retryable = retryable;
-  }
-};
-function safeErrorCode(error) {
-  if (error instanceof RpcError) return error.code;
-  if (error instanceof external_exports.ZodError) return "INVALID_MESSAGE";
-  return "INTERNAL_ERROR";
-}
-
-// src/loopback-host.ts
-var HOP_HEADERS = /* @__PURE__ */ new Set([
-  "connection",
-  "keep-alive",
-  "proxy-authenticate",
-  "proxy-authorization",
-  "te",
-  "trailer",
-  "transfer-encoding",
-  "upgrade",
-  "host",
-  "content-length",
-  "forwarded",
-  "x-forwarded-for",
-  "x-forwarded-host",
-  "x-forwarded-proto"
-]);
-function cleanHeaders(headers) {
-  const removed = new Set(HOP_HEADERS);
-  for (const [name2, value] of headers) if (name2.toLowerCase() === "connection") {
-    for (const token of value.split(",")) removed.add(token.trim().toLowerCase());
-  }
-  return headers.filter(([name2]) => !removed.has(name2.toLowerCase()) && !name2.toLowerCase().startsWith("sec-websocket-"));
-}
-function headerPairs(headers) {
-  return Object.entries(headers).flatMap(([name2, value]) => value === void 0 ? [] : (Array.isArray(value) ? value : [value]).map((item) => [name2, item]));
-}
-var LoopbackHost = class {
-  constructor(getPorts, onClose) {
-    this.onClose = onClose;
-    this.ports = [...getPorts()];
-    this.timer = setInterval(() => {
-      for (const [id5, handle] of this.handles) if (Date.now() - handle.touched > 6e4) this.close(id5);
-    }, 1e4);
-    this.timer.unref();
-  }
-  handles = /* @__PURE__ */ new Map();
-  ports;
-  closed = false;
-  timer;
-  setPorts(ports) {
-    this.ports = [...ports];
-    const allowed = new Set(ports);
-    for (const [id5, handle] of this.handles) if (!allowed.has(handle.port)) this.close(id5);
-  }
-  async call(input2) {
-    if (this.closed) throw new RpcError("TRANSPORT_CLOSED", "Preview connection closed.");
-    const value = loopbackRequestSchema.parse(input2);
-    if (value.op === "describe") return { ports: [...this.ports] };
-    if (value.op === "close") {
-      this.close(value.id);
-      return { closed: true };
-    }
-    if (value.op === "http.open" || value.op === "ws.open") {
-      if (!this.ports.includes(value.port)) throw new RpcError(
-        "LOOPBACK_PORT_DENIED",
-        "This preview port is not allowed. Add it to loopback.ports in the Host Remote settings and save the access settings. / \u8BF7\u5728 Host Remote \u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u9884\u89C8\u7AEF\u53E3\u5E76\u4FDD\u5B58\u8BBF\u95EE\u8BBE\u7F6E\u3002"
-      );
-      if (this.handles.has(value.id)) throw new RpcError("REQUEST_CONFLICT", "Preview handle is already in use.");
-      if (this.handles.size >= LOOPBACK_MAX_CONNECTIONS) throw new RpcError("RATE_LIMITED", "Too many active preview requests.");
-      let openedHandle;
-      try {
-        const opening = value.op === "http.open" ? this.openHttp(value) : this.openWs(value);
-        openedHandle = this.handles.get(value.id);
-        return await opening;
-      } catch {
-        this.close(value.id, openedHandle);
-        throw new RpcError("LOOPBACK_UNAVAILABLE", "The allowed loopback service did not respond. Check that it is running on the Host.");
-      }
-    }
-    const handle = this.handles.get(value.id);
-    if (handle === void 0) throw new RpcError("LOOPBACK_CLOSED", "Preview request closed; reload the preview.");
-    handle.touched = Date.now();
-    if (value.op === "http.read" && handle.kind === "http") {
-      if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
-      handle.reading = true;
-      try {
-        const response = handle.response;
-        let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
-        if (chunk === null && !response.readableEnded && !response.destroyed) {
-          await new Promise((resolve6, reject) => {
-            const timer = setTimeout(() => finish(new Error("timeout")), 2e4);
-            const ready = () => finish();
-            const fail5 = () => finish(new Error("closed"));
-            const finish = (error) => {
-              clearTimeout(timer);
-              response.off("readable", ready);
-              response.off("end", ready);
-              response.off("close", ready);
-              response.off("error", fail5);
-              error === void 0 ? resolve6() : reject(error);
-            };
-            response.once("readable", ready);
-            response.once("end", ready);
-            response.once("close", ready);
-            response.once("error", fail5);
-          });
-          if (this.handles.get(value.id) !== handle) throw new Error("closed");
-          chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
-          if (chunk === null && response.readableLength > 0) chunk = response.read(Math.min(response.readableLength, LOOPBACK_CHUNK_BYTES));
-        }
-        const done = chunk === null && (response.readableEnded || response.destroyed);
-        if (done && !response.complete) throw new Error("truncated");
-        handle.total += chunk?.length ?? 0;
-        if (handle.total > 64 * 1024 * 1024) throw new Error("size");
-        if (done) this.close(value.id, handle);
-        return { data: chunk?.toString("base64") ?? "", done };
-      } catch {
-        this.close(value.id, handle);
-        throw new RpcError("LOOPBACK_READ_FAILED", "Preview response ended or exceeded its limit; reload to retry.");
-      } finally {
-        handle.reading = false;
-      }
-    }
-    if (handle.kind === "ws") {
-      if (value.op === "ws.send") {
-        const data2 = Buffer.from(value.data, "base64");
-        if (data2.length > LOOPBACK_MAX_WS_BYTES || handle.socket.bufferedAmount > 1024 * 1024) {
-          this.close(value.id);
-          throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
-        }
-        await new Promise((resolve6, reject) => handle.socket.send(data2, { binary: value.binary }, (error) => error ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve6()));
-        return { sent: true };
-      }
-      if (value.op === "ws.read") {
-        if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
-        handle.reading = true;
-        try {
-          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve6) => {
-            const timer = setTimeout(() => {
-              handle.wake = void 0;
-              resolve6();
-            }, 2e4);
-            handle.wake = () => {
-              clearTimeout(timer);
-              handle.wake = void 0;
-              resolve6();
-            };
-          });
-          let bytes = 0;
-          const messages = [];
-          while (handle.messages.length > 0 && bytes < LOOPBACK_MAX_WS_BYTES) {
-            const message = handle.messages.shift();
-            bytes += message.data.length;
-            messages.push(message);
-          }
-          handle.bytes -= bytes;
-          const closed = handle.closed && handle.messages.length === 0;
-          if (closed) this.close(value.id, handle);
-          return { messages, closed };
-        } finally {
-          handle.reading = false;
-        }
-      }
-    }
-    throw new RpcError("INVALID_MESSAGE", "Preview handle kind does not match the operation.");
-  }
-  closeAll() {
-    if (this.closed) return;
-    this.closed = true;
-    clearInterval(this.timer);
-    for (const id5 of this.handles.keys()) this.close(id5);
-    this.onClose?.();
-  }
-  close(id5, expected) {
-    const handle = this.handles.get(id5);
-    if (expected !== void 0 && handle !== expected) return;
-    this.handles.delete(id5);
-    if (handle?.kind === "http") {
-      handle.response?.destroy();
-      handle.request.destroy();
-    }
-    if (handle?.kind === "ws") {
-      handle.closed = true;
-      handle.messages = [];
-      handle.bytes = 0;
-      handle.wake?.();
-      handle.socket.terminate();
-    }
-  }
-  openHttp(value) {
-    const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
-    if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
-    return new Promise((resolve6, reject) => {
-      const headers = Object.fromEntries(cleanHeaders(value.headers));
-      let handle;
-      const request = httpRequest({
-        hostname: "127.0.0.1",
-        port: value.port,
-        method: value.method,
-        path: value.path,
-        headers,
-        agent: false,
-        maxHeaderSize: 32 * 1024
-      }, (response) => {
-        if (this.handles.get(value.id) !== handle) {
-          response.destroy();
-          return;
-        }
-        handle.response = response;
-        response.on("error", () => void 0);
-        clearTimeout(timer);
-        resolve6({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
-      });
-      const timer = setTimeout(() => {
-        request.destroy();
-        reject(new Error("timeout"));
-      }, 2e4);
-      request.on("error", () => {
-        clearTimeout(timer);
-        reject(new Error("upstream"));
-      });
-      handle = { kind: "http", port: value.port, request, reading: false, total: 0, touched: Date.now() };
-      this.handles.set(value.id, handle);
-      request.end(body);
-    });
-  }
-  openWs(value) {
-    return new Promise((resolve6, reject) => {
-      const socket = new WebSocket2(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
-        headers: Object.fromEntries(cleanHeaders(value.headers)),
-        followRedirects: false,
-        handshakeTimeout: 15e3,
-        maxPayload: LOOPBACK_MAX_WS_BYTES,
-        perMessageDeflate: false
-      });
-      const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
-      this.handles.set(value.id, handle);
-      socket.once("open", () => resolve6({ protocol: socket.protocol }));
-      socket.on("message", (data2, binary) => {
-        if (handle.closed) return;
-        const message = { data: Buffer.from(data2).toString("base64"), binary };
-        if (handle.bytes + message.data.length > 1024 * 1024 || handle.messages.length >= 256) {
-          this.close(value.id, handle);
-          return;
-        }
-        handle.messages.push(message);
-        handle.bytes += message.data.length;
-        handle.wake?.();
-      });
-      socket.on("close", () => {
-        handle.closed = true;
-        handle.wake?.();
-        reject(new Error("closed"));
-      });
-      socket.on("error", () => {
-        handle.closed = true;
-        handle.wake?.();
-        reject(new Error("upstream"));
-      });
-    });
-  }
-};
-
-// src/loopback-preview.ts
-var LoopbackPreview = class {
-  constructor(client) {
-    this.client = client;
-  }
-  servers = /* @__PURE__ */ new Map();
-  sockets = /* @__PURE__ */ new Set();
-  lifetime = new AbortController();
-  async open(port) {
-    if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new RpcError("INVALID_MESSAGE", "Enter a port between 1024 and 65535.");
-    this.lifetime.signal.throwIfAborted();
-    const description = await this.client.rpc("loopback.call", { op: "describe" }, this.lifetime.signal);
-    if (!description.ports.includes(port)) throw new RpcError("LOOPBACK_PORT_DENIED", "Allow this port in the Host Remote settings (loopback.ports), then save the access settings. / \u8BF7\u5728 Host Remote \u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7AEF\u53E3\uFF0C\u7136\u540E\u4FDD\u5B58\u8BBF\u95EE\u8BBE\u7F6E\u3002");
-    let pending = this.servers.get(port);
-    if (pending === void 0) {
-      if (this.servers.size >= 16) throw new RpcError("RATE_LIMITED", "Too many preview origins.");
-      pending = this.start(port);
-      this.servers.set(port, pending);
-      void pending.catch(() => {
-        this.servers.delete(port);
-      });
-    }
-    return { url: (await pending).url };
-  }
-  async close() {
-    this.lifetime.abort();
-    for (const socket of this.sockets) socket.destroy();
-    for (const pending of this.servers.values()) {
-      const running = await pending.catch(() => void 0);
-      if (running === void 0) continue;
-      for (const client of running.ws.clients) client.terminate();
-      running.ws.close();
-      running.server.closeAllConnections();
-      await new Promise((resolve6) => running.server.close(() => resolve6()));
-    }
-    this.servers.clear();
-  }
-  async start(port) {
-    const hostname4 = `dsh-${randomBytes(24).toString("hex")}.localhost`;
-    let authority = "";
-    const accepted = (req) => req.headers.host === authority && (req.headers.origin === void 0 || req.headers.origin === `http://${authority}`) && req.headers["service-worker"] === void 0;
-    const server = createServer((req, res) => {
-      if (!accepted(req)) {
-        res.writeHead(403);
-        res.end("Preview origin denied.");
-        return;
-      }
-      void this.http(port, authority, req, res);
-    });
-    server.requestTimeout = 3e4;
-    server.headersTimeout = 15e3;
-    server.maxHeadersCount = 64;
-    server.on("connection", (socket) => {
-      if (this.sockets.size >= 64 || this.lifetime.signal.aborted) {
-        socket.destroy();
-        return;
-      }
-      this.sockets.add(socket);
-      socket.on("close", () => this.sockets.delete(socket));
-    });
-    const selectedProtocols = /* @__PURE__ */ new WeakMap();
-    const ws = new WebSocketServer({
-      noServer: true,
-      maxPayload: LOOPBACK_MAX_WS_BYTES,
-      perMessageDeflate: false,
-      handleProtocols: (_protocols, req) => selectedProtocols.get(req) || false
-    });
-    server.on("upgrade", (req, socket, head) => {
-      if (!accepted(req)) {
-        socket.destroy();
-        return;
-      }
-      const id5 = randomUUID();
-      const headers = this.headers(req, port);
-      const protocols = (req.headers["sec-websocket-protocol"] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
-      void this.client.rpc("loopback.call", { op: "ws.open", id: id5, port, path: req.url ?? "/", headers, protocols }, this.lifetime.signal).then((result) => {
-        if (socket.destroyed || this.lifetime.signal.aborted) {
-          socket.destroy();
-          void this.release(id5);
-          return;
-        }
-        selectedProtocols.set(req, result.protocol);
-        ws.handleUpgrade(req, socket, head, (local) => this.websocket(id5, local));
-      }).catch(() => {
-        socket.destroy();
-        void this.release(id5);
-      });
-    });
-    await new Promise((resolve6, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        server.off("error", reject);
-        resolve6();
-      });
-    });
-    const address = server.address();
-    if (address === null || typeof address === "string") {
-      server.close();
-      throw new Error("Preview listener unavailable");
-    }
-    authority = `${hostname4}:${address.port}`;
-    if (this.lifetime.signal.aborted) {
-      server.close();
-      ws.close();
-      throw new Error("Preview closed");
-    }
-    return { server, ws, url: `http://${authority}/` };
-  }
-  headers(req, port) {
-    return cleanHeaders(headerPairs(req.headers)).filter(([name2]) => !["origin", "referer"].includes(name2.toLowerCase())).concat(req.headers.origin === void 0 ? [] : [["origin", `http://127.0.0.1:${port}`]]);
-  }
-  async http(port, authority, req, res) {
-    const id5 = randomUUID();
-    const controller = new AbortController();
-    const abort = () => {
-      controller.abort();
-      void this.release(id5);
-    };
-    res.once("close", abort);
-    const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
-    try {
-      const chunks = [];
-      let length = 0;
-      for await (const chunk of req) {
-        length += chunk.length;
-        if (length > LOOPBACK_MAX_BODY_BYTES) throw new RpcError("PAYLOAD_TOO_LARGE", "Preview request body is limited to 1 MiB.");
-        chunks.push(chunk);
-      }
-      const head = await this.client.rpc("loopback.call", {
-        op: "http.open",
-        id: id5,
-        port,
-        path: req.url ?? "/",
-        method: req.method ?? "GET",
-        headers: this.headers(req, port),
-        ...length === 0 ? {} : { body: Buffer.concat(chunks).toString("base64") }
-      }, signal);
-      const headers = {};
-      for (let [name2, value] of cleanHeaders(head.headers)) {
-        name2 = name2.toLowerCase();
-        if (name2 === "location") {
-          const url = new URL(value, `http://127.0.0.1:${port}/`);
-          if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || Number(url.port || 80) !== port || url.protocol !== "http:") {
-            throw new Error("Redirect is outside the authorized preview service");
-          }
-          value = `http://${authority}${url.pathname}${url.search}${url.hash}`;
-        }
-        if (name2 === "set-cookie") {
-          value = value.replace(/;\s*domain=[^;]*/ig, "");
-          const existing = headers[name2];
-          headers[name2] = [...Array.isArray(existing) ? existing : [], value];
-        } else if (!["service-worker-allowed", "clear-site-data", "alt-svc"].includes(name2)) headers[name2] = value;
-      }
-      headers["referrer-policy"] = "no-referrer";
-      res.writeHead(head.status, headers);
-      while (!signal.aborted) {
-        const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id5 }, signal);
-        if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
-          await new Promise((resolve6, reject) => {
-            const ready = () => {
-              cleanup();
-              resolve6();
-            };
-            const closed = () => {
-              cleanup();
-              reject(new Error("closed"));
-            };
-            const cleanup = () => {
-              res.off("drain", ready);
-              res.off("close", closed);
-            };
-            res.once("drain", ready);
-            res.once("close", closed);
-          });
-        }
-        if (chunk.done) break;
-      }
-      res.end();
-    } catch {
-      if (!res.headersSent) {
-        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end("Remote preview unavailable. Check the Host service and connection, then reload.");
-      } else res.destroy();
-    } finally {
-      res.off("close", abort);
-      await this.release(id5);
-    }
-  }
-  websocket(id5, socket) {
-    let input2 = Promise.resolve();
-    let queued = 0;
-    let count = 0;
-    const controller = new AbortController();
-    const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
-    const close = () => {
-      controller.abort();
-      socket.terminate();
-      void this.release(id5);
-    };
-    socket.on("error", close);
-    socket.on("close", close);
-    socket.on("message", (data2, binary) => {
-      const bytes = Buffer.from(data2);
-      queued += bytes.length;
-      count += 1;
-      if (queued > 1024 * 1024 || count > 256) {
-        close();
-        return;
-      }
-      input2 = input2.then(async () => {
-        await this.client.rpc("loopback.call", { op: "ws.send", id: id5, data: bytes.toString("base64"), binary }, signal);
-        queued -= bytes.length;
-        count -= 1;
-      }).catch(close);
-    });
-    void (async () => {
-      try {
-        while (!signal.aborted) {
-          const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id5 }, signal);
-          for (const message of result.messages) {
-            if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
-            await new Promise((resolve6, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error) => error ? reject(error) : resolve6()));
-          }
-          if (result.closed) break;
-        }
-      } catch {
-      } finally {
-        close();
-      }
-    })();
-  }
-  async release(id5) {
-    if (!this.lifetime.signal.aborted) await this.client.rpc("loopback.call", { op: "close", id: id5 }).catch(() => void 0);
-  }
-};
-
 // ../client-core/dist/remote-gateway.js
 var DIRECT_REMOTE_CALL_BYTES = 2 * 1024 * 1024;
 function remoteWorkspaceTypeAvailable(capabilities, workspaceTypes, id5, capability) {
@@ -11585,6 +11071,1891 @@ function callTimeoutMs(fallback, options) {
 function transportSendError(error) {
   return error instanceof Error ? error : new Error("remote transport send failed", { cause: error });
 }
+
+// src/acp/image-content.ts
+var AGY_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+var AGY_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+var AGY_MAX_IMAGES = 4;
+var AGY_MAX_MESSAGE_IMAGE_BYTES = 32 * 1024 * 1024;
+function parseAcpImage(value) {
+  const image = value;
+  const mimeType = image?.mimeType ?? image?.mediaType;
+  const data2 = image?.data;
+  if (image?.type !== "image" || typeof mimeType !== "string" || !AGY_IMAGE_MEDIA_TYPES.includes(mimeType) || typeof data2 !== "string" || data2.length === 0 || data2.length > Math.ceil(AGY_MAX_IMAGE_BYTES / 3) * 4 || data2.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data2)) throw new Error("Invalid AGY image attachment.");
+  const tail = data2.slice(-4);
+  if (btoa(atob(tail)) !== tail) throw new Error("Invalid AGY image base64.");
+  const bytes = imageByteLength(data2);
+  if (bytes > AGY_MAX_IMAGE_BYTES) throw new Error("AGY image attachment exceeds the size limit.");
+  const dimensions = imageDimensions(mimeType, data2);
+  if (!dimensions || dimensions.width < 1 || dimensions.height < 1 || dimensions.width > 8192 || dimensions.height > 8192 || dimensions.width * dimensions.height > 4e7) throw new Error("Invalid AGY image dimensions or media type.");
+  return { type: "image", mimeType, data: data2 };
+}
+function imageByteLength(data2) {
+  return data2.length / 4 * 3 - (data2.endsWith("==") ? 2 : data2.endsWith("=") ? 1 : 0);
+}
+function imageDimensions(mediaType, data2) {
+  const bytes = Uint8Array.from(atob(data2.slice(0, Math.min(data2.length, 256 * 1024))), (char) => char.charCodeAt(0));
+  const be16 = (i) => bytes[i] * 256 + bytes[i + 1];
+  const be32 = (i) => bytes[i] * 16777216 + bytes[i + 1] * 65536 + bytes[i + 2] * 256 + bytes[i + 3] >>> 0;
+  const le16 = (i) => bytes[i] + bytes[i + 1] * 256;
+  const le24 = (i) => bytes[i] + bytes[i + 1] * 256 + bytes[i + 2] * 65536;
+  const text = (i, n) => String.fromCharCode(...bytes.slice(i, i + n));
+  if (mediaType === "image/png" && bytes.length >= 24 && text(1, 3) === "PNG" && bytes[0] === 137 && text(12, 4) === "IHDR") return { width: be32(16), height: be32(20) };
+  if (mediaType === "image/gif" && bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(text(0, 6))) return { width: le16(6), height: le16(8) };
+  if (mediaType === "image/webp" && bytes.length >= 30 && text(0, 4) === "RIFF" && text(8, 4) === "WEBP") {
+    if (text(12, 4) === "VP8X") return { width: le24(24) + 1, height: le24(27) + 1 };
+    if (text(12, 4) === "VP8 " && bytes[23] === 157 && bytes[24] === 1 && bytes[25] === 42) return { width: le16(26) & 16383, height: le16(28) & 16383 };
+    if (text(12, 4) === "VP8L" && bytes[20] === 47) return { width: 1 + bytes[21] + ((bytes[22] & 63) << 8), height: 1 + (bytes[22] >> 6) + (bytes[23] << 2) + ((bytes[24] & 15) << 10) };
+  }
+  if (mediaType === "image/jpeg" && bytes[0] === 255 && bytes[1] === 216) {
+    for (let i = 2; i + 8 < bytes.length; ) {
+      if (bytes[i] !== 255) {
+        i++;
+        continue;
+      }
+      const marker = bytes[i + 1];
+      i += 2;
+      if (marker === 216 || marker === 217) continue;
+      const length = be16(i);
+      if (length < 2 || i + length > bytes.length) break;
+      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker)) return { width: be16(i + 5), height: be16(i + 3) };
+      i += length;
+    }
+  }
+  return void 0;
+}
+function acpImageContent(image, attachmentId) {
+  const dimensions = imageDimensions(image.mimeType, image.data);
+  return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions }, mediaType: image.mimeType, data: image.data };
+}
+function acpImageLimits(backend) {
+  return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
+}
+
+// src/acp/virtual-catalog.ts
+var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
+var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
+var OPENCODE_WORKSPACE_PREFIX = "opencode:cwd:";
+var CURSOR_PROVIDER = "cursor";
+var OPENCODE_PROVIDER = "opencode";
+function acpCwdWorkspaceId(path, backend) {
+  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode") throw new Error("An explicit ACP workspace backend is required.");
+  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  return `${prefix}${encodeURIComponent(path)}`;
+}
+function createAcpWorkspaceView(path, backend, title) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path;
+  return {
+    workspaceId: acpCwdWorkspaceId(path, backend),
+    path,
+    title: label,
+    sessionIds: [],
+    sessionCount: 0,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+async function discoverAcpVirtualWorkspaces(client, backend, signal) {
+  if (client?.listWorkspaces !== void 0) {
+    try {
+      const items = await client.listWorkspaces(backend, signal);
+      if (Array.isArray(items) && items.length > 0) {
+        return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => {
+          const view = createAcpWorkspaceView(item.path, backend, item.title);
+          if (typeof item.sessionCount === "number") view.sessionCount = item.sessionCount;
+          return view;
+        });
+      }
+    } catch (error) {
+      if (backend === "pi") throw error;
+    }
+  }
+  return [];
+}
+function recreateWorkspaceFromId(workspaceId, backend) {
+  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
+  if (!workspaceId.startsWith(prefix)) return void 0;
+  try {
+    const path = decodeURIComponent(workspaceId.slice(prefix.length));
+    if (path.length > 0) return createAcpWorkspaceView(path, backend);
+  } catch {
+    return void 0;
+  }
+  return void 0;
+}
+function nativeWorkspace(view) {
+  return {
+    workspaceId: view.workspaceId,
+    path: view.path,
+    title: view.title,
+    sessionIds: view.sessionIds,
+    createdAt: view.createdAt,
+    updatedAt: view.updatedAt
+  };
+}
+var CURSOR_MODELS = [
+  { id: "auto", name: "Auto" },
+  { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet" },
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+  { id: "gpt-4o", name: "GPT-4o" },
+  { id: "o3-mini", name: "o3-mini" },
+  { id: "deepseek-r1", name: "DeepSeek R1" }
+];
+var OPENCODE_MODELS = [
+  { id: "opencode", name: "OpenCode" }
+];
+function modelCatalog(backend = "cursor") {
+  const provider = backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
+  const name2 = backend === "pi" ? "PI" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
+  const models = backend === "cursor" ? CURSOR_MODELS : backend === "opencode" ? OPENCODE_MODELS : [];
+  const defaultModel = models[0]?.id ?? "host-settings";
+  return {
+    default: { provider, model: defaultModel },
+    routableProviders: [provider],
+    groups: [{
+      id: provider,
+      name: name2,
+      models
+    }],
+    failures: []
+  };
+}
+
+// src/acp/virtual-contract.ts
+var CURSOR_SESSION_PREFIX = "cursor:";
+var ACP_SESSION_PREFIX = "acp:";
+var OPENCODE_SESSION_PREFIX = "opencode:";
+function piStreamOutcome(reason) {
+  if (reason === "completed") return { kind: "completed" };
+  if (reason === "cancelled" || reason === "peer-disconnected") return { kind: "aborted", reason: { kind: reason === "cancelled" ? "user" : "disposed" } };
+  return { kind: "error", error: { code: "ACP_STREAM_FAILED", message: "PI reply stream failed." } };
+}
+function piPromptOutcome(kind, update) {
+  if (update.stopReason === "cancelled") return { kind: "aborted", reason: { kind: "user" } };
+  if (kind === "prompt_failed" || update.stopReason === "error") return {
+    kind: "error",
+    error: { code: "PI_PROMPT_FAILED", message: "PI reply failed." }
+  };
+  if (update.stopReason === "max_tokens") return { kind: "max-tokens" };
+  return { kind: "completed" };
+}
+function extractPromptText(content) {
+  const parts = content.flatMap((part) => {
+    const item = record(part);
+    if (item.type === "text" && typeof item.text === "string") return [item.text];
+    return [];
+  });
+  const text = parts.join("");
+  return text.length === 0 ? void 0 : text;
+}
+function extractText(update) {
+  const content = update.content;
+  if (typeof content === "string") return content;
+  if (isRecord3(content) && typeof content.text === "string") return content.text;
+  if (Array.isArray(content)) {
+    const parts = content.map((part) => isRecord3(part) && typeof part.text === "string" ? part.text : void 0).filter((part) => part !== void 0);
+    return parts.length === 0 ? void 0 : parts.join("");
+  }
+  return typeof update.text === "string" ? update.text : void 0;
+}
+function summarizeQuestions(params) {
+  if (!Array.isArray(params.questions)) return void 0;
+  const lines = params.questions.map((question) => isRecord3(question) ? string(question.prompt) : void 0).filter((line) => line !== void 0);
+  return lines.length === 0 ? void 0 : lines.join("\n");
+}
+function sessionIdFromAddress(address) {
+  if (typeof address.sessionId === "string" && address.sessionId.length > 0) return address.sessionId;
+  if (typeof address.childSessionId === "string" && address.childSessionId.length > 0) return address.childSessionId;
+  if (address.kind === "session" && typeof address.sessionId === "string" && address.sessionId.length > 0) {
+    return address.sessionId;
+  }
+  throw new Error("The sessionId is required.");
+}
+function extractSessionId(request) {
+  if (typeof request.sessionId === "string" && request.sessionId.length > 0) return request.sessionId;
+  if (isRecord3(request.address)) return sessionIdFromAddress(request.address);
+  throw new Error("The sessionId is required.");
+}
+function sessionPrefix(backend) {
+  return backend === "pi" ? "pi:" : backend === "opencode" ? OPENCODE_SESSION_PREFIX : backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
+}
+function nativeAcpId(sessionId, backend) {
+  const prefix = sessionPrefix(backend);
+  if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
+    throw new Error("The selected Session does not belong to the virtual harness.");
+  }
+  return sessionId.slice(prefix.length);
+}
+function isSurfaceEvent(type) {
+  return type === "user/message" || type === "assistant/message" || type === "tool/result";
+}
+function carrierArgs(payload) {
+  return record(record(payload).args);
+}
+function requestArg(args) {
+  return record(args.request ?? args._request ?? args);
+}
+function rcEndpoint(endpoint) {
+  if (endpoint === "workspace.list") return "workspace/list";
+  return endpoint.replace(".", "/");
+}
+function success(value) {
+  return { ok: true, value };
+}
+function failure(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function business(value) {
+  if (isRecord3(value) && value.ok === false && isRecord3(value.error)) {
+    return {
+      ok: false,
+      error: {
+        code: string(value.error.code) ?? "internal",
+        message: string(value.error.message) ?? "The virtual Harness request failed.",
+        details: isRecord3(value.error.details) ? value.error.details : {}
+      }
+    };
+  }
+  if (isRecord3(value) && value.ok === true) return { ok: true, value: value.value };
+  return { ok: true, value };
+}
+function fail(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function failFrom(error) {
+  const source = error instanceof Error ? error : new Error(String(error));
+  const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
+  return fail(code, source.message);
+}
+function record(value) {
+  return isRecord3(value) ? value : {};
+}
+function isRecord3(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function array(value) {
+  return Array.isArray(value) ? value : [];
+}
+function string(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function integer(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
+}
+function optionalInteger(value) {
+  if (value === void 0) return void 0;
+  const parsed = integer(value);
+  if (parsed === void 0) throw new Error("The History cursor is invalid.");
+  return parsed;
+}
+function optionalPositiveInteger(value) {
+  const parsed = optionalInteger(value);
+  if (parsed !== void 0 && parsed <= 0) throw new Error("The History page size is invalid.");
+  return parsed;
+}
+function requiredString(value, field) {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`The ${field} is required.`);
+  return value;
+}
+var AsyncValueQueue = class {
+  constructor(signal) {
+    this.signal = signal;
+    this.onAbort = () => this.close();
+    signal.addEventListener("abort", this.onAbort, { once: true });
+    if (signal.aborted) this.close();
+  }
+  values = [];
+  waiters = [];
+  closed = false;
+  onAbort;
+  push(value) {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter === void 0) this.values.push(value);
+    else waiter({ done: false, value });
+  }
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.signal.removeEventListener("abort", this.onAbort);
+    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
+  }
+  iterate(dispose) {
+    const queue = this;
+    return {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield* queue;
+        } finally {
+          dispose();
+          queue.close();
+        }
+      }
+    };
+  }
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      if (this.values.length > 0) {
+        yield this.values.shift();
+        continue;
+      }
+      if (this.closed) return;
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
+      if (next.done) return;
+      yield next.value;
+    }
+  }
+};
+
+// src/acp/virtual-event-carrier.ts
+var AcpEventCarrier = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async workspaceFollow(signal) {
+    const queue = new AsyncValueQueue(signal);
+    this.context.workspaceStreams.add(queue);
+    queue.push({
+      type: "baseline",
+      value: {
+        items: this.context.visibleWorkspaces().map(nativeWorkspace),
+        archivedSessionIds: [],
+        pinnedSessionIds: []
+      }
+    });
+    return queue.iterate(() => this.context.workspaceStreams.delete(queue));
+  }
+  async sessionControl(signal) {
+    const queue = new AsyncValueQueue(signal);
+    this.context.controlStreams.add(queue);
+    queue.push({ type: "baseline", value: { projections: {} } });
+    return queue.iterate(() => this.context.controlStreams.delete(queue));
+  }
+  /**
+   * Background jobs belong to the Host Harness session, not to a backend-scoped
+   * virtual Workspace. The native session header mounts a job roster stream as
+   * soon as a Session opens, so answer it with an authoritative empty roster
+   * instead of a terminal `method-not-found` failure that tears the page down.
+   */
+  emptyJobStream(endpoint, signal) {
+    const queue = new AsyncValueQueue(signal);
+    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
+    return queue.iterate(() => queue.close());
+  }
+  async remoteEvents(signal) {
+    const id5 = `cursor-events:${Date.now()}:${Math.random()}`;
+    const queue = new AsyncValueQueue(signal);
+    this.context.eventStreams.set(id5, queue);
+    const workspace = this.context.selectedWorkspaceId === void 0 ? void 0 : this.context.workspaceById.get(this.context.selectedWorkspaceId);
+    queue.push({
+      type: "ready",
+      clientId: id5,
+      host: { home: workspace?.path ?? "/" }
+    });
+    return queue.iterate(() => this.context.eventStreams.delete(id5));
+  }
+  emitRemoteEvent(event, args) {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
+    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
+    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
+      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
+    } else if (event === "api-session/removed" && sessionId !== void 0) {
+      this.broadcastRcHost({ type: "host/session-removed", sessionId });
+    } else if (event === "api-session/added" && isRecord3(args[0])) {
+      const summary = args[0];
+      this.broadcastRcHost({
+        type: "host/session-added",
+        sessionId: summary.sessionId,
+        blank: summary.blank === true,
+        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
+      });
+    }
+  }
+  emitApproval(input2) {
+    for (const queue of this.context.eventStreams.values()) queue.push({
+      type: "waterfall",
+      event: "approval/request",
+      eventId: input2.eventId,
+      agentId: input2.agentId,
+      request: input2.request
+    });
+    this.broadcastRcMux({
+      type: "approval/requested",
+      sessionId: input2.agentId,
+      approvalId: input2.eventId,
+      toolName: string(input2.request.toolName) ?? this.context.backendLabel(),
+      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
+    }, input2.eventId);
+  }
+  async answerRemoteEvent(args, signal) {
+    const eventId = string(args.eventId);
+    const outcome = record(args.outcome);
+    if (eventId === void 0) throw new Error(`The ${this.context.backendLabel()} approval result is missing its event id.`);
+    const pending = this.context.pendingApprovals.get(eventId);
+    if (pending === void 0) return void 0;
+    this.context.pendingApprovals.delete(eventId);
+    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "allow-once" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "reject-once";
+    await this.context.client.respond(pending.requestHandle, decision, void 0, signal);
+    return void 0;
+  }
+  createApiProxy() {
+    const call = (endpoint) => async (request, signal) => {
+      const payload = endpoint === "session.prompt" && isRecord3(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
+      const result = await this.context.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
+      return {
+        rpcId: request.rpcId,
+        result: result.ok ? success(result.value) : failure(result.error.code, result.error.message, result.error.details)
+      };
+    };
+    return {
+      sessions: {
+        list: call("session.list"),
+        search: call("session.search"),
+        create: call("session.create"),
+        history: call("session.history"),
+        models: call("session.models"),
+        selectModel: call("session.selectModel"),
+        rename: call("session.rename"),
+        fork: call("session.fork"),
+        prompt: call("session.prompt"),
+        attachment: call("session.attachment"),
+        updateQueue: call("session.updateQueue"),
+        cancel: call("session.cancel")
+      },
+      workspace: {
+        list: call("workspace.list"),
+        create: call("workspace.create"),
+        rename: call("workspace.rename"),
+        delete: call("workspace.delete"),
+        insertBefore: call("workspace.insertBefore"),
+        insertSessionBefore: call("workspace.insertSessionBefore"),
+        archiveSession: call("workspace.archiveSession")
+      },
+      subagents: {},
+      host: {
+        describe: call("host.describe"),
+        listDirectory: call("host.listDirectory")
+      },
+      skills: { list: call("skills.list") },
+      agentPresets: {},
+      goals: {},
+      settings: {},
+      credentials: {},
+      llm: {},
+      events: {
+        mux: ((request, signal) => this.rcMux(request, signal)),
+        host: ((request, signal) => this.rcHost(request, signal))
+      },
+      downloads: {},
+      respond: async (message) => {
+        const pending = this.context.pendingApprovals.get(String(message.rpcId)) ?? [...this.context.pendingApprovals.values()].find((item) => item.requestHandle === String(message.rpcId));
+        if (pending === void 0) return { accepted: false, reason: "not-pending" };
+        const result = message.result;
+        const outcome = result.ok ? result.value : void 0;
+        const decision = outcome === "allowed-once" ? "allow-once" : outcome === "cancelled" ? "cancel" : "reject-once";
+        await this.context.client.respond(pending.requestHandle, decision);
+        this.context.pendingApprovals.delete(pending.requestHandle);
+        return { accepted: true };
+      }
+    };
+  }
+  async *rcMux(request, signal) {
+    const queue = new AsyncValueQueue(signal);
+    this.context.rcMuxStreams.add(queue);
+    for (const session of this.context.sessions.values()) {
+      queue.push({
+        rpcId: `${String(request.rpcId)}:${session.sessionId}:subscribed`,
+        payload: { type: "session/subscribed", sessionId: session.sessionId, lastSeq: -1 }
+      });
+    }
+    try {
+      yield* queue;
+    } finally {
+      this.context.rcMuxStreams.delete(queue);
+      queue.close();
+    }
+  }
+  async *rcHost(_request, signal) {
+    const queue = new AsyncValueQueue(signal);
+    this.context.rcHostStreams.add(queue);
+    try {
+      yield* queue;
+    } finally {
+      this.context.rcHostStreams.delete(queue);
+      queue.close();
+    }
+  }
+  broadcastRcMux(payload, rpcId2 = `cursor-mux:${Date.now()}:${Math.random()}`) {
+    for (const queue of this.context.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
+  }
+  broadcastRcHost(payload) {
+    const frame = { rpcId: `cursor-host:${Date.now()}:${Math.random()}`, payload };
+    for (const queue of this.context.rcHostStreams) queue.push(frame);
+  }
+  publishProjection(sessionId, key, value, seq = this.context.nextProjectionSeq()) {
+    for (const queue of this.context.controlStreams) {
+      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq, seq });
+    }
+    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
+  }
+};
+
+// src/acp/pi-tool-result.ts
+function piToolResult(update) {
+  let content = Array.isArray(update.content) ? update.content.flatMap((item) => {
+    if (item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string") return [{ type: "text", text: item.content.text }];
+    if (item?.type === "diff" && typeof item.path === "string" && typeof item.newText === "string" && (item.oldText === null || typeof item.oldText === "string")) {
+      return [{ type: "text", text: `File: ${item.path}
+--- before
+${item.oldText ?? ""}
++++ after
+${item.newText}` }];
+    }
+    return [];
+  }) : [];
+  if (!content.length && Array.isArray(update.rawOutput?.content)) content = update.rawOutput.content.filter((item) => item?.type === "text" && typeof item.text === "string").map((item) => ({ type: "text", text: item.text }));
+  const output = update._meta?.terminal_output?.data;
+  if (typeof output === "string") content.push({ type: "text", text: output });
+  return { content, isError: update.status === "failed" || update.rawOutput?.isError === true };
+}
+
+// src/acp/virtual-live.ts
+var AcpLiveProjection = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async sessionFollow(request, signal) {
+    const sessionId = extractSessionId(request);
+    const session = this.context.ensureSessionRegistered(sessionId) ?? this.context.sessions.get(sessionId);
+    if (session === void 0) throw new Error("The Session was not found.");
+    await this.context.hydrateSession(session);
+    const history = this.context.historyPage(session, {
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50
+    });
+    const queue = new AsyncValueQueue(signal);
+    const follow = {
+      sessionId,
+      acpSessionId: session.acpSessionId,
+      queue,
+      nextSeq: session.events.length,
+      turn: Math.max(0, ...session.events.map((entry) => isRecord3(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
+      stepOpen: session.running,
+      streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: "",
+      activeToolCalls: /* @__PURE__ */ new Set(),
+      piToolOutputs: /* @__PURE__ */ new Map(),
+      piToolCalls: /* @__PURE__ */ new Map()
+    };
+    this.context.follows.add(follow);
+    queue.push({
+      type: "snapshot",
+      header: history.header,
+      cursor: history.cursor,
+      records: history.records,
+      hasMore: history.hasMore,
+      projections: {
+        asOfSeq: history.cursor,
+        values: {
+          title: session.title ?? (this.context.backend === "pi" ? "PI" : this.context.backend === "opencode" ? "OpenCode" : this.context.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
+          modelSelection: this.context.modelSelectionProjection(sessionId),
+          imageLimits: acpImageLimits(this.context.backend)
+        }
+      },
+      assistantStream: { revision: 0 }
+    });
+    try {
+      const stream = await this.context.client.openStream(
+        session.acpSessionId,
+        (frame) => this.acceptAcpFrame(follow, frame),
+        (closed) => {
+          session.running = false;
+          this.context.emitRemoteEvent("api-session/status", [sessionId, false]);
+          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
+        },
+        signal
+      );
+      follow.close = () => stream.close();
+    } catch (error) {
+      this.context.follows.delete(follow);
+      queue.close();
+      throw error;
+    }
+    return queue.iterate(() => {
+      this.context.follows.delete(follow);
+      void follow.close?.().catch(() => void 0);
+    });
+  }
+  async ensureFollow(session) {
+    if ([...this.context.follows].some((follow2) => follow2.sessionId === session.sessionId)) return;
+    const controller = new AbortController();
+    const queue = new AsyncValueQueue(controller.signal);
+    const follow = {
+      sessionId: session.sessionId,
+      acpSessionId: session.acpSessionId,
+      queue,
+      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map((entry) => entry.event.seq)) + 1,
+      turn: Math.max(0, ...session.events.map((entry) => isRecord3(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
+      stepOpen: false,
+      streamActive: false,
+      assistantStreamRevision: 0,
+      accumulatedText: "",
+      activeToolCalls: /* @__PURE__ */ new Set(),
+      piToolOutputs: /* @__PURE__ */ new Map(),
+      piToolCalls: /* @__PURE__ */ new Map()
+    };
+    this.context.follows.add(follow);
+    const stream = await this.context.client.openStream(
+      session.acpSessionId,
+      (frame) => this.acceptAcpFrame(follow, frame),
+      (closed) => {
+        if (this.context.backend === "pi") {
+          session.running = false;
+          this.context.emitRemoteEvent("api-session/status", [session.sessionId, false]);
+        }
+        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
+      }
+    );
+    follow.close = async () => {
+      controller.abort();
+      await stream.close();
+    };
+  }
+  acceptAcpFrame(follow, frame) {
+    const method = frame.frame.method;
+    const params = record(frame.frame.params);
+    if (method === "session/update") {
+      this.acceptSessionUpdate(follow, params);
+      return;
+    }
+    if (method === "session/request_permission" || method === "cursor/ask_question" || method === "cursor/create_plan") {
+      this.acceptApproval(follow, params, method);
+    }
+  }
+  acceptSessionUpdate(follow, params) {
+    const update = isRecord3(params.update) ? params.update : params;
+    const kind = string(update.sessionUpdate) ?? string(update.type);
+    const session = this.context.sessions.get(follow.sessionId);
+    if (kind === "model_selection" && isRecord3(update.selected) && update.selected.provider === this.context.backend && typeof update.selected.model === "string") {
+      this.context.selectedModels.set(follow.sessionId, update.selected);
+      this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq());
+      return;
+    }
+    if (kind === "agent_message_chunk" || kind === "agent_message") {
+      const text = extractText(update);
+      if (text === void 0 || text.length === 0) return;
+      this.appendAssistantDelta(follow, text);
+      return;
+    }
+    if (kind === "tool_call" || kind === "tool_call_update") {
+      const toolName = string(update.title) ?? string(update.toolName) ?? string(update.name) ?? "tool";
+      const status2 = string(update.status);
+      const callId = string(update.toolCallId) ?? string(update.callId) ?? toolName;
+      const terminal = status2 === "completed" || status2 === "failed";
+      if (this.context.backend === "pi") {
+        const call = follow.piToolCalls.get(callId) ?? { name: toolName };
+        if (typeof update.title === "string") call.name = update.title;
+        if (update.rawInput !== void 0) call.input = update.rawInput;
+        follow.piToolCalls.set(callId, call);
+        const output = piToolResult(update);
+        const delta = record(record(update._meta).terminal_output).data;
+        if (typeof delta === "string") {
+          const buffered = follow.piToolOutputs.get(callId) ?? { text: "", overflow: false };
+          if (!buffered.overflow) {
+            if (buffered.text.length + delta.length > 1048576) {
+              buffered.text = "";
+              buffered.overflow = true;
+            } else buffered.text += delta;
+          }
+          follow.piToolOutputs.set(callId, buffered);
+        }
+        if (!terminal && status2 !== "in_progress") return;
+        if (!follow.activeToolCalls.has(callId)) {
+          this.ensurePiStep(follow, false);
+          this.finishPiAssistant(follow);
+          follow.piAfterTools = true;
+          this.pushEvent(follow, "tool/call", {
+            turn: follow.turn,
+            step: follow.piStep ?? 1,
+            callId,
+            toolCallId: callId,
+            name: call.name,
+            toolName: call.name,
+            arguments: typeof call.input === "string" ? call.input : call.input != null ? JSON.stringify(call.input) : "{}",
+            status: terminal ? status2 === "failed" ? "failed" : "finished" : "running"
+          });
+          follow.activeToolCalls.add(callId);
+        }
+        if (terminal) {
+          const buffered = follow.piToolOutputs.get(callId);
+          const content = buffered ? [{
+            type: "text",
+            text: buffered.overflow ? "[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text
+          }] : output.content;
+          this.pushEvent(follow, "tool/result", {
+            turn: follow.turn,
+            step: follow.piStep ?? 1,
+            message: {
+              id: `${callId}:result`,
+              role: "user",
+              content: [{
+                type: "tool-result",
+                toolCallId: callId,
+                content,
+                ...output.isError ? { isError: true } : {}
+              }],
+              source: { kind: "tool", callId }
+            }
+          });
+          follow.piToolOutputs.delete(callId);
+          follow.piToolCalls.delete(callId);
+          follow.activeToolCalls.delete(callId);
+        }
+        if (session !== void 0) session.updatedAt = Date.now();
+        return;
+      }
+      if (kind === "tool_call_update" && !terminal) return;
+      if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
+      this.pushEvent(follow, "tool/call", {
+        turn: follow.turn,
+        step: 1,
+        callId,
+        name: toolName,
+        arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
+        toolCallId: callId,
+        toolName,
+        status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
+      });
+      if (terminal) follow.activeToolCalls.delete(callId);
+      else follow.activeToolCalls.add(callId);
+      if (session !== void 0) session.updatedAt = Date.now();
+      return;
+    }
+    if (kind === "agent_thought_chunk") {
+      const text = extractText(update);
+      if (text === void 0 || text.length === 0) return;
+      this.appendReasoningDelta(follow, text);
+      return;
+    }
+    if (kind === "prompt_completed" || kind === "prompt_failed") {
+      const hasLiveContent = follow.stepOpen || follow.streamActive;
+      if (!hasLiveContent && Array.isArray(update.catchUp)) {
+        for (const item of update.catchUp) {
+          if (!isRecord3(item) || typeof item.method !== "string") continue;
+          const params2 = isRecord3(item.params) ? item.params : {};
+          if (item.method === "session/update") this.acceptSessionUpdate(follow, params2);
+        }
+      }
+      if (session !== void 0) {
+        session.running = false;
+        session.updatedAt = Date.now();
+        this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+        if (kind === "prompt_completed") void this.context.refreshSessionTitle(session);
+      }
+      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update));
+    }
+  }
+  acceptApproval(follow, params, method) {
+    const requestHandle = string(params.requestHandle);
+    if (requestHandle === void 0) return;
+    this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
+    const toolName = method === "cursor/create_plan" ? string(params.name) ?? "plan" : method === "cursor/ask_question" ? string(params.title) ?? "question" : string(params.toolName) ?? string(record(params.toolCall).title) ?? "permission";
+    const reason = method === "cursor/create_plan" ? string(params.overview) ?? string(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string(params.reason) ?? string(record(record(params.toolCall).rawInput).message);
+    this.context.emitApproval({
+      eventId: requestHandle,
+      agentId: follow.sessionId,
+      request: {
+        toolName,
+        ...reason === void 0 ? {} : { reason }
+      }
+    });
+  }
+  pushAssistantChunk(follow, chunk) {
+    let attempt = follow.assistantAttempt;
+    if (attempt === void 0) {
+      attempt = {
+        attemptId: this.context.backend === "pi" ? `pi-attempt:${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}:${follow.nextSeq}` : `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: []
+      };
+      follow.assistantAttempt = attempt;
+      follow.assistantStreamRevision += 1;
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "start",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: this.context.backend === "pi" ? follow.piStep ?? 1 : 1
+        }
+      });
+    }
+    const time = Date.now();
+    const index = attempt.nextIndex++;
+    attempt.stream.push({ type: "chunk", time, chunk });
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "chunk",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk
+      }
+    });
+  }
+  endAssistantAttempt(follow, outcome) {
+    const attempt = follow.assistantAttempt;
+    if (attempt === void 0) return;
+    follow.assistantAttempt = void 0;
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "end",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index: attempt.nextIndex,
+        outcome
+      }
+    });
+  }
+  appendAssistantDelta(follow, delta) {
+    if (this.context.backend === "pi") this.ensurePiStep(follow, true);
+    if (!follow.stepOpen) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    }
+    if (follow.blockIndex === void 0) {
+      follow.blockIndex = (follow.reasoningBlockIndex ?? -1) + 1;
+      follow.streamActive = true;
+      this.pushAssistantChunk(follow, { type: "block-start", index: follow.blockIndex, blockType: "text" });
+    }
+    follow.accumulatedText += delta;
+    this.pushAssistantChunk(follow, { type: "text-delta", index: follow.blockIndex, text: delta });
+  }
+  appendReasoningDelta(follow, delta) {
+    if (this.context.backend === "pi") {
+      this.ensurePiStep(follow, true);
+      follow.piReasoning = (follow.piReasoning ?? "") + delta;
+    }
+    if (!follow.stepOpen) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    }
+    if (follow.reasoningBlockIndex === void 0) {
+      follow.reasoningBlockIndex = (follow.blockIndex ?? -1) + 1;
+      follow.streamActive = true;
+      this.pushAssistantChunk(follow, { type: "block-start", index: follow.reasoningBlockIndex, blockType: "reasoning" });
+    }
+    this.pushAssistantChunk(follow, { type: "reasoning-delta", index: follow.reasoningBlockIndex, text: delta });
+  }
+  /** PI model steps settle before tools; a tool round does not end the turn. */
+  ensurePiStep(follow, advanceAfterTools) {
+    if (!follow.stepOpen) {
+      follow.turn++;
+      follow.piStep = 1;
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+    } else if (advanceAfterTools && follow.piAfterTools) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
+      follow.piStep = (follow.piStep ?? 1) + 1;
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: follow.piStep });
+    }
+    if (advanceAfterTools) follow.piAfterTools = false;
+  }
+  finishPiAssistant(follow, outcome = { kind: "completed" }) {
+    if (!follow.streamActive) return;
+    const blocks = [
+      { index: follow.reasoningBlockIndex, type: "reasoning", text: follow.piReasoning ?? "" },
+      { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
+    ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
+    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
+    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "PI reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
+    this.pushAssistantChunk(follow, { type: "finish", reason });
+    const selection = this.context.modelSelection(follow.sessionId);
+    const seq = this.pushEvent(follow, "assistant/message", {
+      turn: follow.turn,
+      step: follow.piStep ?? 1,
+      message: {
+        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
+        role: "assistant",
+        content: blocks.map(({ type, text }) => ({ type, text })),
+        source: { kind: "model", provider: selection.provider, model: selection.model }
+      },
+      stream: follow.assistantAttempt?.stream ?? []
+    });
+    this.endAssistantAttempt(follow, { kind: "committed", eventType: "assistant/message", seq });
+    follow.streamActive = false;
+    follow.blockIndex = void 0;
+    follow.reasoningBlockIndex = void 0;
+    follow.accumulatedText = "";
+    follow.piReasoning = "";
+  }
+  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }) {
+    if (this.context.backend === "pi") {
+      this.finishPiAssistant(follow, outcome);
+      if (follow.stepOpen) {
+        this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
+        this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
+      }
+      follow.stepOpen = false;
+      follow.piStep = 1;
+      follow.piAfterTools = false;
+      follow.piToolOutputs.clear();
+      follow.piToolCalls.clear();
+      follow.activeToolCalls.clear();
+      return;
+    }
+    if (follow.streamActive) {
+      if (follow.reasoningBlockIndex !== void 0) {
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.reasoningBlockIndex,
+          block: { type: "reasoning", text: "" }
+        });
+        follow.reasoningBlockIndex = void 0;
+      }
+      if (follow.blockIndex !== void 0) {
+        const fullText2 = follow.accumulatedText;
+        this.pushAssistantChunk(follow, {
+          type: "block-end",
+          index: follow.blockIndex,
+          block: { type: "text", text: fullText2 }
+        });
+      }
+      this.pushAssistantChunk(follow, {
+        type: "finish",
+        reason: { kind: "stop" }
+      });
+      const fullText = follow.accumulatedText;
+      const selection = this.context.modelSelection(follow.sessionId);
+      const stream = follow.assistantAttempt?.stream ?? [];
+      const assistantMessageSeq = this.pushEvent(follow, "assistant/message", {
+        turn: follow.turn,
+        step: 1,
+        message: {
+          id: `${follow.sessionId}:${follow.turn}`,
+          role: "assistant",
+          content: [{ type: "text", text: fullText }],
+          source: { kind: "model", provider: selection.provider, model: selection.model }
+        },
+        stream
+      });
+      this.endAssistantAttempt(follow, {
+        kind: "committed",
+        eventType: "assistant/message",
+        seq: assistantMessageSeq
+      });
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
+    } else if (follow.stepOpen) {
+      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
+    }
+    follow.streamActive = false;
+    follow.stepOpen = false;
+    follow.blockIndex = void 0;
+    follow.reasoningBlockIndex = void 0;
+    follow.accumulatedText = "";
+    follow.piToolOutputs.clear();
+    follow.piToolCalls.clear();
+  }
+  pushEvent(follow, type, data2) {
+    const session = this.context.sessions.get(follow.sessionId);
+    const seq = session !== void 0 ? session.events.length : follow.nextSeq++;
+    const event = {
+      type,
+      seq,
+      time: Date.now(),
+      data: data2,
+      ...isSurfaceEvent(type) ? { surfaceOp: "append" } : {}
+    };
+    if (session !== void 0) {
+      session.events.push({ type: "event", event });
+    }
+    for (const f of this.context.follows) {
+      if (f.sessionId === follow.sessionId) {
+        f.queue.push({ type: "event", event });
+        f.nextSeq = seq + 1;
+      }
+    }
+    this.context.broadcastRcMux({
+      type: "session/event",
+      sessionId: follow.sessionId,
+      event
+    });
+    return seq;
+  }
+};
+
+// src/acp/virtual-harness.ts
+var AcpVirtualHarness = class _AcpVirtualHarness {
+  constructor(client, host, backend = "cursor", hostCarrier) {
+    this.client = client;
+    this.host = host;
+    this.backend = backend;
+    this.hostCarrier = hostCarrier;
+    const owner = this;
+    this.live = new AcpLiveProjection({
+      ensureSessionRegistered: (...args) => owner.ensureSessionRegistered(...args),
+      get sessions() {
+        return owner.sessions;
+      },
+      hydrateSession: (...args) => owner.hydrateSession(...args),
+      historyPage: (...args) => owner.historyPage(...args),
+      get follows() {
+        return owner.follows;
+      },
+      get backend() {
+        return owner.backend;
+      },
+      modelSelectionProjection: (...args) => owner.modelSelectionProjection(...args),
+      get client() {
+        return owner.client;
+      },
+      emitRemoteEvent: (...args) => owner.events.emitRemoteEvent(...args),
+      get selectedModels() {
+        return owner.selectedModels;
+      },
+      publishProjection: (...args) => owner.events.publishProjection(...args),
+      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
+      refreshSessionTitle: (...args) => owner.refreshSessionTitle(...args),
+      get pendingApprovals() {
+        return owner.pendingApprovals;
+      },
+      emitApproval: (...args) => owner.events.emitApproval(...args),
+      modelSelection: (...args) => owner.modelSelection(...args),
+      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args)
+    });
+    this.events = new AcpEventCarrier({
+      get workspaceStreams() {
+        return owner.workspaceStreams;
+      },
+      visibleWorkspaces: (...args) => owner.visibleWorkspaces(...args),
+      get controlStreams() {
+        return owner.controlStreams;
+      },
+      get eventStreams() {
+        return owner.eventStreams;
+      },
+      get selectedWorkspaceId() {
+        return owner.selectedWorkspaceId;
+      },
+      get workspaceById() {
+        return owner.workspaceById;
+      },
+      backendLabel: (...args) => owner.backendLabel(...args),
+      get pendingApprovals() {
+        return owner.pendingApprovals;
+      },
+      get client() {
+        return owner.client;
+      },
+      dispatch: (...args) => owner.dispatch(...args),
+      get rcMuxStreams() {
+        return owner.rcMuxStreams;
+      },
+      get sessions() {
+        return owner.sessions;
+      },
+      get rcHostStreams() {
+        return owner.rcHostStreams;
+      },
+      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args)
+    });
+    this.api = this.events.createApiProxy();
+  }
+  live;
+  events;
+  api;
+  workspaceById = /* @__PURE__ */ new Map();
+  sessions = /* @__PURE__ */ new Map();
+  workspaceStreams = /* @__PURE__ */ new Set();
+  controlStreams = /* @__PURE__ */ new Set();
+  eventStreams = /* @__PURE__ */ new Map();
+  rcMuxStreams = /* @__PURE__ */ new Set();
+  rcHostStreams = /* @__PURE__ */ new Set();
+  follows = /* @__PURE__ */ new Set();
+  pendingApprovals = /* @__PURE__ */ new Map();
+  pendingHistory = /* @__PURE__ */ new Map();
+  selectedWorkspaceId;
+  selectedModels = /* @__PURE__ */ new Map();
+  lastProjectionSeq = 0;
+  imageAttachments = /* @__PURE__ */ new Map();
+  closed = false;
+  static remote(core, host, backend = "cursor", capabilities = [], hostCarrier) {
+    return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier);
+  }
+  async workspaces() {
+    return [...this.workspaceById.values()];
+  }
+  backendLabel() {
+    return this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
+  }
+  async selectWorkspace(workspaceId) {
+    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
+    if (workspace === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
+    this.workspaceById.set(workspace.workspaceId, workspace);
+    this.selectedWorkspaceId = workspace.workspaceId;
+    await this.discoverAndAttachSessions(workspace);
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace);
+    }
+    this.publishWorkspaceBaseline();
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
+  }
+  async selectOrCreateWorkspace(path) {
+    const trimmed = path.trim();
+    if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`);
+    const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
+    const workspace = existing ?? createAcpWorkspaceView(trimmed, this.backend);
+    this.workspaceById.set(workspace.workspaceId, workspace);
+    this.selectedWorkspaceId = workspace.workspaceId;
+    await this.discoverAndAttachSessions(workspace);
+    if (workspace.sessionIds.length === 0) {
+      await this.ensureInitialSession(workspace);
+    }
+    this.publishWorkspaceBaseline();
+    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
+  }
+  async preferredSessionId() {
+    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const sessionIds = selected?.sessionIds ?? [];
+    let bestSessionId;
+    let bestUpdatedAt = -1;
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId);
+      if (session !== void 0 && !session.running && !session.blank && session.updatedAt > bestUpdatedAt) {
+        bestUpdatedAt = session.updatedAt;
+        bestSessionId = sessionId;
+      }
+    }
+    if (bestSessionId !== void 0) return bestSessionId;
+    for (const sessionId of sessionIds) {
+      const session = this.sessions.get(sessionId);
+      if (session !== void 0 && !session.running) return sessionId;
+    }
+    return sessionIds[0] ?? sessionIds.at(-1);
+  }
+  async invoke(request) {
+    const result = await this.dispatch(
+      `${request.namespace}/${request.method}`,
+      { args: request.args },
+      request.signal ?? new AbortController().signal
+    );
+    if (result.ok) return result.value;
+    throw Object.assign(new Error(result.error.message), {
+      isDSHRemoteError: true,
+      code: result.error.code,
+      details: result.error.details
+    });
+  }
+  async dispatch(endpoint, payload, signal) {
+    try {
+      const args = carrierArgs(payload);
+      if (ACP_TOOL_CALL_ENDPOINTS.some((item) => item === endpoint)) {
+        if (!this.client.workspaceToolCall) return business(failure("method-not-found", "The Host does not support ACP workspace tools."));
+        const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
+        return business(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint, args, signal));
+      }
+      switch (endpoint) {
+        case "$events/result":
+          return business(await this.events.answerRemoteEvent(args, signal));
+        case "workspace/list":
+          return business(success({
+            items: this.visibleWorkspaces().map(nativeWorkspace),
+            archivedSessionIds: [],
+            pinnedSessionIds: []
+          }));
+        case "workspace/create":
+          return business(await this.createWorkspace(requestArg(args)));
+        case "workspace/rename":
+          return business(await this.renameWorkspace(requestArg(args)));
+        case "workspace/delete":
+          return business(failure("workspace-read-only", `${this.backendLabel()} virtual Workspaces cannot be deleted from Desktop yet.`));
+        case "workspace/insertBefore":
+          return business({
+            workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId)
+          });
+        case "workspace/insertSessionBefore":
+          return business(await this.workspaceForSession(requestArg(args)));
+        case "workspace/archiveSession":
+          return business(await this.archiveSession(requestArg(args)));
+        case "session/list":
+          return business(success({ items: await this.handleSessionList() }));
+        case "session/search":
+          return business(success({ items: [], hasMore: false }));
+        case "session/create":
+          return business(await this.createSession(requestArg(args), signal));
+        case "session/fork":
+          return business(failure("bad-request", `${this.backendLabel()} Remote does not support session fork yet.`));
+        case "session/history":
+          return business(await this.sessionHistory(requestArg(args)));
+        case "session/page":
+          return business(await this.sessionPage(requestArg(args)));
+        case "session/prompt":
+          return business(await this.prompt(requestArg(args), signal));
+        case "session/cancel":
+          return business(await this.cancel(requestArg(args), signal));
+        case "session/rename":
+          return business(await this.renameSession(requestArg(args)));
+        case "session/updateQueue":
+          return business(failure("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
+        case "session/attachment":
+          return business(await this.attachment(requestArg(args)));
+        case "session/modelCatalog": {
+          const sessionId = await this.preferredSessionId();
+          if (this.backend === "cursor" || !sessionId) return business(success(modelCatalog(this.backend)));
+          const models = await this.hostSessionModels(sessionId);
+          return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
+        }
+        case "session/models": {
+          const rawId = extractSessionId(requestArg(args));
+          nativeAcpId(rawId, this.backend);
+          if (this.backend !== "cursor") return business(success(await this.hostSessionModels(rawId)));
+          const catalog = modelCatalog(this.backend);
+          return business(success({
+            current: this.modelSelection(rawId),
+            routable: true,
+            groups: catalog.groups,
+            failures: []
+          }));
+        }
+        case "session/selectModel":
+          return business(await this.selectModel(requestArg(args)));
+        case "session/canOpenWorkspacePath":
+          return business(this.selectedWorkspaceId !== void 0);
+        case "session/openWorkspacePath":
+          return business(failure("bad-request", `Opening Host paths is unavailable in ${this.backendLabel()} mode.`));
+        case "host/describe":
+          return business(success(this.describeHost()));
+        case "host/listDirectory":
+        case "directoryPicker/list":
+          return business(await this.listDirectory(requestArg(args), signal));
+        case "skills/list":
+          return business(success({ items: [] }));
+        case "commands/list":
+          return business([]);
+        case "commands/execute":
+          return business(void 0);
+        default:
+          return this.hostCarrier === void 0 ? fail("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
+      }
+    } catch (error) {
+      return failFrom(error);
+    }
+  }
+  async open(endpoint, payload, signal) {
+    const args = carrierArgs(payload);
+    if (ACP_TOOL_STREAM_ENDPOINTS.some((item) => item === endpoint)) {
+      const sessionId = requiredString(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
+      const queue = new AsyncValueQueue(signal);
+      const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), (frame) => {
+        if (frame.frame.method === "dsh/workspaceTool") queue.push(record(frame.frame.params).value);
+      }, () => queue.close(), signal, { backend: this.backend, endpoint, args });
+      return queue.iterate(() => {
+        void stream.close().catch(() => void 0);
+      });
+    }
+    if (endpoint === "workspace/follow") return this.events.workspaceFollow(signal);
+    if (endpoint === "session/control") return this.events.sessionControl(signal);
+    if (endpoint === "session/follow") return this.live.sessionFollow(requestArg(args), signal);
+    if (endpoint === "$events") return this.events.remoteEvents(signal);
+    if (endpoint === "job/list" || endpoint === "job/follow") return this.events.emptyJobStream(endpoint, signal);
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
+    throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
+      isDSHRemoteError: true,
+      code: "method-not-found",
+      details: {}
+    });
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    for (const stream of this.workspaceStreams) stream.close();
+    for (const stream of this.controlStreams) stream.close();
+    for (const stream of this.eventStreams.values()) stream.close();
+    for (const stream of this.rcMuxStreams) stream.close();
+    for (const stream of this.rcHostStreams) stream.close();
+    this.workspaceStreams.clear();
+    this.controlStreams.clear();
+    this.eventStreams.clear();
+    this.rcMuxStreams.clear();
+    this.rcHostStreams.clear();
+    const follows = [...this.follows];
+    this.follows.clear();
+    for (const follow of follows) {
+      follow.queue.close();
+      await follow.close?.().catch(() => void 0);
+    }
+    this.pendingApprovals.clear();
+    this.imageAttachments.clear();
+  }
+  visibleWorkspaces() {
+    if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
+    const selected = this.workspaceById.get(this.selectedWorkspaceId);
+    if (selected === void 0) return [...this.workspaceById.values()];
+    return [
+      selected,
+      ...[...this.workspaceById.values()].filter((item) => item.workspaceId !== selected.workspaceId)
+    ];
+  }
+  async createWorkspace(request) {
+    const path = string(request.path)?.trim();
+    if (path === void 0 || path.length === 0) return failure("bad-request", "A Cursor working directory is required.");
+    const workspace = await this.selectOrCreateWorkspace(path);
+    this.publishWorkspaceBaseline();
+    return success({ workspace: nativeWorkspace(workspace), created: true });
+  }
+  async renameWorkspace(request) {
+    const workspaceId = requiredString(request.workspaceId, "workspaceId");
+    const title = string(request.title)?.trim();
+    const workspace = this.workspaceById.get(workspaceId);
+    if (workspace === void 0) return failure("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    if (title === void 0 || title.length === 0) return failure("bad-request", "A Workspace name is required.");
+    const next = { ...workspace, title, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
+    this.workspaceById.set(workspaceId, next);
+    this.publishWorkspaceBaseline();
+    return success({ workspace: nativeWorkspace(next) });
+  }
+  async workspaceForSession(request) {
+    const sessionId = string(request.sessionId);
+    const workspace = [...this.workspaceById.values()].find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
+    return workspace === void 0 ? failure("workspace-not-found", "The Cursor virtual Workspace was not found.") : success({ workspace: nativeWorkspace(workspace) });
+  }
+  async archiveSession(request) {
+    const sessionId = extractSessionId(request);
+    this.sessions.delete(sessionId);
+    for (const [workspaceId, workspace] of this.workspaceById) {
+      if (!workspace.sessionIds.includes(sessionId)) continue;
+      const sessionIds = workspace.sessionIds.filter((id5) => id5 !== sessionId);
+      this.workspaceById.set(workspaceId, {
+        ...workspace,
+        sessionIds,
+        sessionCount: sessionIds.length,
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      });
+    }
+    this.events.emitRemoteEvent("api-session/removed", [sessionId]);
+    this.publishWorkspaceBaseline();
+    return success({ archivedSessionIds: [sessionId] });
+  }
+  async createSession(request, signal) {
+    const workspaceId = string(request.workspaceId) ?? this.selectedWorkspaceId;
+    const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
+    const cwd2 = string(request.cwd) ?? workspace?.path;
+    if (cwd2 === void 0) return failure("workspace-not-found", "The Cursor virtual Workspace was not found.");
+    const requestedSessionId = string(request.sessionId);
+    const reusable = requestedSessionId === void 0 ? void 0 : this.sessions.get(requestedSessionId);
+    if (reusable !== void 0 && reusable.cwd === cwd2 && reusable.blank && !reusable.running) {
+      return success({ sessionId: reusable.sessionId });
+    }
+    const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
+    if (this.backend !== "cursor" && this.sessions.has(`${sessionPrefix(this.backend)}${created.sessionId}`)) {
+      return failure("session-already-exists", "The backend returned an existing conversation for a new Session.");
+    }
+    const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
+    this.attachSessionToWorkspace(cwd2, session.sessionId);
+    this.publishWorkspaceBaseline();
+    const seq = this.nextProjectionSeq();
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
+    this.events.publishProjection(session.sessionId, "title", session.title ?? this.backendLabel(), seq);
+    return success({ sessionId: session.sessionId });
+  }
+  ensureSessionRegistered(sessionId) {
+    let session = this.sessions.get(sessionId);
+    if (session !== void 0) return session;
+    if (this.backend !== "cursor" && sessionId.startsWith(sessionPrefix(this.backend))) {
+      const acpSessionId = sessionId.slice(sessionPrefix(this.backend).length);
+      const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
+      const cwd2 = workspace?.path ?? "/";
+      session = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
+      if (workspace && !workspace.sessionIds.includes(sessionId)) {
+        workspace.sessionIds.unshift(sessionId);
+        workspace.sessionCount = workspace.sessionIds.length;
+        this.publishWorkspaceBaseline();
+      }
+      return session;
+    }
+    return void 0;
+  }
+  async prompt(request, signal) {
+    const sessionId = extractSessionId(request);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return failure("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
+    const text = extractPromptText(array(request.content));
+    let images;
+    try {
+      images = array(request.content).filter((part) => record(part).type === "image").map(parseAcpImage);
+      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" || array(request.content).some((part) => !["text", "image"].includes(String(record(part).type)))) throw new Error("Unsupported ACP content.");
+    } catch {
+      return failure("attachment-error", "Invalid or unsupported image attachment.");
+    }
+    if (text === void 0 && images.length === 0) return failure("attachment-error", "A prompt or image is required.");
+    const imageBlocks = images.map((image) => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice(6)}`));
+    this.cacheImageAttachments(sessionId, imageBlocks);
+    const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
+    await this.live.ensureFollow(session);
+    const follow = [...this.follows].find((f) => f.sessionId === sessionId);
+    if (follow !== void 0) {
+      follow.turn += 1;
+      follow.stepOpen = true;
+      this.live.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.live.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+      this.live.pushEvent(follow, "user/message", {
+        id: `user:${Date.now()}`,
+        role: "user",
+        content: [...text ? [{ type: "text", text }] : [], ...imageBlocks],
+        source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
+      });
+    }
+    session.blank = false;
+    session.running = true;
+    session.updatedAt = Date.now();
+    this.events.emitRemoteEvent("api-session/status", [sessionId, true]);
+    await this.client.prompt(session.acpSessionId, text ?? "", signal, images, this.backend);
+    return success({ accepted: true });
+  }
+  async cancel(request, signal) {
+    const sessionId = extractSessionId(request);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return failure("session-not-found", "The Session was not found.");
+    await this.client.cancel(session.acpSessionId, signal);
+    session.running = false;
+    for (const follow of this.follows) {
+      if (follow.sessionId === sessionId) {
+        this.live.closeFollowAfterRemoteStreamClosed(follow, { kind: "aborted", reason: { kind: "user" } });
+      }
+    }
+    this.events.emitRemoteEvent("api-session/status", [sessionId, false]);
+    return success({ accepted: true });
+  }
+  async renameSession(request) {
+    const sessionId = extractSessionId(request);
+    const title = string(request.title)?.trim();
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return failure("session-not-found", "The Session was not found.");
+    if (title === void 0) return failure("bad-request", "A Session title is required.");
+    session.title = title;
+    session.titleOverridden = true;
+    session.updatedAt = Date.now();
+    this.events.publishProjection(sessionId, "title", title);
+    return success({ sessionId });
+  }
+  cacheImageAttachments(sessionId, content) {
+    for (const value of content) {
+      const block = record(value);
+      const attachment = record(block.attachment);
+      if (block.type === "image" && typeof attachment.attachmentId === "string" && typeof block.data === "string") {
+        this.imageAttachments.set(attachment.attachmentId, { sessionId, attachment, data: block.data });
+      }
+    }
+  }
+  async attachment(request) {
+    const sessionId = extractSessionId(request);
+    const attachmentId = string(request.attachmentId);
+    const session = this.ensureSessionRegistered(sessionId);
+    if (this.backend !== "antigravity" || session === void 0 || !attachmentId?.startsWith("agy-image:")) return failure("attachment-error", "The image is not referenced by this AGY Session.");
+    await this.hydrateSession(session);
+    const cached = this.imageAttachments.get(attachmentId);
+    return cached?.sessionId === sessionId ? success({ attachment: cached.attachment, data: cached.data }) : failure("attachment-error", "The AGY image is unavailable or expired.");
+  }
+  async hydrateSession(session) {
+    if (this.backend === "cursor" || session.blank || session.events.length > 0) return;
+    if (this.backend !== "pi") return this.hydrateSessionOnce(session);
+    const pending = this.pendingHistory.get(session.sessionId);
+    if (pending) return pending;
+    const read = this.hydrateSessionOnce(session);
+    this.pendingHistory.set(session.sessionId, read);
+    try {
+      await read;
+    } finally {
+      if (this.pendingHistory.get(session.sessionId) === read) this.pendingHistory.delete(session.sessionId);
+    }
+  }
+  async hydrateSessionOnce(session) {
+    let events = [];
+    if (this.client.loadSessionHistory !== void 0) {
+      try {
+        events = await this.client.loadSessionHistory(session.sessionId, this.backend);
+      } catch (error) {
+        if (this.backend === "pi") throw error;
+      }
+    }
+    if (events.length > 0) {
+      session.events = events;
+      session.blank = false;
+      session.updatedAt = Date.now();
+      for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content));
+    }
+  }
+  async sessionHistory(request) {
+    const sessionId = extractSessionId(request);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return failure("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
+    const page = this.historyPage(session, {
+      beforeSeq: optionalInteger(request.beforeSeq),
+      limit: optionalPositiveInteger(request.maxMessages) ?? 50
+    });
+    return success({
+      ...page,
+      events: page.records.map((entry) => ({ event: entry.event })),
+      projections: {
+        asOfSeq: page.cursor,
+        values: {
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
+          modelSelection: this.modelSelectionProjection(sessionId),
+          imageLimits: acpImageLimits(this.backend)
+        }
+      }
+    });
+  }
+  async sessionPage(request) {
+    const sessionId = extractSessionId(request);
+    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
+    if (session === void 0) return failure("session-not-found", "The Session was not found.");
+    await this.hydrateSession(session);
+    const page = this.historyPage(session, {
+      beforeSeq: optionalInteger(request.beforeSeq),
+      throughSeq: optionalInteger(request.throughSeq),
+      limit: optionalPositiveInteger(request.limit) ?? optionalPositiveInteger(request.maxMessages) ?? 50
+    });
+    return success({ records: page.records, hasMore: page.hasMore });
+  }
+  historyPage(session, options = {}) {
+    const lastSessionSeq = session.events.at(-1)?.event.seq ?? -1;
+    const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq);
+    const endSeq = Math.min(throughSeq, options.beforeSeq === void 0 ? throughSeq : options.beforeSeq - 1);
+    const window2 = endSeq < 0 ? [] : session.events.filter((entry) => entry.event.seq <= endSeq);
+    const limit = options.limit ?? 50;
+    const records = window2.slice(Math.max(0, window2.length - limit));
+    const cursor2 = records.at(-1)?.event.seq ?? -1;
+    return {
+      header: {
+        version: 3,
+        id: session.sessionId,
+        createdAt: session.createdAt,
+        cwd: session.cwd,
+        isSeeded: false
+      },
+      cursor: cursor2,
+      nextTurn: Math.max(0, ...session.events.map((entry) => isRecord3(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)) + 1,
+      records,
+      hasMore: window2.length > records.length,
+      ...session.running ? { activeTurnId: "cursor-live" } : {},
+      assistantStream: { revision: 0 }
+    };
+  }
+  describeHost() {
+    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const name2 = this.backendLabel();
+    return {
+      version: `${name2} Remote`,
+      cwd: workspace?.path ?? "",
+      home: workspace?.path ?? "",
+      provider: name2,
+      model: modelCatalog(this.backend).default.model,
+      attachedSessions: this.sessions.size,
+      canOpenPath: workspace !== void 0
+    };
+  }
+  async listDirectory(request, signal) {
+    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    if (workspace === void 0) return failure("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
+    const path = string(request.path) ?? workspace.path;
+    return success(await this.client.listDirectory(path, signal));
+  }
+  registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
+    const session = {
+      sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
+      acpSessionId,
+      cwd: cwd2,
+      ...title === void 0 ? {} : { title },
+      blank,
+      running: false,
+      createdAt,
+      updatedAt,
+      events: []
+    };
+    this.sessions.set(session.sessionId, session);
+    return session;
+  }
+  applyDiscoveredTitle(session, title) {
+    const next = title.trim();
+    if (this.closed || session.titleOverridden || !next || next === "Untitled Session" || next === session.title) return;
+    session.title = next;
+    this.events.publishProjection(session.sessionId, "title", next);
+  }
+  async refreshSessionTitle(session) {
+    if (this.backend === "cursor" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
+    try {
+      const items = await this.client.listSessions(session.cwd, this.backend, 30);
+      const current = items.find((item) => item.conversationId === session.acpSessionId);
+      if (current !== void 0 && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title);
+    } catch {
+    }
+  }
+  async discoverAndAttachSessions(workspace) {
+    if (this.backend === "cursor") return;
+    try {
+      let discovered = [];
+      if (this.client.listSessions !== void 0) {
+        try {
+          discovered = await this.client.listSessions(workspace.path, this.backend, 30);
+        } catch (error) {
+          if (this.backend === "pi") throw error;
+        }
+      }
+      for (const item of discovered) {
+        const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`;
+        if (!this.sessions.has(sessionId)) {
+          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
+        }
+        const existing = this.sessions.get(sessionId);
+        if (existing !== void 0) this.applyDiscoveredTitle(existing, item.title);
+        if (!workspace.sessionIds.includes(sessionId)) {
+          workspace.sessionIds.push(sessionId);
+        }
+      }
+      workspace.sessionCount = workspace.sessionIds.length;
+      workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+    } catch (error) {
+      if (this.backend === "pi") throw error;
+    }
+  }
+  attachSessionToWorkspace(cwd2, sessionId) {
+    const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2, this.backend);
+    const sessionIds = [sessionId, ...workspace.sessionIds.filter((id5) => id5 !== sessionId)];
+    const next = {
+      ...workspace,
+      sessionIds,
+      sessionCount: sessionIds.length,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    this.workspaceById.set(next.workspaceId, next);
+    if (this.selectedWorkspaceId === void 0) this.selectedWorkspaceId = next.workspaceId;
+  }
+  async ensureInitialSession(workspace) {
+    const cwd2 = workspace.path;
+    const created = await this.client.createSession(cwd2, "agent", this.backend);
+    const sessionId = created.sessionId;
+    const title = this.backend === "antigravity" ? "Antigravity" : this.backend === "opencode" ? "OpenCode" : workspace.title;
+    const session = this.registerSession(sessionId, cwd2, title);
+    this.attachSessionToWorkspace(cwd2, session.sessionId);
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(session, 0)]);
+    this.publishWorkspaceBaseline();
+    return session;
+  }
+  async handleSessionList() {
+    for (const workspace of this.workspaceById.values()) {
+      await this.discoverAndAttachSessions(workspace);
+      if (workspace.sessionIds.length === 0) {
+        await this.ensureInitialSession(workspace);
+      }
+    }
+    return this.sessionSummaries();
+  }
+  sessionSummaries() {
+    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
+    const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
+    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
+  }
+  sessionSummary(session, asOfSeq) {
+    return {
+      sessionId: session.sessionId,
+      agentAvailable: true,
+      running: session.running,
+      blank: session.blank,
+      cwd: session.cwd,
+      updatedAt: session.updatedAt,
+      projections: {
+        kind: "sequenced",
+        asOfSeq,
+        values: {
+          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
+          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
+          modelSelection: this.modelSelectionProjection(session.sessionId),
+          imageLimits: acpImageLimits(this.backend)
+        }
+      }
+    };
+  }
+  modelSelection(sessionId) {
+    return this.selectedModels.get(sessionId) ?? modelCatalog(this.backend).default;
+  }
+  modelSelectionProjection(sessionId) {
+    const selection = this.modelSelection(sessionId);
+    return { lastUsed: selection, next: selection };
+  }
+  async hostSessionModels(sessionId) {
+    if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
+    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend);
+    this.selectedModels.set(sessionId, models.current);
+    return models;
+  }
+  async selectModel(request) {
+    const sessionId = extractSessionId(request);
+    nativeAcpId(sessionId, this.backend);
+    const provider = requiredString(request.provider, "provider");
+    const model = requiredString(request.model, "model");
+    const reasoningEffort = string(request.reasoningEffort);
+    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog(this.backend);
+    const group = catalog.groups.find((g) => g.id === provider);
+    const targetModel = group?.models.find((m) => m.id === model);
+    if (group === void 0 || targetModel === void 0) {
+      return failure("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
+    }
+    const supportedEfforts = targetModel.reasoning?.efforts.map((effort) => effort.id) ?? [];
+    if (reasoningEffort !== void 0 && !supportedEfforts.includes(reasoningEffort)) {
+      return failure("model-unavailable", `The selected reasoning effort is unavailable for this ${this.backend} model.`);
+    }
+    const selected = {
+      provider,
+      model,
+      ...reasoningEffort === void 0 ? {} : { reasoningEffort }
+    };
+    if (this.backend !== "cursor" && this.backend !== "opencode") {
+      if (!this.client.selectModel) return failure("model-unavailable", "The Host does not support ACP model selection.");
+      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
+      this.selectedModels.set(sessionId, confirmed);
+    } else return failure("model-unavailable", `${this.backendLabel()} model selection follows Host settings.`);
+    const seq = this.nextProjectionSeq();
+    this.events.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
+    return success({ selected: this.modelSelection(sessionId) });
+  }
+  publishWorkspaceBaseline() {
+    for (const queue of this.workspaceStreams) {
+      for (const workspace of this.visibleWorkspaces()) {
+        queue.push({ type: "upsert", workspace: nativeWorkspace(workspace) });
+      }
+      queue.push({ type: "archived", archivedSessionIds: [] });
+    }
+  }
+  nextProjectionSeq() {
+    this.lastProjectionSeq += 1;
+    return this.lastProjectionSeq;
+  }
+};
+
+// src/api-proxy-switch.ts
+var SWITCHED_DOMAINS = [
+  "sessions",
+  "subagents",
+  "host",
+  "workspace",
+  "skills",
+  "agentPresets",
+  "events",
+  "goals",
+  "llm",
+  "settings",
+  "credentials"
+];
+var ApiProxySwitch = class {
+  remote;
+  target;
+  mode = "local";
+  installed = false;
+  disconnected = false;
+  local;
+  originals;
+  localRespond;
+  constructor(local) {
+    this.local = local;
+    this.originals = new Map(SWITCHED_DOMAINS.map((domain) => [domain, local[domain]]));
+    this.localRespond = local.respond.bind(local);
+  }
+  install() {
+    if (this.installed) return;
+    for (const domain of SWITCHED_DOMAINS) {
+      const localDomain = this.local[domain];
+      const forwarder = new Proxy({}, {
+        get: (_target, key) => {
+          const selected = this.selected(domain);
+          const value = selected[key];
+          return typeof value === "function" ? value.bind(selected) : value;
+        }
+      });
+      Object.defineProperty(this.local, domain, {
+        configurable: true,
+        enumerable: true,
+        writable: true,
+        value: forwarder
+      });
+    }
+    Object.defineProperty(this.local, "respond", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: (...args) => this.mode === "remote" ? this.requireRemote().respond(...args) : this.localRespond(...args)
+    });
+    this.installed = true;
+  }
+  selectRemote(api, target2) {
+    if (!this.installed) throw new Error("The Harness API switch is not installed.");
+    this.remote = api;
+    this.disconnected = false;
+    this.target = { ...target2 };
+    this.mode = "remote";
+  }
+  selectLocal() {
+    this.disconnected = false;
+    this.mode = "local";
+    this.remote = void 0;
+    this.target = void 0;
+  }
+  disconnectRemote() {
+    if (this.mode === "remote") this.disconnected = true;
+  }
+  status() {
+    return { mode: this.mode, ...this.target === void 0 ? {} : { target: { ...this.target } } };
+  }
+  restore() {
+    if (!this.installed) return;
+    this.selectLocal();
+    for (const [domain, value] of this.originals) Object.defineProperty(this.local, domain, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value
+    });
+    Object.defineProperty(this.local, "respond", {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value: this.localRespond
+    });
+    this.installed = false;
+  }
+  selected(domain) {
+    if (this.mode === "local") return this.originalDomain(domain);
+    return this.requireRemote()[domain];
+  }
+  originalDomain(domain) {
+    return this.originals.get(domain);
+  }
+  requireRemote() {
+    if (this.disconnected) throw Object.assign(new Error("The Remote connection was lost. Reconnect to continue."), { code: "remote/disconnected" });
+    if (this.remote === void 0) throw new Error("No remote Harness target is selected.");
+    return this.remote;
+  }
+};
 
 // ../webrtc/dist/websocket-backpressure.js
 async function waitForRelayCapacity(socket) {
@@ -13221,107 +14592,334 @@ var SerialSend = class {
   }
 };
 
-// src/api-proxy-switch.ts
-var SWITCHED_DOMAINS = [
-  "sessions",
-  "subagents",
-  "host",
-  "workspace",
-  "skills",
-  "agentPresets",
-  "events",
-  "goals",
-  "llm",
-  "settings",
-  "credentials"
-];
-var ApiProxySwitch = class {
-  remote;
-  target;
-  mode = "local";
-  installed = false;
-  disconnected = false;
-  local;
-  originals;
-  localRespond;
-  constructor(local) {
-    this.local = local;
-    this.originals = new Map(SWITCHED_DOMAINS.map((domain) => [domain, local[domain]]));
-    this.localRespond = local.respond.bind(local);
+// src/client-runtime-contract.ts
+var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
+var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
+var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
+  "ACCOUNT_AUTH_REQUIRED",
+  "AUTH_INVALID",
+  "DEVICE_OWNERSHIP_REQUIRED",
+  "DEVICE_REVOKED",
+  "TOKEN_EXPIRED"
+]);
+var ClientModeError = class extends Error {
+  constructor(code, message, retryable = false) {
+    super(message);
+    this.code = code;
+    this.retryable = retryable;
   }
-  install() {
-    if (this.installed) return;
-    for (const domain of SWITCHED_DOMAINS) {
-      const localDomain = this.local[domain];
-      const forwarder = new Proxy({}, {
-        get: (_target, key) => {
-          const selected = this.selected(domain);
-          const value = selected[key];
-          return typeof value === "function" ? value.bind(selected) : value;
-        }
-      });
-      Object.defineProperty(this.local, domain, {
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: forwarder
-      });
+};
+function assertAuthorizedHost(listed, descriptor) {
+  if (descriptor.role !== "host" || descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
+    throw new ClientModeError("PEER_IDENTITY_MISMATCH", "Server Host details do not match the authorized device list.");
+  }
+}
+function websocketUrl(baseUrl) {
+  const url = new URL(baseUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.pathname = `${url.pathname.replace(/\/$/, "")}/ws/v1/connect`;
+  return url.toString();
+}
+function webrtcDiagnosticsLogFields(diagnostics) {
+  if (diagnostics === void 0) return {};
+  return {
+    rtcConnectionState: diagnostics.connectionState,
+    rtcIceConnectionState: diagnostics.iceConnectionState,
+    rtcIceGatheringState: diagnostics.iceGatheringState,
+    rtcLocalCandidates: diagnostics.localCandidates,
+    rtcRemoteCandidates: diagnostics.remoteCandidates,
+    rtcCandidatePairs: diagnostics.candidatePairs,
+    rtcFilteredLocalCandidates: diagnostics.filteredLocalCandidates,
+    rtcFilteredCandidatePairs: diagnostics.filteredCandidatePairs,
+    ...diagnostics.selectedPath === void 0 ? {} : { rtcSelectedPath: diagnostics.selectedPath }
+  };
+}
+function record2(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  }
+  return value;
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function ok(value) {
+  return { ok: true, value };
+}
+function fail2(error) {
+  const source = error instanceof Error ? error : void 0;
+  const remoteCode = source !== void 0 && "code" in source && typeof source.code === "string" ? source.code : source instanceof ClientModeError ? source.code : void 0;
+  const retryable = source !== void 0 && "retryable" in source && typeof source.retryable === "boolean" ? source.retryable : source instanceof ClientModeError ? source.retryable : false;
+  return {
+    ok: false,
+    error: {
+      code: "internal",
+      message: source?.message ?? "The remote-mode operation failed.",
+      details: remoteCode === void 0 ? {} : { remoteCode, retryable }
     }
-    Object.defineProperty(this.local, "respond", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: (...args) => this.mode === "remote" ? this.requireRemote().respond(...args) : this.localRespond(...args)
+  };
+}
+function shortId(value) {
+  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
+}
+async function waitForCodexFrames(stream, signal) {
+  if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
+  await new Promise((resolve6, reject) => {
+    const previousWake = stream.wake;
+    const timer = setTimeout(done, 25e3);
+    const onAbort = () => {
+      cleanup();
+      reject(new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled."));
+    };
+    function cleanup() {
+      clearTimeout(timer);
+      stream.wake = previousWake;
+      signal?.removeEventListener("abort", onAbort);
+    }
+    function done() {
+      cleanup();
+      resolve6();
+    }
+    stream.wake = () => {
+      previousWake();
+      done();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+function diagnosticReason(error) {
+  const code = "code" in error && typeof error.code === "string" ? error.code : void 0;
+  const message = error.message.replace(/[\r\n\t]+/g, " ").slice(0, 240);
+  return code === void 0 ? message : `${code}: ${message}`;
+}
+function preferredTransportsForAttempt(attempt) {
+  if (attempt === "direct") return ["lan", "p2p", "relay"];
+  if (attempt === "turn") return ["turn", "relay"];
+  return ["relay"];
+}
+function transportPreferenceForMode(mode2) {
+  if (mode2 === "LAN") return "lan";
+  if (mode2 === "P2P") return "p2p";
+  if (mode2 === "TURN") return "turn";
+  if (mode2 === "Relay") return "relay";
+  return void 0;
+}
+function iceServersForAttempt(attempt, iceServers) {
+  return attempt === "direct" ? stunOnlyIceServers(iceServers) : iceServers;
+}
+
+// src/client-capabilities.ts
+var REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16];
+var REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17];
+function remoteHostFeatures(clientVersion) {
+  return {
+    commandList: isVersionAtLeast(clientVersion, REMOTE_COMMAND_LIST_MIN_VERSION),
+    fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
+    terminal: false,
+    apiProxy: true,
+    remoteGateway: false,
+    codex: false,
+    cursor: false,
+    antigravity: false,
+    opencode: false,
+    pluginRoute: false
+  };
+}
+async function probeRemoteHostFeatures(client, clientVersion) {
+  const fallback = remoteHostFeatures(clientVersion);
+  let value;
+  try {
+    value = await client.rpc("harness.transport.describe", {});
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") return fallback;
+    throw error;
+  }
+  if (!isRecord4(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned invalid transport capabilities.");
+  }
+  const capabilities = new Set(value.capabilities);
+  const apiProxy = capabilities.has("harness.api.v1");
+  const remoteV1 = capabilities.has("harness.remote.v1");
+  const remoteV3 = capabilities.has("harness.remote.v3");
+  const terminal = capabilities.has("harness.terminal.v1");
+  const workspaceTypes = "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
+  const available = (id5, capability) => remoteWorkspaceTypeAvailable(value.capabilities, workspaceTypes, id5, capability);
+  const codex = available("codex", "codex.appserver.v1");
+  const cursor2 = available("cursor", "agent.acp.cursor.v1");
+  const antigravity = available("antigravity", "agent.acp.antigravity.v1");
+  const pi = available("pi", "agent.acp.pi.v1");
+  const opencode = available("opencode", "agent.acp.opencode.v1");
+  if (remoteV1 && remoteV3) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
+  }
+  const sessionFormat = remoteV3 ? 3 : void 0;
+  const remoteGateway = remoteV3 || remoteV1;
+  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode) {
+    throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
+  }
+  return {
+    commandList: remoteGateway || apiProxy && fallback.commandList,
+    fileViewer: capabilities.has("fileviewer.read.v1"),
+    terminal,
+    apiProxy,
+    remoteGateway,
+    ...sessionFormat === void 0 ? {} : { sessionFormat },
+    codex,
+    cursor: cursor2,
+    antigravity,
+    ...pi ? { pi: true } : {},
+    opencode,
+    ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
+    ...workspaceTypes === void 0 ? {} : { workspaceTypes },
+    pluginRoute: capabilities.has("plugin.route.v1")
+  };
+}
+function isVersionAtLeast(value, minimum) {
+  const match = value?.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  if (match === void 0 || match === null) return false;
+  const version = match.slice(1, 4).map((part) => Number(part));
+  for (let index = 0; index < minimum.length; index += 1) {
+    const part = version[index] ?? 0;
+    const expected = minimum[index] ?? 0;
+    if (part > expected) return true;
+    if (part < expected) return false;
+  }
+  return true;
+}
+
+// src/client-codex-streams.ts
+var ClientCodexStreams = class {
+  constructor(context) {
+    this.context = context;
+  }
+  activeCodexRemote() {
+    const remote = this.context.activeRemote();
+    if (remote === void 0) return void 0;
+    if (!remote.features.codex) {
+      return void 0;
+    }
+    return remote;
+  }
+  async openCodexStream(payload, signal) {
+    const remote = this.activeCodexRemote();
+    const value = record2(payload);
+    if (typeof value.streamId !== "string" || value.streamId.length === 0 || value.streamId.length > 128 || typeof value.threadId !== "string" || value.threadId.length === 0) {
+      throw new ClientModeError("INVALID_MESSAGE", "A Codex stream and thread are required.");
+    }
+    if (this.context.codexStreams.has(value.streamId)) throw new ClientModeError("REQUEST_CONFLICT", "The Codex stream is already open.");
+    let wake = () => void 0;
+    const stream = {
+      target: remote === void 0 ? { kind: "local" } : { kind: "remote", client: remote.client },
+      frames: [],
+      unsubscribe: () => void 0,
+      close: async () => {
+        if (remote === void 0) {
+          await this.context.host?.codexCloseStream?.({ streamId: value.streamId }).catch(() => void 0);
+          return;
+        }
+        await remote.client.rpc("codex.app.stream.close", { streamId: value.streamId }).catch(() => void 0);
+      },
+      wake: () => wake()
+    };
+    if (remote === void 0) {
+      const host = this.requireLocalCodex();
+      this.context.codexStreams.set(value.streamId, stream);
+      try {
+        const result = await host.codexOpenStream({ streamId: value.streamId, threadId: value.threadId }, this.publishLocalCodexFrame, signal);
+        return result;
+      } catch (error) {
+        this.context.codexStreams.delete(value.streamId);
+        stream.wake();
+        throw error;
+      }
+    }
+    stream.unsubscribe = remote.client.onEvent((event) => {
+      if (event.event === "codex.app.frame" && isRecord4(event.data) && event.data.streamId === value.streamId) {
+        this.appendCodexFrame(stream, event.data);
+      }
+      if (event.event === "codex.app.stream.closed" && isRecord4(event.data) && event.data.streamId === value.streamId) {
+        stream.closed = typeof event.data.reason === "string" ? event.data.reason : "closed";
+        stream.wake();
+      }
     });
-    this.installed = true;
+    try {
+      await remote.client.rpc("codex.app.stream.open", { streamId: value.streamId, threadId: value.threadId }, signal);
+    } catch (error) {
+      stream.unsubscribe();
+      throw error;
+    }
+    this.context.codexStreams.set(value.streamId, stream);
+    return { opened: true, streamId: value.streamId, threadId: value.threadId };
   }
-  selectRemote(api, target2) {
-    if (!this.installed) throw new Error("The Harness API switch is not installed.");
-    this.remote = api;
-    this.disconnected = false;
-    this.target = { ...target2 };
-    this.mode = "remote";
+  publishLocalCodexFrame = async (event, data2) => {
+    const streamId = data2.streamId;
+    const stream = this.context.codexStreams.get(streamId);
+    if (stream === void 0 || stream.target.kind !== "local") return;
+    if (event === "codex.app.frame") {
+      this.appendCodexFrame(stream, data2);
+      return;
+    }
+    const closed = data2;
+    stream.closed = typeof closed.reason === "string" ? closed.reason : "closed";
+    stream.wake();
+  };
+  appendCodexFrame(stream, data2) {
+    if (!isRecord4(data2) || !isRecord4(data2.frame) || typeof data2.frame.method !== "string") return;
+    if (stream.frames.length >= 256) {
+      stream.closed = "overflow";
+    } else {
+      stream.frames.push({ method: data2.frame.method, params: data2.frame.params });
+    }
+    stream.wake();
   }
-  selectLocal() {
-    this.disconnected = false;
-    this.mode = "local";
-    this.remote = void 0;
-    this.target = void 0;
+  localCodexAvailable() {
+    return this.context.host?.codexStatus?.().available === true;
   }
-  disconnectRemote() {
-    if (this.mode === "remote") this.disconnected = true;
+  requireLocalCodex() {
+    if (!this.localCodexAvailable() || this.context.host?.codexCall === void 0 || this.context.host.codexRespond === void 0 || this.context.host.codexOpenStream === void 0 || this.context.host.codexCloseStream === void 0) {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "Local CodeX is disabled or unavailable on this Host.");
+    }
+    return {
+      codexCall: this.context.host.codexCall.bind(this.context.host),
+      codexRespond: this.context.host.codexRespond.bind(this.context.host),
+      codexOpenStream: this.context.host.codexOpenStream.bind(this.context.host),
+      codexCloseStream: this.context.host.codexCloseStream.bind(this.context.host)
+    };
   }
-  status() {
-    return { mode: this.mode, ...this.target === void 0 ? {} : { target: { ...this.target } } };
+  async nextCodexFrames(payload, signal) {
+    const value = record2(payload);
+    if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
+    const stream = this.context.codexStreams.get(value.streamId);
+    if (stream === void 0) throw new ClientModeError("STREAM_NOT_FOUND", "The Codex stream is not open.");
+    if (stream.frames.length === 0 && stream.closed === void 0) await waitForCodexFrames(stream, signal);
+    const frames = stream.frames.splice(0, 100);
+    return {
+      streamId: value.streamId,
+      frames,
+      closed: stream.closed !== void 0,
+      ...stream.closed === void 0 ? {} : { reason: stream.closed }
+    };
   }
-  restore() {
-    if (!this.installed) return;
-    this.selectLocal();
-    for (const [domain, value] of this.originals) Object.defineProperty(this.local, domain, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value
-    });
-    Object.defineProperty(this.local, "respond", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: this.localRespond
-    });
-    this.installed = false;
+  async closeCodexStream(payload) {
+    const value = record2(payload);
+    if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
+    const stream = this.context.codexStreams.get(value.streamId);
+    if (stream === void 0) return { closed: false, streamId: value.streamId };
+    this.context.codexStreams.delete(value.streamId);
+    stream.unsubscribe();
+    stream.wake();
+    await stream.close();
+    return { closed: true, streamId: value.streamId };
   }
-  selected(domain) {
-    if (this.mode === "local") return this.originalDomain(domain);
-    return this.requireRemote()[domain];
-  }
-  originalDomain(domain) {
-    return this.originals.get(domain);
-  }
-  requireRemote() {
-    if (this.disconnected) throw Object.assign(new Error("The Remote connection was lost. Reconnect to continue."), { code: "remote/disconnected" });
-    if (this.remote === void 0) throw new Error("No remote Harness target is selected.");
-    return this.remote;
+  async closeCodexStreams(client) {
+    const targets = [...this.context.codexStreams.entries()].filter(([, stream]) => client === void 0 || stream.target.kind === "remote" && stream.target.client === client);
+    await Promise.all(targets.map(async ([streamId, stream]) => {
+      this.context.codexStreams.delete(streamId);
+      stream.unsubscribe();
+      stream.closed = "peer-disconnected";
+      stream.wake();
+      await stream.close();
+    }));
   }
 };
 
@@ -13330,7 +14928,7 @@ import * as nc from "node:crypto";
 var crypto2 = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
 // node_modules/@noble/ciphers/esm/webcrypto.js
-function randomBytes2(bytesLength = 32) {
+function randomBytes(bytesLength = 32) {
   if (crypto2 && typeof crypto2.getRandomValues === "function") {
     return crypto2.getRandomValues(new Uint8Array(bytesLength));
   }
@@ -13461,7 +15059,7 @@ function createHasher(hashCons) {
   hashC.create = () => hashCons();
   return hashC;
 }
-function randomBytes3(bytesLength = 32) {
+function randomBytes2(bytesLength = 32) {
   if (crypto3 && typeof crypto3.getRandomValues === "function") {
     return crypto3.getRandomValues(new Uint8Array(bytesLength));
   }
@@ -14897,7 +16495,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes8 = eddsaOpts.randomBytes || randomBytes3;
+  const randomBytes8 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -15098,7 +16696,7 @@ function montgomery(curveDef) {
   const is25519 = type === "x25519";
   if (!is25519 && type !== "x448")
     throw new Error("invalid type");
-  const randomBytes_ = rand || randomBytes3;
+  const randomBytes_ = rand || randomBytes2;
   const montgomeryBits = is25519 ? 255 : 448;
   const fieldLen = is25519 ? 32 : 56;
   const Gu = is25519 ? BigInt(9) : BigInt(5);
@@ -16177,7 +17775,7 @@ function createHasher2(hashCons, info = {}) {
   Object.assign(hashC, info);
   return Object.freeze(hashC);
 }
-function randomBytes4(bytesLength = 32) {
+function randomBytes3(bytesLength = 32) {
   anumber2(bytesLength, "bytesLength");
   const cr = typeof globalThis === "object" ? globalThis.crypto : null;
   if (typeof cr?.getRandomValues !== "function")
@@ -16744,7 +18342,7 @@ function afunction(value, title) {
 var bytesToHex3 = bytesToHex2;
 var hexToBytes3 = (hex) => hexToBytes2(hex);
 var isBytes3 = isBytes2;
-var randomBytes5 = (bytesLength) => randomBytes4(bytesLength);
+var randomBytes4 = (bytesLength) => randomBytes3(bytesLength);
 var _0n7 = /* @__PURE__ */ BigInt(0);
 var _1n7 = /* @__PURE__ */ BigInt(1);
 var atitle2 = (title) => title ? `"${title}" ` : "";
@@ -17680,7 +19278,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes8 = opts.randomBytes === void 0 ? randomBytes5 : opts.randomBytes;
+  const randomBytes8 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -17984,7 +19582,7 @@ function montgomery2(curveDef) {
   const is25519 = type === "x25519";
   if (!is25519 && type !== "x448")
     throw new Error("invalid type");
-  const randomBytes_ = rand === void 0 ? randomBytes5 : rand;
+  const randomBytes_ = rand === void 0 ? randomBytes4 : rand;
   const montgomeryBits = is25519 ? 255 : 448;
   const swap = cswap(P);
   const fieldLen = is25519 ? 32 : 56;
@@ -20191,7 +21789,7 @@ var NoiseIkSession = class {
       ...initiator ? { rs: Uint8Array.from(this.expectedRemoteStatic) } : {},
       cipher: chachaPoly,
       hash: sha256H,
-      rng: options.random ?? randomBytes2
+      rng: options.random ?? randomBytes
     });
     if (this.handshake.getName() !== NOISE_IK_PROTOCOL) {
       throw new NoiseSessionError("NOISE_SUITE_MISMATCH", "The Noise provider selected an unexpected cipher suite.");
@@ -20474,6 +22072,3852 @@ async function waitForResponder(inner, noise, signal) {
   });
 }
 
+// src/client-connection.ts
+var ClientConnection = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async connect(targetDeviceId, signal) {
+    signal?.throwIfAborted();
+    const progressRunId = this.context.connectionProgressRun + 1;
+    this.context.connectionProgressRun = progressRunId;
+    this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
+    const identity = this.context.requireIdentity();
+    let client;
+    try {
+      const serverDevice = (await this.context.server.listDevices()).find((device) => device.deviceId === targetDeviceId);
+      if (serverDevice === void 0) {
+        throw new ClientModeError("MEMBERSHIP_REQUIRED", "The selected Host is not authorized for this account.");
+      }
+      this.updateConnectionProgress(progressRunId, "authorizing-peer");
+      const target2 = await this.authorizeHostPeer(serverDevice);
+      const presence = await this.context.server.presenceFor(targetDeviceId);
+      if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
+      const credentials = await this.context.server.authenticate(identity);
+      const rtcFactory = this.context.config.forceRelay ? void 0 : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => void 0);
+      if (!this.context.config.forceRelay && rtcFactory === void 0) {
+        this.context.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
+          targetDeviceId: shortId(target2.deviceId)
+        });
+      }
+      let webRtcFallback = false;
+      const createTransport = (attempt) => new AdaptiveTransport(
+        websocketUrl(this.context.server.baseUrl),
+        {
+          role: "client",
+          deviceId: identity.deviceId,
+          accessToken: credentials.accessToken,
+          targetDeviceId,
+          forceRelay: this.context.config.forceRelay || attempt === "relay",
+          preferredTransports: preferredTransportsForAttempt(attempt),
+          negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
+          ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
+          fetchIceServers: async (connectionId) => iceServersForAttempt(attempt, await this.context.server.turnCredentials(connectionId)),
+          onWebRtcFallback: (error, diagnostics) => {
+            webRtcFallback = true;
+            this.context.logger.warn(attempt === "direct" ? "remote Harness direct WebRTC failed; trying TURN" : "remote Harness TURN WebRTC failed; using relay", {
+              targetDeviceId: shortId(target2.deviceId),
+              attempt,
+              reason: diagnosticReason(error)
+            });
+            if (diagnostics !== void 0) {
+              this.context.logger.debug("remote Harness WebRTC fallback diagnostics", {
+                targetDeviceId: shortId(target2.deviceId),
+                attempt,
+                ...webrtcDiagnosticsLogFields(diagnostics)
+              });
+            }
+          }
+        }
+      );
+      const attempts = this.context.config.forceRelay || rtcFactory === void 0 ? ["relay"] : ["direct", "turn", "relay"];
+      let transport;
+      for (const attempt of attempts) {
+        webRtcFallback = false;
+        const stopProgressTimer = this.beginAttemptProgress(progressRunId, attempt);
+        try {
+          transport = createTransport(attempt);
+          client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target2), 6e4);
+          const attemptClient = client;
+          const onAbort = () => {
+            void attemptClient.close();
+          };
+          signal?.addEventListener("abort", onAbort, { once: true });
+          try {
+            signal?.throwIfAborted();
+            await attemptClient.connect();
+          } finally {
+            signal?.removeEventListener("abort", onAbort);
+          }
+          signal?.throwIfAborted();
+        } finally {
+          stopProgressTimer();
+        }
+        if (attempt === "relay" || !webRtcFallback) break;
+        await client.close();
+        client = void 0;
+        transport = void 0;
+        if (attempt === "turn") {
+          this.context.logger.info("remote Harness relay fallback re-established", {
+            targetDeviceId: shortId(target2.deviceId)
+          });
+        }
+      }
+      if (client === void 0 || transport === void 0) {
+        throw new ClientModeError("CONNECTION_FAILED", "Unable to establish a remote transport.", true);
+      }
+      const connectedClient = client;
+      const connectedTransport = transport;
+      const connectedPreference = transportPreferenceForMode(connectedClient.getStats().mode);
+      this.updateConnectionProgress(
+        progressRunId,
+        "connected",
+        connectedPreference === void 0 ? void 0 : [connectedPreference]
+      );
+      connectedClient.onClose(() => {
+        if (this.context.connected?.client !== connectedClient) return;
+        void this.context.closePreview();
+        this.context.connected = void 0;
+        this.context.connectionProgress = void 0;
+        this.context.pendingWorkspaceSelection = void 0;
+        void this.context.closeCodexVirtual();
+        void this.context.closeCursorVirtual();
+        this.context.proxySwitch?.disconnectRemote();
+        this.context.gatewaySwitch.disconnectRemote();
+        void connectedClient.close().catch(() => void 0);
+        this.context.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
+          targetDeviceId: shortId(target2.deviceId)
+        });
+      });
+      const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
+      this.context.logger.info("remote Harness transport ready", {
+        targetDeviceId: shortId(target2.deviceId),
+        transport: connectedClient.getStats().mode,
+        ...connectionDetails === void 0 ? {} : {
+          preferredTransports: connectionDetails.preferredTransports,
+          negotiatedCapabilities: connectionDetails.negotiatedCapabilities,
+          webRtcEnabled: connectionDetails.webRtcEnabled
+        }
+      });
+      if (connectionDetails?.webRtc?.diagnostics !== void 0) {
+        this.context.logger.debug("remote Harness transport diagnostics", {
+          targetDeviceId: shortId(target2.deviceId),
+          ...webrtcDiagnosticsLogFields(connectionDetails.webRtc.diagnostics)
+        });
+      }
+      const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion);
+      return {
+        client: connectedClient,
+        target: target2,
+        transport: connectedTransport,
+        features,
+        progressRunId,
+        ...serverDevice.clientVersion === void 0 ? {} : { clientVersion: serverDevice.clientVersion },
+        ...serverDevice.harnessVersion === void 0 ? {} : { harnessVersion: serverDevice.harnessVersion }
+      };
+    } catch (error) {
+      this.clearConnectionProgress(progressRunId);
+      await client?.close().catch(() => void 0);
+      throw error;
+    }
+  }
+  beginAttemptProgress(runId, attempt) {
+    if (attempt !== "direct") {
+      this.updateConnectionProgress(runId, "probing", [attempt]);
+      return () => void 0;
+    }
+    this.updateConnectionProgress(runId, "probing", ["lan"]);
+    const timer = setTimeout(() => {
+      if (this.context.connectionProgress?.runId === runId && this.context.connectionProgress.phase === "probing") {
+        this.updateConnectionProgress(runId, "probing", ["p2p"]);
+      }
+    }, DIRECT_LAN_PROGRESS_DISPLAY_MS);
+    return () => clearTimeout(timer);
+  }
+  updateConnectionProgress(runId, phase, activeTransports) {
+    if (this.context.connectionProgress?.runId !== runId) return;
+    this.context.connectionProgress = {
+      runId,
+      targetDeviceId: this.context.connectionProgress.targetDeviceId,
+      phase,
+      ...activeTransports === void 0 ? {} : { activeTransports }
+    };
+  }
+  clearConnectionProgress(runId) {
+    if (this.context.connectionProgress?.runId === runId) this.context.connectionProgress = void 0;
+  }
+  async authorizeHostPeer(serverDevice) {
+    const descriptor = await this.context.server.deviceFor(serverDevice.deviceId);
+    assertAuthorizedHost(serverDevice, descriptor);
+    const existing = this.context.identities.trustedPeer(descriptor.deviceId);
+    if (existing !== void 0 && existing.publicKey !== descriptor.identityKey) {
+      throw new ClientModeError("PEER_IDENTITY_MISMATCH", "The authorized Host identity key changed unexpectedly.");
+    }
+    if (existing !== void 0 && existing.membershipId === descriptor.membershipId && existing.name === descriptor.name && existing.platform === descriptor.platform) {
+      return existing;
+    }
+    return this.context.identities.trustPeer({
+      deviceId: descriptor.deviceId,
+      name: descriptor.name,
+      platform: descriptor.platform,
+      publicKey: descriptor.identityKey,
+      membershipId: descriptor.membershipId
+    });
+  }
+};
+
+// src/loopback-preview.ts
+import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
+import { createServer } from "node:http";
+import { WebSocketServer } from "ws";
+
+// src/loopback-host.ts
+import { request as httpRequest } from "node:http";
+import { WebSocket as WebSocket2 } from "ws";
+
+// src/safe-error.ts
+var RpcError = class extends Error {
+  constructor(code, message, details, retryable = false) {
+    super(message);
+    this.code = code;
+    this.details = details;
+    this.retryable = retryable;
+  }
+};
+function safeErrorCode(error) {
+  if (error instanceof RpcError) return error.code;
+  if (error instanceof external_exports.ZodError) return "INVALID_MESSAGE";
+  return "INTERNAL_ERROR";
+}
+
+// src/loopback-host.ts
+var HOP_HEADERS = /* @__PURE__ */ new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "host",
+  "content-length",
+  "forwarded",
+  "x-forwarded-for",
+  "x-forwarded-host",
+  "x-forwarded-proto"
+]);
+function cleanHeaders(headers) {
+  const removed = new Set(HOP_HEADERS);
+  for (const [name2, value] of headers) if (name2.toLowerCase() === "connection") {
+    for (const token of value.split(",")) removed.add(token.trim().toLowerCase());
+  }
+  return headers.filter(([name2]) => !removed.has(name2.toLowerCase()) && !name2.toLowerCase().startsWith("sec-websocket-"));
+}
+function headerPairs(headers) {
+  return Object.entries(headers).flatMap(([name2, value]) => value === void 0 ? [] : (Array.isArray(value) ? value : [value]).map((item) => [name2, item]));
+}
+var LoopbackHost = class {
+  constructor(getPorts, onClose) {
+    this.onClose = onClose;
+    this.ports = [...getPorts()];
+    this.timer = setInterval(() => {
+      for (const [id5, handle] of this.handles) if (Date.now() - handle.touched > 6e4) this.close(id5);
+    }, 1e4);
+    this.timer.unref();
+  }
+  handles = /* @__PURE__ */ new Map();
+  ports;
+  closed = false;
+  timer;
+  setPorts(ports) {
+    this.ports = [...ports];
+    const allowed = new Set(ports);
+    for (const [id5, handle] of this.handles) if (!allowed.has(handle.port)) this.close(id5);
+  }
+  async call(input2) {
+    if (this.closed) throw new RpcError("TRANSPORT_CLOSED", "Preview connection closed.");
+    const value = loopbackRequestSchema.parse(input2);
+    if (value.op === "describe") return { ports: [...this.ports] };
+    if (value.op === "close") {
+      this.close(value.id);
+      return { closed: true };
+    }
+    if (value.op === "http.open" || value.op === "ws.open") {
+      if (!this.ports.includes(value.port)) throw new RpcError(
+        "LOOPBACK_PORT_DENIED",
+        "This preview port is not allowed. Add it to loopback.ports in the Host Remote settings and save the access settings. / \u8BF7\u5728 Host Remote \u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u9884\u89C8\u7AEF\u53E3\u5E76\u4FDD\u5B58\u8BBF\u95EE\u8BBE\u7F6E\u3002"
+      );
+      if (this.handles.has(value.id)) throw new RpcError("REQUEST_CONFLICT", "Preview handle is already in use.");
+      if (this.handles.size >= LOOPBACK_MAX_CONNECTIONS) throw new RpcError("RATE_LIMITED", "Too many active preview requests.");
+      let openedHandle;
+      try {
+        const opening = value.op === "http.open" ? this.openHttp(value) : this.openWs(value);
+        openedHandle = this.handles.get(value.id);
+        return await opening;
+      } catch {
+        this.close(value.id, openedHandle);
+        throw new RpcError("LOOPBACK_UNAVAILABLE", "The allowed loopback service did not respond. Check that it is running on the Host.");
+      }
+    }
+    const handle = this.handles.get(value.id);
+    if (handle === void 0) throw new RpcError("LOOPBACK_CLOSED", "Preview request closed; reload the preview.");
+    handle.touched = Date.now();
+    if (value.op === "http.read" && handle.kind === "http") {
+      if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
+      handle.reading = true;
+      try {
+        const response = handle.response;
+        let chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
+        if (chunk === null && !response.readableEnded && !response.destroyed) {
+          await new Promise((resolve6, reject) => {
+            const timer = setTimeout(() => finish(new Error("timeout")), 2e4);
+            const ready = () => finish();
+            const fail5 = () => finish(new Error("closed"));
+            const finish = (error) => {
+              clearTimeout(timer);
+              response.off("readable", ready);
+              response.off("end", ready);
+              response.off("close", ready);
+              response.off("error", fail5);
+              error === void 0 ? resolve6() : reject(error);
+            };
+            response.once("readable", ready);
+            response.once("end", ready);
+            response.once("close", ready);
+            response.once("error", fail5);
+          });
+          if (this.handles.get(value.id) !== handle) throw new Error("closed");
+          chunk = response.read(Math.min(response.readableLength || LOOPBACK_CHUNK_BYTES, LOOPBACK_CHUNK_BYTES));
+          if (chunk === null && response.readableLength > 0) chunk = response.read(Math.min(response.readableLength, LOOPBACK_CHUNK_BYTES));
+        }
+        const done = chunk === null && (response.readableEnded || response.destroyed);
+        if (done && !response.complete) throw new Error("truncated");
+        handle.total += chunk?.length ?? 0;
+        if (handle.total > 64 * 1024 * 1024) throw new Error("size");
+        if (done) this.close(value.id, handle);
+        return { data: chunk?.toString("base64") ?? "", done };
+      } catch {
+        this.close(value.id, handle);
+        throw new RpcError("LOOPBACK_READ_FAILED", "Preview response ended or exceeded its limit; reload to retry.");
+      } finally {
+        handle.reading = false;
+      }
+    }
+    if (handle.kind === "ws") {
+      if (value.op === "ws.send") {
+        const data2 = Buffer.from(value.data, "base64");
+        if (data2.length > LOOPBACK_MAX_WS_BYTES || handle.socket.bufferedAmount > 1024 * 1024) {
+          this.close(value.id);
+          throw new RpcError("RATE_LIMITED", "Preview WebSocket buffer exceeded its limit.");
+        }
+        await new Promise((resolve6, reject) => handle.socket.send(data2, { binary: value.binary }, (error) => error ? reject(new RpcError("LOOPBACK_CLOSED", "Preview socket closed.")) : resolve6()));
+        return { sent: true };
+      }
+      if (value.op === "ws.read") {
+        if (handle.reading) throw new RpcError("REQUEST_CONFLICT", "Only one preview read may be pending.");
+        handle.reading = true;
+        try {
+          if (handle.messages.length === 0 && !handle.closed) await new Promise((resolve6) => {
+            const timer = setTimeout(() => {
+              handle.wake = void 0;
+              resolve6();
+            }, 2e4);
+            handle.wake = () => {
+              clearTimeout(timer);
+              handle.wake = void 0;
+              resolve6();
+            };
+          });
+          let bytes = 0;
+          const messages = [];
+          while (handle.messages.length > 0 && bytes < LOOPBACK_MAX_WS_BYTES) {
+            const message = handle.messages.shift();
+            bytes += message.data.length;
+            messages.push(message);
+          }
+          handle.bytes -= bytes;
+          const closed = handle.closed && handle.messages.length === 0;
+          if (closed) this.close(value.id, handle);
+          return { messages, closed };
+        } finally {
+          handle.reading = false;
+        }
+      }
+    }
+    throw new RpcError("INVALID_MESSAGE", "Preview handle kind does not match the operation.");
+  }
+  closeAll() {
+    if (this.closed) return;
+    this.closed = true;
+    clearInterval(this.timer);
+    for (const id5 of this.handles.keys()) this.close(id5);
+    this.onClose?.();
+  }
+  close(id5, expected) {
+    const handle = this.handles.get(id5);
+    if (expected !== void 0 && handle !== expected) return;
+    this.handles.delete(id5);
+    if (handle?.kind === "http") {
+      handle.response?.destroy();
+      handle.request.destroy();
+    }
+    if (handle?.kind === "ws") {
+      handle.closed = true;
+      handle.messages = [];
+      handle.bytes = 0;
+      handle.wake?.();
+      handle.socket.terminate();
+    }
+  }
+  openHttp(value) {
+    const body = value.body === void 0 ? void 0 : Buffer.from(value.body, "base64");
+    if ((body?.length ?? 0) > LOOPBACK_MAX_BODY_BYTES) throw new Error("body limit");
+    return new Promise((resolve6, reject) => {
+      const headers = Object.fromEntries(cleanHeaders(value.headers));
+      let handle;
+      const request = httpRequest({
+        hostname: "127.0.0.1",
+        port: value.port,
+        method: value.method,
+        path: value.path,
+        headers,
+        agent: false,
+        maxHeaderSize: 32 * 1024
+      }, (response) => {
+        if (this.handles.get(value.id) !== handle) {
+          response.destroy();
+          return;
+        }
+        handle.response = response;
+        response.on("error", () => void 0);
+        clearTimeout(timer);
+        resolve6({ status: response.statusCode ?? 502, headers: cleanHeaders(headerPairs(response.headers)) });
+      });
+      const timer = setTimeout(() => {
+        request.destroy();
+        reject(new Error("timeout"));
+      }, 2e4);
+      request.on("error", () => {
+        clearTimeout(timer);
+        reject(new Error("upstream"));
+      });
+      handle = { kind: "http", port: value.port, request, reading: false, total: 0, touched: Date.now() };
+      this.handles.set(value.id, handle);
+      request.end(body);
+    });
+  }
+  openWs(value) {
+    return new Promise((resolve6, reject) => {
+      const socket = new WebSocket2(`ws://127.0.0.1:${value.port}${value.path}`, value.protocols, {
+        headers: Object.fromEntries(cleanHeaders(value.headers)),
+        followRedirects: false,
+        handshakeTimeout: 15e3,
+        maxPayload: LOOPBACK_MAX_WS_BYTES,
+        perMessageDeflate: false
+      });
+      const handle = { kind: "ws", port: value.port, socket, messages: [], bytes: 0, reading: false, closed: false, touched: Date.now() };
+      this.handles.set(value.id, handle);
+      socket.once("open", () => resolve6({ protocol: socket.protocol }));
+      socket.on("message", (data2, binary) => {
+        if (handle.closed) return;
+        const message = { data: Buffer.from(data2).toString("base64"), binary };
+        if (handle.bytes + message.data.length > 1024 * 1024 || handle.messages.length >= 256) {
+          this.close(value.id, handle);
+          return;
+        }
+        handle.messages.push(message);
+        handle.bytes += message.data.length;
+        handle.wake?.();
+      });
+      socket.on("close", () => {
+        handle.closed = true;
+        handle.wake?.();
+        reject(new Error("closed"));
+      });
+      socket.on("error", () => {
+        handle.closed = true;
+        handle.wake?.();
+        reject(new Error("upstream"));
+      });
+    });
+  }
+};
+
+// src/loopback-preview.ts
+var LoopbackPreview = class {
+  constructor(client) {
+    this.client = client;
+  }
+  servers = /* @__PURE__ */ new Map();
+  sockets = /* @__PURE__ */ new Set();
+  lifetime = new AbortController();
+  async open(port) {
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new RpcError("INVALID_MESSAGE", "Enter a port between 1024 and 65535.");
+    this.lifetime.signal.throwIfAborted();
+    const description = await this.client.rpc("loopback.call", { op: "describe" }, this.lifetime.signal);
+    if (!description.ports.includes(port)) throw new RpcError("LOOPBACK_PORT_DENIED", "Allow this port in the Host Remote settings (loopback.ports), then save the access settings. / \u8BF7\u5728 Host Remote \u8BBE\u7F6E\u4E2D\u5141\u8BB8\u6B64\u7AEF\u53E3\uFF0C\u7136\u540E\u4FDD\u5B58\u8BBF\u95EE\u8BBE\u7F6E\u3002");
+    let pending = this.servers.get(port);
+    if (pending === void 0) {
+      if (this.servers.size >= 16) throw new RpcError("RATE_LIMITED", "Too many preview origins.");
+      pending = this.start(port);
+      this.servers.set(port, pending);
+      void pending.catch(() => {
+        this.servers.delete(port);
+      });
+    }
+    return { url: (await pending).url };
+  }
+  async close() {
+    this.lifetime.abort();
+    for (const socket of this.sockets) socket.destroy();
+    for (const pending of this.servers.values()) {
+      const running = await pending.catch(() => void 0);
+      if (running === void 0) continue;
+      for (const client of running.ws.clients) client.terminate();
+      running.ws.close();
+      running.server.closeAllConnections();
+      await new Promise((resolve6) => running.server.close(() => resolve6()));
+    }
+    this.servers.clear();
+  }
+  async start(port) {
+    const hostname4 = `dsh-${randomBytes6(24).toString("hex")}.localhost`;
+    let authority = "";
+    const accepted = (req) => req.headers.host === authority && (req.headers.origin === void 0 || req.headers.origin === `http://${authority}`) && req.headers["service-worker"] === void 0;
+    const server = createServer((req, res) => {
+      if (!accepted(req)) {
+        res.writeHead(403);
+        res.end("Preview origin denied.");
+        return;
+      }
+      void this.http(port, authority, req, res);
+    });
+    server.requestTimeout = 3e4;
+    server.headersTimeout = 15e3;
+    server.maxHeadersCount = 64;
+    server.on("connection", (socket) => {
+      if (this.sockets.size >= 64 || this.lifetime.signal.aborted) {
+        socket.destroy();
+        return;
+      }
+      this.sockets.add(socket);
+      socket.on("close", () => this.sockets.delete(socket));
+    });
+    const selectedProtocols = /* @__PURE__ */ new WeakMap();
+    const ws = new WebSocketServer({
+      noServer: true,
+      maxPayload: LOOPBACK_MAX_WS_BYTES,
+      perMessageDeflate: false,
+      handleProtocols: (_protocols, req) => selectedProtocols.get(req) || false
+    });
+    server.on("upgrade", (req, socket, head) => {
+      if (!accepted(req)) {
+        socket.destroy();
+        return;
+      }
+      const id5 = randomUUID();
+      const headers = this.headers(req, port);
+      const protocols = (req.headers["sec-websocket-protocol"] ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+      void this.client.rpc("loopback.call", { op: "ws.open", id: id5, port, path: req.url ?? "/", headers, protocols }, this.lifetime.signal).then((result) => {
+        if (socket.destroyed || this.lifetime.signal.aborted) {
+          socket.destroy();
+          void this.release(id5);
+          return;
+        }
+        selectedProtocols.set(req, result.protocol);
+        ws.handleUpgrade(req, socket, head, (local) => this.websocket(id5, local));
+      }).catch(() => {
+        socket.destroy();
+        void this.release(id5);
+      });
+    });
+    await new Promise((resolve6, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve6();
+      });
+    });
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+      server.close();
+      throw new Error("Preview listener unavailable");
+    }
+    authority = `${hostname4}:${address.port}`;
+    if (this.lifetime.signal.aborted) {
+      server.close();
+      ws.close();
+      throw new Error("Preview closed");
+    }
+    return { server, ws, url: `http://${authority}/` };
+  }
+  headers(req, port) {
+    return cleanHeaders(headerPairs(req.headers)).filter(([name2]) => !["origin", "referer"].includes(name2.toLowerCase())).concat(req.headers.origin === void 0 ? [] : [["origin", `http://127.0.0.1:${port}`]]);
+  }
+  async http(port, authority, req, res) {
+    const id5 = randomUUID();
+    const controller = new AbortController();
+    const abort = () => {
+      controller.abort();
+      void this.release(id5);
+    };
+    res.once("close", abort);
+    const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
+    try {
+      const chunks = [];
+      let length = 0;
+      for await (const chunk of req) {
+        length += chunk.length;
+        if (length > LOOPBACK_MAX_BODY_BYTES) throw new RpcError("PAYLOAD_TOO_LARGE", "Preview request body is limited to 1 MiB.");
+        chunks.push(chunk);
+      }
+      const head = await this.client.rpc("loopback.call", {
+        op: "http.open",
+        id: id5,
+        port,
+        path: req.url ?? "/",
+        method: req.method ?? "GET",
+        headers: this.headers(req, port),
+        ...length === 0 ? {} : { body: Buffer.concat(chunks).toString("base64") }
+      }, signal);
+      const headers = {};
+      for (let [name2, value] of cleanHeaders(head.headers)) {
+        name2 = name2.toLowerCase();
+        if (name2 === "location") {
+          const url = new URL(value, `http://127.0.0.1:${port}/`);
+          if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || Number(url.port || 80) !== port || url.protocol !== "http:") {
+            throw new Error("Redirect is outside the authorized preview service");
+          }
+          value = `http://${authority}${url.pathname}${url.search}${url.hash}`;
+        }
+        if (name2 === "set-cookie") {
+          value = value.replace(/;\s*domain=[^;]*/ig, "");
+          const existing = headers[name2];
+          headers[name2] = [...Array.isArray(existing) ? existing : [], value];
+        } else if (!["service-worker-allowed", "clear-site-data", "alt-svc"].includes(name2)) headers[name2] = value;
+      }
+      headers["referrer-policy"] = "no-referrer";
+      res.writeHead(head.status, headers);
+      while (!signal.aborted) {
+        const chunk = await this.client.rpc("loopback.call", { op: "http.read", id: id5 }, signal);
+        if (chunk.data !== "" && !res.write(Buffer.from(chunk.data, "base64"))) {
+          await new Promise((resolve6, reject) => {
+            const ready = () => {
+              cleanup();
+              resolve6();
+            };
+            const closed = () => {
+              cleanup();
+              reject(new Error("closed"));
+            };
+            const cleanup = () => {
+              res.off("drain", ready);
+              res.off("close", closed);
+            };
+            res.once("drain", ready);
+            res.once("close", closed);
+          });
+        }
+        if (chunk.done) break;
+      }
+      res.end();
+    } catch {
+      if (!res.headersSent) {
+        res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Remote preview unavailable. Check the Host service and connection, then reload.");
+      } else res.destroy();
+    } finally {
+      res.off("close", abort);
+      await this.release(id5);
+    }
+  }
+  websocket(id5, socket) {
+    let input2 = Promise.resolve();
+    let queued = 0;
+    let count = 0;
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, this.lifetime.signal]);
+    const close = () => {
+      controller.abort();
+      socket.terminate();
+      void this.release(id5);
+    };
+    socket.on("error", close);
+    socket.on("close", close);
+    socket.on("message", (data2, binary) => {
+      const bytes = Buffer.from(data2);
+      queued += bytes.length;
+      count += 1;
+      if (queued > 1024 * 1024 || count > 256) {
+        close();
+        return;
+      }
+      input2 = input2.then(async () => {
+        await this.client.rpc("loopback.call", { op: "ws.send", id: id5, data: bytes.toString("base64"), binary }, signal);
+        queued -= bytes.length;
+        count -= 1;
+      }).catch(close);
+    });
+    void (async () => {
+      try {
+        while (!signal.aborted) {
+          const result = await this.client.rpc("loopback.call", { op: "ws.read", id: id5 }, signal);
+          for (const message of result.messages) {
+            if (socket.bufferedAmount > 1024 * 1024) throw new Error("slow preview");
+            await new Promise((resolve6, reject) => socket.send(Buffer.from(message.data, "base64"), { binary: message.binary }, (error) => error ? reject(error) : resolve6()));
+          }
+          if (result.closed) break;
+        }
+      } catch {
+      } finally {
+        close();
+      }
+    })();
+  }
+  async release(id5) {
+    if (!this.lifetime.signal.aborted) await this.client.rpc("loopback.call", { op: "close", id: id5 }).catch(() => void 0);
+  }
+};
+
+// src/plugin-route-bridge.ts
+var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
+var BOT_REMOTE_OPERATIONS = [
+  "state",
+  "models",
+  "efforts",
+  "exchange",
+  "earlier",
+  "usage",
+  "room-progress",
+  "schedules",
+  "create-bot",
+  "duplicate-bot",
+  "update-bot",
+  "delete-bot",
+  "set-main",
+  "set-flags",
+  "create-room",
+  "update-room",
+  "delete-room",
+  "add-agent",
+  "agent-session",
+  "agent-adopt",
+  "agent-archive",
+  "agent-rename",
+  "remove-agent",
+  "send",
+  "answer-question",
+  "dismiss-question",
+  "approval-answer",
+  "stop-member-work"
+];
+function isAllowedPluginRoute(route) {
+  return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
+}
+var callSchema = external_exports.object({
+  route: external_exports.enum(PLUGIN_ROUTE_ALLOWLIST),
+  body: external_exports.object({
+    endpoint: external_exports.enum(BOT_REMOTE_OPERATIONS),
+    payload: external_exports.record(external_exports.string(), external_exports.unknown()).nullable().optional()
+  }).strict().superRefine((body, ctx) => {
+    if (body.endpoint === "approval-answer" && body.payload?.choice !== "allow" && body.payload?.choice !== "reject") {
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Only one-time approval or rejection is supported." });
+    }
+  })
+}).strict();
+var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
+var PluginRouteBridge = class {
+  constructor(dispatch, logger) {
+    this.dispatch = dispatch;
+    this.logger = logger;
+  }
+  async call(input2) {
+    let params;
+    try {
+      params = callSchema.parse(input2);
+    } catch (error) {
+      if (error instanceof external_exports.ZodError) {
+        throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
+      }
+      throw error;
+    }
+    if (serializedBytes(params) > MAX_SECURE_MESSAGE_BYTES) {
+      throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
+    }
+    const startedAt = performance.now();
+    let result;
+    try {
+      result = await this.dispatch(params.route, params.body, AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS));
+    } catch (error) {
+      this.logger?.warn("plugin route call failed", {
+        route: params.route,
+        durationMs: Math.round(performance.now() - startedAt)
+      });
+      throw error;
+    }
+    if (serializedBytes(result) > MAX_SECURE_MESSAGE_BYTES) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "The plugin route response exceeds the bounded remote limit.");
+    }
+    this.logger?.debug("plugin route call ok", {
+      route: params.route,
+      status: result.status,
+      durationMs: Math.round(performance.now() - startedAt)
+    });
+    return { status: result.status, json: result.json };
+  }
+};
+function serializedBytes(value) {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+// src/client-control.ts
+var ClientControl = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async handleControl(endpoint, payload, signal) {
+    try {
+      if (endpoint === "status") return ok(await this.context.detailedStatus());
+      if (endpoint === "devices") return ok(await this.context.devices());
+      if (endpoint === "client.account.providers") return ok(await this.context.server.oauthProviders());
+      if (endpoint === "client.account.login") {
+        const value = record2(payload);
+        if (typeof value.email !== "string" || typeof value.password !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
+        }
+        return ok(await this.context.authorizeClientWithAccount(value.email, value.password));
+      }
+      if (endpoint === "client.account.qr.start") {
+        const value = record2(payload);
+        const provider = value.provider ?? "zhihu";
+        if (typeof provider !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
+          throw new ClientModeError("INVALID_MESSAGE", "An OAuth provider ID is required.");
+        }
+        return ok(await this.context.startClientOAuthQrLogin(provider));
+      }
+      if (endpoint === "client.account.qr.poll") {
+        const value = record2(payload);
+        if (typeof value.qrId !== "string" || value.qrId.length < 20) {
+          throw new ClientModeError("INVALID_MESSAGE", "A QR login session is required.");
+        }
+        return ok(await this.context.pollClientOAuthQrLogin(value.qrId));
+      }
+      if (endpoint === "preview.open") {
+        const remote = this.context.activeRemote();
+        if (remote === void 0) throw new ClientModeError("TRANSPORT_CLOSED", "Connect to a Remote Host first.");
+        this.context.preview ??= new LoopbackPreview(remote.client);
+        return ok(await this.context.preview.open(record2(payload).port));
+      }
+      if (endpoint === "directory.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listRemoteDirectory(
+          value.targetDeviceId,
+          typeof value.path === "string" ? value.path : void 0,
+          signal
+        ));
+      }
+      if (endpoint === "workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listRemoteWorkspaces(value.targetDeviceId, signal));
+      }
+      if (endpoint === "codex.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCodexWorkspaces(value.targetDeviceId, signal));
+      }
+      if (endpoint === "workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and working directory are required.");
+        }
+        return ok(await this.context.openRemoteWorkspace(value.targetDeviceId, value.path, signal));
+      }
+      if (endpoint === "codex.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX Workspace are required.");
+        }
+        return ok(await this.context.openCodexWorkspace(value.targetDeviceId, value.workspaceId, signal));
+      }
+      if (endpoint === "codex.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX project directory are required.");
+        }
+        return ok(await this.context.createCodexWorkspace(value.targetDeviceId, value.path, signal));
+      }
+      if (endpoint === "cursor.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, "cursor"));
+      }
+      if (endpoint === "cursor.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "cursor"));
+      }
+      if (endpoint === "cursor.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "cursor"));
+      }
+      if (endpoint === "antigravity.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, "antigravity"));
+      }
+      if (endpoint === "antigravity.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "antigravity"));
+      }
+      if (endpoint === "antigravity.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "antigravity"));
+      }
+      if (endpoint === "pi.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, "pi"));
+      }
+      if (endpoint === "pi.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "pi"));
+      }
+      if (endpoint === "pi.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "pi"));
+      }
+      if (endpoint === "opencode.workspaces.list") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
+        return ok(await this.context.listCursorWorkspaces(value.targetDeviceId, signal, "opencode"));
+      }
+      if (endpoint === "opencode.workspace.open") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and OpenCode Workspace are required.");
+        }
+        return ok(await this.context.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "opencode"));
+      }
+      if (endpoint === "opencode.workspace.create") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and OpenCode project directory are required.");
+        }
+        return ok(await this.context.createCursorWorkspace(value.targetDeviceId, value.path, signal, "opencode"));
+      }
+      if (endpoint === "workspace.selection.consume") {
+        const value = record2(payload);
+        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host and Workspace are required.");
+        }
+        return ok(this.context.consumeWorkspaceSelection({
+          targetDeviceId: value.targetDeviceId,
+          workspaceId: value.workspaceId,
+          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" || value.backend === "opencode" ? { backend: value.backend } : {},
+          ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
+        }));
+      }
+      if (endpoint === "fileviewer.stat" || endpoint === "fileviewer.readRange" || endpoint === "fileviewer.list") {
+        const method = endpoint === "fileviewer.stat" ? "stat" : endpoint === "fileviewer.readRange" ? "readRange" : "list";
+        return ok(await this.context.callRemoteFileViewer(method, payload, signal));
+      }
+      if (endpoint === "codex.call") {
+        const value = record2(payload);
+        if (typeof value.method !== "string" || !("params" in value)) {
+          throw new ClientModeError("INVALID_MESSAGE", "A Codex method and params are required.");
+        }
+        const remote = this.context.activeCodexRemote();
+        if (remote !== void 0) return ok(await new CodexRemoteClient(remote.client).request(value.method, value.params, signal));
+        const host = this.context.requireLocalCodex();
+        return ok(await host.codexCall(value, signal));
+      }
+      if (endpoint === "codex.probe") {
+        const local = this.context.localCodexAvailable();
+        let remoteSupported = false;
+        const remote = this.context.activeRemote();
+        if (remote !== void 0) {
+          try {
+            remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
+            remoteSupported = remote.features.codex;
+          } catch (error) {
+            if (!local) throw error;
+          }
+        }
+        return ok({ supported: local || remoteSupported, local, remote: remoteSupported });
+      }
+      if (endpoint === "codex.respond") {
+        const value = record2(payload);
+        const remote = this.context.activeCodexRemote();
+        if (remote !== void 0) return ok(await remote.client.rpc("codex.app.respond", value, signal));
+        const host = this.context.requireLocalCodex();
+        return ok(await host.codexRespond(value, signal));
+      }
+      if (endpoint === "plugin.route") {
+        const value = record2(payload);
+        if (typeof value.route !== "string" || !isAllowedPluginRoute(value.route)) {
+          throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
+        }
+        if (!isRecord4(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");
+        return ok(await this.context.pluginRoute(value.route, value.body, signal));
+      }
+      if (endpoint === "codex.stream.open") return ok(await this.context.openCodexStream(payload, signal));
+      if (endpoint === "codex.stream.next") return ok(await this.context.nextCodexFrames(payload, signal));
+      if (endpoint === "codex.stream.close") return ok(await this.context.closeCodexStream(payload));
+      if (endpoint === "host.account.login") {
+        if (this.context.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
+        const value = record2(payload);
+        if (typeof value.email !== "string" || typeof value.password !== "string") {
+          throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
+        }
+        return ok(await this.context.host.authorizeHostWithAccount(value.email, value.password));
+      }
+      if (endpoint === "host.authorization.set") {
+        const value = record2(payload);
+        if (typeof value.enabled !== "boolean") {
+          throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
+        }
+        return ok(await this.context.setHostAuthorization(value.enabled));
+      }
+      if (endpoint === "host.registration-code.submit") {
+        if (this.context.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
+        const value = record2(payload);
+        if (typeof value.code !== "string" || value.code.trim() === "") {
+          throw new ClientModeError("INVALID_MESSAGE", "A Host registration code is required.");
+        }
+        return ok(await this.context.host.authorizeHostWithCode(value.code));
+      }
+      if (endpoint === "mode.set") {
+        const value = record2(payload);
+        if (value.mode !== "local" && value.mode !== "remote") throw new ClientModeError("INVALID_MESSAGE", "Mode must be local or remote.");
+        return ok(await this.context.setMode(value.mode, typeof value.targetDeviceId === "string" ? value.targetDeviceId : void 0, signal));
+      }
+      throw new ClientModeError("METHOD_NOT_FOUND", "The remote-mode control method does not exist.");
+    } catch (error) {
+      return fail2(error);
+    }
+  }
+};
+
+// src/ids.ts
+import { randomBytes as randomBytes7 } from "node:crypto";
+function uuidV7(now = Date.now()) {
+  if (!Number.isSafeInteger(now) || now < 0 || now > 281474976710655) {
+    throw new RangeError("UUIDv7 timestamp must be a non-negative 48-bit integer");
+  }
+  const bytes = randomBytes7(16);
+  let timestamp = BigInt(now);
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number(timestamp & 0xffn);
+    timestamp >>= 8n;
+  }
+  bytes[6] = 112 | bytes[6] & 15;
+  bytes[8] = 128 | bytes[8] & 63;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+// src/client-workspace-queries.ts
+async function invokeRemoteCommand(client, request) {
+  const rpcId2 = uuidV7();
+  const response = await client.rpc("harness.api.call", {
+    method: `${request.namespace}.${request.method}`,
+    rpcId: rpcId2,
+    payload: request.args
+  }, request.signal);
+  if (response.rpcId !== rpcId2) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid command response.");
+  }
+  return unwrapNativeResult(response);
+}
+async function readRemoteWorkspaceBaseline(gateway, signal) {
+  const lifetime = new AbortController();
+  const activeSignal = signal === void 0 ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]);
+  const source = await gateway.open("workspace/follow", { args: {} }, activeSignal);
+  const iterator = source[Symbol.asyncIterator]();
+  try {
+    const first = await iterator.next();
+    if (first.done || !isRecord4(first.value) || first.value.type !== "baseline" || !isRecord4(first.value.value) || !Array.isArray(first.value.value.items)) {
+      throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace baseline.");
+    }
+    return first.value.value.items.map((item) => {
+      if (!isRecord4(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
+        throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace row.");
+      }
+      return { workspaceId: item.workspaceId, path: item.path, title: item.title };
+    });
+  } finally {
+    lifetime.abort("workspace-baseline-read");
+    await iterator.return?.();
+  }
+}
+function unwrapNativeResult(response) {
+  const result = response.result;
+  if (typeof result !== "object" || result === null || !("ok" in result)) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid response.");
+  }
+  if (result.ok !== true || !("value" in result)) {
+    const message = "error" in result && typeof result.error === "object" && result.error !== null && "message" in result.error && typeof result.error.message === "string" ? result.error.message : "The remote Host rejected the request.";
+    throw new ClientModeError("REMOTE_API_ERROR", message);
+  }
+  return result.value;
+}
+function workspaceRecordId(value) {
+  if (typeof value !== "object" || value === null || !("workspaceId" in value) || typeof value.workspaceId !== "string" || value.workspaceId.length === 0) {
+    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace.");
+  }
+  return value.workspaceId;
+}
+function remoteWorkspaceTitle(path) {
+  const normalized = path.replace(/[\\/]+$/u, "");
+  return normalized.split(/[\\/]+/u).filter(Boolean).at(-1) ?? path;
+}
+
+// src/codex/permissions.ts
+function codexPermissionPresetFromResponse(value) {
+  const root = record3(value);
+  for (const settings of [root, record3(root.threadSettings)]) {
+    const sandbox = settings.sandbox ?? settings.sandboxPolicy;
+    const type = record3(sandbox).type;
+    if (settings.approvalPolicy === "never" && (sandbox === "danger-full-access" || type === "dangerFullAccess")) {
+      return "danger-full-access";
+    }
+    if (settings.approvalPolicy === "on-request" && (sandbox === "workspace-write" || type === "workspaceWrite")) {
+      return "workspace-write";
+    }
+  }
+  return void 0;
+}
+function record3(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+// src/codex/virtual-values.ts
+var CODEX_SESSION_PREFIX = "codex:";
+function nativeThreadId(sessionId) {
+  if (!sessionId.startsWith(CODEX_SESSION_PREFIX) || sessionId.length === CODEX_SESSION_PREFIX.length) {
+    throw new Error("The selected Session does not belong to CodeX.");
+  }
+  return sessionId.slice(CODEX_SESSION_PREFIX.length);
+}
+function record4(value) {
+  return isRecord5(value) ? value : {};
+}
+function isRecord5(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function array2(value) {
+  return Array.isArray(value) ? value : [];
+}
+function string2(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function integer2(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
+}
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function optionalInteger2(value) {
+  if (value === void 0) return void 0;
+  const parsed = integer2(value);
+  if (parsed === void 0) throw new Error("The CodeX History cursor is invalid.");
+  return parsed;
+}
+function optionalNonNegativeInteger(value) {
+  const parsed = optionalInteger2(value);
+  if (parsed !== void 0 && parsed < 0) throw new Error("The CodeX History cursor is invalid.");
+  return parsed;
+}
+function optionalPositiveInteger2(value) {
+  const parsed = optionalInteger2(value);
+  if (parsed !== void 0 && parsed <= 0) throw new Error("The CodeX History page size is invalid.");
+  return parsed;
+}
+function requiredString2(value, field) {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`The CodeX ${field} is required.`);
+  return value;
+}
+function normalizeTime(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
+  return value < 1e10 ? Math.floor(value * 1e3) : Math.floor(value);
+}
+function isoTime(value) {
+  return new Date(normalizeTime(value) || Date.now()).toISOString();
+}
+function basename(path) {
+  const normalized = path.replace(/[\\/]+$/u, "");
+  const parts = normalized.split(/[\\/]/u);
+  return parts.at(-1) || path;
+}
+function hashString(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+function errorCode(error) {
+  return "code" in error && typeof error.code === "string" ? error.code : void 0;
+}
+
+// src/codex/virtual-catalog.ts
+var CODEX_WORKSPACE_PREFIX = "codex-workspace:";
+var CODEX_PROVIDER = "codex";
+var CODEX_MODEL = "codex";
+var CODEX_PAGE_LIMIT = 100;
+var MAX_CODEX_PAGES = 32;
+function codexProjectWorkspaceId(projectId) {
+  return `${CODEX_WORKSPACE_PREFIX}project:${projectId}`;
+}
+async function discoverCodexVirtualWorkspaces(client, signal) {
+  return (await loadCatalog(client, signal)).workspaces;
+}
+async function loadCatalog(client, signal, pendingThreads) {
+  let projects = await loadCodexProjects(client, signal);
+  const threads = [];
+  let cursor2;
+  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
+    const result = record4(await client.request("thread/list", {
+      limit: CODEX_PAGE_LIMIT,
+      sortKey: "updated_at",
+      sortDirection: "desc",
+      archived: false,
+      ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+    }, signal));
+    for (const value of array2(result.data)) {
+      const thread = record4(value);
+      if (string2(thread.id) !== void 0) threads.push(thread);
+    }
+    cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+    if (cursor2 === void 0) break;
+  }
+  if (pendingThreads !== void 0) {
+    const listedIds = new Set(threads.map((thread) => string2(thread.id)).filter((id5) => id5 !== void 0));
+    for (const [threadId, thread] of pendingThreads) {
+      if (listedIds.has(threadId)) pendingThreads.delete(threadId);
+      else threads.unshift(thread);
+    }
+  }
+  if (projects.length === 0) {
+    projects = deriveCodexCwdWorkspaces(threads).map((workspace) => ({
+      id: workspace.id,
+      name: workspace.name,
+      roots: [{ path: workspace.path }],
+      position: workspace.position,
+      createdAt: workspace.createdAt,
+      updatedAt: workspace.updatedAt
+    }));
+  }
+  const projected = threads.map((thread) => {
+    const session = projectCodexThread(thread);
+    return session === void 0 ? void 0 : { thread, session };
+  }).filter((value) => value !== void 0);
+  const projectWorkspaces = projects.map(projectWorkspace);
+  const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]]));
+  const visibleSessionIds = /* @__PURE__ */ new Set();
+  const visibleThreads = [];
+  for (const { thread, session } of projected) {
+    const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId);
+    if (projectWorkspaceForSession !== void 0) {
+      addSessionToWorkspace(projectWorkspaceForSession, session);
+      visibleSessionIds.add(session.id);
+      visibleThreads.push(thread);
+    }
+  }
+  const sessions = projected.map((value) => value.session).filter((session) => visibleSessionIds.has(session.id));
+  return {
+    threads: visibleThreads,
+    sessions,
+    projects,
+    workspaces: projectWorkspaces
+  };
+}
+async function loadCodexProjects(client, signal) {
+  const projects = [];
+  let cursor2;
+  try {
+    for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
+      const result = record4(await client.request("project/list", {
+        limit: CODEX_PAGE_LIMIT,
+        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+      }, signal));
+      for (const value of array2(result.data)) {
+        const project = projectCodexProject(value, projects.length);
+        if (project !== void 0 && !projects.some((item) => item.id === project.id)) projects.push(project);
+      }
+      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+      if (cursor2 === void 0) break;
+    }
+  } catch (error) {
+    if (isProjectListUnsupported(error)) return [];
+    throw error;
+  }
+  return projects.sort((left, right) => left.position - right.position || left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
+}
+async function loadModelDirectory(client, signal) {
+  const models = /* @__PURE__ */ new Map();
+  let defaultModelId;
+  let cursor2;
+  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
+    const result = record4(await client.request("model/list", {
+      limit: CODEX_PAGE_LIMIT,
+      includeHidden: false,
+      ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+    }, signal));
+    for (const value of array2(result.data)) {
+      const source = record4(value);
+      if (source.hidden === true) continue;
+      const id5 = string2(source.model) ?? string2(source.id);
+      if (id5 === void 0 || models.has(id5)) continue;
+      const efforts = array2(source.supportedReasoningEfforts).map((value2) => {
+        const effort = record4(value2);
+        const effortId = string2(effort.reasoningEffort);
+        if (effortId === void 0) return void 0;
+        const description2 = string2(effort.description);
+        return {
+          id: effortId,
+          name: reasoningEffortName(effortId),
+          ...description2 === void 0 ? {} : { description: description2 }
+        };
+      }).filter((value2) => value2 !== void 0);
+      const defaultEffort2 = string2(source.defaultReasoningEffort);
+      const description = string2(source.description);
+      const model = {
+        id: id5,
+        name: string2(source.displayName) ?? id5,
+        ...description === void 0 ? {} : { description },
+        ...efforts.length === 0 ? {} : {
+          reasoning: {
+            efforts,
+            ...defaultEffort2 === void 0 || !efforts.some((effort) => effort.id === defaultEffort2) ? {} : { defaultEffort: defaultEffort2 }
+          }
+        }
+      };
+      models.set(id5, model);
+      if (source.isDefault === true) defaultModelId = id5;
+    }
+    cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
+    if (cursor2 === void 0) break;
+  }
+  const defaultModel = models.get(defaultModelId ?? "") ?? models.values().next().value;
+  if (defaultModel === void 0) throw new Error("CodeX did not advertise any available models.");
+  const defaultEffort = defaultModel.reasoning?.defaultEffort;
+  return {
+    default: {
+      provider: CODEX_PROVIDER,
+      model: defaultModel.id,
+      ...defaultEffort === void 0 ? {} : { reasoningEffort: defaultEffort }
+    },
+    groups: [{ id: CODEX_PROVIDER, name: "CodeX", models: [...models.values()] }],
+    models
+  };
+}
+function nativeWorkspace2(view) {
+  const { sessionCount: _sessionCount, ...workspace } = view;
+  return workspace;
+}
+function nativeVisibleWorkspaces(catalog, selectedWorkspaceId) {
+  return catalog.workspaces.filter((workspace) => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId);
+}
+function projectWorkspace(project) {
+  const root = project.roots[0];
+  return {
+    workspaceId: codexProjectWorkspaceId(project.id),
+    path: root.path,
+    title: project.name.trim() || basename(root.path),
+    sessionIds: [],
+    sessionCount: 0,
+    createdAt: isoTime(project.createdAt),
+    updatedAt: isoTime(project.updatedAt || project.createdAt)
+  };
+}
+function projectCodexProject(value, fallbackPosition) {
+  const source = record4(value);
+  const id5 = string2(source.id);
+  if (id5 === void 0) return void 0;
+  const roots = array2(source.roots).map((root) => string2(record4(root).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
+  if (roots.length === 0) return void 0;
+  return {
+    id: id5,
+    name: string2(source.name) ?? basename(roots[0].path),
+    roots,
+    position: finiteNumber(source.position) ?? fallbackPosition,
+    createdAt: normalizeTime(source.createdAt),
+    updatedAt: normalizeTime(source.updatedAt)
+  };
+}
+function findProjectWorkspace(thread, session, projects, workspaceByProjectId) {
+  const explicitProjectId = string2(thread.projectId);
+  const explicitWorkspace = explicitProjectId === void 0 ? void 0 : workspaceByProjectId.get(explicitProjectId);
+  if (explicitWorkspace !== void 0) return explicitWorkspace;
+  if (session.cwd === void 0) return void 0;
+  const match = projects.flatMap((project) => project.roots.map((root) => ({ project, root }))).filter((value) => containsPath(value.root.path, session.cwd)).sort((left, right) => {
+    const length = right.root.path.length - left.root.path.length;
+    if (length !== 0) return length;
+    const position = left.project.position - right.project.position;
+    if (position !== 0) return position;
+    return left.project.id.localeCompare(right.project.id);
+  })[0];
+  return match === void 0 ? void 0 : workspaceByProjectId.get(match.project.id);
+}
+function addSessionToWorkspace(workspace, session) {
+  if (!workspace.sessionIds.includes(session.id)) {
+    workspace.sessionIds.push(session.id);
+    workspace.sessionCount = workspace.sessionIds.length;
+  }
+  const createdAt = isoTime(session.createdAt);
+  const updatedAt = isoTime(session.updatedAt || session.createdAt);
+  if (createdAt < workspace.createdAt) workspace.createdAt = createdAt;
+  if (updatedAt > workspace.updatedAt) workspace.updatedAt = updatedAt;
+}
+function containsPath(root, candidate) {
+  const normalizedRoot = normalizePathForCompare(root);
+  const normalizedCandidate = normalizePathForCompare(candidate);
+  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
+}
+function normalizePathForCompare(path) {
+  return path.replace(/[\\/]+$/u, "") || path;
+}
+function modelSelection() {
+  return { provider: CODEX_PROVIDER, model: CODEX_MODEL };
+}
+function modelSelectionProjection(selection) {
+  return { lastUsed: selection, next: selection };
+}
+function modelCatalog2(directory) {
+  return {
+    default: directory.default,
+    routableProviders: [CODEX_PROVIDER],
+    groups: directory.groups,
+    failures: []
+  };
+}
+function codexModelParams(selection) {
+  return {
+    model: selection.model,
+    ...selection.reasoningEffort === void 0 ? {} : { effort: selection.reasoningEffort }
+  };
+}
+function reasoningEffortName(effort) {
+  const names = {
+    none: "None",
+    minimal: "Minimal",
+    low: "Low",
+    medium: "Medium",
+    high: "High",
+    xhigh: "Extra High",
+    max: "Max",
+    ultra: "Ultra"
+  };
+  return names[effort] ?? effort;
+}
+function displayTitle(session) {
+  const value = session.title ?? session.preview;
+  return value === void 0 || value.trim() === "" ? null : value.slice(0, 256);
+}
+function isCodexDirectoryListing(value) {
+  const listing = record4(value);
+  return typeof listing.path === "string" && typeof listing.home === "string" && Array.isArray(listing.crumbs) && listing.crumbs.every(isCodexDirectoryEntry) && Array.isArray(listing.entries) && listing.entries.every(isCodexDirectoryEntry) && typeof listing.truncated === "boolean";
+}
+function isCodexDirectoryEntry(value) {
+  const entry = record4(value);
+  return typeof entry.name === "string" && typeof entry.path === "string" && typeof entry.hidden === "boolean";
+}
+function isProjectListUnsupported(error) {
+  if (!(error instanceof Error)) return false;
+  const code = errorCode(error);
+  return code === "METHOD_NOT_ALLOWED" || code === "METHOD_NOT_FOUND" || code === "CODEX_UPSTREAM_ERROR" || error.message.includes("The requested Codex method is not available over Remote.");
+}
+
+// src/codex/codex-image-codec.ts
+var CODEX_IMAGE_MEDIA_TYPES2 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var CODEX_IMAGE_ATTACHMENT_PREFIX = "codex-image:";
+var MAX_CODEX_IMAGE_BASE64 = 288 * 1024 * 1024;
+var DATA_IMAGE_URL2 = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
+function string3(value) {
+  return typeof value === "string" ? value : void 0;
+}
+function isRecord6(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function record5(value) {
+  return isRecord6(value) ? value : {};
+}
+function toolOutputImageBlocks(item) {
+  const candidates = [
+    record5(item.result).content,
+    record5(item.output).content,
+    item.contentItems,
+    Array.isArray(item.output) ? item.output : void 0
+  ];
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    const images = candidate.flatMap((value) => {
+      const block = record5(value);
+      return isImageContent2(block) && parseImageBlock(block) !== void 0 ? [block] : [];
+    });
+    if (images.length > 0) return images;
+  }
+  return [];
+}
+function contentBlocks(value, attachmentSeed) {
+  if (typeof value === "string") return [{ type: "text", text: value }];
+  if (!Array.isArray(value)) return [];
+  const blocks = [];
+  let imageIndex = 0;
+  for (const raw of value) {
+    if (typeof raw === "string") {
+      blocks.push({ type: "text", text: raw });
+      continue;
+    }
+    const block = record5(raw);
+    const image = imageContentBlock(block, attachmentSeed, imageIndex);
+    if (image !== void 0) {
+      imageIndex += 1;
+      blocks.push(image);
+      continue;
+    }
+    const text = string3(block.text) ?? string3(block.content);
+    if (text !== void 0) blocks.push({ type: block.type === "reasoning" ? "reasoning" : "text", text });
+  }
+  return blocks;
+}
+function imageContentBlock(block, attachmentSeed, index) {
+  if (!isImageContent2(block)) return void 0;
+  const image = parseImageBlock(block);
+  if (image === void 0) return void 0;
+  const dimensions = imageDimensions2(image.mediaType, image.data);
+  const name2 = string3(block.name);
+  const attachment = {
+    attachmentId: `${CODEX_IMAGE_ATTACHMENT_PREFIX}${hashString2(`${attachmentSeed}:${index}`)}:${index}`,
+    mediaType: image.mediaType,
+    bytes: base64ByteLength(image.data),
+    width: dimensions.width,
+    height: dimensions.height,
+    ...name2 === void 0 ? {} : { name: name2 }
+  };
+  return {
+    type: "image",
+    attachment,
+    mediaType: image.mediaType,
+    data: image.data,
+    url: image.url,
+    ...name2 === void 0 ? {} : { name: name2 }
+  };
+}
+function isImageContent2(block) {
+  return block.type === "image" || block.type === "input_image";
+}
+function parseImageBlock(block) {
+  const url = string3(block.url) ?? string3(block.image_url) ?? string3(record5(block.image_url).url);
+  const parsed = url === void 0 ? void 0 : parseDataImageUrl2(url);
+  if (parsed !== void 0) return parsed;
+  const data2 = string3(block.data);
+  if (data2 === void 0 || !isCanonicalBase642(data2)) return void 0;
+  if (data2.length > MAX_CODEX_IMAGE_BASE64) return void 0;
+  const mediaType = string3(block.mediaType) ?? string3(block.mimeType) ?? sniffImageMediaType2(data2);
+  return mediaType !== void 0 && CODEX_IMAGE_MEDIA_TYPES2.has(mediaType) ? { mediaType, data: data2, url: `data:${mediaType};base64,${data2}` } : void 0;
+}
+function parseDataImageUrl2(value) {
+  const match = DATA_IMAGE_URL2.exec(value);
+  if (match === null) return void 0;
+  const mediaType = match[1];
+  const data2 = match[2];
+  if (!CODEX_IMAGE_MEDIA_TYPES2.has(mediaType) || !isCanonicalBase642(data2)) return void 0;
+  return { mediaType, data: data2, url: `data:${mediaType};base64,${data2}` };
+}
+function collectImageBlocks(value, output = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectImageBlocks(item, output);
+    return output;
+  }
+  if (!isRecord6(value)) return output;
+  if (value.type === "image") output.push(value);
+  for (const [key, child] of Object.entries(value)) {
+    if (key === "attachment") continue;
+    if (key === "content" || key === "message" || key === "inserted" || key === "chunk" || key === "block") {
+      collectImageBlocks(child, output);
+    }
+  }
+  return output;
+}
+function base64ByteLength(value) {
+  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
+  return Math.max(1, Math.floor(value.length * 3 / 4) - padding);
+}
+function imageDimensions2(mediaType, data2) {
+  const bytes = base64PrefixBytes2(data2, 256 * 1024);
+  const parsed = mediaType === "image/png" ? pngDimensions(bytes) : mediaType === "image/jpeg" ? jpegDimensions(bytes) : mediaType === "image/gif" ? gifDimensions(bytes) : mediaType === "image/webp" ? webpDimensions(bytes) : void 0;
+  return parsed ?? { width: 1, height: 1 };
+}
+function pngDimensions(bytes) {
+  if (bytes.length < 24 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71 || bytes[4] !== 13 || bytes[5] !== 10 || bytes[6] !== 26 || bytes[7] !== 10) return void 0;
+  return positiveDimensions(readUint32BE(bytes, 16), readUint32BE(bytes, 20));
+}
+function jpegDimensions(bytes) {
+  if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216) return void 0;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 255) {
+      offset += 1;
+      continue;
+    }
+    const marker = bytes[offset + 1];
+    offset += 2;
+    if (marker === 216 || marker === 217) continue;
+    if (offset + 2 > bytes.length) return void 0;
+    const length = readUint16BE(bytes, offset);
+    if (length < 2 || offset + length > bytes.length) return void 0;
+    if (isJpegSof(marker) && length >= 7) {
+      return positiveDimensions(readUint16BE(bytes, offset + 5), readUint16BE(bytes, offset + 3));
+    }
+    offset += length;
+  }
+  return void 0;
+}
+function gifDimensions(bytes) {
+  if (bytes.length < 10 || bytes[0] !== 71 || bytes[1] !== 73 || bytes[2] !== 70 || bytes[3] !== 56 || bytes[4] !== 55 && bytes[4] !== 57 || bytes[5] !== 97) return void 0;
+  return positiveDimensions(readUint16LE(bytes, 6), readUint16LE(bytes, 8));
+}
+function webpDimensions(bytes) {
+  if (bytes.length < 30 || stringFromBytes(bytes, 0, 4) !== "RIFF" || stringFromBytes(bytes, 8, 12) !== "WEBP") return void 0;
+  const chunk = stringFromBytes(bytes, 12, 16);
+  if (chunk === "VP8X") {
+    return positiveDimensions(1 + readUint24LE(bytes, 24), 1 + readUint24LE(bytes, 27));
+  }
+  if (chunk === "VP8L" && bytes[20] === 47) {
+    const b0 = bytes[21];
+    const b1 = bytes[22];
+    const b2 = bytes[23];
+    const b3 = bytes[24];
+    const width = 1 + b0 + ((b1 & 63) << 8);
+    const height = 1 + ((b1 & 192) >> 6) + (b2 << 2) + ((b3 & 15) << 10);
+    return positiveDimensions(width, height);
+  }
+  if (chunk === "VP8 " && bytes[23] === 157 && bytes[24] === 1 && bytes[25] === 42) {
+    return positiveDimensions(readUint16LE(bytes, 26) & 16383, readUint16LE(bytes, 28) & 16383);
+  }
+  return void 0;
+}
+function sniffImageMediaType2(data2) {
+  const bytes = base64PrefixBytes2(data2, 32);
+  if (pngDimensions(bytes) !== void 0) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
+  if (gifDimensions(bytes) !== void 0) return "image/gif";
+  if (bytes.length >= 12 && stringFromBytes(bytes, 0, 4) === "RIFF" && stringFromBytes(bytes, 8, 12) === "WEBP") return "image/webp";
+  return void 0;
+}
+function base64PrefixBytes2(value, maxBytes) {
+  const chars = value.slice(0, Math.ceil(maxBytes / 3) * 4);
+  let binary;
+  try {
+    binary = atob(chars);
+  } catch {
+    return new Uint8Array();
+  }
+  const bytes = new Uint8Array(Math.min(binary.length, maxBytes));
+  for (let index = 0; index < bytes.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+function readUint16BE(bytes, offset) {
+  return (bytes[offset] << 8) + bytes[offset + 1];
+}
+function readUint16LE(bytes, offset) {
+  return bytes[offset] + (bytes[offset + 1] << 8);
+}
+function readUint24LE(bytes, offset) {
+  return bytes[offset] + (bytes[offset + 1] << 8) + (bytes[offset + 2] << 16);
+}
+function readUint32BE(bytes, offset) {
+  return bytes[offset] * 16777216 + bytes[offset + 1] * 65536 + bytes[offset + 2] * 256 + bytes[offset + 3];
+}
+function positiveDimensions(width, height) {
+  return width > 0 && height > 0 ? { width, height } : void 0;
+}
+function isJpegSof(marker) {
+  return marker >= 192 && marker <= 195 || marker >= 197 && marker <= 199 || marker >= 201 && marker <= 203 || marker >= 205 && marker <= 207;
+}
+function stringFromBytes(bytes, start, end) {
+  if (bytes.length < end) return "";
+  let output = "";
+  for (let index = start; index < end; index += 1) output += String.fromCharCode(bytes[index]);
+  return output;
+}
+function isCanonicalBase642(value) {
+  return value.length >= 4 && value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value);
+}
+function hashString2(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+// src/codex/virtual-contract.ts
+var SESSION_SEARCH_RESULT_LIMIT = 20;
+var SESSION_SEARCH_SNIPPET_CODE_POINTS = 240;
+var CODEX_DEFAULT_PERMISSION = "workspace-write";
+var MAX_CODEX_PROMPT_PARTS = 16;
+var MAX_CODEX_PROMPT_TEXT = 256 * 1024;
+var MAX_CODEX_IMAGE_BASE642 = 288 * 1024 * 1024;
+var CODEX_IMAGE_MEDIA_TYPES3 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var CODEX_IMAGE_ATTACHMENT_PREFIX2 = "codex-image:";
+var HOST_WORKSPACE_ENDPOINTS = /* @__PURE__ */ new Set([
+  "workspaceFiles/list",
+  "workspaceFiles/stat",
+  "workspaceFiles/read",
+  "workspaceFiles/readBytes",
+  "workspaceFiles/readAll",
+  "workspaceFiles/readRelated",
+  "terminal/environment",
+  "terminal/shells",
+  "terminal/list",
+  "terminal/create",
+  "terminal/write",
+  "terminal/resize",
+  "terminal/rename",
+  "terminal/close"
+]);
+var HOST_WORKSPACE_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/changes", "terminal/follow", "terminal/retain"]);
+function isHostWorkspaceEndpoint(endpoint) {
+  return HOST_WORKSPACE_ENDPOINTS.has(endpoint);
+}
+function isHostWorkspaceStreamEndpoint(endpoint) {
+  return HOST_WORKSPACE_STREAM_ENDPOINTS.has(endpoint);
+}
+function codexPromptInput(content) {
+  if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return void 0;
+  const input2 = [];
+  for (const value of content) {
+    if (!isRecord5(value)) return void 0;
+    if (value.type === "text") {
+      if (typeof value.text !== "string" || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return void 0;
+      input2.push({ type: "text", text: value.text });
+      continue;
+    }
+    if (value.type === "image") {
+      if (typeof value.mediaType !== "string" || !CODEX_IMAGE_MEDIA_TYPES3.has(value.mediaType) || typeof value.data !== "string" || value.data.length > MAX_CODEX_IMAGE_BASE642 || !isCanonicalBase642(value.data)) return void 0;
+      input2.push({ type: "image", mediaType: value.mediaType, data: value.data });
+      continue;
+    }
+    return void 0;
+  }
+  return input2;
+}
+function codexPermissionsProjection(preset) {
+  return {
+    options: [
+      {
+        value: "workspace-write",
+        name: "workspace-write",
+        description: "Write inside the workspace; wider command and file access requires one-time approval."
+      },
+      {
+        value: "danger-full-access",
+        name: "danger-full-access",
+        description: "Full Host file access without approval prompts for subsequent turns in this virtual Session."
+      }
+    ],
+    currentValue: preset ?? "Host settings (not reported)"
+  };
+}
+function codexImageLimitsProjection() {
+  return {
+    maxImageBytes: 20 * 1024 * 1024,
+    maxImagesPerMessage: MAX_CODEX_PROMPT_PARTS,
+    maxMessageImageBytes: 100 * 1024 * 1024,
+    maxImagePixels: 4e7,
+    maxImageDimension: 8192,
+    mediaTypes: [...CODEX_IMAGE_MEDIA_TYPES3]
+  };
+}
+function isCodexPermissionPreset(value) {
+  return value === "workspace-write" || value === "danger-full-access";
+}
+function sessionIdFromAddress2(address) {
+  if (address.kind === "session") return requiredString2(address.sessionId, "sessionId");
+  return requiredString2(address.childSessionId, "childSessionId");
+}
+function carrierArgs2(payload) {
+  return record4(record4(payload).args);
+}
+function requestArg2(args) {
+  return record4(args.request ?? args._request ?? args);
+}
+function rcEndpoint2(endpoint) {
+  if (endpoint === "workspace.list") return "workspace/list";
+  return endpoint.replace(".", "/");
+}
+function success2(value) {
+  return { ok: true, value };
+}
+function failure2(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function ok2(value) {
+  return value === void 0 ? { ok: true } : { ok: true, value };
+}
+function business2(value) {
+  const result = record4(value);
+  if (result.ok === true) return ok2(result.value);
+  if (result.ok === false) {
+    const error = record4(result.error);
+    return fail3(string2(error.code) ?? "internal", string2(error.message) ?? "CodeX virtual Harness rejected the request.", record4(error.details));
+  }
+  return ok2(value);
+}
+function fail3(code, message, details = {}) {
+  return { ok: false, error: { code, message, details } };
+}
+function failFrom2(error) {
+  const source = error instanceof Error ? error : new Error(String(error));
+  return fail3(errorCode(source) ?? "internal", source.message, errorDetails(source));
+}
+function isLegacySessionHistoryUnsupported(error) {
+  if (!(error instanceof Error)) return false;
+  return errorCode(error) === "METHOD_NOT_ALLOWED" || errorCode(error) === "METHOD_NOT_FOUND" || error.message.includes("The requested Codex method is not available over Remote.");
+}
+function errorDetails(error) {
+  return "details" in error && isRecord5(error.details) ? error.details : {};
+}
+function truncateCodePoints(value, maximum) {
+  return [...value].slice(0, maximum).join("");
+}
+var AsyncValueQueue2 = class {
+  constructor(signal) {
+    this.signal = signal;
+    this.onAbort = () => this.close();
+    signal.addEventListener("abort", this.onAbort, { once: true });
+    if (signal.aborted) this.close();
+  }
+  values = [];
+  waiters = [];
+  closed = false;
+  onAbort;
+  push(value) {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter === void 0) this.values.push(value);
+    else waiter({ done: false, value });
+  }
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    this.signal.removeEventListener("abort", this.onAbort);
+    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
+  }
+  iterate(dispose) {
+    const queue = this;
+    return {
+      async *[Symbol.asyncIterator]() {
+        try {
+          yield* queue;
+        } finally {
+          dispose();
+          queue.close();
+        }
+      }
+    };
+  }
+  async *[Symbol.asyncIterator]() {
+    while (true) {
+      if (this.values.length > 0) {
+        yield this.values.shift();
+        continue;
+      }
+      if (this.closed) return;
+      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
+      if (next.done) return;
+      yield next.value;
+    }
+  }
+};
+
+// src/codex/virtual-event-carrier.ts
+var CodexEventCarrier = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async workspaceFollow(signal) {
+    const queue = new AsyncValueQueue2(signal);
+    this.context.workspaceStreams.add(queue);
+    const catalog = await this.context.refreshCatalog(signal);
+    queue.push({
+      type: "baseline",
+      value: {
+        items: nativeVisibleWorkspaces(catalog, this.context.selectedWorkspaceId).map(nativeWorkspace2),
+        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+        pinnedSessionIds: []
+      }
+    });
+    return queue.iterate(() => this.context.workspaceStreams.delete(queue));
+  }
+  async sessionControl(signal) {
+    const queue = new AsyncValueQueue2(signal);
+    this.context.controlStreams.add(queue);
+    queue.push({ type: "baseline", value: { queues: {}, jobs: {}, projections: {} } });
+    return queue.iterate(() => this.context.controlStreams.delete(queue));
+  }
+  /**
+   * Background jobs belong to the Host Harness session, not to a CodeX virtual
+   * Workspace. The native session header mounts a job roster stream as soon as a
+   * Session opens, so answer it with an authoritative empty roster instead of a
+   * terminal `method-not-found` failure that tears the page down.
+   */
+  emptyJobStream(endpoint, signal) {
+    const queue = new AsyncValueQueue2(signal);
+    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
+    return queue.iterate(() => queue.close());
+  }
+  async remoteEvents(signal) {
+    const queue = new AsyncValueQueue2(signal);
+    const clientId = `codex-events:${this.context.host.deviceId}:${Date.now().toString(36)}`;
+    this.context.eventStreams.set(clientId, queue);
+    const home = (await this.context.currentCatalog(signal)).workspaces[0]?.path ?? "/";
+    queue.push({ type: "ready", clientId, host: { home } });
+    return queue.iterate(() => this.context.eventStreams.delete(clientId));
+  }
+  emitRemoteEvent(event, args) {
+    for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
+    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
+    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
+      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
+    } else if (event === "api-session/removed" && sessionId !== void 0) {
+      this.broadcastRcHost({ type: "host/session-removed", sessionId });
+    } else if (event === "api-session/added" && isRecord5(args[0])) {
+      const summary = args[0];
+      this.broadcastRcHost({
+        type: "host/session-added",
+        sessionId: summary.sessionId,
+        blank: summary.blank === true,
+        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
+      });
+    }
+  }
+  emitApproval(input2) {
+    for (const queue of this.context.eventStreams.values()) queue.push({
+      type: "waterfall",
+      event: "approval/request",
+      eventId: input2.eventId,
+      agentId: input2.agentId,
+      request: input2.request
+    });
+    this.broadcastRcMux({
+      type: "approval/requested",
+      sessionId: input2.agentId,
+      approvalId: input2.eventId,
+      toolName: string2(input2.request.toolName) ?? "CodeX",
+      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
+    }, input2.eventId);
+  }
+  async answerRemoteEvent(args, signal) {
+    const eventId = string2(args.eventId);
+    const outcome = record4(args.outcome);
+    if (eventId === void 0) throw new Error("The CodeX approval result is missing its event id.");
+    const pending = this.context.pendingApprovals.get(eventId);
+    if (pending === void 0) return void 0;
+    this.context.pendingApprovals.delete(eventId);
+    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "accept" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "decline";
+    await this.context.client.respond(pending.requestHandle, decision, signal);
+    return void 0;
+  }
+  createApiProxy() {
+    const call = (endpoint) => async (request, signal) => {
+      const payload = endpoint === "session.prompt" && isRecord5(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
+      const result = await this.context.dispatch(rcEndpoint2(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
+      return {
+        rpcId: request.rpcId,
+        result: result.ok ? success2(result.value) : failure2(result.error.code, result.error.message, result.error.details)
+      };
+    };
+    return {
+      sessions: {
+        list: call("session.list"),
+        search: call("session.search"),
+        create: call("session.create"),
+        history: call("session.history"),
+        models: call("session.models"),
+        selectModel: call("session.selectModel"),
+        rename: call("session.rename"),
+        fork: call("session.fork"),
+        prompt: call("session.prompt"),
+        attachment: call("session.attachment"),
+        updateQueue: call("session.updateQueue"),
+        cancel: call("session.cancel")
+      },
+      workspace: {
+        list: call("workspace.list"),
+        create: call("workspace.create"),
+        rename: call("workspace.rename"),
+        delete: call("workspace.delete"),
+        insertBefore: call("workspace.insertBefore"),
+        insertSessionBefore: call("workspace.insertSessionBefore"),
+        archiveSession: call("workspace.archiveSession")
+      },
+      subagents: {},
+      host: {
+        describe: call("host.describe"),
+        listDirectory: call("host.listDirectory")
+      },
+      skills: { list: call("skills.list") },
+      agentPresets: {},
+      goals: {},
+      settings: {},
+      credentials: {},
+      llm: {},
+      events: {
+        mux: ((request, signal) => this.rcMux(request, signal)),
+        host: ((request, signal) => this.rcHost(request, signal))
+      },
+      downloads: {},
+      respond: async (message) => {
+        const pending = this.context.pendingApprovals.get(String(message.rpcId));
+        if (pending === void 0) return { accepted: false, reason: "not-pending" };
+        const result = message.result;
+        const outcome = result.ok ? result.value : void 0;
+        const decision = outcome === "allowed-once" ? "accept" : outcome === "cancelled" ? "cancel" : "decline";
+        await this.context.client.respond(pending.requestHandle, decision);
+        this.context.pendingApprovals.delete(pending.requestHandle);
+        return { accepted: true };
+      }
+    };
+  }
+  async *rcMux(request, signal) {
+    const queue = new AsyncValueQueue2(signal);
+    this.context.rcMuxStreams.add(queue);
+    const catalog = await this.context.currentCatalog(signal);
+    for (const session of catalog.sessions) queue.push({
+      rpcId: `${String(request.rpcId)}:${session.id}:subscribed`,
+      payload: { type: "session/subscribed", sessionId: session.id, lastSeq: -1 }
+    });
+    try {
+      yield* queue;
+    } finally {
+      this.context.rcMuxStreams.delete(queue);
+      queue.close();
+    }
+  }
+  async *rcHost(_request, signal) {
+    const queue = new AsyncValueQueue2(signal);
+    this.context.rcHostStreams.add(queue);
+    try {
+      yield* queue;
+    } finally {
+      this.context.rcHostStreams.delete(queue);
+      queue.close();
+    }
+  }
+  broadcastRcMux(payload, rpcId2 = `codex-mux:${Date.now()}:${Math.random()}`) {
+    for (const queue of this.context.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
+  }
+  broadcastRcHost(payload) {
+    const frame = { rpcId: `codex-host:${Date.now()}:${Math.random()}`, payload };
+    for (const queue of this.context.rcHostStreams) queue.push(frame);
+  }
+  publishProjection(sessionId, key, value, seq) {
+    for (const queue of this.context.controlStreams) queue.push({ type: "projection", sessionId, key, value, seq });
+    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
+  }
+};
+
+// src/codex/virtual-history.ts
+var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
+var DEFAULT_HISTORY_MESSAGES = 50;
+function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
+  const entries = [];
+  let seq = 0;
+  let turnNumber = 0;
+  const active = activeTurnId(thread.turns);
+  const append = (type, data2, time = Date.now(), view, sourceEventSeqs) => {
+    const eventSeq = seq++;
+    entries.push({
+      type: "event",
+      event: {
+        type,
+        seq: eventSeq,
+        time,
+        data: adaptEventData(type, data2, sessionGeneration),
+        ...sourceEventSeqs === void 0 ? {} : { sourceEventSeqs },
+        ...isSurfaceEvent2(type) ? { surfaceOp: "append" } : {}
+      },
+      ...view === void 0 ? {} : { view }
+    });
+    return eventSeq;
+  };
+  for (const rawTurn of array2(thread.turns)) {
+    const turn = record4(rawTurn);
+    const turnItems = array2(turn.items).map(record4);
+    const toolImages = turnItems.flatMap(toolOutputImageBlocks);
+    let imageOwner = -1;
+    for (let index = 0; index < turnItems.length; index += 1) {
+      if (turnItems[index].type === "agentMessage") imageOwner = index;
+    }
+    turnNumber += 1;
+    const turnActive = isActiveCodexTurn(turn);
+    const time = normalizeTime(turn.createdAt) || normalizeTime(turn.startedAt) || normalizeTime(thread.createdAt) || Date.now();
+    append("turn/start", { turn: turnNumber }, time);
+    append("step/start", { turn: turnNumber, step: 1 }, time);
+    for (let itemIndex = 0; itemIndex < turnItems.length; itemIndex += 1) {
+      const item = turnItems[itemIndex];
+      let toolCallSeq;
+      for (const event of itemEvents(
+        item,
+        turnNumber,
+        1,
+        void 0,
+        modelSelection(),
+        sessionId,
+        itemIndex === imageOwner ? toolImages : []
+      )) {
+        const eventSeq = append(
+          event.type,
+          event.data,
+          normalizeTime(item.createdAt) || time,
+          event.view,
+          event.type === "tool/result" && toolCallSeq !== void 0 ? [toolCallSeq] : void 0
+        );
+        if (event.type === "tool/call") toolCallSeq = eventSeq;
+      }
+    }
+    if (turnActive) continue;
+    append("step/end", { turn: turnNumber, step: 1 }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time);
+    append("turn/end", {
+      turn: turnNumber,
+      reason: turn.status === "failed" || turn.error !== void 0 && turn.error !== null ? { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } } : { kind: "completed" }
+    }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time);
+  }
+  const projected = projectCodexThread(thread);
+  return {
+    header: {
+      version: sessionGeneration === "v3" ? 3 : 1,
+      id: sessionId,
+      createdAt: projected?.createdAt ?? Date.now(),
+      ...projected?.cwd === void 0 ? {} : { cwd: projected.cwd },
+      ...sessionGeneration === "v3" ? { isSeeded: false } : {}
+    },
+    entries,
+    lastSeq: seq - 1,
+    nextTurn: turnNumber,
+    ...active === void 0 ? {} : { activeTurnId: active }
+  };
+}
+function paginateCodexNativeHistory(history, request) {
+  const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq);
+  const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
+  const window2 = endSeq < 0 ? [] : history.entries.filter((entry) => entry.event.seq <= endSeq);
+  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES;
+  let messages = 0;
+  let cut = 0;
+  for (let index = window2.length - 1; index >= 0; index -= 1) {
+    const event = window2[index].event;
+    if (!isSurfaceEvent2(event.type) || event.surfaceOp !== "append") continue;
+    messages += 1;
+    if (messages >= maxMessages) {
+      cut = Math.min(event.seq, ...event.sourceEventSeqs ?? []);
+      break;
+    }
+  }
+  return {
+    header: history.header,
+    cursor: history.lastSeq,
+    nextTurn: history.nextTurn,
+    records: window2.filter((entry) => entry.event.seq >= cut),
+    hasMore: window2.some((entry) => entry.event.seq < cut),
+    ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+  };
+}
+function adaptEventData(type, data2, sessionGeneration) {
+  if (sessionGeneration !== "v3" || type !== "assistant/message") return data2;
+  const value = record4(data2);
+  return Array.isArray(value.stream) ? value : { ...value, stream: [] };
+}
+function adaptCodexHistoryPage(value, sessionGeneration) {
+  if (sessionGeneration !== "v3") return value;
+  const page = record4(value);
+  const sourceHeader = record4(page.header);
+  const { seedLength: _seedLength, ...header } = sourceHeader;
+  const records = Array.isArray(page.records) ? page.records.map((raw) => {
+    const entry = record4(raw);
+    const sourceEvent = record4(entry.event);
+    const sourceSurfaceOp = record4(sourceEvent.surfaceOp);
+    const surfaceOp = sourceEvent.surfaceOp === "append" ? "append" : sourceSurfaceOp.op === "replace" && integer2(sourceSurfaceOp.startSeq) !== void 0 && integer2(sourceSurfaceOp.endSeq) !== void 0 ? sourceSurfaceOp : sourceSurfaceOp.op === "replace" && integer2(sourceSurfaceOp.start) !== void 0 && integer2(sourceSurfaceOp.end) !== void 0 ? {
+      op: "replace",
+      startSeq: sourceSurfaceOp.start,
+      endSeq: sourceSurfaceOp.end
+    } : sourceEvent.surfaceOp;
+    return {
+      ...entry,
+      event: {
+        ...sourceEvent,
+        data: adaptEventData(string2(sourceEvent.type) ?? "", sourceEvent.data, sessionGeneration),
+        ...surfaceOp === void 0 ? {} : { surfaceOp }
+      }
+    };
+  }) : page.records;
+  return {
+    ...page,
+    header: { ...header, version: 3, isSeeded: sourceHeader.isSeeded === true },
+    records
+  };
+}
+function itemEvents(item, turn, step, requestId, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
+  const type = string2(item.type);
+  const id5 = string2(item.id) ?? `${turn}:${step}:${hashString(JSON.stringify(item))}`;
+  const text = itemText2(item);
+  if (type === "userMessage") return [{
+    type: "user/message",
+    data: {
+      id: id5,
+      role: "user",
+      content: messageContent(item, `${sessionId}:${id5}`, "text", text),
+      source: requestId === void 0 || requestId === "" ? { kind: "user" } : { kind: "user", rpcId: requestId }
+    }
+  }];
+  if (type === "agentMessage" || type === "reasoning" || type === "plan") return [{
+    type: "assistant/message",
+    data: {
+      turn,
+      step,
+      message: {
+        id: id5,
+        role: "assistant",
+        content: messageContent(
+          item,
+          `${sessionId}:${id5}`,
+          type === "reasoning" ? "reasoning" : "text",
+          text,
+          type === "agentMessage" ? supplementalImages : []
+        ),
+        source: { kind: "model", provider: selection.provider, model: selection.model }
+      }
+    }
+  }];
+  if (type !== void 0 && isToolItemType2(type)) {
+    const name2 = toolEventName(type);
+    const args = toolArguments(item);
+    return [
+      {
+        type: "tool/call",
+        data: { turn, step, callId: id5, name: name2, arguments: JSON.stringify(args) },
+        view: { for: "call", view: toolCallView(item, type, args) }
+      },
+      toolResultEvent(item, turn, step, id5, toolResultText(item, type, text))
+    ];
+  }
+  if (type === "error") return [{
+    type: "assistant/message",
+    data: {
+      turn,
+      step,
+      message: {
+        id: id5,
+        role: "assistant",
+        content: [{ type: "text", text: text ?? "CodeX reported an error." }],
+        source: { kind: "model", provider: selection.provider, model: selection.model }
+      }
+    }
+  }];
+  return [];
+}
+function messageContent(item, attachmentSeed, fallbackType, fallbackText, supplementalImages = []) {
+  const source = item.content ?? item.input;
+  const blocks = contentBlocks(source, attachmentSeed);
+  const images = contentBlocks(supplementalImages, `${attachmentSeed}:tool-output`);
+  if (blocks.length > 0 || images.length > 0) {
+    return [...blocks.length > 0 ? blocks : [{ type: fallbackType, text: fallbackText ?? "" }], ...images];
+  }
+  return [{ type: fallbackType, text: fallbackText ?? "" }];
+}
+function toolResultEvent(item, turn, step, id5, resultText) {
+  const type = string2(item.type) ?? "unknown";
+  return {
+    type: "tool/result",
+    data: {
+      turn,
+      step,
+      message: {
+        id: `${id5}:result`,
+        role: "user",
+        content: [{
+          type: "tool-result",
+          toolCallId: id5,
+          content: [{ type: "text", text: resultText }],
+          ...item.status === "failed" || item.success === false ? { isError: true } : {}
+        }],
+        source: { kind: "tool", callId: id5 }
+      }
+    },
+    view: { for: "result", view: toolResultView(item, type, resultText) }
+  };
+}
+function toolResultContentReplacement(event) {
+  const data2 = record4(event.data);
+  const message = record4(data2.message);
+  const content = array2(message.content);
+  const result = record4(content[0]);
+  if (result.isError === void 0) return event;
+  const { isError: _isError, ...stableResult } = result;
+  return {
+    ...event,
+    data: {
+      ...data2,
+      message: { ...message, content: [stableResult] }
+    }
+  };
+}
+function isToolItemType2(type) {
+  return type === "commandExecution" || type === "mcpToolCall" || type === "dynamicToolCall" || type === "fileChange" || type === "functionCallOutput" || type === "hookPrompt" || type === "collabAgentToolCall" || type === "subAgentActivity" || type === "webSearch" || type === "imageView" || type === "imageGeneration" || type === "sleep" || type === "enteredReviewMode" || type === "exitedReviewMode" || type === "contextCompaction";
+}
+function toolEventName(type) {
+  if (type === "fileChange") return "codex.fileChange";
+  if (type === "commandExecution") return "codex.command";
+  if (type === "webSearch") return "codex.webSearch";
+  if (type === "collabAgentToolCall" || type === "subAgentActivity") return "codex.subagent";
+  if (type === "imageView" || type === "imageGeneration") return "codex.image";
+  if (type === "enteredReviewMode" || type === "exitedReviewMode") return "codex.reviewMode";
+  if (type === "contextCompaction") return "codex.compaction";
+  return `codex.${type}`;
+}
+function toolResultText(item, type, text) {
+  if (type === "fileChange") return fileChangeSummary(item);
+  if (type === "webSearch") {
+    const count = array2(item.results).length;
+    return count === 0 ? "Web search completed." : `Web search returned ${count} result${count === 1 ? "" : "s"}.`;
+  }
+  if (type === "imageView") return `Viewed image: ${string2(item.path) ?? "image"}`;
+  if (type === "imageGeneration") {
+    const savedPath = string2(item.savedPath);
+    return savedPath === void 0 ? `Image generation ${string2(item.status) ?? "completed"}.` : `Generated image: ${savedPath}`;
+  }
+  if (type === "contextCompaction") return "CodeX compacted the conversation context.";
+  if (type === "enteredReviewMode") return `Entered review mode${string2(item.review) ? `: ${string2(item.review)}` : "."}`;
+  if (type === "exitedReviewMode") return `Exited review mode${string2(item.review) ? `: ${string2(item.review)}` : "."}`;
+  if (type === "sleep") return `Waited ${integer2(item.durationMs) ?? 0} ms.`;
+  if (type === "subAgentActivity") {
+    return [string2(record4(item.kind).type) ?? string2(item.kind) ?? "Subagent activity", string2(item.agentPath)].filter((value) => value !== void 0).join(": ");
+  }
+  return text ?? itemText2(record4(item.result)) ?? itemText2(record4(item.output)) ?? string2(item.status) ?? type;
+}
+function isSurfaceEvent2(type) {
+  return type === "user/message" || type === "assistant/message" || type === "tool/result";
+}
+function toolCallView(item, type, args) {
+  if (type === "commandExecution") {
+    return {
+      card: "terminal",
+      title: commandText(item.command) ?? "CodeX command",
+      ...typeof item.cwd === "string" ? { cwd: item.cwd } : {}
+    };
+  }
+  const locations = fileLocations(item);
+  if (type === "fileChange") {
+    return {
+      card: "generic",
+      title: locations.length === 0 ? "CodeX file changes" : `Modify ${locations.length} file${locations.length === 1 ? "" : "s"}`,
+      kind: "edit",
+      rawInput: args,
+      ...locations.length === 0 ? {} : { locations }
+    };
+  }
+  if (type === "webSearch") {
+    return {
+      card: "generic",
+      title: string2(item.query) ?? "CodeX web search",
+      kind: "search",
+      rawInput: args
+    };
+  }
+  if (type === "imageView" || type === "imageGeneration") {
+    const path = string2(item.path) ?? string2(item.savedPath);
+    return {
+      card: "generic",
+      title: type === "imageView" ? "View image" : "Generate image",
+      kind: type === "imageView" ? "read" : "other",
+      ...path === void 0 ? {} : { locations: [{ path }] }
+    };
+  }
+  if (type === "collabAgentToolCall" || type === "subAgentActivity") {
+    return {
+      card: "generic",
+      title: type === "collabAgentToolCall" ? `Subagent: ${string2(item.tool) ?? "collaboration"}` : `Subagent activity: ${string2(item.agentPath) ?? string2(item.agentThreadId) ?? "agent"}`,
+      kind: "other",
+      rawInput: args
+    };
+  }
+  if (type === "contextCompaction") return { card: "generic", title: "Compact conversation context", kind: "other" };
+  if (type === "enteredReviewMode") return { card: "generic", title: "Enter review mode", kind: "other" };
+  if (type === "exitedReviewMode") return { card: "generic", title: "Exit review mode", kind: "other" };
+  return {
+    card: "generic",
+    title: toolDisplayName(item, type),
+    kind: "other"
+  };
+}
+function toolResultView(item, type, resultText) {
+  if (type === "commandExecution") {
+    return {
+      card: "terminal",
+      output: resultText,
+      ...typeof item.exitCode === "number" && Number.isSafeInteger(item.exitCode) ? { exitCode: item.exitCode } : {}
+    };
+  }
+  return {
+    card: "generic",
+    ...type === "fileChange" ? { title: item.status === "inProgress" ? "CodeX file changes" : "CodeX file changes completed" } : {},
+    ...type === "mcpToolCall" && item.status === "inProgress" ? { title: "CodeX MCP tool in progress", content: [{ type: "text", text: resultText }] } : {}
+  };
+}
+function toolDisplayName(item, type) {
+  return string2(item.name) ?? string2(item.tool) ?? string2(record4(item.tool).name) ?? (type === "mcpToolCall" ? "CodeX MCP tool" : humanizeItemType(type));
+}
+function fileLocations(item) {
+  return array2(item.changes).map((value) => string2(record4(value).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
+}
+function itemText2(value) {
+  if (typeof value.text === "string") return value.text;
+  if (typeof value.content === "string") return value.content;
+  const content = Array.isArray(value.content) ? value.content : Array.isArray(value.input) ? value.input : void 0;
+  if (content !== void 0) {
+    const text = content.map((part) => {
+      if (typeof part === "string") return part;
+      const block = record4(part);
+      return string2(block.text) ?? string2(block.content) ?? "";
+    }).filter(Boolean).join("\n");
+    if (text !== "") return text;
+  }
+  if (Array.isArray(value.summary)) return value.summary.filter((item) => typeof item === "string").join("\n");
+  if (typeof value.output === "string") return value.output;
+  if (typeof value.aggregatedOutput === "string") return value.aggregatedOutput;
+  return void 0;
+}
+function toolArguments(item) {
+  if (item.type === "commandExecution") return { command: commandText(item.command) ?? item.command ?? "" };
+  if (item.type === "fileChange") return {
+    changes: array2(item.changes).map((value) => {
+      const change = record4(value);
+      const kind = typeof change.kind === "string" ? change.kind : string2(record4(change.kind).type);
+      return {
+        ...typeof change.path === "string" ? { path: change.path } : {},
+        ...kind === void 0 ? {} : { kind }
+      };
+    })
+  };
+  if (item.type === "webSearch") return { query: string2(item.query) ?? "" };
+  if (item.type === "imageView") return { path: string2(item.path) ?? "" };
+  if (item.type === "imageGeneration") return {
+    ...string2(item.revisedPrompt) === void 0 ? {} : { prompt: string2(item.revisedPrompt) },
+    transparentBackground: item.transparentBackground === true
+  };
+  if (item.type === "collabAgentToolCall") return {
+    tool: string2(item.tool) ?? "collaboration",
+    receiverThreadIds: array2(item.receiverThreadIds).filter((value) => typeof value === "string"),
+    ...string2(item.model) === void 0 ? {} : { model: string2(item.model) }
+  };
+  if (item.type === "subAgentActivity") return {
+    agentThreadId: string2(item.agentThreadId) ?? "",
+    agentPath: string2(item.agentPath) ?? "",
+    kind: string2(record4(item.kind).type) ?? string2(item.kind) ?? "activity"
+  };
+  if (item.type === "sleep") return { durationMs: integer2(item.durationMs) ?? 0 };
+  if (item.type === "enteredReviewMode" || item.type === "exitedReviewMode") return {
+    review: string2(item.review) ?? ""
+  };
+  if (item.type === "contextCompaction") return {};
+  return { name: item.name ?? item.tool ?? item.type ?? "tool", arguments: item.arguments ?? item.input ?? {} };
+}
+function fileChangeSummary(item) {
+  const changes = array2(item.changes).map((value) => {
+    const change = record4(value);
+    const path = string2(change.path);
+    const kind = typeof change.kind === "string" ? change.kind : string2(record4(change.kind).type);
+    return [kind, path].filter((part) => part !== void 0 && part.length > 0).join(" ");
+  }).filter(Boolean);
+  return changes.length === 0 ? "File changes completed." : changes.join("\n");
+}
+function sanitizedFileChanges(value) {
+  return array2(value).flatMap((raw) => {
+    const change = record4(raw);
+    const path = string2(change.path);
+    if (path === void 0) return [];
+    const kind = typeof change.kind === "string" ? change.kind : string2(record4(change.kind).type);
+    return [{ path, ...kind === void 0 ? {} : { kind } }];
+  });
+}
+function appendBoundedText(current, delta) {
+  const value = `${current}${delta}`;
+  if (value.length <= MAX_LIVE_TOOL_OUTPUT) return value;
+  return `\u2026 earlier output omitted \u2026
+${value.slice(value.length - MAX_LIVE_TOOL_OUTPUT)}`;
+}
+function humanizeItemType(type) {
+  const names = {
+    functionCallOutput: "CodeX function output",
+    hookPrompt: "CodeX hook prompt",
+    dynamicToolCall: "CodeX tool",
+    collabAgentToolCall: "CodeX subagent",
+    subAgentActivity: "CodeX subagent activity",
+    webSearch: "CodeX web search",
+    imageView: "CodeX image view",
+    imageGeneration: "CodeX image generation",
+    sleep: "CodeX wait",
+    enteredReviewMode: "CodeX review mode",
+    exitedReviewMode: "CodeX review mode",
+    contextCompaction: "CodeX context compaction"
+  };
+  return names[type] ?? "CodeX tool";
+}
+function commandText(value) {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string").join(" ");
+  const source = record4(value);
+  return string2(source.command) ?? string2(source.text);
+}
+function activeTurnId(value) {
+  if (!Array.isArray(value)) return void 0;
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    const turn = record4(value[index]);
+    if (isActiveCodexTurn(turn) && typeof turn.id === "string" && turn.id.length > 0) return turn.id;
+  }
+  return void 0;
+}
+function isActiveCodexTurn(turn) {
+  return turn.status === "inProgress" || turn.status === "running";
+}
+function isCodexNativeHistoryPage(value, sessionId) {
+  const page = record4(value);
+  const header = record4(page.header);
+  return header.id === sessionId && integer2(page.cursor) !== void 0 && integer2(page.nextTurn) !== void 0 && Array.isArray(page.records) && typeof page.hasMore === "boolean" && (page.activeTurnId === void 0 || typeof page.activeTurnId === "string");
+}
+
+// src/codex/virtual-live.ts
+var CodexLiveProjection = class {
+  constructor(context) {
+    this.context = context;
+  }
+  async sessionFollow(request, signal) {
+    const sessionId = sessionIdFromAddress2(record4(request.address));
+    const threadId = nativeThreadId(sessionId);
+    const history = await this.context.readHistoryPage(threadId, {
+      maxMessages: optionalPositiveInteger2(request.maxMessages)
+    }, signal);
+    const directory = await this.context.models(signal).catch(() => void 0);
+    const queue = new AsyncValueQueue2(signal);
+    const follow = {
+      sessionId,
+      threadId,
+      queue,
+      nextSeq: history.cursor + 1,
+      turn: history.nextTurn,
+      stepOpen: history.activeTurnId !== void 0,
+      startedItems: /* @__PURE__ */ new Set(),
+      completedItems: /* @__PURE__ */ new Set(),
+      streamedBlocks: /* @__PURE__ */ new Map(),
+      nextBlockIndex: 0,
+      streamActive: false,
+      assistantStreamRevision: 0,
+      liveItems: /* @__PURE__ */ new Map(),
+      liveToolOutput: /* @__PURE__ */ new Map(),
+      liveToolResultSeq: /* @__PURE__ */ new Map(),
+      pendingToolImages: [],
+      requestId: this.context.pendingRequestIds.get(sessionId),
+      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+    };
+    this.context.follows.add(follow);
+    queue.push({
+      type: "snapshot",
+      header: history.header,
+      cursor: history.cursor,
+      records: history.records,
+      hasMore: history.hasMore,
+      projections: {
+        asOfSeq: history.cursor,
+        values: {
+          title: this.context.sessionTitle(sessionId),
+          sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
+          modelSelection: modelSelectionProjection(this.context.modelSelection(sessionId, directory)),
+          permissions: codexPermissionsProjection(this.context.permissionSelection(sessionId)),
+          imageLimits: codexImageLimitsProjection()
+        }
+      },
+      ...this.context.sessionGeneration === "v3" ? { assistantStream: { revision: 0 } } : {}
+    });
+    try {
+      const stream = await this.context.client.subscribe(
+        threadId,
+        (frame) => this.acceptCodexFrame(follow, frame),
+        signal,
+        () => this.closeFollowAfterRemoteStreamClosed(follow)
+      );
+      if (this.context.closed || signal.aborted) {
+        await stream.close().catch(() => void 0);
+        signal.throwIfAborted();
+        throw new Error("The CodeX virtual Harness is closed.");
+      }
+      follow.close = () => stream.close();
+    } catch (error) {
+      this.context.follows.delete(follow);
+      queue.close();
+      throw error;
+    }
+    this.context.rememberOpenedSession(sessionId);
+    return queue.iterate(() => {
+      this.context.follows.delete(follow);
+      void follow.close?.().catch(() => void 0);
+    });
+  }
+  acceptCodexFrame(follow, frame) {
+    const params = record4(frame.params);
+    if (frame.method === "thread/name/updated") {
+      const name2 = string2(params.threadName);
+      if (name2 === void 0) return;
+      const seq = this.context.nextProjectionSeq();
+      this.context.updateThreadName(follow.threadId, name2);
+      const title = name2.trim() === "" ? null : name2.slice(0, 256);
+      this.context.publishProjection(follow.sessionId, "title", title, seq);
+      return;
+    }
+    if (frame.method === "thread/settings/updated") {
+      const preset = codexPermissionPresetFromResponse(params);
+      this.context.setPermissionSelection(follow.sessionId, preset);
+      return;
+    }
+    if (frame.method === "turn/started") {
+      const turn = record4(params.turn);
+      this.endAssistantAttempt(follow, { kind: "abandoned" });
+      this.resetLiveTurn(follow);
+      follow.turn += 1;
+      follow.activeTurnId = string2(turn.id);
+      follow.requestId = this.context.pendingRequestIds.get(follow.sessionId);
+      follow.stepOpen = true;
+      this.pushEvent(follow, "turn/start", { turn: follow.turn });
+      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
+      this.context.emitRemoteEvent("api-session/status", [follow.sessionId, true]);
+      for (const item of array2(turn.items)) this.acceptCompletedItem(follow, record4(item), false);
+      return;
+    }
+    if (frame.method === "item/started" || frame.method === "item/completed") {
+      const item = record4(params.item);
+      const itemId = string2(item.id);
+      if (frame.method === "item/started" && itemId !== void 0) {
+        follow.startedItems.add(itemId);
+        follow.liveItems.set(itemId, item);
+        if (isToolItemType2(string2(item.type))) this.ensureToolStarted(follow, item);
+      }
+      if (frame.method === "item/completed") this.acceptCompletedItem(follow, item, true);
+      return;
+    }
+    if (frame.method === "item/agentMessage/delta") {
+      const itemId = string2(params.itemId) ?? `assistant:${follow.turn}`;
+      const delta = string2(params.delta);
+      if (delta === void 0) return;
+      this.appendStreamDelta(follow, `agent:${itemId}`, itemId, "text", delta);
+      return;
+    }
+    if (frame.method === "item/reasoning/summaryPartAdded") {
+      const itemId = string2(params.itemId);
+      if (itemId !== void 0) this.ensureStreamBlock(
+        follow,
+        `reasoning-summary:${itemId}:${integer2(params.summaryIndex) ?? 0}`,
+        itemId,
+        "reasoning"
+      );
+      return;
+    }
+    if (frame.method === "item/reasoning/summaryTextDelta" || frame.method === "item/reasoning/textDelta" || frame.method === "item/plan/delta") {
+      const itemId = string2(params.itemId);
+      const delta = string2(params.delta);
+      if (itemId === void 0 || delta === void 0) return;
+      const key = frame.method === "item/plan/delta" ? `plan:${itemId}` : frame.method === "item/reasoning/summaryTextDelta" ? `reasoning-summary:${itemId}:${integer2(params.summaryIndex) ?? 0}` : `reasoning-content:${itemId}:${integer2(params.contentIndex) ?? 0}`;
+      this.appendStreamDelta(follow, key, itemId, "reasoning", delta);
+      return;
+    }
+    if (frame.method === "turn/plan/updated") {
+      const todos = array2(params.plan).flatMap((value) => {
+        const item = record4(value);
+        const content = string2(item.step);
+        if (content === void 0) return [];
+        const status2 = item.status === "inProgress" ? "in_progress" : item.status === "completed" ? "completed" : "pending";
+        return [{ content, status: status2 }];
+      });
+      this.pushEvent(follow, "todo/write", { todos });
+      return;
+    }
+    if (frame.method === "item/commandExecution/outputDelta" || frame.method === "item/fileChange/outputDelta" || frame.method === "item/mcpToolCall/progress") {
+      const itemId = string2(params.itemId);
+      const delta = frame.method === "item/mcpToolCall/progress" ? string2(params.message) : string2(params.delta);
+      if (itemId === void 0 || delta === void 0) return;
+      const type = frame.method === "item/commandExecution/outputDelta" ? "commandExecution" : frame.method === "item/fileChange/outputDelta" ? "fileChange" : "mcpToolCall";
+      const item = follow.liveItems.get(itemId) ?? { id: itemId, type, status: "inProgress" };
+      follow.liveItems.set(itemId, item);
+      this.ensureToolStarted(follow, item);
+      const separator = frame.method === "item/mcpToolCall/progress" && follow.liveToolOutput.has(itemId) ? "\n" : "";
+      const output = appendBoundedText(follow.liveToolOutput.get(itemId) ?? "", `${separator}${delta}`);
+      follow.liveToolOutput.set(itemId, output);
+      this.emitToolResult(follow, item, output);
+      return;
+    }
+    if (frame.method === "item/fileChange/patchUpdated") {
+      const itemId = string2(params.itemId);
+      if (itemId === void 0) return;
+      const previous = follow.liveItems.get(itemId) ?? { id: itemId, type: "fileChange", status: "inProgress" };
+      const item = { ...previous, changes: sanitizedFileChanges(params.changes) };
+      follow.liveItems.set(itemId, item);
+      this.ensureToolStarted(follow, item);
+      this.emitToolResult(follow, item, fileChangeSummary(item));
+      return;
+    }
+    if (frame.method === "thread/status/changed") {
+      const status2 = record4(params.status);
+      const running = status2.type === "active";
+      this.context.emitRemoteEvent("api-session/status", [follow.sessionId, running]);
+      if (status2.type === "systemError") {
+        this.context.broadcastRcHost({
+          type: "host/agent-error",
+          sessionId: follow.sessionId,
+          message: "CodeX reported a thread system error."
+        });
+      }
+      return;
+    }
+    if (frame.method === "model/rerouted") {
+      const model = string2(params.toModel);
+      if (model === void 0) return;
+      const previous = this.context.selectedModels.get(follow.sessionId);
+      const selected = {
+        provider: CODEX_PROVIDER,
+        model,
+        ...previous?.reasoningEffort === void 0 ? {} : { reasoningEffort: previous.reasoningEffort }
+      };
+      this.context.selectedModels.set(follow.sessionId, selected);
+      const seq = this.pushEvent(follow, "request/context", { provider: CODEX_PROVIDER, model });
+      this.context.publishProjection(follow.sessionId, "modelSelection", modelSelectionProjection(selected), seq);
+      return;
+    }
+    if (frame.method === "turn/completed") {
+      const turn = record4(params.turn);
+      for (const item of array2(turn.items)) this.acceptCompletedItem(follow, record4(item), true);
+      if (follow.stepOpen) {
+        this.closeAllStreamBlocks(follow);
+        if (follow.streamActive) this.finishStream(follow);
+        this.endAssistantAttempt(follow, { kind: "abandoned" });
+        this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
+        follow.stepOpen = false;
+      }
+      this.pushEvent(follow, "turn/end", {
+        turn: follow.turn,
+        reason: turn.status === "failed" || turn.error !== void 0 && turn.error !== null ? { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } } : { kind: "completed" }
+      });
+      this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+      this.context.emitRemoteEvent("api-session/activity", [follow.sessionId, Date.now()]);
+      follow.activeTurnId = void 0;
+      this.context.pendingRequestIds.delete(follow.sessionId);
+      void this.context.refreshAndPublishWorkspaces();
+      return;
+    }
+    if (frame.method === "item/commandExecution/requestApproval" || frame.method === "item/fileChange/requestApproval") {
+      const requestHandle = string2(params.requestHandle);
+      if (requestHandle === void 0) return;
+      const command = commandText(params.command);
+      this.context.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
+      this.context.emitApproval({
+        eventId: requestHandle,
+        agentId: follow.sessionId,
+        request: {
+          toolName: frame.method.includes("fileChange") ? "CodeX file change" : "CodeX command",
+          ...command === void 0 ? {} : { reason: command }
+        }
+      });
+    }
+  }
+  acceptCompletedItem(follow, item, settleAssistant) {
+    const itemId = string2(item.id) ?? `item:${follow.nextSeq}`;
+    if (follow.completedItems.has(itemId)) return;
+    const type = string2(item.type);
+    if (type === "agentMessage" && !settleAssistant) return;
+    follow.completedItems.add(itemId);
+    this.closeItemStreamBlocks(follow, itemId, itemText2(item));
+    if (type === "agentMessage" && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow);
+    const supplementalImages = type === "agentMessage" ? follow.pendingToolImages : [];
+    let assistantMessageSeq;
+    for (const event of itemEvents(
+      item,
+      follow.turn,
+      1,
+      follow.requestId,
+      this.context.modelSelection(follow.sessionId),
+      follow.sessionId,
+      supplementalImages
+    )) {
+      if (event.type === "tool/call" && follow.startedItems.has(itemId)) continue;
+      if (event.type === "tool/result") this.pushToolResult(follow, itemId, event);
+      else {
+        const seq = this.pushEvent(follow, event.type, event.data, event.view);
+        if (event.type === "assistant/message") assistantMessageSeq = seq;
+      }
+    }
+    if (type === "agentMessage" && assistantMessageSeq !== void 0) {
+      this.endAssistantAttempt(follow, {
+        kind: "committed",
+        eventType: "assistant/message",
+        seq: assistantMessageSeq
+      });
+    }
+    if (type === "agentMessage" && supplementalImages.length > 0) follow.pendingToolImages = [];
+    else if (type !== void 0 && isToolItemType2(type)) {
+      follow.pendingToolImages.push(...toolOutputImageBlocks(item));
+    }
+    follow.liveItems.delete(itemId);
+    follow.liveToolOutput.delete(itemId);
+    follow.liveToolResultSeq.delete(itemId);
+    follow.liveToolResultSeq.delete(`${itemId}:call`);
+  }
+  pushEvent(follow, type, data2, view, placement) {
+    const seq = follow.nextSeq++;
+    const event = {
+      type,
+      seq,
+      time: Date.now(),
+      data: adaptEventData(
+        type,
+        type === "assistant/message" && this.context.sessionGeneration === "v3" && follow.assistantAttempt !== void 0 ? { ...record4(data2), stream: follow.assistantAttempt.stream } : data2,
+        this.context.sessionGeneration
+      ),
+      ...isSurfaceEvent2(type) ? placement === void 0 ? { surfaceOp: "append" } : {
+        surfaceOp: this.context.sessionGeneration === "v3" ? { op: "replace", startSeq: placement.replaceSeq, endSeq: placement.replaceSeq } : { op: "replace", start: placement.replaceSeq, end: placement.replaceSeq },
+        sourceEventSeqs: [placement.replaceSeq]
+      } : {}
+    };
+    this.cacheImageBlocks(follow.sessionId, event.data);
+    if (!follow.rcOnly) {
+      follow.queue.push({
+        type: "event",
+        event,
+        ...view === void 0 ? {} : { view }
+      });
+    }
+    this.context.broadcastRcMux({
+      type: "session/event",
+      sessionId: follow.sessionId,
+      event,
+      ...view === void 0 ? {} : { view }
+    });
+    return seq;
+  }
+  cacheImageBlocks(sessionId, value) {
+    for (const block of collectImageBlocks(value)) {
+      const attachment = record4(block.attachment);
+      const attachmentId = string2(attachment.attachmentId);
+      const data2 = string2(block.data);
+      if (attachmentId === void 0 || data2 === void 0 || !attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX2)) continue;
+      this.context.imageAttachments.set(attachmentId, { sessionId, attachment, data: data2 });
+    }
+  }
+  ensureStreamBlock(follow, key, itemId, kind) {
+    const current = follow.streamedBlocks.get(key);
+    if (current !== void 0) return current;
+    const block = { itemId, index: follow.nextBlockIndex++, kind, text: "" };
+    follow.streamedBlocks.set(key, block);
+    follow.streamActive = true;
+    this.pushAssistantChunk(follow, { type: "block-start", index: block.index, blockType: kind });
+    return block;
+  }
+  appendStreamDelta(follow, key, itemId, kind, delta) {
+    const block = this.ensureStreamBlock(follow, key, itemId, kind);
+    block.text = appendBoundedText(block.text, delta);
+    this.pushAssistantChunk(follow, {
+      type: kind === "reasoning" ? "reasoning-delta" : "text-delta",
+      index: block.index,
+      text: delta
+    });
+  }
+  closeItemStreamBlocks(follow, itemId, fallback) {
+    const matches = [...follow.streamedBlocks].filter(([, block]) => block.itemId === itemId);
+    for (const [key, block] of matches) {
+      const text = block.text || fallback || "";
+      this.pushAssistantChunk(follow, {
+        type: "block-end",
+        index: block.index,
+        block: { type: block.kind, text }
+      });
+      follow.streamedBlocks.delete(key);
+    }
+  }
+  closeAllStreamBlocks(follow) {
+    for (const block of follow.streamedBlocks.values()) {
+      this.pushAssistantChunk(follow, {
+        type: "block-end",
+        index: block.index,
+        block: { type: block.kind, text: block.text }
+      });
+    }
+    follow.streamedBlocks.clear();
+  }
+  finishStream(follow) {
+    this.pushAssistantChunk(follow, { type: "finish", reason: { kind: "stop" } });
+    follow.streamActive = false;
+  }
+  pushAssistantChunk(follow, chunk) {
+    if (this.context.sessionGeneration !== "v3" || follow.rcOnly === true) {
+      this.pushEvent(follow, "assistant/chunk", { turn: follow.turn, step: 1, chunk });
+      return;
+    }
+    let attempt = follow.assistantAttempt;
+    if (attempt === void 0) {
+      attempt = {
+        attemptId: `codex-attempt:${follow.activeTurnId ?? follow.turn}:${follow.nextSeq}`,
+        startedAfterSeq: follow.nextSeq - 1,
+        nextIndex: 0,
+        stream: []
+      };
+      follow.assistantAttempt = attempt;
+      follow.assistantStreamRevision += 1;
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "start",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          startedAfterSeq: attempt.startedAfterSeq,
+          turn: follow.turn,
+          step: 1
+        }
+      });
+    }
+    const time = Date.now();
+    const index = attempt.nextIndex++;
+    attempt.stream.push({ time, chunk });
+    follow.assistantStreamRevision += 1;
+    follow.queue.push({
+      type: "assistant-stream",
+      frame: {
+        type: "chunk",
+        attemptId: attempt.attemptId,
+        revision: follow.assistantStreamRevision,
+        index,
+        time,
+        chunk
+      }
+    });
+  }
+  endAssistantAttempt(follow, outcome) {
+    const attempt = follow.assistantAttempt;
+    if (attempt === void 0) return;
+    follow.assistantAttempt = void 0;
+    follow.assistantStreamRevision += 1;
+    if (this.context.sessionGeneration === "v3" && follow.rcOnly !== true) {
+      follow.queue.push({
+        type: "assistant-stream",
+        frame: {
+          type: "end",
+          attemptId: attempt.attemptId,
+          revision: follow.assistantStreamRevision,
+          index: attempt.nextIndex,
+          outcome
+        }
+      });
+    }
+  }
+  ensureToolStarted(follow, item) {
+    const itemId = string2(item.id);
+    if (itemId === void 0) return;
+    if (!follow.startedItems.has(itemId)) follow.startedItems.add(itemId);
+    if (follow.liveItems.get(itemId) !== item) follow.liveItems.set(itemId, item);
+    const call = itemEvents(
+      item,
+      follow.turn,
+      1,
+      follow.requestId,
+      this.context.modelSelection(follow.sessionId),
+      follow.sessionId
+    ).find((event) => event.type === "tool/call");
+    if (call !== void 0 && !follow.liveToolResultSeq.has(`${itemId}:call`)) {
+      this.pushEvent(follow, call.type, call.data, call.view);
+      follow.liveToolResultSeq.set(`${itemId}:call`, -1);
+    }
+  }
+  emitToolResult(follow, item, resultText) {
+    const itemId = string2(item.id);
+    if (itemId === void 0) return;
+    const result = toolResultEvent(item, follow.turn, 1, itemId, resultText);
+    this.pushToolResult(follow, itemId, result);
+  }
+  pushToolResult(follow, itemId, event) {
+    const previous = follow.liveToolResultSeq.get(itemId);
+    const projected = previous === void 0 ? event : toolResultContentReplacement(event);
+    const seq = this.pushEvent(
+      follow,
+      projected.type,
+      projected.data,
+      projected.view,
+      previous === void 0 ? void 0 : { replaceSeq: previous }
+    );
+    follow.liveToolResultSeq.set(itemId, seq);
+  }
+  resetLiveTurn(follow) {
+    follow.startedItems.clear();
+    follow.completedItems.clear();
+    follow.streamedBlocks.clear();
+    follow.nextBlockIndex = 0;
+    follow.streamActive = false;
+    follow.assistantAttempt = void 0;
+    follow.liveItems.clear();
+    follow.liveToolOutput.clear();
+    follow.liveToolResultSeq.clear();
+    follow.pendingToolImages = [];
+  }
+  async ensureRcFollow(sessionId, seedHistory) {
+    if (this.followsHas(sessionId)) return;
+    const threadId = nativeThreadId(sessionId);
+    const stale = [...this.context.follows].filter((follow2) => follow2.rcOnly && follow2.sessionId !== sessionId);
+    for (const follow2 of stale) {
+      this.context.follows.delete(follow2);
+      follow2.queue.close();
+      await follow2.close?.().catch(() => void 0);
+    }
+    const history = seedHistory ?? await this.context.readHistoryPage(threadId, {}, void 0);
+    const controller = new AbortController();
+    const follow = {
+      sessionId,
+      threadId,
+      queue: new AsyncValueQueue2(controller.signal),
+      nextSeq: history.cursor + 1,
+      turn: history.nextTurn,
+      stepOpen: history.activeTurnId !== void 0,
+      startedItems: /* @__PURE__ */ new Set(),
+      completedItems: /* @__PURE__ */ new Set(),
+      streamedBlocks: /* @__PURE__ */ new Map(),
+      nextBlockIndex: 0,
+      streamActive: false,
+      assistantStreamRevision: 0,
+      liveItems: /* @__PURE__ */ new Map(),
+      liveToolOutput: /* @__PURE__ */ new Map(),
+      liveToolResultSeq: /* @__PURE__ */ new Map(),
+      pendingToolImages: [],
+      requestId: this.context.pendingRequestIds.get(sessionId),
+      rcOnly: true,
+      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
+    };
+    this.context.follows.add(follow);
+    try {
+      const stream = await this.context.client.subscribe(
+        threadId,
+        (frame) => this.acceptCodexFrame(follow, frame),
+        controller.signal,
+        () => this.closeFollowAfterRemoteStreamClosed(follow)
+      );
+      if (this.context.closed || !this.context.follows.has(follow)) {
+        await stream.close().catch(() => void 0);
+        throw new Error("The CodeX follow was closed before it opened.");
+      }
+      follow.close = async () => {
+        controller.abort();
+        await stream.close();
+      };
+    } catch (error) {
+      this.context.follows.delete(follow);
+      controller.abort();
+      follow.queue.close();
+      throw error;
+    }
+  }
+  followsHas(sessionId) {
+    for (const follow of this.context.follows) if (follow.sessionId === sessionId) return true;
+    return false;
+  }
+  closeFollowAfterRemoteStreamClosed(follow) {
+    this.context.follows.delete(follow);
+    follow.queue.close();
+    this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+  }
+};
+
+// src/codex/virtual-harness.ts
+var CodexVirtualHarness = class _CodexVirtualHarness {
+  constructor(client, host, sessionGeneration = "legacy", hostCarrier) {
+    this.client = client;
+    this.host = host;
+    this.sessionGeneration = sessionGeneration;
+    this.hostCarrier = hostCarrier;
+    const owner = this;
+    this.live = new CodexLiveProjection({
+      readHistoryPage: (...args) => owner.readHistoryPage(...args),
+      models: (...args) => owner.models(...args),
+      get pendingRequestIds() {
+        return owner.pendingRequestIds;
+      },
+      get follows() {
+        return owner.follows;
+      },
+      sessionTitle: (...args) => owner.sessionTitle(...args),
+      modelSelection: (...args) => owner.modelSelection(...args),
+      permissionSelection: (...args) => owner.permissionSelection(...args),
+      get sessionGeneration() {
+        return owner.sessionGeneration;
+      },
+      get client() {
+        return owner.client;
+      },
+      get closed() {
+        return owner.closed;
+      },
+      rememberOpenedSession: (...args) => owner.rememberOpenedSession(...args),
+      nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
+      updateThreadName: (...args) => owner.updateThreadName(...args),
+      publishProjection: (...args) => owner.events.publishProjection(...args),
+      setPermissionSelection: (...args) => owner.setPermissionSelection(...args),
+      emitRemoteEvent: (...args) => owner.events.emitRemoteEvent(...args),
+      broadcastRcHost: (...args) => owner.events.broadcastRcHost(...args),
+      get selectedModels() {
+        return owner.selectedModels;
+      },
+      refreshAndPublishWorkspaces: (...args) => owner.refreshAndPublishWorkspaces(...args),
+      get pendingApprovals() {
+        return owner.pendingApprovals;
+      },
+      emitApproval: (...args) => owner.events.emitApproval(...args),
+      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args),
+      get imageAttachments() {
+        return owner.imageAttachments;
+      }
+    });
+    this.events = new CodexEventCarrier({
+      get workspaceStreams() {
+        return owner.workspaceStreams;
+      },
+      refreshCatalog: (...args) => owner.refreshCatalog(...args),
+      get selectedWorkspaceId() {
+        return owner.selectedWorkspaceId;
+      },
+      get controlStreams() {
+        return owner.controlStreams;
+      },
+      get host() {
+        return owner.host;
+      },
+      get eventStreams() {
+        return owner.eventStreams;
+      },
+      currentCatalog: (...args) => owner.currentCatalog(...args),
+      get pendingApprovals() {
+        return owner.pendingApprovals;
+      },
+      get client() {
+        return owner.client;
+      },
+      dispatch: (...args) => owner.dispatch(...args),
+      get rcMuxStreams() {
+        return owner.rcMuxStreams;
+      },
+      get rcHostStreams() {
+        return owner.rcHostStreams;
+      }
+    });
+    this.api = this.events.createApiProxy();
+  }
+  live;
+  events;
+  api;
+  catalog;
+  workspaceStreams = /* @__PURE__ */ new Set();
+  controlStreams = /* @__PURE__ */ new Set();
+  eventStreams = /* @__PURE__ */ new Map();
+  rcMuxStreams = /* @__PURE__ */ new Set();
+  rcHostStreams = /* @__PURE__ */ new Set();
+  follows = /* @__PURE__ */ new Set();
+  pendingRequestIds = /* @__PURE__ */ new Map();
+  pendingApprovals = /* @__PURE__ */ new Map();
+  pendingThreads = /* @__PURE__ */ new Map();
+  blankThreads = /* @__PURE__ */ new Set();
+  selectedModels = /* @__PURE__ */ new Map();
+  selectedPermissions = /* @__PURE__ */ new Map();
+  imageAttachments = /* @__PURE__ */ new Map();
+  modelDirectory;
+  modelDirectoryPromise;
+  lastProjectionSeq = 0;
+  commandSeq = 0;
+  selectedWorkspaceId;
+  lastOpenedSessionId;
+  openedWorkspaceSessions = /* @__PURE__ */ new Map();
+  closed = false;
+  static remote(core, host, sessionGeneration = "legacy", hostCarrier) {
+    return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration, hostCarrier);
+  }
+  async workspaces(signal) {
+    return (await this.refreshCatalog(signal)).workspaces;
+  }
+  async selectWorkspace(workspaceId, signal) {
+    const catalog = await loadCatalog(this.client, signal);
+    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId);
+    if (workspace === void 0) throw new Error("The selected CodeX workspace is no longer available.");
+    this.selectedWorkspaceId = workspace.workspaceId;
+    this.catalog = catalog;
+    return workspace;
+  }
+  get openedSessionId() {
+    return this.lastOpenedSessionId;
+  }
+  get openedSessions() {
+    return new Map(this.openedWorkspaceSessions);
+  }
+  rememberOpenedSession(sessionId) {
+    if (this.closed) return;
+    this.lastOpenedSessionId = sessionId;
+    for (const workspace of this.catalog?.workspaces ?? []) {
+      if (!workspace.sessionIds.includes(sessionId)) continue;
+      this.openedWorkspaceSessions.delete(workspace.workspaceId);
+      this.openedWorkspaceSessions.set(workspace.workspaceId, sessionId);
+      if (this.openedWorkspaceSessions.size > 64) {
+        this.openedWorkspaceSessions.delete(this.openedWorkspaceSessions.keys().next().value);
+      }
+    }
+  }
+  async preferredSessionId(signal, preferredSessionId = this.openedWorkspaceSessions.get(this.selectedWorkspaceId ?? "")) {
+    signal?.throwIfAborted();
+    const catalog = this.catalog;
+    const selected = catalog?.workspaces.find((workspace) => workspace.workspaceId === this.selectedWorkspaceId);
+    const selectedSessionIds = new Set(selected?.sessionIds ?? []);
+    const sessions = (catalog?.sessions ?? []).filter((session) => selectedSessionIds.has(session.id));
+    if (sessions.some((session) => session.id === preferredSessionId)) return preferredSessionId;
+    return sessions.reduce(
+      (latest, session) => latest === void 0 || session.updatedAt > latest.updatedAt ? session : latest,
+      void 0
+    )?.id;
+  }
+  async invoke(request) {
+    const result = await this.dispatch(
+      `${request.namespace}/${request.method}`,
+      { args: request.args },
+      request.signal ?? new AbortController().signal
+    );
+    if (result.ok) return result.value;
+    throw Object.assign(new Error(result.error.message), {
+      isDSHRemoteError: true,
+      code: result.error.code,
+      details: result.error.details
+    });
+  }
+  async dispatch(endpoint, payload, signal) {
+    try {
+      if (isHostWorkspaceEndpoint(endpoint)) {
+        if (this.hostCarrier === void 0) return fail3("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
+        return await this.hostCarrier.dispatch(endpoint, payload, signal);
+      }
+      const args = carrierArgs2(payload);
+      switch (endpoint) {
+        case "$events/result":
+          return business2(await this.events.answerRemoteEvent(args, signal));
+        case "workspace/list": {
+          const catalog = await this.refreshCatalog(signal);
+          return business2(success2({
+            items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace2),
+            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
+            pinnedSessionIds: []
+          }));
+        }
+        case "workspace/create":
+          return business2(await this.createWorkspace(requestArg2(args), signal));
+        case "workspace/rename":
+          return business2(await this.renameWorkspace(requestArg2(args)));
+        case "workspace/delete":
+          return business2(failure2("workspace-read-only", "CodeX virtual Workspaces cannot be deleted."));
+        case "workspace/insertBefore":
+          return business2({
+            workspaceIds: nativeVisibleWorkspaces(await this.currentCatalog(signal), this.selectedWorkspaceId).map((item) => item.workspaceId)
+          });
+        case "workspace/insertSessionBefore":
+          return business2(await this.workspaceForSession(requestArg2(args), signal));
+        case "workspace/archiveSession":
+          return business2(await this.archiveSession(requestArg2(args), signal));
+        case "session/list":
+          return business2(success2({ items: await this.sessionSummaries(signal) }));
+        case "session/search":
+          return business2(await this.searchSessions(requestArg2(args), signal));
+        case "session/create":
+          return business2(await this.createSession(requestArg2(args), signal));
+        case "session/fork":
+          return business2(await this.forkSession(requestArg2(args), signal));
+        case "session/history":
+          return business2(await this.sessionHistory(requestArg2(args), signal));
+        case "session/page":
+          return business2(await this.sessionPage(requestArg2(args), signal));
+        case "session/prompt":
+          return business2(await this.prompt(requestArg2(args), signal));
+        case "session/cancel":
+          return business2(await this.cancel(requestArg2(args), signal));
+        case "session/rename":
+          return business2(await this.renameSession(requestArg2(args), signal));
+        case "session/updateQueue":
+          return business2(failure2("queue-item-not-found", "CodeX does not expose a DSH inbox queue."));
+        case "session/attachment":
+          return business2(await this.attachment(requestArg2(args), signal));
+        case "session/modelCatalog":
+          return business2(success2(modelCatalog2(await this.models(signal))));
+        case "session/models": {
+          const sessionId = requiredString2(requestArg2(args).sessionId, "sessionId");
+          nativeThreadId(sessionId);
+          const directory = await this.models(signal);
+          return business2(success2({
+            current: this.modelSelection(sessionId, directory),
+            routable: true,
+            groups: directory.groups,
+            failures: []
+          }));
+        }
+        case "session/selectModel":
+          return business2(await this.selectModel(requestArg2(args), signal));
+        case "session/canOpenWorkspacePath":
+          return business2(this.selectedWorkspaceId !== void 0);
+        case "session/openWorkspacePath":
+          return business2(failure2("bad-request", "Opening Host paths is unavailable in CodeX mode."));
+        case "host/describe":
+          return business2(success2(await this.describeHost(signal)));
+        case "host/listDirectory":
+          return business2(await this.listDirectory(requestArg2(args), signal));
+        case "directoryPicker/list":
+          return business2(await this.listDirectory(requestArg2(args), signal));
+        case "skills/list":
+          return business2(success2({ items: [] }));
+        case "commands/list":
+          return ok2(this.commandList(args));
+        case "commands/execute":
+          return ok2(await this.executeCommand(args, signal));
+        default:
+          return this.hostCarrier === void 0 ? fail3("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
+      }
+    } catch (error) {
+      return failFrom2(error);
+    }
+  }
+  async open(endpoint, payload, signal) {
+    if (isHostWorkspaceStreamEndpoint(endpoint)) {
+      if (this.hostCarrier === void 0) {
+        throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
+          isDSHRemoteError: true,
+          code: "method-not-found",
+          details: {}
+        });
+      }
+      return this.hostCarrier.open(endpoint, payload, signal);
+    }
+    const args = carrierArgs2(payload);
+    if (endpoint === "workspace/follow") return this.events.workspaceFollow(signal);
+    if (endpoint === "session/control") return this.events.sessionControl(signal);
+    if (endpoint === "session/follow") return this.live.sessionFollow(requestArg2(args), signal);
+    if (endpoint === "$events") return this.events.remoteEvents(signal);
+    if (endpoint === "job/list" || endpoint === "job/follow") return this.events.emptyJobStream(endpoint, signal);
+    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
+    throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
+      isDSHRemoteError: true,
+      code: "method-not-found",
+      details: {}
+    });
+  }
+  async close() {
+    if (this.closed) return;
+    this.closed = true;
+    for (const stream of this.workspaceStreams) stream.close();
+    for (const stream of this.controlStreams) stream.close();
+    for (const stream of this.eventStreams.values()) stream.close();
+    for (const stream of this.rcMuxStreams) stream.close();
+    for (const stream of this.rcHostStreams) stream.close();
+    this.workspaceStreams.clear();
+    this.controlStreams.clear();
+    this.eventStreams.clear();
+    this.rcMuxStreams.clear();
+    this.rcHostStreams.clear();
+    const follows = [...this.follows];
+    this.follows.clear();
+    for (const follow of follows) {
+      follow.queue.close();
+      await follow.close?.().catch(() => void 0);
+    }
+    this.pendingApprovals.clear();
+    this.pendingRequestIds.clear();
+    this.pendingThreads.clear();
+    this.blankThreads.clear();
+    this.selectedModels.clear();
+    this.selectedPermissions.clear();
+    this.imageAttachments.clear();
+  }
+  async refreshCatalog(signal) {
+    const catalog = await loadCatalog(this.client, signal, this.pendingThreads);
+    if (this.selectedWorkspaceId !== void 0 && !catalog.workspaces.some((workspace) => workspace.workspaceId === this.selectedWorkspaceId)) {
+      this.selectedWorkspaceId = void 0;
+    }
+    this.catalog = catalog;
+    return catalog;
+  }
+  async currentCatalog(signal) {
+    return this.catalog ?? this.refreshCatalog(signal);
+  }
+  models(signal) {
+    if (this.modelDirectory !== void 0) return Promise.resolve(this.modelDirectory);
+    this.modelDirectoryPromise ??= loadModelDirectory(this.client, signal).then((directory) => {
+      this.modelDirectory = directory;
+      return directory;
+    }).finally(() => {
+      this.modelDirectoryPromise = void 0;
+    });
+    return this.modelDirectoryPromise;
+  }
+  modelSelection(sessionId, directory) {
+    return this.selectedModels.get(sessionId) ?? directory?.default ?? modelSelection();
+  }
+  permissionSelection(sessionId) {
+    return this.selectedPermissions.get(sessionId);
+  }
+  setPermissionSelection(sessionId, preset) {
+    if (preset === void 0) this.selectedPermissions.delete(sessionId);
+    else this.selectedPermissions.set(sessionId, preset);
+    this.events.publishProjection(sessionId, "permissions", codexPermissionsProjection(preset), this.nextProjectionSeq());
+  }
+  commandList(args) {
+    nativeThreadId(requiredString2(args.agentId, "agentId"));
+    return [{
+      name: "permission",
+      description: "Switch the CodeX Remote sandbox mode and approval policy",
+      input: { hint: "<preset>" }
+    }];
+  }
+  async executeCommand(args, signal) {
+    const sessionId = requiredString2(args.agentId, "agentId");
+    const threadId = nativeThreadId(sessionId);
+    const line = requiredString2(args.line, "command line").trim();
+    if (!Array.isArray(args.images)) throw new Error("The CodeX command image list is required.");
+    const match = /^\/permission(?:\s+([\s\S]*))?$/u.exec(line);
+    if (match === null) return void 0;
+    const commandId = `codex-permission:${++this.commandSeq}`;
+    if (args.images.length > 0) return {
+      commandId,
+      result: { kind: "error", text: "CodeX Remote permission commands do not accept attachments." }
+    };
+    const requested = (match[1] ?? "").trim();
+    if (requested === "") {
+      await this.readHistoryPage(threadId, { maxMessages: 1 }, signal);
+      return {
+        commandId,
+        result: { kind: "success", text: `current preset ${this.permissionSelection(sessionId) ?? "Host settings (not reported)"}` }
+      };
+    }
+    if (!isCodexPermissionPreset(requested)) return {
+      commandId,
+      result: { kind: "error", text: `unknown preset "${requested}" (available: workspace-write, danger-full-access)` }
+    };
+    const result = await this.client.request("thread/resume", { threadId, permissionPreset: requested }, signal);
+    const effective = codexPermissionPresetFromResponse(result);
+    if (effective === void 0) throw new Error("The Host did not confirm the CodeX permission preset.");
+    this.setPermissionSelection(sessionId, effective);
+    if (effective !== requested) throw new Error("The Host did not apply the requested CodeX permission preset.");
+    return { commandId, result: { kind: "success", text: `preset ${effective}` } };
+  }
+  sessionTitle(sessionId) {
+    const session = this.catalog?.sessions.find((item) => item.id === sessionId);
+    return session === void 0 ? null : displayTitle(session);
+  }
+  async selectModel(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    nativeThreadId(sessionId);
+    const provider = requiredString2(request.provider, "provider");
+    const model = requiredString2(request.model, "model");
+    const reasoningEffort = string2(request.reasoningEffort);
+    const directory = await this.models(signal);
+    const available = directory.models.get(model);
+    if (provider !== CODEX_PROVIDER || available === void 0) {
+      return failure2("model-unavailable", "The selected CodeX model is unavailable on this Host.");
+    }
+    const supportedEfforts = available.reasoning?.efforts.map((effort) => effort.id) ?? [];
+    if (reasoningEffort !== void 0 && !supportedEfforts.includes(reasoningEffort)) {
+      return failure2("model-unavailable", "The selected reasoning effort is unavailable for this CodeX model.");
+    }
+    const selected = {
+      provider,
+      model,
+      ...reasoningEffort === void 0 ? {} : { reasoningEffort }
+    };
+    this.selectedModels.set(sessionId, selected);
+    const seq = Date.now();
+    this.events.publishProjection(sessionId, "modelSelection", modelSelectionProjection(selected), seq);
+    return success2({ selected });
+  }
+  nextProjectionSeq() {
+    const seq = Math.max(Date.now(), this.lastProjectionSeq + 1);
+    this.lastProjectionSeq = seq;
+    return seq;
+  }
+  updateThreadName(threadId, name2) {
+    const pending = this.pendingThreads.get(threadId);
+    if (pending !== void 0) this.pendingThreads.set(threadId, { ...pending, name: name2 });
+    if (this.catalog === void 0) return;
+    const threads = this.catalog.threads.map((thread) => string2(thread.id) === threadId ? { ...thread, name: name2 } : thread);
+    const sessions = this.catalog.sessions.map((session) => {
+      if (session.nativeId !== threadId) return session;
+      const { title: _title, ...rest } = session;
+      return name2.trim() === "" ? rest : { ...rest, title: name2 };
+    });
+    this.catalog = { ...this.catalog, threads, sessions };
+  }
+  async sessionSummaries(signal) {
+    const catalog = await this.refreshCatalog(signal);
+    const directory = await this.models(signal).catch(() => void 0);
+    return catalog.sessions.map((session) => {
+      const blank = this.blankThreads.has(session.nativeId) || this.pendingThreads.has(session.nativeId);
+      return this.sessionSummary(session, {
+        blank,
+        modelSelection: this.modelSelection(session.id, directory),
+        lastPromptAt: session.updatedAt || null
+      });
+    });
+  }
+  sessionSummary(session, options) {
+    return {
+      sessionId: session.id,
+      updatedAt: session.updatedAt,
+      running: session.status === "running" || session.status === "waiting",
+      blank: options.blank,
+      ...session.cwd === void 0 ? {} : { cwd: session.cwd },
+      projections: {
+        kind: "sequenced",
+        asOfSeq: options.asOfSeq ?? 0,
+        values: {
+          title: displayTitle(session),
+          sessionListMetadata: { blank: options.blank, lastPromptAt: options.lastPromptAt },
+          modelSelection: modelSelectionProjection(options.modelSelection),
+          permissions: codexPermissionsProjection(this.permissionSelection(session.id)),
+          imageLimits: codexImageLimitsProjection()
+        }
+      }
+    };
+  }
+  async searchSessions(request, signal) {
+    const query = requiredString2(request.query, "query").trim();
+    if (query.length === 0 || query.length > 500 || query.includes("\0")) {
+      return failure2("bad-request", "The CodeX Session search query is invalid.");
+    }
+    const catalog = await this.currentCatalog(signal);
+    const needle = query.toLocaleLowerCase();
+    const matches = catalog.threads.flatMap((thread) => {
+      const session = projectCodexThread(thread);
+      if (session === void 0) return [];
+      const candidates = [session.title, session.preview, session.cwd, session.nativeId].filter((value) => value !== void 0 && value.length > 0);
+      const snippet = candidates.find((value) => value.toLocaleLowerCase().includes(needle));
+      if (snippet === void 0) return [];
+      return [{ sessionId: session.id, snippet: truncateCodePoints(snippet, SESSION_SEARCH_SNIPPET_CODE_POINTS) }];
+    });
+    return success2({
+      items: matches.slice(0, SESSION_SEARCH_RESULT_LIMIT),
+      hasMore: matches.length > SESSION_SEARCH_RESULT_LIMIT
+    });
+  }
+  async createWorkspace(request, signal) {
+    const path = string2(request.path);
+    if (path === void 0 || path.trim() === "") return failure2("bad-request", "A CodeX working directory is required.");
+    const catalog = await this.currentCatalog(signal);
+    const existing = catalog.workspaces.find((item) => item.path === path);
+    if (existing !== void 0) return success2({ workspace: nativeWorkspace2(existing), created: false });
+    return failure2("workspace-not-found", "The selected directory is not visible to CodeX Remote.");
+  }
+  async renameWorkspace(request) {
+    return failure2("workspace-read-only", `CodeX virtual Workspace ${string2(request.workspaceId) ?? ""} cannot be renamed.`);
+  }
+  async workspaceForSession(request, signal) {
+    const sessionId = string2(request.sessionId);
+    const catalog = await this.currentCatalog(signal);
+    const workspace = catalog.workspaces.find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
+    return workspace === void 0 ? failure2("workspace-not-found", "The CodeX virtual Workspace was not found.") : success2({ workspace: nativeWorkspace2(workspace) });
+  }
+  selectedWorkspace(catalog) {
+    return this.selectedWorkspaceId === void 0 ? void 0 : catalog.workspaces.find((item) => item.workspaceId === this.selectedWorkspaceId);
+  }
+  async describeHost(signal) {
+    const catalog = await this.currentCatalog(signal);
+    const workspace = this.selectedWorkspace(catalog);
+    const models = await this.models(signal).catch(() => void 0);
+    return {
+      version: "CodeX Remote",
+      cwd: workspace?.path ?? "",
+      home: workspace?.path ?? "",
+      provider: "CodeX",
+      ...models === void 0 ? {} : { model: models.default.model },
+      attachedSessions: catalog.sessions.length,
+      canOpenPath: workspace !== void 0
+    };
+  }
+  async listDirectory(request, signal) {
+    const catalog = await this.currentCatalog(signal);
+    const workspace = this.selectedWorkspace(catalog);
+    if (workspace === void 0) return failure2("workspace-not-found", "The CodeX virtual Workspace was not found.");
+    const path = string2(request.path) ?? workspace.path;
+    if (!containsPath(workspace.path, path)) {
+      return failure2("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
+    }
+    const listing = record4(await this.client.request("dsh/directoryList", { path }, signal));
+    if (!isCodexDirectoryListing(listing)) {
+      return failure2("internal", "CodeX Remote returned an invalid directory listing.");
+    }
+    const listedPaths = [
+      listing.path,
+      listing.home,
+      ...listing.crumbs.map((item) => item.path),
+      ...listing.entries.map((item) => item.path)
+    ];
+    if (listedPaths.some((path2) => !containsPath(workspace.path, path2))) {
+      return failure2("internal", "CodeX Remote returned a directory outside the current Workspace.");
+    }
+    return success2(listing);
+  }
+  async archiveSession(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    await this.client.request("thread/archive", { threadId: nativeThreadId(sessionId) }, signal);
+    const catalog = await this.refreshCatalog(signal);
+    this.publishWorkspaceBaseline(catalog);
+    return success2({ archivedSessionIds: [sessionId] });
+  }
+  async createSession(request, signal) {
+    const catalog = await this.currentCatalog(signal);
+    const workspaceId = string2(request.workspaceId) ?? this.selectedWorkspaceId;
+    const workspace = workspaceId === void 0 ? void 0 : catalog.workspaces.find((item) => item.workspaceId === workspaceId);
+    const cwd2 = string2(request.cwd) ?? workspace?.path;
+    if (cwd2 === void 0) return failure2("workspace-not-found", "The CodeX virtual Workspace was not found.");
+    if (workspace !== void 0 && !containsPath(workspace.path, cwd2)) {
+      return failure2("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
+    }
+    const directory = await this.models(signal);
+    const selection = directory.default;
+    const requestedPreset = CODEX_DEFAULT_PERMISSION;
+    const result = record4(await this.client.request("thread/start", {
+      cwd: cwd2,
+      model: selection.model,
+      permissionPreset: requestedPreset
+    }, signal));
+    const permissionPreset2 = codexPermissionPresetFromResponse(result) ?? requestedPreset;
+    const thread = { ...record4(result.thread), cwd: cwd2, turns: array2(record4(result.thread).turns) };
+    const projected = projectCodexThread(thread);
+    if (projected === void 0) return failure2("internal", "CodeX returned an invalid Thread.");
+    this.pendingThreads.set(projected.nativeId, thread);
+    this.blankThreads.add(projected.nativeId);
+    this.selectedModels.set(projected.id, selection);
+    this.selectedPermissions.set(projected.id, permissionPreset2);
+    await this.refreshAndPublishWorkspaces();
+    const seq = this.nextProjectionSeq();
+    this.events.emitRemoteEvent("api-session/added", [this.sessionSummary(projected, {
+      blank: true,
+      modelSelection: selection,
+      lastPromptAt: null,
+      asOfSeq: seq
+    })]);
+    this.events.publishProjection(projected.id, "title", displayTitle(projected), seq);
+    return success2({ sessionId: projected.id });
+  }
+  async forkSession(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const result = record4(await this.client.request("thread/fork", {
+      threadId: nativeThreadId(sessionId)
+    }, signal));
+    const permissionPreset2 = codexPermissionPresetFromResponse(result);
+    const projected = projectCodexThread(record4(result.thread));
+    if (projected === void 0) return failure2("internal", "CodeX returned an invalid forked Thread.");
+    this.selectedModels.set(projected.id, this.modelSelection(sessionId, await this.models(signal)));
+    this.setPermissionSelection(projected.id, permissionPreset2);
+    await this.refreshAndPublishWorkspaces();
+    const seq = this.nextProjectionSeq();
+    this.events.publishProjection(projected.id, "title", displayTitle(projected), seq);
+    return success2({ sessionId: projected.id });
+  }
+  async prompt(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const content = array2(request.content);
+    const input2 = codexPromptInput(content);
+    if (input2 === void 0) return failure2("attachment-error", "CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.");
+    const threadId = nativeThreadId(sessionId);
+    const selection = this.modelSelection(sessionId, await this.models(signal));
+    const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId);
+    await this.live.ensureRcFollow(sessionId);
+    if (!isFreshBlankThread) {
+      const resumeResult = await this.client.request("thread/resume", {
+        threadId,
+        model: selection.model
+      }, signal);
+      const serverPreset = codexPermissionPresetFromResponse(resumeResult);
+      if (serverPreset !== void 0) {
+        this.setPermissionSelection(sessionId, serverPreset);
+      }
+    }
+    this.pendingRequestIds.set(sessionId, string2(request.requestId) ?? "");
+    const mode2 = request.mode === "steer" ? "turn/steer" : "turn/start";
+    if (mode2 === "turn/steer") {
+      const active = this.activeTurnId(threadId);
+      if (active === void 0) return failure2("steer-unavailable", "The CodeX Thread has no active turn to steer.");
+      await this.client.request(mode2, { threadId, expectedTurnId: active, input: input2 }, signal);
+    } else {
+      await this.client.request(mode2, {
+        threadId,
+        input: input2,
+        ...codexModelParams(selection)
+      }, signal);
+    }
+    this.blankThreads.delete(threadId);
+    return success2({ accepted: true });
+  }
+  async attachment(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const attachmentId = requiredString2(request.attachmentId, "attachmentId");
+    if (!attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX2)) {
+      return failure2("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "not-referenced" });
+    }
+    nativeThreadId(sessionId);
+    const cached = this.imageAttachments.get(attachmentId);
+    if (cached?.sessionId === sessionId) return success2({ attachment: cached.attachment, data: cached.data });
+    await this.hydrateImageAttachments(sessionId, signal);
+    const hydrated = this.imageAttachments.get(attachmentId);
+    return hydrated?.sessionId === sessionId ? success2({ attachment: hydrated.attachment, data: hydrated.data }) : failure2("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "not-referenced" });
+  }
+  async hydrateImageAttachments(sessionId, signal) {
+    const threadId = nativeThreadId(sessionId);
+    const result = record4(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
+    const thread = record4(result.thread);
+    if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
+    this.cacheHistoryImages(projectCodexNativeHistory(thread, sessionId));
+  }
+  async cancel(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const threadId = nativeThreadId(sessionId);
+    const turnId = this.activeTurnId(threadId);
+    if (turnId !== void 0) await this.client.request("turn/interrupt", { threadId, turnId }, signal);
+    return success2({ accepted: true });
+  }
+  async renameSession(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const title = requiredString2(request.title, "title");
+    await this.client.request("thread/name/set", { threadId: nativeThreadId(sessionId), name: title }, signal);
+    const seq = this.nextProjectionSeq();
+    this.updateThreadName(nativeThreadId(sessionId), title);
+    this.events.publishProjection(sessionId, "title", title, seq);
+    await this.refreshAndPublishWorkspaces();
+    return success2({ title, seq });
+  }
+  async sessionPage(request, signal) {
+    const sessionId = sessionIdFromAddress2(record4(request.address));
+    const page = await this.readHistoryPage(nativeThreadId(sessionId), {
+      beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
+      throughSeq: optionalInteger2(request.throughSeq),
+      maxMessages: optionalPositiveInteger2(request.maxMessages)
+    }, signal);
+    return success2({ records: page.records, hasMore: page.hasMore });
+  }
+  activeTurnId(threadId) {
+    for (const follow of this.follows) if (follow.threadId === threadId && follow.stepOpen) return follow.activeTurnId;
+    return void 0;
+  }
+  async readHistoryPage(threadId, page, signal) {
+    let value;
+    try {
+      value = record4(await this.client.request("dsh/sessionHistory", {
+        threadId,
+        ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
+        ...page.throughSeq === void 0 ? {} : { throughSeq: page.throughSeq },
+        ...page.maxMessages === void 0 ? {} : { maxMessages: page.maxMessages }
+      }, signal));
+    } catch (error) {
+      if (!isLegacySessionHistoryUnsupported(error)) throw error;
+      const result = record4(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
+      const thread = record4(result.thread);
+      if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
+      value = paginateCodexNativeHistory(
+        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
+        {
+          beforeSeq: page.beforeSeq,
+          throughSeq: page.throughSeq,
+          maxMessages: page.maxMessages
+        }
+      );
+    }
+    value = adaptCodexHistoryPage(value, this.sessionGeneration);
+    if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
+      throw new Error("CodeX Remote returned an invalid paginated History.");
+    }
+    if (Object.hasOwn(value, "permissionPreset")) {
+      const preset = value.permissionPreset;
+      this.setPermissionSelection(`codex:${threadId}`, preset === "workspace-write" || preset === "danger-full-access" ? preset : void 0);
+    }
+    this.cacheHistoryImages(value);
+    return value;
+  }
+  cacheHistoryImages(history) {
+    const sessionId = history.header.id;
+    const entries = "entries" in history ? history.entries : history.records;
+    for (const entry of entries) this.live.cacheImageBlocks(sessionId, entry.event.data);
+  }
+  async sessionHistory(request, signal) {
+    const sessionId = requiredString2(request.sessionId, "sessionId");
+    const beforeSeq = optionalNonNegativeInteger(request.beforeSeq);
+    const history = await this.readHistoryPage(nativeThreadId(sessionId), {
+      beforeSeq,
+      maxMessages: optionalPositiveInteger2(request.maxMessages)
+    }, signal);
+    const directory = await this.models(signal).catch(() => void 0);
+    if (beforeSeq === void 0) {
+      await this.live.ensureRcFollow(sessionId, history);
+      signal.throwIfAborted();
+      if (this.closed) throw new Error("The CodeX virtual Harness is closed.");
+      this.rememberOpenedSession(sessionId);
+    }
+    return success2({
+      events: history.records.map((entry) => ({
+        event: entry.event,
+        ...entry.view === void 0 ? {} : { view: entry.view }
+      })),
+      hasMore: history.hasMore,
+      ...beforeSeq !== void 0 ? {} : {
+        projections: {
+          asOfSeq: history.cursor,
+          values: {
+            title: this.sessionTitle(sessionId),
+            sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
+            modelSelection: modelSelectionProjection(this.modelSelection(sessionId, directory)),
+            permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
+            imageLimits: codexImageLimitsProjection()
+          }
+        }
+      }
+    });
+  }
+  async refreshAndPublishWorkspaces() {
+    const catalog = await this.refreshCatalog().catch(() => void 0);
+    if (catalog !== void 0) this.publishWorkspaceBaseline(catalog);
+  }
+  publishWorkspaceBaseline(catalog) {
+    for (const queue of this.workspaceStreams) {
+      for (const workspace of nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId)) {
+        queue.push({ type: "upsert", workspace: nativeWorkspace2(workspace) });
+      }
+      queue.push({ type: "archived", archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id) });
+    }
+  }
+};
+
 // src/control-route.ts
 var CONTROL_RPC_PREFIX = "/ds-harness-remote";
 var STATUS_STREAM_ENDPOINT = "status.events";
@@ -20598,24 +26042,6 @@ function writeText(res, status2, body) {
   res.end(body);
 }
 
-// src/ids.ts
-import { randomBytes as randomBytes7 } from "node:crypto";
-function uuidV7(now = Date.now()) {
-  if (!Number.isSafeInteger(now) || now < 0 || now > 281474976710655) {
-    throw new RangeError("UUIDv7 timestamp must be a non-negative 48-bit integer");
-  }
-  const bytes = randomBytes7(16);
-  let timestamp = BigInt(now);
-  for (let index = 5; index >= 0; index -= 1) {
-    bytes[index] = Number(timestamp & 0xffn);
-    timestamp >>= 8n;
-  }
-  bytes[6] = 112 | bytes[6] & 15;
-  bytes[8] = 128 | bytes[8] & 63;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 // src/harness-version.ts
 import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -20671,97 +26097,6 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   } catch {
     return void 0;
   }
-}
-
-// src/plugin-route-bridge.ts
-var PLUGIN_ROUTE_ALLOWLIST = ["api/bot"];
-var BOT_REMOTE_OPERATIONS = [
-  "state",
-  "models",
-  "efforts",
-  "exchange",
-  "earlier",
-  "usage",
-  "room-progress",
-  "schedules",
-  "create-bot",
-  "duplicate-bot",
-  "update-bot",
-  "delete-bot",
-  "set-main",
-  "set-flags",
-  "create-room",
-  "update-room",
-  "delete-room",
-  "add-agent",
-  "agent-session",
-  "agent-adopt",
-  "agent-archive",
-  "agent-rename",
-  "remove-agent",
-  "send",
-  "answer-question",
-  "dismiss-question",
-  "approval-answer",
-  "stop-member-work"
-];
-function isAllowedPluginRoute(route) {
-  return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
-}
-var callSchema = external_exports.object({
-  route: external_exports.enum(PLUGIN_ROUTE_ALLOWLIST),
-  body: external_exports.object({
-    endpoint: external_exports.enum(BOT_REMOTE_OPERATIONS),
-    payload: external_exports.record(external_exports.string(), external_exports.unknown()).nullable().optional()
-  }).strict().superRefine((body, ctx) => {
-    if (body.endpoint === "approval-answer" && body.payload?.choice !== "allow" && body.payload?.choice !== "reject") {
-      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Only one-time approval or rejection is supported." });
-    }
-  })
-}).strict();
-var PLUGIN_ROUTE_TIMEOUT_MS = 3e4;
-var PluginRouteBridge = class {
-  constructor(dispatch, logger) {
-    this.dispatch = dispatch;
-    this.logger = logger;
-  }
-  async call(input2) {
-    let params;
-    try {
-      params = callSchema.parse(input2);
-    } catch (error) {
-      if (error instanceof external_exports.ZodError) {
-        throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
-      }
-      throw error;
-    }
-    if (serializedBytes(params) > MAX_SECURE_MESSAGE_BYTES) {
-      throw new RpcError("INVALID_MESSAGE", `The plugin route call exceeds the ${MAX_SECURE_MESSAGE_BYTES}-byte remote limit.`);
-    }
-    const startedAt = performance.now();
-    let result;
-    try {
-      result = await this.dispatch(params.route, params.body, AbortSignal.timeout(PLUGIN_ROUTE_TIMEOUT_MS));
-    } catch (error) {
-      this.logger?.warn("plugin route call failed", {
-        route: params.route,
-        durationMs: Math.round(performance.now() - startedAt)
-      });
-      throw error;
-    }
-    if (serializedBytes(result) > MAX_SECURE_MESSAGE_BYTES) {
-      throw new RpcError("RESPONSE_TOO_LARGE", "The plugin route response exceeds the bounded remote limit.");
-    }
-    this.logger?.debug("plugin route call ok", {
-      route: params.route,
-      status: result.status,
-      durationMs: Math.round(performance.now() - startedAt)
-    });
-    return { status: result.status, json: result.json };
-  }
-};
-function serializedBytes(value) {
-  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 // src/remote-api-proxy.ts
@@ -20876,7 +26211,7 @@ var RemoteHarnessApiProxy = class {
   }
   normalizeLegacyWelcomeSettings(method, payload, response) {
     if (!isLegacyRemoteHost(this.harnessVersion)) return response;
-    if (method === "settings.describe" && response.result.ok && isRecord3(response.result.value)) {
+    if (method === "settings.describe" && response.result.ok && isRecord7(response.result.value)) {
       this.settingsDescribeValue = response.result.value;
       return this.legacyWelcomeAcknowledged ? patchWelcomeDescribe(response) : response;
     }
@@ -20988,7 +26323,7 @@ function normalizeLegacyResponse(method, response) {
   };
 }
 function normalizeLegacyRequest(method, payload) {
-  if (!isRecord3(payload)) return payload;
+  if (!isRecord7(payload)) return payload;
   if (method === "agentPreset.read") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.select") return replaceAgentPreset(payload, "agentPreset");
   if (method === "agentPreset.copy") return replaceAgentPreset(payload, "from");
@@ -21003,7 +26338,7 @@ function replaceAgentPreset(payload, key) {
   return replacement === void 0 ? payload : { ...payload, [key]: replacement };
 }
 function replaceAgentPresetSettings(payload) {
-  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord3(payload.patch)) return payload;
+  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord7(payload.patch)) return payload;
   const patch = replaceAgentPreset(payload.patch, "default");
   return patch === payload.patch ? payload : { ...payload, patch };
 }
@@ -21013,11 +26348,11 @@ function isLegacyRemoteHost(version) {
   return match !== null && Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
 }
 function isWelcomeNoticeRequest(payload) {
-  if (!isRecord3(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
-  return payload.ops.some((operation) => isRecord3(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
+  if (!isRecord7(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
+  return payload.ops.some((operation) => isRecord7(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
 }
 function patchWelcomeDescribe(response) {
-  if (!response.result.ok || !isRecord3(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
+  if (!response.result.ok || !isRecord7(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
   return {
     ...response,
     result: {
@@ -21025,8 +26360,8 @@ function patchWelcomeDescribe(response) {
       value: {
         ...response.result.value,
         namespaces: response.result.value.namespaces.map((namespace) => {
-          if (!isRecord3(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-          const value = isRecord3(namespace.value) ? namespace.value : {};
+          if (!isRecord7(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+          const value = isRecord7(namespace.value) ? namespace.value : {};
           return { ...namespace, value: { ...value, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
         })
       }
@@ -21040,8 +26375,8 @@ function patchWelcomeMutate(value, rpcId2) {
   };
   const namespaces = Array.isArray(value.namespaces) ? value.namespaces : [];
   response.result.value.namespaces = namespaces.map((namespace) => {
-    if (!isRecord3(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-    const current = isRecord3(namespace.value) ? namespace.value : {};
+    if (!isRecord7(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+    const current = isRecord7(namespace.value) ? namespace.value : {};
     return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
   });
   return response;
@@ -21049,7 +26384,7 @@ function patchWelcomeMutate(value, rpcId2) {
 function isRemoteDisconnect(error) {
   return error instanceof RemoteClientError && (error.code === "TRANSPORT_CLOSED" || error.code === "CLIENT_CLOSED");
 }
-function isRecord3(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 var AsyncFrameQueue = class {
@@ -21121,15 +26456,15 @@ function normalizeLegacySessionGatewayValue(endpoint, value) {
   return value;
 }
 function normalizeAssistantMessageStreamValue(endpoint, value) {
-  if (endpoint === "session/page" && isRecord4(value)) return { ...value, records: normalizeRecords(value.records) };
-  if (endpoint === "session/follow" && isRecord4(value) && value.type === "snapshot") {
+  if (endpoint === "session/page" && isRecord8(value)) return { ...value, records: normalizeRecords(value.records) };
+  if (endpoint === "session/follow" && isRecord8(value) && value.type === "snapshot") {
     return { ...value, records: normalizeRecords(value.records) };
   }
   if (endpoint === "session/follow") return normalizeEntry(value);
   return value;
 }
 function normalizeFollowFrame(value) {
-  if (!isRecord4(value)) return value;
+  if (!isRecord8(value)) return value;
   if (value.type === "snapshot") {
     return {
       ...value,
@@ -21141,7 +26476,7 @@ function normalizeFollowFrame(value) {
   return normalizeEntry(value);
 }
 function normalizePage(value) {
-  if (!isRecord4(value)) return value;
+  if (!isRecord8(value)) return value;
   return { ...value, records: normalizeRecords(value.records) };
 }
 function normalizeRecords(value) {
@@ -21186,10 +26521,10 @@ function eventTime(value) {
   return typeof value.event.time === "number" && Number.isSafeInteger(value.event.time) ? value.event.time : 0;
 }
 function isEventEntry(value) {
-  return isRecord4(value) && value.type === "event" && isRecord4(value.event);
+  return isRecord8(value) && value.type === "event" && isRecord8(value.event);
 }
 function normalizeHeader(value) {
-  if (!isRecord4(value)) return value;
+  if (!isRecord8(value)) return value;
   const next = {
     ...value,
     version: 3,
@@ -21198,7 +26533,7 @@ function normalizeHeader(value) {
   return next.agentPreset === "code" ? { ...next, agentPreset: "ptc" } : next;
 }
 function normalizeEvent(value) {
-  if (!isRecord4(value)) return value;
+  if (!isRecord8(value)) return value;
   let next = value;
   const type = normalizeEventType(value.type);
   if (type !== value.type) next = { ...next, type };
@@ -21218,7 +26553,7 @@ function normalizeEventType(value) {
   return value;
 }
 function normalizeEventData(type, value) {
-  if (!isRecord4(value)) return value;
+  if (!isRecord8(value)) return value;
   if (type === "assistant/message" && Object.hasOwn(value, "stream") && !Array.isArray(value.stream)) {
     const { stream: _stream, ...rest } = value;
     return rest;
@@ -21235,7 +26570,7 @@ function normalizeEventData(type, value) {
   return value;
 }
 function normalizeRequestHeaderData(value) {
-  if (!isRecord4(value.header)) return value;
+  if (!isRecord8(value.header)) return value;
   const header = normalizeRequestHeader(value.header);
   return header === value.header ? value : { ...value, header };
 }
@@ -21251,7 +26586,7 @@ function normalizeRequestHeader(value) {
       changed = true;
       continue;
     }
-    if (key === "adapterDefaults" && isRecord4(field) && Object.keys(field).length === 0) {
+    if (key === "adapterDefaults" && isRecord8(field) && Object.keys(field).length === 0) {
       changed = true;
       continue;
     }
@@ -21260,12 +26595,12 @@ function normalizeRequestHeader(value) {
   return changed ? next : value;
 }
 function normalizeMessage(value) {
-  if (!isRecord4(value) || !isRecord4(value.source)) return value;
+  if (!isRecord8(value) || !isRecord8(value.source)) return value;
   if (value.source.kind !== "plugin" || value.source.plugin !== "tools-code-mode") return value;
   return { ...value, source: { ...value.source, plugin: "tools-ptc" } };
 }
 function normalizeSurfaceOp(value) {
-  if (!isRecord4(value) || value.op !== "replace") return value;
+  if (!isRecord8(value) || value.op !== "replace") return value;
   const { start, end, ...rest } = value;
   if (start === void 0 && end === void 0) return value;
   return {
@@ -21275,7 +26610,7 @@ function normalizeSurfaceOp(value) {
     ...end === void 0 ? {} : { endSeq: end }
   };
 }
-function isRecord4(value) {
+function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isEventSeq(value) {
@@ -21330,11 +26665,11 @@ var RemoteTypertGateway2 = class {
   /** DSH <=0.1.6 cannot persist the 0.1.7 welcome acknowledgement remotely. */
   normalizeLegacyWelcomeSettings(endpoint, payload, result) {
     if (!isLegacyRemoteHost2(this.harnessVersion)) return void 0;
-    if (endpoint === "settings/describe" && result.ok && isRecord5(result.value)) {
+    if (endpoint === "settings/describe" && result.ok && isRecord9(result.value)) {
       this.settingsDescribeValue = result.value;
       return this.legacyWelcomeAcknowledged ? { ...result, value: patchWelcomeDescribe2(result.value) } : void 0;
     }
-    if (endpoint !== "settings/mutate" || !isRecord5(payload) || !isRecord5(payload.args)) return void 0;
+    if (endpoint !== "settings/mutate" || !isRecord9(payload) || !isRecord9(payload.args)) return void 0;
     const args = payload.args;
     if (args.ns !== WELCOME_NOTICE_NAMESPACE2 || !isWelcomeNoticeOperation(args.ops)) return void 0;
     const value = patchWelcomeDescribe2(this.settingsDescribeValue ?? { namespaces: [] });
@@ -21343,7 +26678,7 @@ var RemoteTypertGateway2 = class {
   }
   async open(endpoint, payload, signal) {
     const streamId = uuidV7();
-    const queue = new AsyncValueQueue();
+    const queue = new AsyncValueQueue4();
     const unsubscribe = this.client.onEvent((event) => routeStreamEvent2(event, streamId, queue));
     const unsubscribeClose = this.client.onClose(() => {
       queue.fail(new RemoteClientError("TRANSPORT_CLOSED", "The remote Harness stream transport closed."));
@@ -21430,7 +26765,7 @@ var RemoteTypertGateway2 = class {
     }
   }
 };
-var AsyncValueQueue = class {
+var AsyncValueQueue4 = class {
   values = [];
   bytes = 0;
   waiters = [];
@@ -21498,16 +26833,16 @@ function routeStreamEvent2(event, streamId, queue) {
     queue.fail(remoteFailure({
       code: typeof failure3?.code === "string" ? failure3.code : "internal",
       message: typeof failure3?.message === "string" ? failure3.message : "The remote Harness stream failed.",
-      details: isRecord5(failure3?.details) ? failure3.details : {}
+      details: isRecord9(failure3?.details) ? failure3.details : {}
     }));
   } else {
     queue.close();
   }
 }
 function parseRpcResult(value) {
-  if (!isRecord5(value)) throw new Error("The remote Host returned an invalid Gateway result.");
+  if (!isRecord9(value)) throw new Error("The remote Host returned an invalid Gateway result.");
   if (value.ok === true) return Object.hasOwn(value, "value") ? { ok: true, value: value.value } : { ok: true };
-  if (value.ok !== false || !isRecord5(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord5(value.error.details)) {
+  if (value.ok !== false || !isRecord9(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord9(value.error.details)) {
     throw new Error("The remote Host returned an invalid Gateway failure.");
   }
   return {
@@ -21543,10 +26878,10 @@ function base64ToBytes3(value) {
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
   if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
-  if (!isRecord5(value) || typeof value.data !== "string") return value;
+  if (!isRecord9(value) || typeof value.data !== "string") return value;
   return { ...value, data: base64ToBytes3(value.data) };
 }
-function isRecord5(value) {
+function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasErrorCode(error, code) {
@@ -21559,4328 +26894,17 @@ function isLegacyRemoteHost2(version) {
   return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
 }
 function isWelcomeNoticeOperation(value) {
-  return Array.isArray(value) && value.some((operation) => isRecord5(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD2 && operation.value === WELCOME_NOTICE_VERSION2);
+  return Array.isArray(value) && value.some((operation) => isRecord9(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD2 && operation.value === WELCOME_NOTICE_VERSION2);
 }
 function patchWelcomeDescribe2(value) {
   if (!Array.isArray(value.namespaces)) return value;
   const namespaces = value.namespaces.map((namespace) => {
-    if (!isRecord5(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE2) return namespace;
-    const current = isRecord5(namespace.value) ? namespace.value : {};
+    if (!isRecord9(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE2) return namespace;
+    const current = isRecord9(namespace.value) ? namespace.value : {};
     return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD2]: WELCOME_NOTICE_VERSION2 } };
   });
   return { ...value, namespaces };
 }
-
-// src/codex/permissions.ts
-function codexPermissionPresetFromResponse(value) {
-  const root = record(value);
-  for (const settings of [root, record(root.threadSettings)]) {
-    const sandbox = settings.sandbox ?? settings.sandboxPolicy;
-    const type = record(sandbox).type;
-    if (settings.approvalPolicy === "never" && (sandbox === "danger-full-access" || type === "dangerFullAccess")) {
-      return "danger-full-access";
-    }
-    if (settings.approvalPolicy === "on-request" && (sandbox === "workspace-write" || type === "workspaceWrite")) {
-      return "workspace-write";
-    }
-  }
-  return void 0;
-}
-function record(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
-}
-
-// src/codex/codex-image-codec.ts
-var CODEX_IMAGE_MEDIA_TYPES2 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var CODEX_IMAGE_ATTACHMENT_PREFIX = "codex-image:";
-var MAX_CODEX_IMAGE_BASE64 = 288 * 1024 * 1024;
-var DATA_IMAGE_URL2 = /^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/]+={0,2})$/u;
-function string(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function isRecord6(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function record2(value) {
-  return isRecord6(value) ? value : {};
-}
-function toolOutputImageBlocks(item) {
-  const candidates = [
-    record2(item.result).content,
-    record2(item.output).content,
-    item.contentItems,
-    Array.isArray(item.output) ? item.output : void 0
-  ];
-  for (const candidate of candidates) {
-    if (!Array.isArray(candidate)) continue;
-    const images = candidate.flatMap((value) => {
-      const block = record2(value);
-      return isImageContent2(block) && parseImageBlock(block) !== void 0 ? [block] : [];
-    });
-    if (images.length > 0) return images;
-  }
-  return [];
-}
-function contentBlocks(value, attachmentSeed) {
-  if (typeof value === "string") return [{ type: "text", text: value }];
-  if (!Array.isArray(value)) return [];
-  const blocks = [];
-  let imageIndex = 0;
-  for (const raw of value) {
-    if (typeof raw === "string") {
-      blocks.push({ type: "text", text: raw });
-      continue;
-    }
-    const block = record2(raw);
-    const image = imageContentBlock(block, attachmentSeed, imageIndex);
-    if (image !== void 0) {
-      imageIndex += 1;
-      blocks.push(image);
-      continue;
-    }
-    const text = string(block.text) ?? string(block.content);
-    if (text !== void 0) blocks.push({ type: block.type === "reasoning" ? "reasoning" : "text", text });
-  }
-  return blocks;
-}
-function imageContentBlock(block, attachmentSeed, index) {
-  if (!isImageContent2(block)) return void 0;
-  const image = parseImageBlock(block);
-  if (image === void 0) return void 0;
-  const dimensions = imageDimensions(image.mediaType, image.data);
-  const name2 = string(block.name);
-  const attachment = {
-    attachmentId: `${CODEX_IMAGE_ATTACHMENT_PREFIX}${hashString(`${attachmentSeed}:${index}`)}:${index}`,
-    mediaType: image.mediaType,
-    bytes: base64ByteLength(image.data),
-    width: dimensions.width,
-    height: dimensions.height,
-    ...name2 === void 0 ? {} : { name: name2 }
-  };
-  return {
-    type: "image",
-    attachment,
-    mediaType: image.mediaType,
-    data: image.data,
-    url: image.url,
-    ...name2 === void 0 ? {} : { name: name2 }
-  };
-}
-function isImageContent2(block) {
-  return block.type === "image" || block.type === "input_image";
-}
-function parseImageBlock(block) {
-  const url = string(block.url) ?? string(block.image_url) ?? string(record2(block.image_url).url);
-  const parsed = url === void 0 ? void 0 : parseDataImageUrl2(url);
-  if (parsed !== void 0) return parsed;
-  const data2 = string(block.data);
-  if (data2 === void 0 || !isCanonicalBase642(data2)) return void 0;
-  if (data2.length > MAX_CODEX_IMAGE_BASE64) return void 0;
-  const mediaType = string(block.mediaType) ?? string(block.mimeType) ?? sniffImageMediaType2(data2);
-  return mediaType !== void 0 && CODEX_IMAGE_MEDIA_TYPES2.has(mediaType) ? { mediaType, data: data2, url: `data:${mediaType};base64,${data2}` } : void 0;
-}
-function parseDataImageUrl2(value) {
-  const match = DATA_IMAGE_URL2.exec(value);
-  if (match === null) return void 0;
-  const mediaType = match[1];
-  const data2 = match[2];
-  if (!CODEX_IMAGE_MEDIA_TYPES2.has(mediaType) || !isCanonicalBase642(data2)) return void 0;
-  return { mediaType, data: data2, url: `data:${mediaType};base64,${data2}` };
-}
-function collectImageBlocks(value, output = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectImageBlocks(item, output);
-    return output;
-  }
-  if (!isRecord6(value)) return output;
-  if (value.type === "image") output.push(value);
-  for (const [key, child] of Object.entries(value)) {
-    if (key === "attachment") continue;
-    if (key === "content" || key === "message" || key === "inserted" || key === "chunk" || key === "block") {
-      collectImageBlocks(child, output);
-    }
-  }
-  return output;
-}
-function base64ByteLength(value) {
-  const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
-  return Math.max(1, Math.floor(value.length * 3 / 4) - padding);
-}
-function imageDimensions(mediaType, data2) {
-  const bytes = base64PrefixBytes2(data2, 256 * 1024);
-  const parsed = mediaType === "image/png" ? pngDimensions(bytes) : mediaType === "image/jpeg" ? jpegDimensions(bytes) : mediaType === "image/gif" ? gifDimensions(bytes) : mediaType === "image/webp" ? webpDimensions(bytes) : void 0;
-  return parsed ?? { width: 1, height: 1 };
-}
-function pngDimensions(bytes) {
-  if (bytes.length < 24 || bytes[0] !== 137 || bytes[1] !== 80 || bytes[2] !== 78 || bytes[3] !== 71 || bytes[4] !== 13 || bytes[5] !== 10 || bytes[6] !== 26 || bytes[7] !== 10) return void 0;
-  return positiveDimensions(readUint32BE(bytes, 16), readUint32BE(bytes, 20));
-}
-function jpegDimensions(bytes) {
-  if (bytes.length < 4 || bytes[0] !== 255 || bytes[1] !== 216) return void 0;
-  let offset = 2;
-  while (offset + 9 < bytes.length) {
-    if (bytes[offset] !== 255) {
-      offset += 1;
-      continue;
-    }
-    const marker = bytes[offset + 1];
-    offset += 2;
-    if (marker === 216 || marker === 217) continue;
-    if (offset + 2 > bytes.length) return void 0;
-    const length = readUint16BE(bytes, offset);
-    if (length < 2 || offset + length > bytes.length) return void 0;
-    if (isJpegSof(marker) && length >= 7) {
-      return positiveDimensions(readUint16BE(bytes, offset + 5), readUint16BE(bytes, offset + 3));
-    }
-    offset += length;
-  }
-  return void 0;
-}
-function gifDimensions(bytes) {
-  if (bytes.length < 10 || bytes[0] !== 71 || bytes[1] !== 73 || bytes[2] !== 70 || bytes[3] !== 56 || bytes[4] !== 55 && bytes[4] !== 57 || bytes[5] !== 97) return void 0;
-  return positiveDimensions(readUint16LE(bytes, 6), readUint16LE(bytes, 8));
-}
-function webpDimensions(bytes) {
-  if (bytes.length < 30 || stringFromBytes(bytes, 0, 4) !== "RIFF" || stringFromBytes(bytes, 8, 12) !== "WEBP") return void 0;
-  const chunk = stringFromBytes(bytes, 12, 16);
-  if (chunk === "VP8X") {
-    return positiveDimensions(1 + readUint24LE(bytes, 24), 1 + readUint24LE(bytes, 27));
-  }
-  if (chunk === "VP8L" && bytes[20] === 47) {
-    const b0 = bytes[21];
-    const b1 = bytes[22];
-    const b2 = bytes[23];
-    const b3 = bytes[24];
-    const width = 1 + b0 + ((b1 & 63) << 8);
-    const height = 1 + ((b1 & 192) >> 6) + (b2 << 2) + ((b3 & 15) << 10);
-    return positiveDimensions(width, height);
-  }
-  if (chunk === "VP8 " && bytes[23] === 157 && bytes[24] === 1 && bytes[25] === 42) {
-    return positiveDimensions(readUint16LE(bytes, 26) & 16383, readUint16LE(bytes, 28) & 16383);
-  }
-  return void 0;
-}
-function sniffImageMediaType2(data2) {
-  const bytes = base64PrefixBytes2(data2, 32);
-  if (pngDimensions(bytes) !== void 0) return "image/png";
-  if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return "image/jpeg";
-  if (gifDimensions(bytes) !== void 0) return "image/gif";
-  if (bytes.length >= 12 && stringFromBytes(bytes, 0, 4) === "RIFF" && stringFromBytes(bytes, 8, 12) === "WEBP") return "image/webp";
-  return void 0;
-}
-function base64PrefixBytes2(value, maxBytes) {
-  const chars = value.slice(0, Math.ceil(maxBytes / 3) * 4);
-  let binary;
-  try {
-    binary = atob(chars);
-  } catch {
-    return new Uint8Array();
-  }
-  const bytes = new Uint8Array(Math.min(binary.length, maxBytes));
-  for (let index = 0; index < bytes.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-function readUint16BE(bytes, offset) {
-  return (bytes[offset] << 8) + bytes[offset + 1];
-}
-function readUint16LE(bytes, offset) {
-  return bytes[offset] + (bytes[offset + 1] << 8);
-}
-function readUint24LE(bytes, offset) {
-  return bytes[offset] + (bytes[offset + 1] << 8) + (bytes[offset + 2] << 16);
-}
-function readUint32BE(bytes, offset) {
-  return bytes[offset] * 16777216 + bytes[offset + 1] * 65536 + bytes[offset + 2] * 256 + bytes[offset + 3];
-}
-function positiveDimensions(width, height) {
-  return width > 0 && height > 0 ? { width, height } : void 0;
-}
-function isJpegSof(marker) {
-  return marker >= 192 && marker <= 195 || marker >= 197 && marker <= 199 || marker >= 201 && marker <= 203 || marker >= 205 && marker <= 207;
-}
-function stringFromBytes(bytes, start, end) {
-  if (bytes.length < end) return "";
-  let output = "";
-  for (let index = start; index < end; index += 1) output += String.fromCharCode(bytes[index]);
-  return output;
-}
-function isCanonicalBase642(value) {
-  return value.length >= 4 && value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value);
-}
-function hashString(value) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-// src/codex/virtual-harness.ts
-var CODEX_SESSION_PREFIX = "codex:";
-var CODEX_WORKSPACE_PREFIX = "codex-workspace:";
-var CODEX_PROVIDER = "codex";
-var CODEX_MODEL = "codex";
-var CODEX_PAGE_LIMIT = 100;
-var MAX_CODEX_PAGES = 32;
-var MAX_LIVE_TOOL_OUTPUT = 128 * 1024;
-var DEFAULT_HISTORY_MESSAGES = 50;
-var SESSION_SEARCH_RESULT_LIMIT = 20;
-var SESSION_SEARCH_SNIPPET_CODE_POINTS = 240;
-var CODEX_DEFAULT_PERMISSION = "workspace-write";
-var MAX_CODEX_PROMPT_PARTS = 16;
-var MAX_CODEX_PROMPT_TEXT = 256 * 1024;
-var MAX_CODEX_IMAGE_BASE642 = 288 * 1024 * 1024;
-var CODEX_IMAGE_MEDIA_TYPES3 = /* @__PURE__ */ new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var CODEX_IMAGE_ATTACHMENT_PREFIX2 = "codex-image:";
-var HOST_WORKSPACE_ENDPOINTS = /* @__PURE__ */ new Set([
-  "workspaceFiles/list",
-  "workspaceFiles/stat",
-  "workspaceFiles/read",
-  "workspaceFiles/readBytes",
-  "workspaceFiles/readAll",
-  "workspaceFiles/readRelated",
-  "terminal/environment",
-  "terminal/shells",
-  "terminal/list",
-  "terminal/create",
-  "terminal/write",
-  "terminal/resize",
-  "terminal/rename",
-  "terminal/close"
-]);
-var HOST_WORKSPACE_STREAM_ENDPOINTS = /* @__PURE__ */ new Set(["workspaceFiles/changes", "terminal/follow", "terminal/retain"]);
-function isHostWorkspaceEndpoint(endpoint) {
-  return HOST_WORKSPACE_ENDPOINTS.has(endpoint);
-}
-function isHostWorkspaceStreamEndpoint(endpoint) {
-  return HOST_WORKSPACE_STREAM_ENDPOINTS.has(endpoint);
-}
-function codexProjectWorkspaceId(projectId) {
-  return `${CODEX_WORKSPACE_PREFIX}project:${projectId}`;
-}
-async function discoverCodexVirtualWorkspaces(client, signal) {
-  return (await loadCatalog(client, signal)).workspaces;
-}
-var CodexVirtualHarness = class _CodexVirtualHarness {
-  constructor(client, host, sessionGeneration = "legacy", hostCarrier) {
-    this.client = client;
-    this.host = host;
-    this.sessionGeneration = sessionGeneration;
-    this.hostCarrier = hostCarrier;
-    this.api = this.createApiProxy();
-  }
-  api;
-  catalog;
-  workspaceStreams = /* @__PURE__ */ new Set();
-  controlStreams = /* @__PURE__ */ new Set();
-  eventStreams = /* @__PURE__ */ new Map();
-  rcMuxStreams = /* @__PURE__ */ new Set();
-  rcHostStreams = /* @__PURE__ */ new Set();
-  follows = /* @__PURE__ */ new Set();
-  pendingRequestIds = /* @__PURE__ */ new Map();
-  pendingApprovals = /* @__PURE__ */ new Map();
-  pendingThreads = /* @__PURE__ */ new Map();
-  blankThreads = /* @__PURE__ */ new Set();
-  selectedModels = /* @__PURE__ */ new Map();
-  selectedPermissions = /* @__PURE__ */ new Map();
-  imageAttachments = /* @__PURE__ */ new Map();
-  modelDirectory;
-  modelDirectoryPromise;
-  lastProjectionSeq = 0;
-  commandSeq = 0;
-  selectedWorkspaceId;
-  lastOpenedSessionId;
-  openedWorkspaceSessions = /* @__PURE__ */ new Map();
-  closed = false;
-  static remote(core, host, sessionGeneration = "legacy", hostCarrier) {
-    return new _CodexVirtualHarness(new CodexRemoteClient(core), host, sessionGeneration, hostCarrier);
-  }
-  async workspaces(signal) {
-    return (await this.refreshCatalog(signal)).workspaces;
-  }
-  async selectWorkspace(workspaceId, signal) {
-    const catalog = await loadCatalog(this.client, signal);
-    const workspace = catalog.workspaces.find((item) => item.workspaceId === workspaceId);
-    if (workspace === void 0) throw new Error("The selected CodeX workspace is no longer available.");
-    this.selectedWorkspaceId = workspace.workspaceId;
-    this.catalog = catalog;
-    return workspace;
-  }
-  get openedSessionId() {
-    return this.lastOpenedSessionId;
-  }
-  get openedSessions() {
-    return new Map(this.openedWorkspaceSessions);
-  }
-  rememberOpenedSession(sessionId) {
-    if (this.closed) return;
-    this.lastOpenedSessionId = sessionId;
-    for (const workspace of this.catalog?.workspaces ?? []) {
-      if (!workspace.sessionIds.includes(sessionId)) continue;
-      this.openedWorkspaceSessions.delete(workspace.workspaceId);
-      this.openedWorkspaceSessions.set(workspace.workspaceId, sessionId);
-      if (this.openedWorkspaceSessions.size > 64) {
-        this.openedWorkspaceSessions.delete(this.openedWorkspaceSessions.keys().next().value);
-      }
-    }
-  }
-  async preferredSessionId(signal, preferredSessionId = this.openedWorkspaceSessions.get(this.selectedWorkspaceId ?? "")) {
-    signal?.throwIfAborted();
-    const catalog = this.catalog;
-    const selected = catalog?.workspaces.find((workspace) => workspace.workspaceId === this.selectedWorkspaceId);
-    const selectedSessionIds = new Set(selected?.sessionIds ?? []);
-    const sessions = (catalog?.sessions ?? []).filter((session) => selectedSessionIds.has(session.id));
-    if (sessions.some((session) => session.id === preferredSessionId)) return preferredSessionId;
-    return sessions.reduce(
-      (latest, session) => latest === void 0 || session.updatedAt > latest.updatedAt ? session : latest,
-      void 0
-    )?.id;
-  }
-  async invoke(request) {
-    const result = await this.dispatch(
-      `${request.namespace}/${request.method}`,
-      { args: request.args },
-      request.signal ?? new AbortController().signal
-    );
-    if (result.ok) return result.value;
-    throw Object.assign(new Error(result.error.message), {
-      isDSHRemoteError: true,
-      code: result.error.code,
-      details: result.error.details
-    });
-  }
-  async dispatch(endpoint, payload, signal) {
-    try {
-      if (isHostWorkspaceEndpoint(endpoint)) {
-        if (this.hostCarrier === void 0) return fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`);
-        return await this.hostCarrier.dispatch(endpoint, payload, signal);
-      }
-      const args = carrierArgs(payload);
-      switch (endpoint) {
-        case "$events/result":
-          return business(await this.answerRemoteEvent(args, signal));
-        case "workspace/list": {
-          const catalog = await this.refreshCatalog(signal);
-          return business(success({
-            items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-            archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
-            pinnedSessionIds: []
-          }));
-        }
-        case "workspace/create":
-          return business(await this.createWorkspace(requestArg(args), signal));
-        case "workspace/rename":
-          return business(await this.renameWorkspace(requestArg(args)));
-        case "workspace/delete":
-          return business(failure("workspace-read-only", "CodeX virtual Workspaces cannot be deleted."));
-        case "workspace/insertBefore":
-          return business({
-            workspaceIds: nativeVisibleWorkspaces(await this.currentCatalog(signal), this.selectedWorkspaceId).map((item) => item.workspaceId)
-          });
-        case "workspace/insertSessionBefore":
-          return business(await this.workspaceForSession(requestArg(args), signal));
-        case "workspace/archiveSession":
-          return business(await this.archiveSession(requestArg(args), signal));
-        case "session/list":
-          return business(success({ items: await this.sessionSummaries(signal) }));
-        case "session/search":
-          return business(await this.searchSessions(requestArg(args), signal));
-        case "session/create":
-          return business(await this.createSession(requestArg(args), signal));
-        case "session/fork":
-          return business(await this.forkSession(requestArg(args), signal));
-        case "session/history":
-          return business(await this.sessionHistory(requestArg(args), signal));
-        case "session/page":
-          return business(await this.sessionPage(requestArg(args), signal));
-        case "session/prompt":
-          return business(await this.prompt(requestArg(args), signal));
-        case "session/cancel":
-          return business(await this.cancel(requestArg(args), signal));
-        case "session/rename":
-          return business(await this.renameSession(requestArg(args), signal));
-        case "session/updateQueue":
-          return business(failure("queue-item-not-found", "CodeX does not expose a DSH inbox queue."));
-        case "session/attachment":
-          return business(await this.attachment(requestArg(args), signal));
-        case "session/modelCatalog":
-          return business(success(modelCatalog(await this.models(signal))));
-        case "session/models": {
-          const sessionId = requiredString(requestArg(args).sessionId, "sessionId");
-          nativeThreadId(sessionId);
-          const directory = await this.models(signal);
-          return business(success({
-            current: this.modelSelection(sessionId, directory),
-            routable: true,
-            groups: directory.groups,
-            failures: []
-          }));
-        }
-        case "session/selectModel":
-          return business(await this.selectModel(requestArg(args), signal));
-        case "session/canOpenWorkspacePath":
-          return business(this.selectedWorkspaceId !== void 0);
-        case "session/openWorkspacePath":
-          return business(failure("bad-request", "Opening Host paths is unavailable in CodeX mode."));
-        case "host/describe":
-          return business(success(await this.describeHost(signal)));
-        case "host/listDirectory":
-          return business(await this.listDirectory(requestArg(args), signal));
-        case "directoryPicker/list":
-          return business(await this.listDirectory(requestArg(args), signal));
-        case "skills/list":
-          return business(success({ items: [] }));
-        case "commands/list":
-          return ok(this.commandList(args));
-        case "commands/execute":
-          return ok(await this.executeCommand(args, signal));
-        default:
-          return this.hostCarrier === void 0 ? fail("method-not-found", `CodeX virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
-      }
-    } catch (error) {
-      return failFrom(error);
-    }
-  }
-  async open(endpoint, payload, signal) {
-    if (isHostWorkspaceStreamEndpoint(endpoint)) {
-      if (this.hostCarrier === void 0) {
-        throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
-          isDSHRemoteError: true,
-          code: "method-not-found",
-          details: {}
-        });
-      }
-      return this.hostCarrier.open(endpoint, payload, signal);
-    }
-    const args = carrierArgs(payload);
-    if (endpoint === "workspace/follow") return this.workspaceFollow(signal);
-    if (endpoint === "session/control") return this.sessionControl(signal);
-    if (endpoint === "session/follow") return this.sessionFollow(requestArg(args), signal);
-    if (endpoint === "$events") return this.remoteEvents(signal);
-    if (endpoint === "job/list" || endpoint === "job/follow") return this.emptyJobStream(endpoint, signal);
-    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
-    throw Object.assign(new Error(`CodeX virtual Harness does not implement stream ${endpoint}.`), {
-      isDSHRemoteError: true,
-      code: "method-not-found",
-      details: {}
-    });
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    for (const stream of this.workspaceStreams) stream.close();
-    for (const stream of this.controlStreams) stream.close();
-    for (const stream of this.eventStreams.values()) stream.close();
-    for (const stream of this.rcMuxStreams) stream.close();
-    for (const stream of this.rcHostStreams) stream.close();
-    this.workspaceStreams.clear();
-    this.controlStreams.clear();
-    this.eventStreams.clear();
-    this.rcMuxStreams.clear();
-    this.rcHostStreams.clear();
-    const follows = [...this.follows];
-    this.follows.clear();
-    for (const follow of follows) {
-      follow.queue.close();
-      await follow.close?.().catch(() => void 0);
-    }
-    this.pendingApprovals.clear();
-    this.pendingRequestIds.clear();
-    this.pendingThreads.clear();
-    this.blankThreads.clear();
-    this.selectedModels.clear();
-    this.selectedPermissions.clear();
-    this.imageAttachments.clear();
-  }
-  async refreshCatalog(signal) {
-    const catalog = await loadCatalog(this.client, signal, this.pendingThreads);
-    if (this.selectedWorkspaceId !== void 0 && !catalog.workspaces.some((workspace) => workspace.workspaceId === this.selectedWorkspaceId)) {
-      this.selectedWorkspaceId = void 0;
-    }
-    this.catalog = catalog;
-    return catalog;
-  }
-  async currentCatalog(signal) {
-    return this.catalog ?? this.refreshCatalog(signal);
-  }
-  models(signal) {
-    if (this.modelDirectory !== void 0) return Promise.resolve(this.modelDirectory);
-    this.modelDirectoryPromise ??= loadModelDirectory(this.client, signal).then((directory) => {
-      this.modelDirectory = directory;
-      return directory;
-    }).finally(() => {
-      this.modelDirectoryPromise = void 0;
-    });
-    return this.modelDirectoryPromise;
-  }
-  modelSelection(sessionId, directory) {
-    return this.selectedModels.get(sessionId) ?? directory?.default ?? modelSelection();
-  }
-  permissionSelection(sessionId) {
-    return this.selectedPermissions.get(sessionId);
-  }
-  setPermissionSelection(sessionId, preset) {
-    if (preset === void 0) this.selectedPermissions.delete(sessionId);
-    else this.selectedPermissions.set(sessionId, preset);
-    this.publishProjection(sessionId, "permissions", codexPermissionsProjection(preset), this.nextProjectionSeq());
-  }
-  commandList(args) {
-    nativeThreadId(requiredString(args.agentId, "agentId"));
-    return [{
-      name: "permission",
-      description: "Switch the CodeX Remote sandbox mode and approval policy",
-      input: { hint: "<preset>" }
-    }];
-  }
-  async executeCommand(args, signal) {
-    const sessionId = requiredString(args.agentId, "agentId");
-    const threadId = nativeThreadId(sessionId);
-    const line = requiredString(args.line, "command line").trim();
-    if (!Array.isArray(args.images)) throw new Error("The CodeX command image list is required.");
-    const match = /^\/permission(?:\s+([\s\S]*))?$/u.exec(line);
-    if (match === null) return void 0;
-    const commandId = `codex-permission:${++this.commandSeq}`;
-    if (args.images.length > 0) return {
-      commandId,
-      result: { kind: "error", text: "CodeX Remote permission commands do not accept attachments." }
-    };
-    const requested = (match[1] ?? "").trim();
-    if (requested === "") {
-      await this.readHistoryPage(threadId, { maxMessages: 1 }, signal);
-      return {
-        commandId,
-        result: { kind: "success", text: `current preset ${this.permissionSelection(sessionId) ?? "Host settings (not reported)"}` }
-      };
-    }
-    if (!isCodexPermissionPreset(requested)) return {
-      commandId,
-      result: { kind: "error", text: `unknown preset "${requested}" (available: workspace-write, danger-full-access)` }
-    };
-    const result = await this.client.request("thread/resume", { threadId, permissionPreset: requested }, signal);
-    const effective = codexPermissionPresetFromResponse(result);
-    if (effective === void 0) throw new Error("The Host did not confirm the CodeX permission preset.");
-    this.setPermissionSelection(sessionId, effective);
-    if (effective !== requested) throw new Error("The Host did not apply the requested CodeX permission preset.");
-    return { commandId, result: { kind: "success", text: `preset ${effective}` } };
-  }
-  sessionTitle(sessionId) {
-    const session = this.catalog?.sessions.find((item) => item.id === sessionId);
-    return session === void 0 ? null : displayTitle(session);
-  }
-  async selectModel(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    nativeThreadId(sessionId);
-    const provider = requiredString(request.provider, "provider");
-    const model = requiredString(request.model, "model");
-    const reasoningEffort = string2(request.reasoningEffort);
-    const directory = await this.models(signal);
-    const available = directory.models.get(model);
-    if (provider !== CODEX_PROVIDER || available === void 0) {
-      return failure("model-unavailable", "The selected CodeX model is unavailable on this Host.");
-    }
-    const supportedEfforts = available.reasoning?.efforts.map((effort) => effort.id) ?? [];
-    if (reasoningEffort !== void 0 && !supportedEfforts.includes(reasoningEffort)) {
-      return failure("model-unavailable", "The selected reasoning effort is unavailable for this CodeX model.");
-    }
-    const selected = {
-      provider,
-      model,
-      ...reasoningEffort === void 0 ? {} : { reasoningEffort }
-    };
-    this.selectedModels.set(sessionId, selected);
-    const seq = Date.now();
-    this.publishProjection(sessionId, "modelSelection", modelSelectionProjection(selected), seq);
-    return success({ selected });
-  }
-  publishProjection(sessionId, key, value, seq) {
-    for (const queue of this.controlStreams) queue.push({ type: "projection", sessionId, key, value, seq });
-    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
-  }
-  nextProjectionSeq() {
-    const seq = Math.max(Date.now(), this.lastProjectionSeq + 1);
-    this.lastProjectionSeq = seq;
-    return seq;
-  }
-  updateThreadName(threadId, name2) {
-    const pending = this.pendingThreads.get(threadId);
-    if (pending !== void 0) this.pendingThreads.set(threadId, { ...pending, name: name2 });
-    if (this.catalog === void 0) return;
-    const threads = this.catalog.threads.map((thread) => string2(thread.id) === threadId ? { ...thread, name: name2 } : thread);
-    const sessions = this.catalog.sessions.map((session) => {
-      if (session.nativeId !== threadId) return session;
-      const { title: _title, ...rest } = session;
-      return name2.trim() === "" ? rest : { ...rest, title: name2 };
-    });
-    this.catalog = { ...this.catalog, threads, sessions };
-  }
-  async sessionSummaries(signal) {
-    const catalog = await this.refreshCatalog(signal);
-    const directory = await this.models(signal).catch(() => void 0);
-    return catalog.sessions.map((session) => {
-      const blank = this.blankThreads.has(session.nativeId) || this.pendingThreads.has(session.nativeId);
-      return this.sessionSummary(session, {
-        blank,
-        modelSelection: this.modelSelection(session.id, directory),
-        lastPromptAt: session.updatedAt || null
-      });
-    });
-  }
-  sessionSummary(session, options) {
-    return {
-      sessionId: session.id,
-      updatedAt: session.updatedAt,
-      running: session.status === "running" || session.status === "waiting",
-      blank: options.blank,
-      ...session.cwd === void 0 ? {} : { cwd: session.cwd },
-      projections: {
-        kind: "sequenced",
-        asOfSeq: options.asOfSeq ?? 0,
-        values: {
-          title: displayTitle(session),
-          sessionListMetadata: { blank: options.blank, lastPromptAt: options.lastPromptAt },
-          modelSelection: modelSelectionProjection(options.modelSelection),
-          permissions: codexPermissionsProjection(this.permissionSelection(session.id)),
-          imageLimits: codexImageLimitsProjection()
-        }
-      }
-    };
-  }
-  async searchSessions(request, signal) {
-    const query = requiredString(request.query, "query").trim();
-    if (query.length === 0 || query.length > 500 || query.includes("\0")) {
-      return failure("bad-request", "The CodeX Session search query is invalid.");
-    }
-    const catalog = await this.currentCatalog(signal);
-    const needle = query.toLocaleLowerCase();
-    const matches = catalog.threads.flatMap((thread) => {
-      const session = projectCodexThread(thread);
-      if (session === void 0) return [];
-      const candidates = [session.title, session.preview, session.cwd, session.nativeId].filter((value) => value !== void 0 && value.length > 0);
-      const snippet = candidates.find((value) => value.toLocaleLowerCase().includes(needle));
-      if (snippet === void 0) return [];
-      return [{ sessionId: session.id, snippet: truncateCodePoints(snippet, SESSION_SEARCH_SNIPPET_CODE_POINTS) }];
-    });
-    return success({
-      items: matches.slice(0, SESSION_SEARCH_RESULT_LIMIT),
-      hasMore: matches.length > SESSION_SEARCH_RESULT_LIMIT
-    });
-  }
-  async workspaceFollow(signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.workspaceStreams.add(queue);
-    const catalog = await this.refreshCatalog(signal);
-    queue.push({
-      type: "baseline",
-      value: {
-        items: nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId).map(nativeWorkspace),
-        archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id),
-        pinnedSessionIds: []
-      }
-    });
-    return queue.iterate(() => this.workspaceStreams.delete(queue));
-  }
-  async sessionControl(signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.controlStreams.add(queue);
-    queue.push({ type: "baseline", value: { queues: {}, jobs: {}, projections: {} } });
-    return queue.iterate(() => this.controlStreams.delete(queue));
-  }
-  /**
-   * Background jobs belong to the Host Harness session, not to a CodeX virtual
-   * Workspace. The native session header mounts a job roster stream as soon as a
-   * Session opens, so answer it with an authoritative empty roster instead of a
-   * terminal `method-not-found` failure that tears the page down.
-   */
-  emptyJobStream(endpoint, signal) {
-    const queue = new AsyncValueQueue2(signal);
-    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
-    return queue.iterate(() => queue.close());
-  }
-  async remoteEvents(signal) {
-    const queue = new AsyncValueQueue2(signal);
-    const clientId = `codex-events:${this.host.deviceId}:${Date.now().toString(36)}`;
-    this.eventStreams.set(clientId, queue);
-    const home = (await this.currentCatalog(signal)).workspaces[0]?.path ?? "/";
-    queue.push({ type: "ready", clientId, host: { home } });
-    return queue.iterate(() => this.eventStreams.delete(clientId));
-  }
-  async sessionFollow(request, signal) {
-    const sessionId = sessionIdFromAddress(record3(request.address));
-    const threadId = nativeThreadId(sessionId);
-    const history = await this.readHistoryPage(threadId, {
-      maxMessages: optionalPositiveInteger(request.maxMessages)
-    }, signal);
-    const directory = await this.models(signal).catch(() => void 0);
-    const queue = new AsyncValueQueue2(signal);
-    const follow = {
-      sessionId,
-      threadId,
-      queue,
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== void 0,
-      startedItems: /* @__PURE__ */ new Set(),
-      completedItems: /* @__PURE__ */ new Set(),
-      streamedBlocks: /* @__PURE__ */ new Map(),
-      nextBlockIndex: 0,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      liveItems: /* @__PURE__ */ new Map(),
-      liveToolOutput: /* @__PURE__ */ new Map(),
-      liveToolResultSeq: /* @__PURE__ */ new Map(),
-      pendingToolImages: [],
-      requestId: this.pendingRequestIds.get(sessionId),
-      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
-    };
-    this.follows.add(follow);
-    queue.push({
-      type: "snapshot",
-      header: history.header,
-      cursor: history.cursor,
-      records: history.records,
-      hasMore: history.hasMore,
-      projections: {
-        asOfSeq: history.cursor,
-        values: {
-          title: this.sessionTitle(sessionId),
-          sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
-          modelSelection: modelSelectionProjection(this.modelSelection(sessionId, directory)),
-          permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
-          imageLimits: codexImageLimitsProjection()
-        }
-      },
-      ...this.sessionGeneration === "v3" ? { assistantStream: { revision: 0 } } : {}
-    });
-    try {
-      const stream = await this.client.subscribe(
-        threadId,
-        (frame) => this.acceptCodexFrame(follow, frame),
-        signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow)
-      );
-      if (this.closed || signal.aborted) {
-        await stream.close().catch(() => void 0);
-        signal.throwIfAborted();
-        throw new Error("The CodeX virtual Harness is closed.");
-      }
-      follow.close = () => stream.close();
-    } catch (error) {
-      this.follows.delete(follow);
-      queue.close();
-      throw error;
-    }
-    this.rememberOpenedSession(sessionId);
-    return queue.iterate(() => {
-      this.follows.delete(follow);
-      void follow.close?.().catch(() => void 0);
-    });
-  }
-  acceptCodexFrame(follow, frame) {
-    const params = record3(frame.params);
-    if (frame.method === "thread/name/updated") {
-      const name2 = string2(params.threadName);
-      if (name2 === void 0) return;
-      const seq = this.nextProjectionSeq();
-      this.updateThreadName(follow.threadId, name2);
-      const title = name2.trim() === "" ? null : name2.slice(0, 256);
-      this.publishProjection(follow.sessionId, "title", title, seq);
-      return;
-    }
-    if (frame.method === "thread/settings/updated") {
-      const preset = codexPermissionPresetFromResponse(params);
-      this.setPermissionSelection(follow.sessionId, preset);
-      return;
-    }
-    if (frame.method === "turn/started") {
-      const turn = record3(params.turn);
-      this.endAssistantAttempt(follow, { kind: "abandoned" });
-      this.resetLiveTurn(follow);
-      follow.turn += 1;
-      follow.activeTurnId = string2(turn.id);
-      follow.requestId = this.pendingRequestIds.get(follow.sessionId);
-      follow.stepOpen = true;
-      this.pushEvent(follow, "turn/start", { turn: follow.turn });
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
-      this.emitRemoteEvent("api-session/status", [follow.sessionId, true]);
-      for (const item of array(turn.items)) this.acceptCompletedItem(follow, record3(item), false);
-      return;
-    }
-    if (frame.method === "item/started" || frame.method === "item/completed") {
-      const item = record3(params.item);
-      const itemId = string2(item.id);
-      if (frame.method === "item/started" && itemId !== void 0) {
-        follow.startedItems.add(itemId);
-        follow.liveItems.set(itemId, item);
-        if (isToolItemType2(string2(item.type))) this.ensureToolStarted(follow, item);
-      }
-      if (frame.method === "item/completed") this.acceptCompletedItem(follow, item, true);
-      return;
-    }
-    if (frame.method === "item/agentMessage/delta") {
-      const itemId = string2(params.itemId) ?? `assistant:${follow.turn}`;
-      const delta = string2(params.delta);
-      if (delta === void 0) return;
-      this.appendStreamDelta(follow, `agent:${itemId}`, itemId, "text", delta);
-      return;
-    }
-    if (frame.method === "item/reasoning/summaryPartAdded") {
-      const itemId = string2(params.itemId);
-      if (itemId !== void 0) this.ensureStreamBlock(
-        follow,
-        `reasoning-summary:${itemId}:${integer(params.summaryIndex) ?? 0}`,
-        itemId,
-        "reasoning"
-      );
-      return;
-    }
-    if (frame.method === "item/reasoning/summaryTextDelta" || frame.method === "item/reasoning/textDelta" || frame.method === "item/plan/delta") {
-      const itemId = string2(params.itemId);
-      const delta = string2(params.delta);
-      if (itemId === void 0 || delta === void 0) return;
-      const key = frame.method === "item/plan/delta" ? `plan:${itemId}` : frame.method === "item/reasoning/summaryTextDelta" ? `reasoning-summary:${itemId}:${integer(params.summaryIndex) ?? 0}` : `reasoning-content:${itemId}:${integer(params.contentIndex) ?? 0}`;
-      this.appendStreamDelta(follow, key, itemId, "reasoning", delta);
-      return;
-    }
-    if (frame.method === "turn/plan/updated") {
-      const todos = array(params.plan).flatMap((value) => {
-        const item = record3(value);
-        const content = string2(item.step);
-        if (content === void 0) return [];
-        const status2 = item.status === "inProgress" ? "in_progress" : item.status === "completed" ? "completed" : "pending";
-        return [{ content, status: status2 }];
-      });
-      this.pushEvent(follow, "todo/write", { todos });
-      return;
-    }
-    if (frame.method === "item/commandExecution/outputDelta" || frame.method === "item/fileChange/outputDelta" || frame.method === "item/mcpToolCall/progress") {
-      const itemId = string2(params.itemId);
-      const delta = frame.method === "item/mcpToolCall/progress" ? string2(params.message) : string2(params.delta);
-      if (itemId === void 0 || delta === void 0) return;
-      const type = frame.method === "item/commandExecution/outputDelta" ? "commandExecution" : frame.method === "item/fileChange/outputDelta" ? "fileChange" : "mcpToolCall";
-      const item = follow.liveItems.get(itemId) ?? { id: itemId, type, status: "inProgress" };
-      follow.liveItems.set(itemId, item);
-      this.ensureToolStarted(follow, item);
-      const separator = frame.method === "item/mcpToolCall/progress" && follow.liveToolOutput.has(itemId) ? "\n" : "";
-      const output = appendBoundedText(follow.liveToolOutput.get(itemId) ?? "", `${separator}${delta}`);
-      follow.liveToolOutput.set(itemId, output);
-      this.emitToolResult(follow, item, output);
-      return;
-    }
-    if (frame.method === "item/fileChange/patchUpdated") {
-      const itemId = string2(params.itemId);
-      if (itemId === void 0) return;
-      const previous = follow.liveItems.get(itemId) ?? { id: itemId, type: "fileChange", status: "inProgress" };
-      const item = { ...previous, changes: sanitizedFileChanges(params.changes) };
-      follow.liveItems.set(itemId, item);
-      this.ensureToolStarted(follow, item);
-      this.emitToolResult(follow, item, fileChangeSummary(item));
-      return;
-    }
-    if (frame.method === "thread/status/changed") {
-      const status2 = record3(params.status);
-      const running = status2.type === "active";
-      this.emitRemoteEvent("api-session/status", [follow.sessionId, running]);
-      if (status2.type === "systemError") {
-        this.broadcastRcHost({
-          type: "host/agent-error",
-          sessionId: follow.sessionId,
-          message: "CodeX reported a thread system error."
-        });
-      }
-      return;
-    }
-    if (frame.method === "model/rerouted") {
-      const model = string2(params.toModel);
-      if (model === void 0) return;
-      const previous = this.selectedModels.get(follow.sessionId);
-      const selected = {
-        provider: CODEX_PROVIDER,
-        model,
-        ...previous?.reasoningEffort === void 0 ? {} : { reasoningEffort: previous.reasoningEffort }
-      };
-      this.selectedModels.set(follow.sessionId, selected);
-      const seq = this.pushEvent(follow, "request/context", { provider: CODEX_PROVIDER, model });
-      this.publishProjection(follow.sessionId, "modelSelection", modelSelectionProjection(selected), seq);
-      return;
-    }
-    if (frame.method === "turn/completed") {
-      const turn = record3(params.turn);
-      for (const item of array(turn.items)) this.acceptCompletedItem(follow, record3(item), true);
-      if (follow.stepOpen) {
-        this.closeAllStreamBlocks(follow);
-        if (follow.streamActive) this.finishStream(follow);
-        this.endAssistantAttempt(follow, { kind: "abandoned" });
-        this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-        follow.stepOpen = false;
-      }
-      this.pushEvent(follow, "turn/end", {
-        turn: follow.turn,
-        reason: turn.status === "failed" || turn.error !== void 0 && turn.error !== null ? { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } } : { kind: "completed" }
-      });
-      this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
-      this.emitRemoteEvent("api-session/activity", [follow.sessionId, Date.now()]);
-      follow.activeTurnId = void 0;
-      this.pendingRequestIds.delete(follow.sessionId);
-      void this.refreshAndPublishWorkspaces();
-      return;
-    }
-    if (frame.method === "item/commandExecution/requestApproval" || frame.method === "item/fileChange/requestApproval") {
-      const requestHandle = string2(params.requestHandle);
-      if (requestHandle === void 0) return;
-      const command = commandText(params.command);
-      this.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
-      this.emitApproval({
-        eventId: requestHandle,
-        agentId: follow.sessionId,
-        request: {
-          toolName: frame.method.includes("fileChange") ? "CodeX file change" : "CodeX command",
-          ...command === void 0 ? {} : { reason: command }
-        }
-      });
-    }
-  }
-  acceptCompletedItem(follow, item, settleAssistant) {
-    const itemId = string2(item.id) ?? `item:${follow.nextSeq}`;
-    if (follow.completedItems.has(itemId)) return;
-    const type = string2(item.type);
-    if (type === "agentMessage" && !settleAssistant) return;
-    follow.completedItems.add(itemId);
-    this.closeItemStreamBlocks(follow, itemId, itemText2(item));
-    if (type === "agentMessage" && follow.streamActive && follow.streamedBlocks.size === 0) this.finishStream(follow);
-    const supplementalImages = type === "agentMessage" ? follow.pendingToolImages : [];
-    let assistantMessageSeq;
-    for (const event of itemEvents(
-      item,
-      follow.turn,
-      1,
-      follow.requestId,
-      this.modelSelection(follow.sessionId),
-      follow.sessionId,
-      supplementalImages
-    )) {
-      if (event.type === "tool/call" && follow.startedItems.has(itemId)) continue;
-      if (event.type === "tool/result") this.pushToolResult(follow, itemId, event);
-      else {
-        const seq = this.pushEvent(follow, event.type, event.data, event.view);
-        if (event.type === "assistant/message") assistantMessageSeq = seq;
-      }
-    }
-    if (type === "agentMessage" && assistantMessageSeq !== void 0) {
-      this.endAssistantAttempt(follow, {
-        kind: "committed",
-        eventType: "assistant/message",
-        seq: assistantMessageSeq
-      });
-    }
-    if (type === "agentMessage" && supplementalImages.length > 0) follow.pendingToolImages = [];
-    else if (type !== void 0 && isToolItemType2(type)) {
-      follow.pendingToolImages.push(...toolOutputImageBlocks(item));
-    }
-    follow.liveItems.delete(itemId);
-    follow.liveToolOutput.delete(itemId);
-    follow.liveToolResultSeq.delete(itemId);
-    follow.liveToolResultSeq.delete(`${itemId}:call`);
-  }
-  pushEvent(follow, type, data2, view, placement) {
-    const seq = follow.nextSeq++;
-    const event = {
-      type,
-      seq,
-      time: Date.now(),
-      data: adaptEventData(
-        type,
-        type === "assistant/message" && this.sessionGeneration === "v3" && follow.assistantAttempt !== void 0 ? { ...record3(data2), stream: follow.assistantAttempt.stream } : data2,
-        this.sessionGeneration
-      ),
-      ...isSurfaceEvent(type) ? placement === void 0 ? { surfaceOp: "append" } : {
-        surfaceOp: this.sessionGeneration === "v3" ? { op: "replace", startSeq: placement.replaceSeq, endSeq: placement.replaceSeq } : { op: "replace", start: placement.replaceSeq, end: placement.replaceSeq },
-        sourceEventSeqs: [placement.replaceSeq]
-      } : {}
-    };
-    this.cacheImageBlocks(follow.sessionId, event.data);
-    if (!follow.rcOnly) {
-      follow.queue.push({
-        type: "event",
-        event,
-        ...view === void 0 ? {} : { view }
-      });
-    }
-    this.broadcastRcMux({
-      type: "session/event",
-      sessionId: follow.sessionId,
-      event,
-      ...view === void 0 ? {} : { view }
-    });
-    return seq;
-  }
-  cacheImageBlocks(sessionId, value) {
-    for (const block of collectImageBlocks(value)) {
-      const attachment = record3(block.attachment);
-      const attachmentId = string2(attachment.attachmentId);
-      const data2 = string2(block.data);
-      if (attachmentId === void 0 || data2 === void 0 || !attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX2)) continue;
-      this.imageAttachments.set(attachmentId, { sessionId, attachment, data: data2 });
-    }
-  }
-  ensureStreamBlock(follow, key, itemId, kind) {
-    const current = follow.streamedBlocks.get(key);
-    if (current !== void 0) return current;
-    const block = { itemId, index: follow.nextBlockIndex++, kind, text: "" };
-    follow.streamedBlocks.set(key, block);
-    follow.streamActive = true;
-    this.pushAssistantChunk(follow, { type: "block-start", index: block.index, blockType: kind });
-    return block;
-  }
-  appendStreamDelta(follow, key, itemId, kind, delta) {
-    const block = this.ensureStreamBlock(follow, key, itemId, kind);
-    block.text = appendBoundedText(block.text, delta);
-    this.pushAssistantChunk(follow, {
-      type: kind === "reasoning" ? "reasoning-delta" : "text-delta",
-      index: block.index,
-      text: delta
-    });
-  }
-  closeItemStreamBlocks(follow, itemId, fallback) {
-    const matches = [...follow.streamedBlocks].filter(([, block]) => block.itemId === itemId);
-    for (const [key, block] of matches) {
-      const text = block.text || fallback || "";
-      this.pushAssistantChunk(follow, {
-        type: "block-end",
-        index: block.index,
-        block: { type: block.kind, text }
-      });
-      follow.streamedBlocks.delete(key);
-    }
-  }
-  closeAllStreamBlocks(follow) {
-    for (const block of follow.streamedBlocks.values()) {
-      this.pushAssistantChunk(follow, {
-        type: "block-end",
-        index: block.index,
-        block: { type: block.kind, text: block.text }
-      });
-    }
-    follow.streamedBlocks.clear();
-  }
-  finishStream(follow) {
-    this.pushAssistantChunk(follow, { type: "finish", reason: { kind: "stop" } });
-    follow.streamActive = false;
-  }
-  pushAssistantChunk(follow, chunk) {
-    if (this.sessionGeneration !== "v3" || follow.rcOnly === true) {
-      this.pushEvent(follow, "assistant/chunk", { turn: follow.turn, step: 1, chunk });
-      return;
-    }
-    let attempt = follow.assistantAttempt;
-    if (attempt === void 0) {
-      attempt = {
-        attemptId: `codex-attempt:${follow.activeTurnId ?? follow.turn}:${follow.nextSeq}`,
-        startedAfterSeq: follow.nextSeq - 1,
-        nextIndex: 0,
-        stream: []
-      };
-      follow.assistantAttempt = attempt;
-      follow.assistantStreamRevision += 1;
-      follow.queue.push({
-        type: "assistant-stream",
-        frame: {
-          type: "start",
-          attemptId: attempt.attemptId,
-          revision: follow.assistantStreamRevision,
-          startedAfterSeq: attempt.startedAfterSeq,
-          turn: follow.turn,
-          step: 1
-        }
-      });
-    }
-    const time = Date.now();
-    const index = attempt.nextIndex++;
-    attempt.stream.push({ time, chunk });
-    follow.assistantStreamRevision += 1;
-    follow.queue.push({
-      type: "assistant-stream",
-      frame: {
-        type: "chunk",
-        attemptId: attempt.attemptId,
-        revision: follow.assistantStreamRevision,
-        index,
-        time,
-        chunk
-      }
-    });
-  }
-  endAssistantAttempt(follow, outcome) {
-    const attempt = follow.assistantAttempt;
-    if (attempt === void 0) return;
-    follow.assistantAttempt = void 0;
-    follow.assistantStreamRevision += 1;
-    if (this.sessionGeneration === "v3" && follow.rcOnly !== true) {
-      follow.queue.push({
-        type: "assistant-stream",
-        frame: {
-          type: "end",
-          attemptId: attempt.attemptId,
-          revision: follow.assistantStreamRevision,
-          index: attempt.nextIndex,
-          outcome
-        }
-      });
-    }
-  }
-  ensureToolStarted(follow, item) {
-    const itemId = string2(item.id);
-    if (itemId === void 0) return;
-    if (!follow.startedItems.has(itemId)) follow.startedItems.add(itemId);
-    if (follow.liveItems.get(itemId) !== item) follow.liveItems.set(itemId, item);
-    const call = itemEvents(
-      item,
-      follow.turn,
-      1,
-      follow.requestId,
-      this.modelSelection(follow.sessionId),
-      follow.sessionId
-    ).find((event) => event.type === "tool/call");
-    if (call !== void 0 && !follow.liveToolResultSeq.has(`${itemId}:call`)) {
-      this.pushEvent(follow, call.type, call.data, call.view);
-      follow.liveToolResultSeq.set(`${itemId}:call`, -1);
-    }
-  }
-  emitToolResult(follow, item, resultText) {
-    const itemId = string2(item.id);
-    if (itemId === void 0) return;
-    const result = toolResultEvent(item, follow.turn, 1, itemId, resultText);
-    this.pushToolResult(follow, itemId, result);
-  }
-  pushToolResult(follow, itemId, event) {
-    const previous = follow.liveToolResultSeq.get(itemId);
-    const projected = previous === void 0 ? event : toolResultContentReplacement(event);
-    const seq = this.pushEvent(
-      follow,
-      projected.type,
-      projected.data,
-      projected.view,
-      previous === void 0 ? void 0 : { replaceSeq: previous }
-    );
-    follow.liveToolResultSeq.set(itemId, seq);
-  }
-  resetLiveTurn(follow) {
-    follow.startedItems.clear();
-    follow.completedItems.clear();
-    follow.streamedBlocks.clear();
-    follow.nextBlockIndex = 0;
-    follow.streamActive = false;
-    follow.assistantAttempt = void 0;
-    follow.liveItems.clear();
-    follow.liveToolOutput.clear();
-    follow.liveToolResultSeq.clear();
-    follow.pendingToolImages = [];
-  }
-  emitRemoteEvent(event, args) {
-    for (const queue of this.eventStreams.values()) queue.push({ type: "emit", event, args });
-    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
-    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
-      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
-    } else if (event === "api-session/removed" && sessionId !== void 0) {
-      this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord7(args[0])) {
-      const summary = args[0];
-      this.broadcastRcHost({
-        type: "host/session-added",
-        sessionId: summary.sessionId,
-        blank: summary.blank === true,
-        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
-      });
-    }
-  }
-  emitApproval(input2) {
-    for (const queue of this.eventStreams.values()) queue.push({
-      type: "waterfall",
-      event: "approval/request",
-      eventId: input2.eventId,
-      agentId: input2.agentId,
-      request: input2.request
-    });
-    this.broadcastRcMux({
-      type: "approval/requested",
-      sessionId: input2.agentId,
-      approvalId: input2.eventId,
-      toolName: string2(input2.request.toolName) ?? "CodeX",
-      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
-    }, input2.eventId);
-  }
-  async answerRemoteEvent(args, signal) {
-    const eventId = string2(args.eventId);
-    const outcome = record3(args.outcome);
-    if (eventId === void 0) throw new Error("The CodeX approval result is missing its event id.");
-    const pending = this.pendingApprovals.get(eventId);
-    if (pending === void 0) return void 0;
-    this.pendingApprovals.delete(eventId);
-    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "accept" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "decline";
-    await this.client.respond(pending.requestHandle, decision, signal);
-    return void 0;
-  }
-  async createWorkspace(request, signal) {
-    const path = string2(request.path);
-    if (path === void 0 || path.trim() === "") return failure("bad-request", "A CodeX working directory is required.");
-    const catalog = await this.currentCatalog(signal);
-    const existing = catalog.workspaces.find((item) => item.path === path);
-    if (existing !== void 0) return success({ workspace: nativeWorkspace(existing), created: false });
-    return failure("workspace-not-found", "The selected directory is not visible to CodeX Remote.");
-  }
-  async renameWorkspace(request) {
-    return failure("workspace-read-only", `CodeX virtual Workspace ${string2(request.workspaceId) ?? ""} cannot be renamed.`);
-  }
-  async workspaceForSession(request, signal) {
-    const sessionId = string2(request.sessionId);
-    const catalog = await this.currentCatalog(signal);
-    const workspace = catalog.workspaces.find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
-    return workspace === void 0 ? failure("workspace-not-found", "The CodeX virtual Workspace was not found.") : success({ workspace: nativeWorkspace(workspace) });
-  }
-  selectedWorkspace(catalog) {
-    return this.selectedWorkspaceId === void 0 ? void 0 : catalog.workspaces.find((item) => item.workspaceId === this.selectedWorkspaceId);
-  }
-  async describeHost(signal) {
-    const catalog = await this.currentCatalog(signal);
-    const workspace = this.selectedWorkspace(catalog);
-    const models = await this.models(signal).catch(() => void 0);
-    return {
-      version: "CodeX Remote",
-      cwd: workspace?.path ?? "",
-      home: workspace?.path ?? "",
-      provider: "CodeX",
-      ...models === void 0 ? {} : { model: models.default.model },
-      attachedSessions: catalog.sessions.length,
-      canOpenPath: workspace !== void 0
-    };
-  }
-  async listDirectory(request, signal) {
-    const catalog = await this.currentCatalog(signal);
-    const workspace = this.selectedWorkspace(catalog);
-    if (workspace === void 0) return failure("workspace-not-found", "The CodeX virtual Workspace was not found.");
-    const path = string2(request.path) ?? workspace.path;
-    if (!containsPath(workspace.path, path)) {
-      return failure("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
-    }
-    const listing = record3(await this.client.request("dsh/directoryList", { path }, signal));
-    if (!isCodexDirectoryListing(listing)) {
-      return failure("internal", "CodeX Remote returned an invalid directory listing.");
-    }
-    const listedPaths = [
-      listing.path,
-      listing.home,
-      ...listing.crumbs.map((item) => item.path),
-      ...listing.entries.map((item) => item.path)
-    ];
-    if (listedPaths.some((path2) => !containsPath(workspace.path, path2))) {
-      return failure("internal", "CodeX Remote returned a directory outside the current Workspace.");
-    }
-    return success(listing);
-  }
-  async archiveSession(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    await this.client.request("thread/archive", { threadId: nativeThreadId(sessionId) }, signal);
-    const catalog = await this.refreshCatalog(signal);
-    this.publishWorkspaceBaseline(catalog);
-    return success({ archivedSessionIds: [sessionId] });
-  }
-  async createSession(request, signal) {
-    const catalog = await this.currentCatalog(signal);
-    const workspaceId = string2(request.workspaceId) ?? this.selectedWorkspaceId;
-    const workspace = workspaceId === void 0 ? void 0 : catalog.workspaces.find((item) => item.workspaceId === workspaceId);
-    const cwd2 = string2(request.cwd) ?? workspace?.path;
-    if (cwd2 === void 0) return failure("workspace-not-found", "The CodeX virtual Workspace was not found.");
-    if (workspace !== void 0 && !containsPath(workspace.path, cwd2)) {
-      return failure("workspace-not-found", "The selected directory is outside the current CodeX virtual Workspace.");
-    }
-    const directory = await this.models(signal);
-    const selection = directory.default;
-    const requestedPreset = CODEX_DEFAULT_PERMISSION;
-    const result = record3(await this.client.request("thread/start", {
-      cwd: cwd2,
-      model: selection.model,
-      permissionPreset: requestedPreset
-    }, signal));
-    const permissionPreset2 = codexPermissionPresetFromResponse(result) ?? requestedPreset;
-    const thread = { ...record3(result.thread), cwd: cwd2, turns: array(record3(result.thread).turns) };
-    const projected = projectCodexThread(thread);
-    if (projected === void 0) return failure("internal", "CodeX returned an invalid Thread.");
-    this.pendingThreads.set(projected.nativeId, thread);
-    this.blankThreads.add(projected.nativeId);
-    this.selectedModels.set(projected.id, selection);
-    this.selectedPermissions.set(projected.id, permissionPreset2);
-    await this.refreshAndPublishWorkspaces();
-    const seq = this.nextProjectionSeq();
-    this.emitRemoteEvent("api-session/added", [this.sessionSummary(projected, {
-      blank: true,
-      modelSelection: selection,
-      lastPromptAt: null,
-      asOfSeq: seq
-    })]);
-    this.publishProjection(projected.id, "title", displayTitle(projected), seq);
-    return success({ sessionId: projected.id });
-  }
-  async forkSession(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const result = record3(await this.client.request("thread/fork", {
-      threadId: nativeThreadId(sessionId)
-    }, signal));
-    const permissionPreset2 = codexPermissionPresetFromResponse(result);
-    const projected = projectCodexThread(record3(result.thread));
-    if (projected === void 0) return failure("internal", "CodeX returned an invalid forked Thread.");
-    this.selectedModels.set(projected.id, this.modelSelection(sessionId, await this.models(signal)));
-    this.setPermissionSelection(projected.id, permissionPreset2);
-    await this.refreshAndPublishWorkspaces();
-    const seq = this.nextProjectionSeq();
-    this.publishProjection(projected.id, "title", displayTitle(projected), seq);
-    return success({ sessionId: projected.id });
-  }
-  async prompt(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const content = array(request.content);
-    const input2 = codexPromptInput(content);
-    if (input2 === void 0) return failure("attachment-error", "CodeX virtual Sessions accept text and pasted PNG, JPEG, WebP, or GIF images only.");
-    const threadId = nativeThreadId(sessionId);
-    const selection = this.modelSelection(sessionId, await this.models(signal));
-    const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId);
-    await this.ensureRcFollow(sessionId);
-    if (!isFreshBlankThread) {
-      const resumeResult = await this.client.request("thread/resume", {
-        threadId,
-        model: selection.model
-      }, signal);
-      const serverPreset = codexPermissionPresetFromResponse(resumeResult);
-      if (serverPreset !== void 0) {
-        this.setPermissionSelection(sessionId, serverPreset);
-      }
-    }
-    this.pendingRequestIds.set(sessionId, string2(request.requestId) ?? "");
-    const mode2 = request.mode === "steer" ? "turn/steer" : "turn/start";
-    if (mode2 === "turn/steer") {
-      const active = this.activeTurnId(threadId);
-      if (active === void 0) return failure("steer-unavailable", "The CodeX Thread has no active turn to steer.");
-      await this.client.request(mode2, { threadId, expectedTurnId: active, input: input2 }, signal);
-    } else {
-      await this.client.request(mode2, {
-        threadId,
-        input: input2,
-        ...codexModelParams(selection)
-      }, signal);
-    }
-    this.blankThreads.delete(threadId);
-    return success({ accepted: true });
-  }
-  async attachment(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const attachmentId = requiredString(request.attachmentId, "attachmentId");
-    if (!attachmentId.startsWith(CODEX_IMAGE_ATTACHMENT_PREFIX2)) {
-      return failure("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "not-referenced" });
-    }
-    nativeThreadId(sessionId);
-    const cached = this.imageAttachments.get(attachmentId);
-    if (cached?.sessionId === sessionId) return success({ attachment: cached.attachment, data: cached.data });
-    await this.hydrateImageAttachments(sessionId, signal);
-    const hydrated = this.imageAttachments.get(attachmentId);
-    return hydrated?.sessionId === sessionId ? success({ attachment: hydrated.attachment, data: hydrated.data }) : failure("attachment-error", "The CodeX image is not available in this virtual Session.", { reason: "not-referenced" });
-  }
-  async hydrateImageAttachments(sessionId, signal) {
-    const threadId = nativeThreadId(sessionId);
-    const result = record3(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
-    const thread = record3(result.thread);
-    if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
-    this.cacheHistoryImages(projectCodexNativeHistory(thread, sessionId));
-  }
-  async cancel(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const threadId = nativeThreadId(sessionId);
-    const turnId = this.activeTurnId(threadId);
-    if (turnId !== void 0) await this.client.request("turn/interrupt", { threadId, turnId }, signal);
-    return success({ accepted: true });
-  }
-  async renameSession(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const title = requiredString(request.title, "title");
-    await this.client.request("thread/name/set", { threadId: nativeThreadId(sessionId), name: title }, signal);
-    const seq = this.nextProjectionSeq();
-    this.updateThreadName(nativeThreadId(sessionId), title);
-    this.publishProjection(sessionId, "title", title, seq);
-    await this.refreshAndPublishWorkspaces();
-    return success({ title, seq });
-  }
-  async sessionPage(request, signal) {
-    const sessionId = sessionIdFromAddress(record3(request.address));
-    const page = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq: optionalNonNegativeInteger(request.beforeSeq),
-      throughSeq: optionalInteger(request.throughSeq),
-      maxMessages: optionalPositiveInteger(request.maxMessages)
-    }, signal);
-    return success({ records: page.records, hasMore: page.hasMore });
-  }
-  activeTurnId(threadId) {
-    for (const follow of this.follows) if (follow.threadId === threadId && follow.stepOpen) return follow.activeTurnId;
-    return void 0;
-  }
-  async readHistoryPage(threadId, page, signal) {
-    let value;
-    try {
-      value = record3(await this.client.request("dsh/sessionHistory", {
-        threadId,
-        ...page.beforeSeq === void 0 ? {} : { beforeSeq: page.beforeSeq },
-        ...page.throughSeq === void 0 ? {} : { throughSeq: page.throughSeq },
-        ...page.maxMessages === void 0 ? {} : { maxMessages: page.maxMessages }
-      }, signal));
-    } catch (error) {
-      if (!isLegacySessionHistoryUnsupported(error)) throw error;
-      const result = record3(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
-      const thread = record3(result.thread);
-      if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
-      value = paginateCodexNativeHistory(
-        projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
-        {
-          beforeSeq: page.beforeSeq,
-          throughSeq: page.throughSeq,
-          maxMessages: page.maxMessages
-        }
-      );
-    }
-    value = adaptCodexHistoryPage(value, this.sessionGeneration);
-    if (!isCodexNativeHistoryPage(value, `codex:${threadId}`)) {
-      throw new Error("CodeX Remote returned an invalid paginated History.");
-    }
-    if (Object.hasOwn(value, "permissionPreset")) {
-      const preset = value.permissionPreset;
-      this.setPermissionSelection(`codex:${threadId}`, preset === "workspace-write" || preset === "danger-full-access" ? preset : void 0);
-    }
-    this.cacheHistoryImages(value);
-    return value;
-  }
-  cacheHistoryImages(history) {
-    const sessionId = history.header.id;
-    const entries = "entries" in history ? history.entries : history.records;
-    for (const entry of entries) this.cacheImageBlocks(sessionId, entry.event.data);
-  }
-  async sessionHistory(request, signal) {
-    const sessionId = requiredString(request.sessionId, "sessionId");
-    const beforeSeq = optionalNonNegativeInteger(request.beforeSeq);
-    const history = await this.readHistoryPage(nativeThreadId(sessionId), {
-      beforeSeq,
-      maxMessages: optionalPositiveInteger(request.maxMessages)
-    }, signal);
-    const directory = await this.models(signal).catch(() => void 0);
-    if (beforeSeq === void 0) {
-      await this.ensureRcFollow(sessionId, history);
-      signal.throwIfAborted();
-      if (this.closed) throw new Error("The CodeX virtual Harness is closed.");
-      this.rememberOpenedSession(sessionId);
-    }
-    return success({
-      events: history.records.map((entry) => ({
-        event: entry.event,
-        ...entry.view === void 0 ? {} : { view: entry.view }
-      })),
-      hasMore: history.hasMore,
-      ...beforeSeq !== void 0 ? {} : {
-        projections: {
-          asOfSeq: history.cursor,
-          values: {
-            title: this.sessionTitle(sessionId),
-            sessionListMetadata: { blank: history.cursor < 0, lastPromptAt: null },
-            modelSelection: modelSelectionProjection(this.modelSelection(sessionId, directory)),
-            permissions: codexPermissionsProjection(this.permissionSelection(sessionId)),
-            imageLimits: codexImageLimitsProjection()
-          }
-        }
-      }
-    });
-  }
-  async ensureRcFollow(sessionId, seedHistory) {
-    if (this.followsHas(sessionId)) return;
-    const threadId = nativeThreadId(sessionId);
-    const stale = [...this.follows].filter((follow2) => follow2.rcOnly && follow2.sessionId !== sessionId);
-    for (const follow2 of stale) {
-      this.follows.delete(follow2);
-      follow2.queue.close();
-      await follow2.close?.().catch(() => void 0);
-    }
-    const history = seedHistory ?? await this.readHistoryPage(threadId, {}, void 0);
-    const controller = new AbortController();
-    const follow = {
-      sessionId,
-      threadId,
-      queue: new AsyncValueQueue2(controller.signal),
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== void 0,
-      startedItems: /* @__PURE__ */ new Set(),
-      completedItems: /* @__PURE__ */ new Set(),
-      streamedBlocks: /* @__PURE__ */ new Map(),
-      nextBlockIndex: 0,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      liveItems: /* @__PURE__ */ new Map(),
-      liveToolOutput: /* @__PURE__ */ new Map(),
-      liveToolResultSeq: /* @__PURE__ */ new Map(),
-      pendingToolImages: [],
-      requestId: this.pendingRequestIds.get(sessionId),
-      rcOnly: true,
-      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
-    };
-    this.follows.add(follow);
-    try {
-      const stream = await this.client.subscribe(
-        threadId,
-        (frame) => this.acceptCodexFrame(follow, frame),
-        controller.signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow)
-      );
-      if (this.closed || !this.follows.has(follow)) {
-        await stream.close().catch(() => void 0);
-        throw new Error("The CodeX follow was closed before it opened.");
-      }
-      follow.close = async () => {
-        controller.abort();
-        await stream.close();
-      };
-    } catch (error) {
-      this.follows.delete(follow);
-      controller.abort();
-      follow.queue.close();
-      throw error;
-    }
-  }
-  followsHas(sessionId) {
-    for (const follow of this.follows) if (follow.sessionId === sessionId) return true;
-    return false;
-  }
-  closeFollowAfterRemoteStreamClosed(follow) {
-    this.follows.delete(follow);
-    follow.queue.close();
-    this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
-  }
-  async refreshAndPublishWorkspaces() {
-    const catalog = await this.refreshCatalog().catch(() => void 0);
-    if (catalog !== void 0) this.publishWorkspaceBaseline(catalog);
-  }
-  publishWorkspaceBaseline(catalog) {
-    for (const queue of this.workspaceStreams) {
-      for (const workspace of nativeVisibleWorkspaces(catalog, this.selectedWorkspaceId)) {
-        queue.push({ type: "upsert", workspace: nativeWorkspace(workspace) });
-      }
-      queue.push({ type: "archived", archivedSessionIds: catalog.sessions.filter((item) => item.archived).map((item) => item.id) });
-    }
-  }
-  createApiProxy() {
-    const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord7(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
-      const result = await this.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
-      return {
-        rpcId: request.rpcId,
-        result: result.ok ? success(result.value) : failure(result.error.code, result.error.message, result.error.details)
-      };
-    };
-    return {
-      sessions: {
-        list: call("session.list"),
-        search: call("session.search"),
-        create: call("session.create"),
-        history: call("session.history"),
-        models: call("session.models"),
-        selectModel: call("session.selectModel"),
-        rename: call("session.rename"),
-        fork: call("session.fork"),
-        prompt: call("session.prompt"),
-        attachment: call("session.attachment"),
-        updateQueue: call("session.updateQueue"),
-        cancel: call("session.cancel")
-      },
-      workspace: {
-        list: call("workspace.list"),
-        create: call("workspace.create"),
-        rename: call("workspace.rename"),
-        delete: call("workspace.delete"),
-        insertBefore: call("workspace.insertBefore"),
-        insertSessionBefore: call("workspace.insertSessionBefore"),
-        archiveSession: call("workspace.archiveSession")
-      },
-      subagents: {},
-      host: {
-        describe: call("host.describe"),
-        listDirectory: call("host.listDirectory")
-      },
-      skills: { list: call("skills.list") },
-      agentPresets: {},
-      goals: {},
-      settings: {},
-      credentials: {},
-      llm: {},
-      events: {
-        mux: ((request, signal) => this.rcMux(request, signal)),
-        host: ((request, signal) => this.rcHost(request, signal))
-      },
-      downloads: {},
-      respond: async (message) => {
-        const pending = this.pendingApprovals.get(String(message.rpcId));
-        if (pending === void 0) return { accepted: false, reason: "not-pending" };
-        const result = message.result;
-        const outcome = result.ok ? result.value : void 0;
-        const decision = outcome === "allowed-once" ? "accept" : outcome === "cancelled" ? "cancel" : "decline";
-        await this.client.respond(pending.requestHandle, decision);
-        this.pendingApprovals.delete(pending.requestHandle);
-        return { accepted: true };
-      }
-    };
-  }
-  async *rcMux(request, signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.rcMuxStreams.add(queue);
-    const catalog = await this.currentCatalog(signal);
-    for (const session of catalog.sessions) queue.push({
-      rpcId: `${String(request.rpcId)}:${session.id}:subscribed`,
-      payload: { type: "session/subscribed", sessionId: session.id, lastSeq: -1 }
-    });
-    try {
-      yield* queue;
-    } finally {
-      this.rcMuxStreams.delete(queue);
-      queue.close();
-    }
-  }
-  async *rcHost(_request, signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.rcHostStreams.add(queue);
-    try {
-      yield* queue;
-    } finally {
-      this.rcHostStreams.delete(queue);
-      queue.close();
-    }
-  }
-  broadcastRcMux(payload, rpcId2 = `codex-mux:${Date.now()}:${Math.random()}`) {
-    for (const queue of this.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
-  }
-  broadcastRcHost(payload) {
-    const frame = { rpcId: `codex-host:${Date.now()}:${Math.random()}`, payload };
-    for (const queue of this.rcHostStreams) queue.push(frame);
-  }
-};
-async function loadCatalog(client, signal, pendingThreads) {
-  let projects = await loadCodexProjects(client, signal);
-  const threads = [];
-  let cursor2;
-  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-    const result = record3(await client.request("thread/list", {
-      limit: CODEX_PAGE_LIMIT,
-      sortKey: "updated_at",
-      sortDirection: "desc",
-      archived: false,
-      ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-    }, signal));
-    for (const value of array(result.data)) {
-      const thread = record3(value);
-      if (string2(thread.id) !== void 0) threads.push(thread);
-    }
-    cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-    if (cursor2 === void 0) break;
-  }
-  if (pendingThreads !== void 0) {
-    const listedIds = new Set(threads.map((thread) => string2(thread.id)).filter((id5) => id5 !== void 0));
-    for (const [threadId, thread] of pendingThreads) {
-      if (listedIds.has(threadId)) pendingThreads.delete(threadId);
-      else threads.unshift(thread);
-    }
-  }
-  if (projects.length === 0) {
-    projects = deriveCodexCwdWorkspaces(threads).map((workspace) => ({
-      id: workspace.id,
-      name: workspace.name,
-      roots: [{ path: workspace.path }],
-      position: workspace.position,
-      createdAt: workspace.createdAt,
-      updatedAt: workspace.updatedAt
-    }));
-  }
-  const projected = threads.map((thread) => {
-    const session = projectCodexThread(thread);
-    return session === void 0 ? void 0 : { thread, session };
-  }).filter((value) => value !== void 0);
-  const projectWorkspaces = projects.map(projectWorkspace);
-  const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]]));
-  const visibleSessionIds = /* @__PURE__ */ new Set();
-  const visibleThreads = [];
-  for (const { thread, session } of projected) {
-    const projectWorkspaceForSession = findProjectWorkspace(thread, session, projects, workspaceByProjectId);
-    if (projectWorkspaceForSession !== void 0) {
-      addSessionToWorkspace(projectWorkspaceForSession, session);
-      visibleSessionIds.add(session.id);
-      visibleThreads.push(thread);
-    }
-  }
-  const sessions = projected.map((value) => value.session).filter((session) => visibleSessionIds.has(session.id));
-  return {
-    threads: visibleThreads,
-    sessions,
-    projects,
-    workspaces: projectWorkspaces
-  };
-}
-async function loadCodexProjects(client, signal) {
-  const projects = [];
-  let cursor2;
-  try {
-    for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-      const result = record3(await client.request("project/list", {
-        limit: CODEX_PAGE_LIMIT,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      }, signal));
-      for (const value of array(result.data)) {
-        const project = projectCodexProject(value, projects.length);
-        if (project !== void 0 && !projects.some((item) => item.id === project.id)) projects.push(project);
-      }
-      cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-      if (cursor2 === void 0) break;
-    }
-  } catch (error) {
-    if (isProjectListUnsupported(error)) return [];
-    throw error;
-  }
-  return projects.sort((left, right) => left.position - right.position || left.name.localeCompare(right.name) || left.id.localeCompare(right.id));
-}
-async function loadModelDirectory(client, signal) {
-  const models = /* @__PURE__ */ new Map();
-  let defaultModelId;
-  let cursor2;
-  for (let page = 0; page < MAX_CODEX_PAGES; page += 1) {
-    const result = record3(await client.request("model/list", {
-      limit: CODEX_PAGE_LIMIT,
-      includeHidden: false,
-      ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-    }, signal));
-    for (const value of array(result.data)) {
-      const source = record3(value);
-      if (source.hidden === true) continue;
-      const id5 = string2(source.model) ?? string2(source.id);
-      if (id5 === void 0 || models.has(id5)) continue;
-      const efforts = array(source.supportedReasoningEfforts).map((value2) => {
-        const effort = record3(value2);
-        const effortId = string2(effort.reasoningEffort);
-        if (effortId === void 0) return void 0;
-        const description2 = string2(effort.description);
-        return {
-          id: effortId,
-          name: reasoningEffortName(effortId),
-          ...description2 === void 0 ? {} : { description: description2 }
-        };
-      }).filter((value2) => value2 !== void 0);
-      const defaultEffort2 = string2(source.defaultReasoningEffort);
-      const description = string2(source.description);
-      const model = {
-        id: id5,
-        name: string2(source.displayName) ?? id5,
-        ...description === void 0 ? {} : { description },
-        ...efforts.length === 0 ? {} : {
-          reasoning: {
-            efforts,
-            ...defaultEffort2 === void 0 || !efforts.some((effort) => effort.id === defaultEffort2) ? {} : { defaultEffort: defaultEffort2 }
-          }
-        }
-      };
-      models.set(id5, model);
-      if (source.isDefault === true) defaultModelId = id5;
-    }
-    cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
-    if (cursor2 === void 0) break;
-  }
-  const defaultModel = models.get(defaultModelId ?? "") ?? models.values().next().value;
-  if (defaultModel === void 0) throw new Error("CodeX did not advertise any available models.");
-  const defaultEffort = defaultModel.reasoning?.defaultEffort;
-  return {
-    default: {
-      provider: CODEX_PROVIDER,
-      model: defaultModel.id,
-      ...defaultEffort === void 0 ? {} : { reasoningEffort: defaultEffort }
-    },
-    groups: [{ id: CODEX_PROVIDER, name: "CodeX", models: [...models.values()] }],
-    models
-  };
-}
-function projectCodexNativeHistory(thread, sessionId, sessionGeneration = "legacy") {
-  const entries = [];
-  let seq = 0;
-  let turnNumber = 0;
-  const active = activeTurnId(thread.turns);
-  const append = (type, data2, time = Date.now(), view, sourceEventSeqs) => {
-    const eventSeq = seq++;
-    entries.push({
-      type: "event",
-      event: {
-        type,
-        seq: eventSeq,
-        time,
-        data: adaptEventData(type, data2, sessionGeneration),
-        ...sourceEventSeqs === void 0 ? {} : { sourceEventSeqs },
-        ...isSurfaceEvent(type) ? { surfaceOp: "append" } : {}
-      },
-      ...view === void 0 ? {} : { view }
-    });
-    return eventSeq;
-  };
-  for (const rawTurn of array(thread.turns)) {
-    const turn = record3(rawTurn);
-    const turnItems = array(turn.items).map(record3);
-    const toolImages = turnItems.flatMap(toolOutputImageBlocks);
-    let imageOwner = -1;
-    for (let index = 0; index < turnItems.length; index += 1) {
-      if (turnItems[index].type === "agentMessage") imageOwner = index;
-    }
-    turnNumber += 1;
-    const turnActive = isActiveCodexTurn(turn);
-    const time = normalizeTime(turn.createdAt) || normalizeTime(turn.startedAt) || normalizeTime(thread.createdAt) || Date.now();
-    append("turn/start", { turn: turnNumber }, time);
-    append("step/start", { turn: turnNumber, step: 1 }, time);
-    for (let itemIndex = 0; itemIndex < turnItems.length; itemIndex += 1) {
-      const item = turnItems[itemIndex];
-      let toolCallSeq;
-      for (const event of itemEvents(
-        item,
-        turnNumber,
-        1,
-        void 0,
-        modelSelection(),
-        sessionId,
-        itemIndex === imageOwner ? toolImages : []
-      )) {
-        const eventSeq = append(
-          event.type,
-          event.data,
-          normalizeTime(item.createdAt) || time,
-          event.view,
-          event.type === "tool/result" && toolCallSeq !== void 0 ? [toolCallSeq] : void 0
-        );
-        if (event.type === "tool/call") toolCallSeq = eventSeq;
-      }
-    }
-    if (turnActive) continue;
-    append("step/end", { turn: turnNumber, step: 1 }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time);
-    append("turn/end", {
-      turn: turnNumber,
-      reason: turn.status === "failed" || turn.error !== void 0 && turn.error !== null ? { kind: "error", error: { message: "CodeX turn failed.", code: "codex-turn-failed" } } : { kind: "completed" }
-    }, normalizeTime(turn.updatedAt) || normalizeTime(turn.completedAt) || time);
-  }
-  const projected = projectCodexThread(thread);
-  return {
-    header: {
-      version: sessionGeneration === "v3" ? 3 : 1,
-      id: sessionId,
-      createdAt: projected?.createdAt ?? Date.now(),
-      ...projected?.cwd === void 0 ? {} : { cwd: projected.cwd },
-      ...sessionGeneration === "v3" ? { isSeeded: false } : {}
-    },
-    entries,
-    lastSeq: seq - 1,
-    nextTurn: turnNumber,
-    ...active === void 0 ? {} : { activeTurnId: active }
-  };
-}
-function paginateCodexNativeHistory(history, request) {
-  const throughSeq = Math.min(request.throughSeq ?? history.lastSeq, history.lastSeq);
-  const endSeq = Math.min(throughSeq, request.beforeSeq === void 0 ? throughSeq : request.beforeSeq - 1);
-  const window2 = endSeq < 0 ? [] : history.entries.filter((entry) => entry.event.seq <= endSeq);
-  const maxMessages = request.maxMessages ?? DEFAULT_HISTORY_MESSAGES;
-  let messages = 0;
-  let cut = 0;
-  for (let index = window2.length - 1; index >= 0; index -= 1) {
-    const event = window2[index].event;
-    if (!isSurfaceEvent(event.type) || event.surfaceOp !== "append") continue;
-    messages += 1;
-    if (messages >= maxMessages) {
-      cut = Math.min(event.seq, ...event.sourceEventSeqs ?? []);
-      break;
-    }
-  }
-  return {
-    header: history.header,
-    cursor: history.lastSeq,
-    nextTurn: history.nextTurn,
-    records: window2.filter((entry) => entry.event.seq >= cut),
-    hasMore: window2.some((entry) => entry.event.seq < cut),
-    ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
-  };
-}
-function adaptEventData(type, data2, sessionGeneration) {
-  if (sessionGeneration !== "v3" || type !== "assistant/message") return data2;
-  const value = record3(data2);
-  return Array.isArray(value.stream) ? value : { ...value, stream: [] };
-}
-function adaptCodexHistoryPage(value, sessionGeneration) {
-  if (sessionGeneration !== "v3") return value;
-  const page = record3(value);
-  const sourceHeader = record3(page.header);
-  const { seedLength: _seedLength, ...header } = sourceHeader;
-  const records = Array.isArray(page.records) ? page.records.map((raw) => {
-    const entry = record3(raw);
-    const sourceEvent = record3(entry.event);
-    const sourceSurfaceOp = record3(sourceEvent.surfaceOp);
-    const surfaceOp = sourceEvent.surfaceOp === "append" ? "append" : sourceSurfaceOp.op === "replace" && integer(sourceSurfaceOp.startSeq) !== void 0 && integer(sourceSurfaceOp.endSeq) !== void 0 ? sourceSurfaceOp : sourceSurfaceOp.op === "replace" && integer(sourceSurfaceOp.start) !== void 0 && integer(sourceSurfaceOp.end) !== void 0 ? {
-      op: "replace",
-      startSeq: sourceSurfaceOp.start,
-      endSeq: sourceSurfaceOp.end
-    } : sourceEvent.surfaceOp;
-    return {
-      ...entry,
-      event: {
-        ...sourceEvent,
-        data: adaptEventData(string2(sourceEvent.type) ?? "", sourceEvent.data, sessionGeneration),
-        ...surfaceOp === void 0 ? {} : { surfaceOp }
-      }
-    };
-  }) : page.records;
-  return {
-    ...page,
-    header: { ...header, version: 3, isSeeded: sourceHeader.isSeeded === true },
-    records
-  };
-}
-function itemEvents(item, turn, step, requestId, selection = modelSelection(), sessionId = CODEX_SESSION_PREFIX, supplementalImages = []) {
-  const type = string2(item.type);
-  const id5 = string2(item.id) ?? `${turn}:${step}:${hashString2(JSON.stringify(item))}`;
-  const text = itemText2(item);
-  if (type === "userMessage") return [{
-    type: "user/message",
-    data: {
-      id: id5,
-      role: "user",
-      content: messageContent(item, `${sessionId}:${id5}`, "text", text),
-      source: requestId === void 0 || requestId === "" ? { kind: "user" } : { kind: "user", rpcId: requestId }
-    }
-  }];
-  if (type === "agentMessage" || type === "reasoning" || type === "plan") return [{
-    type: "assistant/message",
-    data: {
-      turn,
-      step,
-      message: {
-        id: id5,
-        role: "assistant",
-        content: messageContent(
-          item,
-          `${sessionId}:${id5}`,
-          type === "reasoning" ? "reasoning" : "text",
-          text,
-          type === "agentMessage" ? supplementalImages : []
-        ),
-        source: { kind: "model", provider: selection.provider, model: selection.model }
-      }
-    }
-  }];
-  if (type !== void 0 && isToolItemType2(type)) {
-    const name2 = toolEventName(type);
-    const args = toolArguments(item);
-    return [
-      {
-        type: "tool/call",
-        data: { turn, step, callId: id5, name: name2, arguments: JSON.stringify(args) },
-        view: { for: "call", view: toolCallView(item, type, args) }
-      },
-      toolResultEvent(item, turn, step, id5, toolResultText(item, type, text))
-    ];
-  }
-  if (type === "error") return [{
-    type: "assistant/message",
-    data: {
-      turn,
-      step,
-      message: {
-        id: id5,
-        role: "assistant",
-        content: [{ type: "text", text: text ?? "CodeX reported an error." }],
-        source: { kind: "model", provider: selection.provider, model: selection.model }
-      }
-    }
-  }];
-  return [];
-}
-function messageContent(item, attachmentSeed, fallbackType, fallbackText, supplementalImages = []) {
-  const source = item.content ?? item.input;
-  const blocks = contentBlocks(source, attachmentSeed);
-  const images = contentBlocks(supplementalImages, `${attachmentSeed}:tool-output`);
-  if (blocks.length > 0 || images.length > 0) {
-    return [...blocks.length > 0 ? blocks : [{ type: fallbackType, text: fallbackText ?? "" }], ...images];
-  }
-  return [{ type: fallbackType, text: fallbackText ?? "" }];
-}
-function toolResultEvent(item, turn, step, id5, resultText) {
-  const type = string2(item.type) ?? "unknown";
-  return {
-    type: "tool/result",
-    data: {
-      turn,
-      step,
-      message: {
-        id: `${id5}:result`,
-        role: "user",
-        content: [{
-          type: "tool-result",
-          toolCallId: id5,
-          content: [{ type: "text", text: resultText }],
-          ...item.status === "failed" || item.success === false ? { isError: true } : {}
-        }],
-        source: { kind: "tool", callId: id5 }
-      }
-    },
-    view: { for: "result", view: toolResultView(item, type, resultText) }
-  };
-}
-function toolResultContentReplacement(event) {
-  const data2 = record3(event.data);
-  const message = record3(data2.message);
-  const content = array(message.content);
-  const result = record3(content[0]);
-  if (result.isError === void 0) return event;
-  const { isError: _isError, ...stableResult } = result;
-  return {
-    ...event,
-    data: {
-      ...data2,
-      message: { ...message, content: [stableResult] }
-    }
-  };
-}
-function isToolItemType2(type) {
-  return type === "commandExecution" || type === "mcpToolCall" || type === "dynamicToolCall" || type === "fileChange" || type === "functionCallOutput" || type === "hookPrompt" || type === "collabAgentToolCall" || type === "subAgentActivity" || type === "webSearch" || type === "imageView" || type === "imageGeneration" || type === "sleep" || type === "enteredReviewMode" || type === "exitedReviewMode" || type === "contextCompaction";
-}
-function toolEventName(type) {
-  if (type === "fileChange") return "codex.fileChange";
-  if (type === "commandExecution") return "codex.command";
-  if (type === "webSearch") return "codex.webSearch";
-  if (type === "collabAgentToolCall" || type === "subAgentActivity") return "codex.subagent";
-  if (type === "imageView" || type === "imageGeneration") return "codex.image";
-  if (type === "enteredReviewMode" || type === "exitedReviewMode") return "codex.reviewMode";
-  if (type === "contextCompaction") return "codex.compaction";
-  return `codex.${type}`;
-}
-function toolResultText(item, type, text) {
-  if (type === "fileChange") return fileChangeSummary(item);
-  if (type === "webSearch") {
-    const count = array(item.results).length;
-    return count === 0 ? "Web search completed." : `Web search returned ${count} result${count === 1 ? "" : "s"}.`;
-  }
-  if (type === "imageView") return `Viewed image: ${string2(item.path) ?? "image"}`;
-  if (type === "imageGeneration") {
-    const savedPath = string2(item.savedPath);
-    return savedPath === void 0 ? `Image generation ${string2(item.status) ?? "completed"}.` : `Generated image: ${savedPath}`;
-  }
-  if (type === "contextCompaction") return "CodeX compacted the conversation context.";
-  if (type === "enteredReviewMode") return `Entered review mode${string2(item.review) ? `: ${string2(item.review)}` : "."}`;
-  if (type === "exitedReviewMode") return `Exited review mode${string2(item.review) ? `: ${string2(item.review)}` : "."}`;
-  if (type === "sleep") return `Waited ${integer(item.durationMs) ?? 0} ms.`;
-  if (type === "subAgentActivity") {
-    return [string2(record3(item.kind).type) ?? string2(item.kind) ?? "Subagent activity", string2(item.agentPath)].filter((value) => value !== void 0).join(": ");
-  }
-  return text ?? itemText2(record3(item.result)) ?? itemText2(record3(item.output)) ?? string2(item.status) ?? type;
-}
-function isSurfaceEvent(type) {
-  return type === "user/message" || type === "assistant/message" || type === "tool/result";
-}
-function toolCallView(item, type, args) {
-  if (type === "commandExecution") {
-    return {
-      card: "terminal",
-      title: commandText(item.command) ?? "CodeX command",
-      ...typeof item.cwd === "string" ? { cwd: item.cwd } : {}
-    };
-  }
-  const locations = fileLocations(item);
-  if (type === "fileChange") {
-    return {
-      card: "generic",
-      title: locations.length === 0 ? "CodeX file changes" : `Modify ${locations.length} file${locations.length === 1 ? "" : "s"}`,
-      kind: "edit",
-      rawInput: args,
-      ...locations.length === 0 ? {} : { locations }
-    };
-  }
-  if (type === "webSearch") {
-    return {
-      card: "generic",
-      title: string2(item.query) ?? "CodeX web search",
-      kind: "search",
-      rawInput: args
-    };
-  }
-  if (type === "imageView" || type === "imageGeneration") {
-    const path = string2(item.path) ?? string2(item.savedPath);
-    return {
-      card: "generic",
-      title: type === "imageView" ? "View image" : "Generate image",
-      kind: type === "imageView" ? "read" : "other",
-      ...path === void 0 ? {} : { locations: [{ path }] }
-    };
-  }
-  if (type === "collabAgentToolCall" || type === "subAgentActivity") {
-    return {
-      card: "generic",
-      title: type === "collabAgentToolCall" ? `Subagent: ${string2(item.tool) ?? "collaboration"}` : `Subagent activity: ${string2(item.agentPath) ?? string2(item.agentThreadId) ?? "agent"}`,
-      kind: "other",
-      rawInput: args
-    };
-  }
-  if (type === "contextCompaction") return { card: "generic", title: "Compact conversation context", kind: "other" };
-  if (type === "enteredReviewMode") return { card: "generic", title: "Enter review mode", kind: "other" };
-  if (type === "exitedReviewMode") return { card: "generic", title: "Exit review mode", kind: "other" };
-  return {
-    card: "generic",
-    title: toolDisplayName(item, type),
-    kind: "other"
-  };
-}
-function toolResultView(item, type, resultText) {
-  if (type === "commandExecution") {
-    return {
-      card: "terminal",
-      output: resultText,
-      ...typeof item.exitCode === "number" && Number.isSafeInteger(item.exitCode) ? { exitCode: item.exitCode } : {}
-    };
-  }
-  return {
-    card: "generic",
-    ...type === "fileChange" ? { title: item.status === "inProgress" ? "CodeX file changes" : "CodeX file changes completed" } : {},
-    ...type === "mcpToolCall" && item.status === "inProgress" ? { title: "CodeX MCP tool in progress", content: [{ type: "text", text: resultText }] } : {}
-  };
-}
-function toolDisplayName(item, type) {
-  return string2(item.name) ?? string2(item.tool) ?? string2(record3(item.tool).name) ?? (type === "mcpToolCall" ? "CodeX MCP tool" : humanizeItemType(type));
-}
-function fileLocations(item) {
-  return array(item.changes).map((value) => string2(record3(value).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
-}
-function nativeWorkspace(view) {
-  const { sessionCount: _sessionCount, ...workspace } = view;
-  return workspace;
-}
-function nativeVisibleWorkspaces(catalog, selectedWorkspaceId) {
-  return catalog.workspaces.filter((workspace) => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId);
-}
-function projectWorkspace(project) {
-  const root = project.roots[0];
-  return {
-    workspaceId: codexProjectWorkspaceId(project.id),
-    path: root.path,
-    title: project.name.trim() || basename(root.path),
-    sessionIds: [],
-    sessionCount: 0,
-    createdAt: isoTime(project.createdAt),
-    updatedAt: isoTime(project.updatedAt || project.createdAt)
-  };
-}
-function projectCodexProject(value, fallbackPosition) {
-  const source = record3(value);
-  const id5 = string2(source.id);
-  if (id5 === void 0) return void 0;
-  const roots = array(source.roots).map((root) => string2(record3(root).path)).filter((path) => path !== void 0 && path.length > 0).map((path) => ({ path }));
-  if (roots.length === 0) return void 0;
-  return {
-    id: id5,
-    name: string2(source.name) ?? basename(roots[0].path),
-    roots,
-    position: finiteNumber(source.position) ?? fallbackPosition,
-    createdAt: normalizeTime(source.createdAt),
-    updatedAt: normalizeTime(source.updatedAt)
-  };
-}
-function findProjectWorkspace(thread, session, projects, workspaceByProjectId) {
-  const explicitProjectId = string2(thread.projectId);
-  const explicitWorkspace = explicitProjectId === void 0 ? void 0 : workspaceByProjectId.get(explicitProjectId);
-  if (explicitWorkspace !== void 0) return explicitWorkspace;
-  if (session.cwd === void 0) return void 0;
-  const match = projects.flatMap((project) => project.roots.map((root) => ({ project, root }))).filter((value) => containsPath(value.root.path, session.cwd)).sort((left, right) => {
-    const length = right.root.path.length - left.root.path.length;
-    if (length !== 0) return length;
-    const position = left.project.position - right.project.position;
-    if (position !== 0) return position;
-    return left.project.id.localeCompare(right.project.id);
-  })[0];
-  return match === void 0 ? void 0 : workspaceByProjectId.get(match.project.id);
-}
-function addSessionToWorkspace(workspace, session) {
-  if (!workspace.sessionIds.includes(session.id)) {
-    workspace.sessionIds.push(session.id);
-    workspace.sessionCount = workspace.sessionIds.length;
-  }
-  const createdAt = isoTime(session.createdAt);
-  const updatedAt = isoTime(session.updatedAt || session.createdAt);
-  if (createdAt < workspace.createdAt) workspace.createdAt = createdAt;
-  if (updatedAt > workspace.updatedAt) workspace.updatedAt = updatedAt;
-}
-function containsPath(root, candidate) {
-  const normalizedRoot = normalizePathForCompare(root);
-  const normalizedCandidate = normalizePathForCompare(candidate);
-  return normalizedCandidate === normalizedRoot || normalizedCandidate.startsWith(`${normalizedRoot}/`) || normalizedCandidate.startsWith(`${normalizedRoot}\\`);
-}
-function normalizePathForCompare(path) {
-  return path.replace(/[\\/]+$/u, "") || path;
-}
-function modelSelection() {
-  return { provider: CODEX_PROVIDER, model: CODEX_MODEL };
-}
-function codexPromptInput(content) {
-  if (content.length === 0 || content.length > MAX_CODEX_PROMPT_PARTS) return void 0;
-  const input2 = [];
-  for (const value of content) {
-    if (!isRecord7(value)) return void 0;
-    if (value.type === "text") {
-      if (typeof value.text !== "string" || value.text.length === 0 || value.text.length > MAX_CODEX_PROMPT_TEXT) return void 0;
-      input2.push({ type: "text", text: value.text });
-      continue;
-    }
-    if (value.type === "image") {
-      if (typeof value.mediaType !== "string" || !CODEX_IMAGE_MEDIA_TYPES3.has(value.mediaType) || typeof value.data !== "string" || value.data.length > MAX_CODEX_IMAGE_BASE642 || !isCanonicalBase642(value.data)) return void 0;
-      input2.push({ type: "image", mediaType: value.mediaType, data: value.data });
-      continue;
-    }
-    return void 0;
-  }
-  return input2;
-}
-function modelSelectionProjection(selection) {
-  return { lastUsed: selection, next: selection };
-}
-function codexPermissionsProjection(preset) {
-  return {
-    options: [
-      {
-        value: "workspace-write",
-        name: "workspace-write",
-        description: "Write inside the workspace; wider command and file access requires one-time approval."
-      },
-      {
-        value: "danger-full-access",
-        name: "danger-full-access",
-        description: "Full Host file access without approval prompts for subsequent turns in this virtual Session."
-      }
-    ],
-    currentValue: preset ?? "Host settings (not reported)"
-  };
-}
-function codexImageLimitsProjection() {
-  return {
-    maxImageBytes: 20 * 1024 * 1024,
-    maxImagesPerMessage: MAX_CODEX_PROMPT_PARTS,
-    maxMessageImageBytes: 100 * 1024 * 1024,
-    maxImagePixels: 4e7,
-    maxImageDimension: 8192,
-    mediaTypes: [...CODEX_IMAGE_MEDIA_TYPES3]
-  };
-}
-function isCodexPermissionPreset(value) {
-  return value === "workspace-write" || value === "danger-full-access";
-}
-function modelCatalog(directory) {
-  return {
-    default: directory.default,
-    routableProviders: [CODEX_PROVIDER],
-    groups: directory.groups,
-    failures: []
-  };
-}
-function codexModelParams(selection) {
-  return {
-    model: selection.model,
-    ...selection.reasoningEffort === void 0 ? {} : { effort: selection.reasoningEffort }
-  };
-}
-function reasoningEffortName(effort) {
-  const names = {
-    none: "None",
-    minimal: "Minimal",
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-    max: "Max",
-    ultra: "Ultra"
-  };
-  return names[effort] ?? effort;
-}
-function displayTitle(session) {
-  const value = session.title ?? session.preview;
-  return value === void 0 || value.trim() === "" ? null : value.slice(0, 256);
-}
-function itemText2(value) {
-  if (typeof value.text === "string") return value.text;
-  if (typeof value.content === "string") return value.content;
-  const content = Array.isArray(value.content) ? value.content : Array.isArray(value.input) ? value.input : void 0;
-  if (content !== void 0) {
-    const text = content.map((part) => {
-      if (typeof part === "string") return part;
-      const block = record3(part);
-      return string2(block.text) ?? string2(block.content) ?? "";
-    }).filter(Boolean).join("\n");
-    if (text !== "") return text;
-  }
-  if (Array.isArray(value.summary)) return value.summary.filter((item) => typeof item === "string").join("\n");
-  if (typeof value.output === "string") return value.output;
-  if (typeof value.aggregatedOutput === "string") return value.aggregatedOutput;
-  return void 0;
-}
-function toolArguments(item) {
-  if (item.type === "commandExecution") return { command: commandText(item.command) ?? item.command ?? "" };
-  if (item.type === "fileChange") return {
-    changes: array(item.changes).map((value) => {
-      const change = record3(value);
-      const kind = typeof change.kind === "string" ? change.kind : string2(record3(change.kind).type);
-      return {
-        ...typeof change.path === "string" ? { path: change.path } : {},
-        ...kind === void 0 ? {} : { kind }
-      };
-    })
-  };
-  if (item.type === "webSearch") return { query: string2(item.query) ?? "" };
-  if (item.type === "imageView") return { path: string2(item.path) ?? "" };
-  if (item.type === "imageGeneration") return {
-    ...string2(item.revisedPrompt) === void 0 ? {} : { prompt: string2(item.revisedPrompt) },
-    transparentBackground: item.transparentBackground === true
-  };
-  if (item.type === "collabAgentToolCall") return {
-    tool: string2(item.tool) ?? "collaboration",
-    receiverThreadIds: array(item.receiverThreadIds).filter((value) => typeof value === "string"),
-    ...string2(item.model) === void 0 ? {} : { model: string2(item.model) }
-  };
-  if (item.type === "subAgentActivity") return {
-    agentThreadId: string2(item.agentThreadId) ?? "",
-    agentPath: string2(item.agentPath) ?? "",
-    kind: string2(record3(item.kind).type) ?? string2(item.kind) ?? "activity"
-  };
-  if (item.type === "sleep") return { durationMs: integer(item.durationMs) ?? 0 };
-  if (item.type === "enteredReviewMode" || item.type === "exitedReviewMode") return {
-    review: string2(item.review) ?? ""
-  };
-  if (item.type === "contextCompaction") return {};
-  return { name: item.name ?? item.tool ?? item.type ?? "tool", arguments: item.arguments ?? item.input ?? {} };
-}
-function fileChangeSummary(item) {
-  const changes = array(item.changes).map((value) => {
-    const change = record3(value);
-    const path = string2(change.path);
-    const kind = typeof change.kind === "string" ? change.kind : string2(record3(change.kind).type);
-    return [kind, path].filter((part) => part !== void 0 && part.length > 0).join(" ");
-  }).filter(Boolean);
-  return changes.length === 0 ? "File changes completed." : changes.join("\n");
-}
-function sanitizedFileChanges(value) {
-  return array(value).flatMap((raw) => {
-    const change = record3(raw);
-    const path = string2(change.path);
-    if (path === void 0) return [];
-    const kind = typeof change.kind === "string" ? change.kind : string2(record3(change.kind).type);
-    return [{ path, ...kind === void 0 ? {} : { kind } }];
-  });
-}
-function appendBoundedText(current, delta) {
-  const value = `${current}${delta}`;
-  if (value.length <= MAX_LIVE_TOOL_OUTPUT) return value;
-  return `\u2026 earlier output omitted \u2026
-${value.slice(value.length - MAX_LIVE_TOOL_OUTPUT)}`;
-}
-function humanizeItemType(type) {
-  const names = {
-    functionCallOutput: "CodeX function output",
-    hookPrompt: "CodeX hook prompt",
-    dynamicToolCall: "CodeX tool",
-    collabAgentToolCall: "CodeX subagent",
-    subAgentActivity: "CodeX subagent activity",
-    webSearch: "CodeX web search",
-    imageView: "CodeX image view",
-    imageGeneration: "CodeX image generation",
-    sleep: "CodeX wait",
-    enteredReviewMode: "CodeX review mode",
-    exitedReviewMode: "CodeX review mode",
-    contextCompaction: "CodeX context compaction"
-  };
-  return names[type] ?? "CodeX tool";
-}
-function commandText(value) {
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) return value.filter((item) => typeof item === "string").join(" ");
-  const source = record3(value);
-  return string2(source.command) ?? string2(source.text);
-}
-function sessionIdFromAddress(address) {
-  if (address.kind === "session") return requiredString(address.sessionId, "sessionId");
-  return requiredString(address.childSessionId, "childSessionId");
-}
-function nativeThreadId(sessionId) {
-  if (!sessionId.startsWith(CODEX_SESSION_PREFIX) || sessionId.length === CODEX_SESSION_PREFIX.length) {
-    throw new Error("The selected Session does not belong to CodeX.");
-  }
-  return sessionId.slice(CODEX_SESSION_PREFIX.length);
-}
-function activeTurnId(value) {
-  if (!Array.isArray(value)) return void 0;
-  for (let index = value.length - 1; index >= 0; index -= 1) {
-    const turn = record3(value[index]);
-    if (isActiveCodexTurn(turn) && typeof turn.id === "string" && turn.id.length > 0) return turn.id;
-  }
-  return void 0;
-}
-function isActiveCodexTurn(turn) {
-  return turn.status === "inProgress" || turn.status === "running";
-}
-function carrierArgs(payload) {
-  return record3(record3(payload).args);
-}
-function requestArg(args) {
-  return record3(args.request ?? args._request ?? args);
-}
-function rcEndpoint(endpoint) {
-  if (endpoint === "workspace.list") return "workspace/list";
-  return endpoint.replace(".", "/");
-}
-function success(value) {
-  return { ok: true, value };
-}
-function failure(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
-}
-function ok(value) {
-  return value === void 0 ? { ok: true } : { ok: true, value };
-}
-function business(value) {
-  const result = record3(value);
-  if (result.ok === true) return ok(result.value);
-  if (result.ok === false) {
-    const error = record3(result.error);
-    return fail(string2(error.code) ?? "internal", string2(error.message) ?? "CodeX virtual Harness rejected the request.", record3(error.details));
-  }
-  return ok(value);
-}
-function isCodexDirectoryListing(value) {
-  const listing = record3(value);
-  return typeof listing.path === "string" && typeof listing.home === "string" && Array.isArray(listing.crumbs) && listing.crumbs.every(isCodexDirectoryEntry) && Array.isArray(listing.entries) && listing.entries.every(isCodexDirectoryEntry) && typeof listing.truncated === "boolean";
-}
-function isCodexDirectoryEntry(value) {
-  const entry = record3(value);
-  return typeof entry.name === "string" && typeof entry.path === "string" && typeof entry.hidden === "boolean";
-}
-function fail(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
-}
-function failFrom(error) {
-  const source = error instanceof Error ? error : new Error(String(error));
-  return fail(errorCode(source) ?? "internal", source.message, errorDetails(source));
-}
-function isLegacySessionHistoryUnsupported(error) {
-  if (!(error instanceof Error)) return false;
-  return errorCode(error) === "METHOD_NOT_ALLOWED" || errorCode(error) === "METHOD_NOT_FOUND" || error.message.includes("The requested Codex method is not available over Remote.");
-}
-function errorCode(error) {
-  return "code" in error && typeof error.code === "string" ? error.code : void 0;
-}
-function errorDetails(error) {
-  return "details" in error && isRecord7(error.details) ? error.details : {};
-}
-function record3(value) {
-  return isRecord7(value) ? value : {};
-}
-function isRecord7(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array(value) {
-  return Array.isArray(value) ? value : [];
-}
-function string2(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function integer(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
-}
-function finiteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-function optionalInteger(value) {
-  if (value === void 0) return void 0;
-  const parsed = integer(value);
-  if (parsed === void 0) throw new Error("The CodeX History cursor is invalid.");
-  return parsed;
-}
-function optionalNonNegativeInteger(value) {
-  const parsed = optionalInteger(value);
-  if (parsed !== void 0 && parsed < 0) throw new Error("The CodeX History cursor is invalid.");
-  return parsed;
-}
-function optionalPositiveInteger(value) {
-  const parsed = optionalInteger(value);
-  if (parsed !== void 0 && parsed <= 0) throw new Error("The CodeX History page size is invalid.");
-  return parsed;
-}
-function isCodexNativeHistoryPage(value, sessionId) {
-  const page = record3(value);
-  const header = record3(page.header);
-  return header.id === sessionId && integer(page.cursor) !== void 0 && integer(page.nextTurn) !== void 0 && Array.isArray(page.records) && typeof page.hasMore === "boolean" && (page.activeTurnId === void 0 || typeof page.activeTurnId === "string");
-}
-function truncateCodePoints(value, maximum) {
-  return [...value].slice(0, maximum).join("");
-}
-function requiredString(value, field) {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`The CodeX ${field} is required.`);
-  return value;
-}
-function normalizeTime(value) {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return 0;
-  return value < 1e10 ? Math.floor(value * 1e3) : Math.floor(value);
-}
-function isoTime(value) {
-  return new Date(normalizeTime(value) || Date.now()).toISOString();
-}
-function isProjectListUnsupported(error) {
-  if (!(error instanceof Error)) return false;
-  const code = errorCode(error);
-  return code === "METHOD_NOT_ALLOWED" || code === "METHOD_NOT_FOUND" || code === "CODEX_UPSTREAM_ERROR" || error.message.includes("The requested Codex method is not available over Remote.");
-}
-function basename(path) {
-  const normalized = path.replace(/[\\/]+$/u, "");
-  const parts = normalized.split(/[\\/]/u);
-  return parts.at(-1) || path;
-}
-function hashString2(value) {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-  return (hash >>> 0).toString(36);
-}
-var AsyncValueQueue2 = class {
-  constructor(signal) {
-    this.signal = signal;
-    this.onAbort = () => this.close();
-    signal.addEventListener("abort", this.onAbort, { once: true });
-    if (signal.aborted) this.close();
-  }
-  values = [];
-  waiters = [];
-  closed = false;
-  onAbort;
-  push(value) {
-    if (this.closed) return;
-    const waiter = this.waiters.shift();
-    if (waiter === void 0) this.values.push(value);
-    else waiter({ done: false, value });
-  }
-  close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.signal.removeEventListener("abort", this.onAbort);
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
-  }
-  iterate(dispose) {
-    const queue = this;
-    return {
-      async *[Symbol.asyncIterator]() {
-        try {
-          yield* queue;
-        } finally {
-          dispose();
-          queue.close();
-        }
-      }
-    };
-  }
-  async *[Symbol.asyncIterator]() {
-    while (true) {
-      if (this.values.length > 0) {
-        yield this.values.shift();
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
-      if (next.done) return;
-      yield next.value;
-    }
-  }
-};
-
-// src/acp/image-content.ts
-var AGY_IMAGE_MEDIA_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"];
-var AGY_MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-var AGY_MAX_IMAGES = 4;
-var AGY_MAX_MESSAGE_IMAGE_BYTES = 32 * 1024 * 1024;
-function parseAcpImage(value) {
-  const image = value;
-  const mimeType = image?.mimeType ?? image?.mediaType;
-  const data2 = image?.data;
-  if (image?.type !== "image" || typeof mimeType !== "string" || !AGY_IMAGE_MEDIA_TYPES.includes(mimeType) || typeof data2 !== "string" || data2.length === 0 || data2.length > Math.ceil(AGY_MAX_IMAGE_BYTES / 3) * 4 || data2.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data2)) throw new Error("Invalid AGY image attachment.");
-  const tail = data2.slice(-4);
-  if (btoa(atob(tail)) !== tail) throw new Error("Invalid AGY image base64.");
-  const bytes = imageByteLength(data2);
-  if (bytes > AGY_MAX_IMAGE_BYTES) throw new Error("AGY image attachment exceeds the size limit.");
-  const dimensions = imageDimensions2(mimeType, data2);
-  if (!dimensions || dimensions.width < 1 || dimensions.height < 1 || dimensions.width > 8192 || dimensions.height > 8192 || dimensions.width * dimensions.height > 4e7) throw new Error("Invalid AGY image dimensions or media type.");
-  return { type: "image", mimeType, data: data2 };
-}
-function imageByteLength(data2) {
-  return data2.length / 4 * 3 - (data2.endsWith("==") ? 2 : data2.endsWith("=") ? 1 : 0);
-}
-function imageDimensions2(mediaType, data2) {
-  const bytes = Uint8Array.from(atob(data2.slice(0, Math.min(data2.length, 256 * 1024))), (char) => char.charCodeAt(0));
-  const be16 = (i) => bytes[i] * 256 + bytes[i + 1];
-  const be32 = (i) => bytes[i] * 16777216 + bytes[i + 1] * 65536 + bytes[i + 2] * 256 + bytes[i + 3] >>> 0;
-  const le16 = (i) => bytes[i] + bytes[i + 1] * 256;
-  const le24 = (i) => bytes[i] + bytes[i + 1] * 256 + bytes[i + 2] * 65536;
-  const text = (i, n) => String.fromCharCode(...bytes.slice(i, i + n));
-  if (mediaType === "image/png" && bytes.length >= 24 && text(1, 3) === "PNG" && bytes[0] === 137 && text(12, 4) === "IHDR") return { width: be32(16), height: be32(20) };
-  if (mediaType === "image/gif" && bytes.length >= 10 && ["GIF87a", "GIF89a"].includes(text(0, 6))) return { width: le16(6), height: le16(8) };
-  if (mediaType === "image/webp" && bytes.length >= 30 && text(0, 4) === "RIFF" && text(8, 4) === "WEBP") {
-    if (text(12, 4) === "VP8X") return { width: le24(24) + 1, height: le24(27) + 1 };
-    if (text(12, 4) === "VP8 " && bytes[23] === 157 && bytes[24] === 1 && bytes[25] === 42) return { width: le16(26) & 16383, height: le16(28) & 16383 };
-    if (text(12, 4) === "VP8L" && bytes[20] === 47) return { width: 1 + bytes[21] + ((bytes[22] & 63) << 8), height: 1 + (bytes[22] >> 6) + (bytes[23] << 2) + ((bytes[24] & 15) << 10) };
-  }
-  if (mediaType === "image/jpeg" && bytes[0] === 255 && bytes[1] === 216) {
-    for (let i = 2; i + 8 < bytes.length; ) {
-      if (bytes[i] !== 255) {
-        i++;
-        continue;
-      }
-      const marker = bytes[i + 1];
-      i += 2;
-      if (marker === 216 || marker === 217) continue;
-      const length = be16(i);
-      if (length < 2 || i + length > bytes.length) break;
-      if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker)) return { width: be16(i + 5), height: be16(i + 3) };
-      i += length;
-    }
-  }
-  return void 0;
-}
-function acpImageContent(image, attachmentId) {
-  const dimensions = imageDimensions2(image.mimeType, image.data);
-  return { type: "image", attachment: { attachmentId, mediaType: image.mimeType, bytes: imageByteLength(image.data), ...dimensions }, mediaType: image.mimeType, data: image.data };
-}
-function acpImageLimits(backend) {
-  return backend === "antigravity" ? { maxImageBytes: AGY_MAX_IMAGE_BYTES, maxImagesPerMessage: AGY_MAX_IMAGES, maxMessageImageBytes: AGY_MAX_MESSAGE_IMAGE_BYTES, maxImagePixels: 4e7, maxImageDimension: 8192, mediaTypes: [...AGY_IMAGE_MEDIA_TYPES] } : { maxImageBytes: 0, maxImagesPerMessage: 0, mediaTypes: [] };
-}
-
-// src/acp/pi-tool-result.ts
-function piToolResult(update) {
-  let content = Array.isArray(update.content) ? update.content.flatMap((item) => {
-    if (item?.type === "content" && item.content?.type === "text" && typeof item.content.text === "string") return [{ type: "text", text: item.content.text }];
-    if (item?.type === "diff" && typeof item.path === "string" && typeof item.newText === "string" && (item.oldText === null || typeof item.oldText === "string")) {
-      return [{ type: "text", text: `File: ${item.path}
---- before
-${item.oldText ?? ""}
-+++ after
-${item.newText}` }];
-    }
-    return [];
-  }) : [];
-  if (!content.length && Array.isArray(update.rawOutput?.content)) content = update.rawOutput.content.filter((item) => item?.type === "text" && typeof item.text === "string").map((item) => ({ type: "text", text: item.text }));
-  const output = update._meta?.terminal_output?.data;
-  if (typeof output === "string") content.push({ type: "text", text: output });
-  return { content, isError: update.status === "failed" || update.rawOutput?.isError === true };
-}
-
-// src/acp/virtual-harness.ts
-var CURSOR_SESSION_PREFIX = "cursor:";
-var ACP_SESSION_PREFIX = "acp:";
-var OPENCODE_SESSION_PREFIX = "opencode:";
-var CURSOR_WORKSPACE_PREFIX = "cursor:cwd:";
-var AGY_WORKSPACE_PREFIX = "antigravity:cwd:";
-var OPENCODE_WORKSPACE_PREFIX = "opencode:cwd:";
-var CURSOR_PROVIDER = "cursor";
-var OPENCODE_PROVIDER = "opencode";
-function piStreamOutcome(reason) {
-  if (reason === "completed") return { kind: "completed" };
-  if (reason === "cancelled" || reason === "peer-disconnected") return { kind: "aborted", reason: { kind: reason === "cancelled" ? "user" : "disposed" } };
-  return { kind: "error", error: { code: "ACP_STREAM_FAILED", message: "PI reply stream failed." } };
-}
-function piPromptOutcome(kind, update) {
-  if (update.stopReason === "cancelled") return { kind: "aborted", reason: { kind: "user" } };
-  if (kind === "prompt_failed" || update.stopReason === "error") return {
-    kind: "error",
-    error: { code: "PI_PROMPT_FAILED", message: "PI reply failed." }
-  };
-  if (update.stopReason === "max_tokens") return { kind: "max-tokens" };
-  return { kind: "completed" };
-}
-function acpCwdWorkspaceId(path, backend) {
-  if (backend !== "cursor" && backend !== "antigravity" && backend !== "pi" && backend !== "opencode") throw new Error("An explicit ACP workspace backend is required.");
-  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
-  return `${prefix}${encodeURIComponent(path)}`;
-}
-function createAcpWorkspaceView(path, backend, title) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const label = title?.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path;
-  return {
-    workspaceId: acpCwdWorkspaceId(path, backend),
-    path,
-    title: label,
-    sessionIds: [],
-    sessionCount: 0,
-    createdAt: now,
-    updatedAt: now
-  };
-}
-async function discoverAcpVirtualWorkspaces(client, backend, signal) {
-  if (client?.listWorkspaces !== void 0) {
-    try {
-      const items = await client.listWorkspaces(backend, signal);
-      if (Array.isArray(items) && items.length > 0) {
-        return items.filter((item) => typeof item?.path === "string" && item.path.trim() !== "").map((item) => {
-          const view = createAcpWorkspaceView(item.path, backend, item.title);
-          if (typeof item.sessionCount === "number") view.sessionCount = item.sessionCount;
-          return view;
-        });
-      }
-    } catch (error) {
-      if (backend === "pi") throw error;
-    }
-  }
-  return [];
-}
-var AcpVirtualHarness = class _AcpVirtualHarness {
-  constructor(client, host, backend = "cursor", hostCarrier) {
-    this.client = client;
-    this.host = host;
-    this.backend = backend;
-    this.hostCarrier = hostCarrier;
-    this.api = this.createApiProxy();
-  }
-  api;
-  workspaceById = /* @__PURE__ */ new Map();
-  sessions = /* @__PURE__ */ new Map();
-  workspaceStreams = /* @__PURE__ */ new Set();
-  controlStreams = /* @__PURE__ */ new Set();
-  eventStreams = /* @__PURE__ */ new Map();
-  rcMuxStreams = /* @__PURE__ */ new Set();
-  rcHostStreams = /* @__PURE__ */ new Set();
-  follows = /* @__PURE__ */ new Set();
-  pendingApprovals = /* @__PURE__ */ new Map();
-  pendingHistory = /* @__PURE__ */ new Map();
-  selectedWorkspaceId;
-  selectedModels = /* @__PURE__ */ new Map();
-  lastProjectionSeq = 0;
-  imageAttachments = /* @__PURE__ */ new Map();
-  closed = false;
-  static remote(core, host, backend = "cursor", capabilities = [], hostCarrier) {
-    return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier);
-  }
-  async workspaces() {
-    return [...this.workspaceById.values()];
-  }
-  backendLabel() {
-    return this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor";
-  }
-  async selectWorkspace(workspaceId) {
-    const workspace = this.workspaceById.get(workspaceId) ?? recreateWorkspaceFromId(workspaceId, this.backend);
-    if (workspace === void 0) throw new Error(`The selected ${this.backendLabel()} workspace is no longer available.`);
-    this.workspaceById.set(workspace.workspaceId, workspace);
-    this.selectedWorkspaceId = workspace.workspaceId;
-    await this.discoverAndAttachSessions(workspace);
-    if (workspace.sessionIds.length === 0) {
-      await this.ensureInitialSession(workspace);
-    }
-    this.publishWorkspaceBaseline();
-    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
-  }
-  async selectOrCreateWorkspace(path) {
-    const trimmed = path.trim();
-    if (trimmed.length === 0) throw new Error(`A ${this.backendLabel()} working directory is required.`);
-    const existing = [...this.workspaceById.values()].find((item) => item.path === trimmed);
-    const workspace = existing ?? createAcpWorkspaceView(trimmed, this.backend);
-    this.workspaceById.set(workspace.workspaceId, workspace);
-    this.selectedWorkspaceId = workspace.workspaceId;
-    await this.discoverAndAttachSessions(workspace);
-    if (workspace.sessionIds.length === 0) {
-      await this.ensureInitialSession(workspace);
-    }
-    this.publishWorkspaceBaseline();
-    return this.workspaceById.get(workspace.workspaceId) ?? workspace;
-  }
-  async preferredSessionId() {
-    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    const sessionIds = selected?.sessionIds ?? [];
-    let bestSessionId;
-    let bestUpdatedAt = -1;
-    for (const sessionId of sessionIds) {
-      const session = this.sessions.get(sessionId);
-      if (session !== void 0 && !session.running && !session.blank && session.updatedAt > bestUpdatedAt) {
-        bestUpdatedAt = session.updatedAt;
-        bestSessionId = sessionId;
-      }
-    }
-    if (bestSessionId !== void 0) return bestSessionId;
-    for (const sessionId of sessionIds) {
-      const session = this.sessions.get(sessionId);
-      if (session !== void 0 && !session.running) return sessionId;
-    }
-    return sessionIds[0] ?? sessionIds.at(-1);
-  }
-  async invoke(request) {
-    const result = await this.dispatch(
-      `${request.namespace}/${request.method}`,
-      { args: request.args },
-      request.signal ?? new AbortController().signal
-    );
-    if (result.ok) return result.value;
-    throw Object.assign(new Error(result.error.message), {
-      isDSHRemoteError: true,
-      code: result.error.code,
-      details: result.error.details
-    });
-  }
-  async dispatch(endpoint, payload, signal) {
-    try {
-      const args = carrierArgs2(payload);
-      if (ACP_TOOL_CALL_ENDPOINTS.some((item) => item === endpoint)) {
-        if (!this.client.workspaceToolCall) return business2(failure2("method-not-found", "The Host does not support ACP workspace tools."));
-        const sessionId = requiredString2(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
-        return business2(await this.client.workspaceToolCall(nativeAcpId(sessionId, this.backend), this.backend, endpoint, args, signal));
-      }
-      switch (endpoint) {
-        case "$events/result":
-          return business2(await this.answerRemoteEvent(args, signal));
-        case "workspace/list":
-          return business2(success2({
-            items: this.visibleWorkspaces().map(nativeWorkspace2),
-            archivedSessionIds: [],
-            pinnedSessionIds: []
-          }));
-        case "workspace/create":
-          return business2(await this.createWorkspace(requestArg2(args)));
-        case "workspace/rename":
-          return business2(await this.renameWorkspace(requestArg2(args)));
-        case "workspace/delete":
-          return business2(failure2("workspace-read-only", `${this.backendLabel()} virtual Workspaces cannot be deleted from Desktop yet.`));
-        case "workspace/insertBefore":
-          return business2({
-            workspaceIds: this.visibleWorkspaces().map((item) => item.workspaceId)
-          });
-        case "workspace/insertSessionBefore":
-          return business2(await this.workspaceForSession(requestArg2(args)));
-        case "workspace/archiveSession":
-          return business2(await this.archiveSession(requestArg2(args)));
-        case "session/list":
-          return business2(success2({ items: await this.handleSessionList() }));
-        case "session/search":
-          return business2(success2({ items: [], hasMore: false }));
-        case "session/create":
-          return business2(await this.createSession(requestArg2(args), signal));
-        case "session/fork":
-          return business2(failure2("bad-request", `${this.backendLabel()} Remote does not support session fork yet.`));
-        case "session/history":
-          return business2(await this.sessionHistory(requestArg2(args)));
-        case "session/page":
-          return business2(await this.sessionPage(requestArg2(args)));
-        case "session/prompt":
-          return business2(await this.prompt(requestArg2(args), signal));
-        case "session/cancel":
-          return business2(await this.cancel(requestArg2(args), signal));
-        case "session/rename":
-          return business2(await this.renameSession(requestArg2(args)));
-        case "session/updateQueue":
-          return business2(failure2("queue-item-not-found", `${this.backendLabel()} does not expose a DSH inbox queue.`));
-        case "session/attachment":
-          return business2(await this.attachment(requestArg2(args)));
-        case "session/modelCatalog": {
-          const sessionId = await this.preferredSessionId();
-          if (this.backend === "cursor" || !sessionId) return business2(success2(modelCatalog2(this.backend)));
-          const models = await this.hostSessionModels(sessionId);
-          return business2(success2({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
-        }
-        case "session/models": {
-          const rawId = extractSessionId(requestArg2(args));
-          nativeAcpId(rawId, this.backend);
-          if (this.backend !== "cursor") return business2(success2(await this.hostSessionModels(rawId)));
-          const catalog = modelCatalog2(this.backend);
-          return business2(success2({
-            current: this.modelSelection(rawId),
-            routable: true,
-            groups: catalog.groups,
-            failures: []
-          }));
-        }
-        case "session/selectModel":
-          return business2(await this.selectModel(requestArg2(args)));
-        case "session/canOpenWorkspacePath":
-          return business2(this.selectedWorkspaceId !== void 0);
-        case "session/openWorkspacePath":
-          return business2(failure2("bad-request", `Opening Host paths is unavailable in ${this.backendLabel()} mode.`));
-        case "host/describe":
-          return business2(success2(this.describeHost()));
-        case "host/listDirectory":
-        case "directoryPicker/list":
-          return business2(await this.listDirectory(requestArg2(args), signal));
-        case "skills/list":
-          return business2(success2({ items: [] }));
-        case "commands/list":
-          return business2([]);
-        case "commands/execute":
-          return business2(void 0);
-        default:
-          return this.hostCarrier === void 0 ? fail2("method-not-found", `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`) : await this.hostCarrier.dispatch(endpoint, payload, signal);
-      }
-    } catch (error) {
-      return failFrom2(error);
-    }
-  }
-  async open(endpoint, payload, signal) {
-    const args = carrierArgs2(payload);
-    if (ACP_TOOL_STREAM_ENDPOINTS.some((item) => item === endpoint)) {
-      const sessionId = requiredString2(args.workspaceFileScopeId ?? args.agentId ?? args.sessionId, "sessionId");
-      const queue = new AsyncValueQueue3(signal);
-      const stream = await this.client.openStream(nativeAcpId(sessionId, this.backend), (frame) => {
-        if (frame.frame.method === "dsh/workspaceTool") queue.push(record4(frame.frame.params).value);
-      }, () => queue.close(), signal, { backend: this.backend, endpoint, args });
-      return queue.iterate(() => {
-        void stream.close().catch(() => void 0);
-      });
-    }
-    if (endpoint === "workspace/follow") return this.workspaceFollow(signal);
-    if (endpoint === "session/control") return this.sessionControl(signal);
-    if (endpoint === "session/follow") return this.sessionFollow(requestArg2(args), signal);
-    if (endpoint === "$events") return this.remoteEvents(signal);
-    if (endpoint === "job/list" || endpoint === "job/follow") return this.emptyJobStream(endpoint, signal);
-    if (this.hostCarrier !== void 0) return this.hostCarrier.open(endpoint, payload, signal);
-    throw Object.assign(new Error(`${this.backendLabel()} virtual Harness does not implement stream ${endpoint}.`), {
-      isDSHRemoteError: true,
-      code: "method-not-found",
-      details: {}
-    });
-  }
-  async close() {
-    if (this.closed) return;
-    this.closed = true;
-    for (const stream of this.workspaceStreams) stream.close();
-    for (const stream of this.controlStreams) stream.close();
-    for (const stream of this.eventStreams.values()) stream.close();
-    for (const stream of this.rcMuxStreams) stream.close();
-    for (const stream of this.rcHostStreams) stream.close();
-    this.workspaceStreams.clear();
-    this.controlStreams.clear();
-    this.eventStreams.clear();
-    this.rcMuxStreams.clear();
-    this.rcHostStreams.clear();
-    const follows = [...this.follows];
-    this.follows.clear();
-    for (const follow of follows) {
-      follow.queue.close();
-      await follow.close?.().catch(() => void 0);
-    }
-    this.pendingApprovals.clear();
-    this.imageAttachments.clear();
-  }
-  visibleWorkspaces() {
-    if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
-    const selected = this.workspaceById.get(this.selectedWorkspaceId);
-    if (selected === void 0) return [...this.workspaceById.values()];
-    return [
-      selected,
-      ...[...this.workspaceById.values()].filter((item) => item.workspaceId !== selected.workspaceId)
-    ];
-  }
-  async createWorkspace(request) {
-    const path = string3(request.path)?.trim();
-    if (path === void 0 || path.length === 0) return failure2("bad-request", "A Cursor working directory is required.");
-    const workspace = await this.selectOrCreateWorkspace(path);
-    this.publishWorkspaceBaseline();
-    return success2({ workspace: nativeWorkspace2(workspace), created: true });
-  }
-  async renameWorkspace(request) {
-    const workspaceId = requiredString2(request.workspaceId, "workspaceId");
-    const title = string3(request.title)?.trim();
-    const workspace = this.workspaceById.get(workspaceId);
-    if (workspace === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    if (title === void 0 || title.length === 0) return failure2("bad-request", "A Workspace name is required.");
-    const next = { ...workspace, title, updatedAt: (/* @__PURE__ */ new Date()).toISOString() };
-    this.workspaceById.set(workspaceId, next);
-    this.publishWorkspaceBaseline();
-    return success2({ workspace: nativeWorkspace2(next) });
-  }
-  async workspaceForSession(request) {
-    const sessionId = string3(request.sessionId);
-    const workspace = [...this.workspaceById.values()].find((item) => sessionId !== void 0 && item.sessionIds.includes(sessionId));
-    return workspace === void 0 ? failure2("workspace-not-found", "The Cursor virtual Workspace was not found.") : success2({ workspace: nativeWorkspace2(workspace) });
-  }
-  async archiveSession(request) {
-    const sessionId = extractSessionId(request);
-    this.sessions.delete(sessionId);
-    for (const [workspaceId, workspace] of this.workspaceById) {
-      if (!workspace.sessionIds.includes(sessionId)) continue;
-      const sessionIds = workspace.sessionIds.filter((id5) => id5 !== sessionId);
-      this.workspaceById.set(workspaceId, {
-        ...workspace,
-        sessionIds,
-        sessionCount: sessionIds.length,
-        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-      });
-    }
-    this.emitRemoteEvent("api-session/removed", [sessionId]);
-    this.publishWorkspaceBaseline();
-    return success2({ archivedSessionIds: [sessionId] });
-  }
-  async createSession(request, signal) {
-    const workspaceId = string3(request.workspaceId) ?? this.selectedWorkspaceId;
-    const workspace = workspaceId === void 0 ? void 0 : this.workspaceById.get(workspaceId);
-    const cwd2 = string3(request.cwd) ?? workspace?.path;
-    if (cwd2 === void 0) return failure2("workspace-not-found", "The Cursor virtual Workspace was not found.");
-    const requestedSessionId = string3(request.sessionId);
-    const reusable = requestedSessionId === void 0 ? void 0 : this.sessions.get(requestedSessionId);
-    if (reusable !== void 0 && reusable.cwd === cwd2 && reusable.blank && !reusable.running) {
-      return success2({ sessionId: reusable.sessionId });
-    }
-    const created = await this.client.createSession(cwd2, "agent", this.backend, signal);
-    if (this.backend !== "cursor" && this.sessions.has(`${sessionPrefix(this.backend)}${created.sessionId}`)) {
-      return failure2("session-already-exists", "The backend returned an existing conversation for a new Session.");
-    }
-    const session = this.registerSession(created.sessionId, cwd2, workspace?.title);
-    this.attachSessionToWorkspace(cwd2, session.sessionId);
-    this.publishWorkspaceBaseline();
-    const seq = this.nextProjectionSeq();
-    this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, seq)]);
-    this.publishProjection(session.sessionId, "title", session.title ?? this.backendLabel(), seq);
-    return success2({ sessionId: session.sessionId });
-  }
-  ensureSessionRegistered(sessionId) {
-    let session = this.sessions.get(sessionId);
-    if (session !== void 0) return session;
-    if (this.backend !== "cursor" && sessionId.startsWith(sessionPrefix(this.backend))) {
-      const acpSessionId = sessionId.slice(sessionPrefix(this.backend).length);
-      const workspace = this.selectedWorkspaceId !== void 0 ? this.workspaceById.get(this.selectedWorkspaceId) : void 0;
-      const cwd2 = workspace?.path ?? "/";
-      session = this.registerSession(acpSessionId, cwd2, this.backendLabel(), Date.now(), Date.now(), false);
-      if (workspace && !workspace.sessionIds.includes(sessionId)) {
-        workspace.sessionIds.unshift(sessionId);
-        workspace.sessionCount = workspace.sessionIds.length;
-        this.publishWorkspaceBaseline();
-      }
-      return session;
-    }
-    return void 0;
-  }
-  async prompt(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    await this.hydrateSession(session);
-    const text = extractPromptText(array2(request.content));
-    let images;
-    try {
-      images = array2(request.content).filter((part) => record4(part).type === "image").map(parseAcpImage);
-      if (images.length > 4 || images.length > 0 && this.backend !== "antigravity" || array2(request.content).some((part) => !["text", "image"].includes(String(record4(part).type)))) throw new Error("Unsupported ACP content.");
-    } catch {
-      return failure2("attachment-error", "Invalid or unsupported image attachment.");
-    }
-    if (text === void 0 && images.length === 0) return failure2("attachment-error", "A prompt or image is required.");
-    const imageBlocks = images.map((image) => acpImageContent(image, `agy-image:${crypto.randomUUID()}.${image.mimeType === "image/jpeg" ? "jpg" : image.mimeType.slice(6)}`));
-    this.cacheImageAttachments(sessionId, imageBlocks);
-    const requestId = typeof request.requestId === "string" && request.requestId.length > 0 ? request.requestId : void 0;
-    await this.ensureFollow(session);
-    const follow = [...this.follows].find((f) => f.sessionId === sessionId);
-    if (follow !== void 0) {
-      follow.turn += 1;
-      follow.stepOpen = true;
-      this.pushEvent(follow, "turn/start", { turn: follow.turn });
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
-      this.pushEvent(follow, "user/message", {
-        id: `user:${Date.now()}`,
-        role: "user",
-        content: [...text ? [{ type: "text", text }] : [], ...imageBlocks],
-        source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
-      });
-    }
-    session.blank = false;
-    session.running = true;
-    session.updatedAt = Date.now();
-    this.emitRemoteEvent("api-session/status", [sessionId, true]);
-    await this.client.prompt(session.acpSessionId, text ?? "", signal, images, this.backend);
-    return success2({ accepted: true });
-  }
-  async cancel(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    await this.client.cancel(session.acpSessionId, signal);
-    session.running = false;
-    for (const follow of this.follows) {
-      if (follow.sessionId === sessionId) {
-        this.closeFollowAfterRemoteStreamClosed(follow, { kind: "aborted", reason: { kind: "user" } });
-      }
-    }
-    this.emitRemoteEvent("api-session/status", [sessionId, false]);
-    return success2({ accepted: true });
-  }
-  async renameSession(request) {
-    const sessionId = extractSessionId(request);
-    const title = string3(request.title)?.trim();
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    if (title === void 0) return failure2("bad-request", "A Session title is required.");
-    session.title = title;
-    session.titleOverridden = true;
-    session.updatedAt = Date.now();
-    this.publishProjection(sessionId, "title", title);
-    return success2({ sessionId });
-  }
-  cacheImageAttachments(sessionId, content) {
-    for (const value of content) {
-      const block = record4(value);
-      const attachment = record4(block.attachment);
-      if (block.type === "image" && typeof attachment.attachmentId === "string" && typeof block.data === "string") {
-        this.imageAttachments.set(attachment.attachmentId, { sessionId, attachment, data: block.data });
-      }
-    }
-  }
-  async attachment(request) {
-    const sessionId = extractSessionId(request);
-    const attachmentId = string3(request.attachmentId);
-    const session = this.ensureSessionRegistered(sessionId);
-    if (this.backend !== "antigravity" || session === void 0 || !attachmentId?.startsWith("agy-image:")) return failure2("attachment-error", "The image is not referenced by this AGY Session.");
-    await this.hydrateSession(session);
-    const cached = this.imageAttachments.get(attachmentId);
-    return cached?.sessionId === sessionId ? success2({ attachment: cached.attachment, data: cached.data }) : failure2("attachment-error", "The AGY image is unavailable or expired.");
-  }
-  async hydrateSession(session) {
-    if (this.backend === "cursor" || session.blank || session.events.length > 0) return;
-    if (this.backend !== "pi") return this.hydrateSessionOnce(session);
-    const pending = this.pendingHistory.get(session.sessionId);
-    if (pending) return pending;
-    const read = this.hydrateSessionOnce(session);
-    this.pendingHistory.set(session.sessionId, read);
-    try {
-      await read;
-    } finally {
-      if (this.pendingHistory.get(session.sessionId) === read) this.pendingHistory.delete(session.sessionId);
-    }
-  }
-  async hydrateSessionOnce(session) {
-    let events = [];
-    if (this.client.loadSessionHistory !== void 0) {
-      try {
-        events = await this.client.loadSessionHistory(session.sessionId, this.backend);
-      } catch (error) {
-        if (this.backend === "pi") throw error;
-      }
-    }
-    if (events.length > 0) {
-      session.events = events;
-      session.blank = false;
-      session.updatedAt = Date.now();
-      for (const event of session.events) this.cacheImageAttachments(session.sessionId, array2(record4(event.event.data).content ?? record4(record4(event.event.data).message).content));
-    }
-  }
-  async sessionHistory(request) {
-    const sessionId = extractSessionId(request);
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    await this.hydrateSession(session);
-    const page = this.historyPage(session, {
-      beforeSeq: optionalInteger2(request.beforeSeq),
-      limit: optionalPositiveInteger2(request.maxMessages) ?? 50
-    });
-    return success2({
-      ...page,
-      events: page.records.map((entry) => ({ event: entry.event })),
-      projections: {
-        asOfSeq: page.cursor,
-        values: {
-          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
-          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
-          modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: acpImageLimits(this.backend)
-        }
-      }
-    });
-  }
-  async sessionPage(request) {
-    const sessionId = extractSessionId(request);
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) return failure2("session-not-found", "The Session was not found.");
-    await this.hydrateSession(session);
-    const page = this.historyPage(session, {
-      beforeSeq: optionalInteger2(request.beforeSeq),
-      throughSeq: optionalInteger2(request.throughSeq),
-      limit: optionalPositiveInteger2(request.limit) ?? optionalPositiveInteger2(request.maxMessages) ?? 50
-    });
-    return success2({ records: page.records, hasMore: page.hasMore });
-  }
-  historyPage(session, options = {}) {
-    const lastSessionSeq = session.events.at(-1)?.event.seq ?? -1;
-    const throughSeq = Math.min(options.throughSeq ?? lastSessionSeq, lastSessionSeq);
-    const endSeq = Math.min(throughSeq, options.beforeSeq === void 0 ? throughSeq : options.beforeSeq - 1);
-    const window2 = endSeq < 0 ? [] : session.events.filter((entry) => entry.event.seq <= endSeq);
-    const limit = options.limit ?? 50;
-    const records = window2.slice(Math.max(0, window2.length - limit));
-    const cursor2 = records.at(-1)?.event.seq ?? -1;
-    return {
-      header: {
-        version: 3,
-        id: session.sessionId,
-        createdAt: session.createdAt,
-        cwd: session.cwd,
-        isSeeded: false
-      },
-      cursor: cursor2,
-      nextTurn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)) + 1,
-      records,
-      hasMore: window2.length > records.length,
-      ...session.running ? { activeTurnId: "cursor-live" } : {},
-      assistantStream: { revision: 0 }
-    };
-  }
-  describeHost() {
-    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    const name2 = this.backendLabel();
-    return {
-      version: `${name2} Remote`,
-      cwd: workspace?.path ?? "",
-      home: workspace?.path ?? "",
-      provider: name2,
-      model: modelCatalog2(this.backend).default.model,
-      attachedSessions: this.sessions.size,
-      canOpenPath: workspace !== void 0
-    };
-  }
-  async listDirectory(request, signal) {
-    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    if (workspace === void 0) return failure2("workspace-not-found", `The ${this.backendLabel()} virtual Workspace was not found.`);
-    const path = string3(request.path) ?? workspace.path;
-    return success2(await this.client.listDirectory(path, signal));
-  }
-  async answerRemoteEvent(args, signal) {
-    const eventId = string3(args.eventId);
-    const outcome = record4(args.outcome);
-    if (eventId === void 0) throw new Error(`The ${this.backendLabel()} approval result is missing its event id.`);
-    const pending = this.pendingApprovals.get(eventId);
-    if (pending === void 0) return void 0;
-    this.pendingApprovals.delete(eventId);
-    const decision = outcome.kind === "result" && outcome.value === "allowed-once" ? "allow-once" : outcome.kind === "result" && outcome.value === "cancelled" ? "cancel" : "reject-once";
-    await this.client.respond(pending.requestHandle, decision, void 0, signal);
-    return void 0;
-  }
-  async workspaceFollow(signal) {
-    const queue = new AsyncValueQueue3(signal);
-    this.workspaceStreams.add(queue);
-    queue.push({
-      type: "baseline",
-      value: {
-        items: this.visibleWorkspaces().map(nativeWorkspace2),
-        archivedSessionIds: [],
-        pinnedSessionIds: []
-      }
-    });
-    return queue.iterate(() => this.workspaceStreams.delete(queue));
-  }
-  async sessionControl(signal) {
-    const queue = new AsyncValueQueue3(signal);
-    this.controlStreams.add(queue);
-    queue.push({ type: "baseline", value: { projections: {} } });
-    return queue.iterate(() => this.controlStreams.delete(queue));
-  }
-  /**
-   * Background jobs belong to the Host Harness session, not to a backend-scoped
-   * virtual Workspace. The native session header mounts a job roster stream as
-   * soon as a Session opens, so answer it with an authoritative empty roster
-   * instead of a terminal `method-not-found` failure that tears the page down.
-   */
-  emptyJobStream(endpoint, signal) {
-    const queue = new AsyncValueQueue3(signal);
-    if (endpoint === "job/list") queue.push({ type: "rows", jobs: [] });
-    return queue.iterate(() => queue.close());
-  }
-  async remoteEvents(signal) {
-    const id5 = `cursor-events:${Date.now()}:${Math.random()}`;
-    const queue = new AsyncValueQueue3(signal);
-    this.eventStreams.set(id5, queue);
-    const workspace = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    queue.push({
-      type: "ready",
-      clientId: id5,
-      host: { home: workspace?.path ?? "/" }
-    });
-    return queue.iterate(() => this.eventStreams.delete(id5));
-  }
-  async sessionFollow(request, signal) {
-    const sessionId = extractSessionId(request);
-    const session = this.ensureSessionRegistered(sessionId) ?? this.sessions.get(sessionId);
-    if (session === void 0) throw new Error("The Session was not found.");
-    await this.hydrateSession(session);
-    const history = this.historyPage(session, {
-      limit: optionalPositiveInteger2(request.maxMessages) ?? 50
-    });
-    const queue = new AsyncValueQueue3(signal);
-    const follow = {
-      sessionId,
-      acpSessionId: session.acpSessionId,
-      queue,
-      nextSeq: session.events.length,
-      turn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
-      stepOpen: session.running,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      accumulatedText: "",
-      activeToolCalls: /* @__PURE__ */ new Set(),
-      piToolOutputs: /* @__PURE__ */ new Map(),
-      piToolCalls: /* @__PURE__ */ new Map()
-    };
-    this.follows.add(follow);
-    queue.push({
-      type: "snapshot",
-      header: history.header,
-      cursor: history.cursor,
-      records: history.records,
-      hasMore: history.hasMore,
-      projections: {
-        asOfSeq: history.cursor,
-        values: {
-          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
-          sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
-          modelSelection: this.modelSelectionProjection(sessionId),
-          imageLimits: acpImageLimits(this.backend)
-        }
-      },
-      assistantStream: { revision: 0 }
-    });
-    try {
-      const stream = await this.client.openStream(
-        session.acpSessionId,
-        (frame) => this.acceptAcpFrame(follow, frame),
-        (closed) => {
-          session.running = false;
-          this.emitRemoteEvent("api-session/status", [sessionId, false]);
-          this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
-        },
-        signal
-      );
-      follow.close = () => stream.close();
-    } catch (error) {
-      this.follows.delete(follow);
-      queue.close();
-      throw error;
-    }
-    return queue.iterate(() => {
-      this.follows.delete(follow);
-      void follow.close?.().catch(() => void 0);
-    });
-  }
-  async ensureFollow(session) {
-    if ([...this.follows].some((follow2) => follow2.sessionId === session.sessionId)) return;
-    const controller = new AbortController();
-    const queue = new AsyncValueQueue3(controller.signal);
-    const follow = {
-      sessionId: session.sessionId,
-      acpSessionId: session.acpSessionId,
-      queue,
-      nextSeq: session.events.length === 0 ? 0 : Math.max(...session.events.map((entry) => entry.event.seq)) + 1,
-      turn: Math.max(0, ...session.events.map((entry) => isRecord8(entry.event.data) && typeof entry.event.data.turn === "number" ? entry.event.data.turn : 0)),
-      stepOpen: false,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      accumulatedText: "",
-      activeToolCalls: /* @__PURE__ */ new Set(),
-      piToolOutputs: /* @__PURE__ */ new Map(),
-      piToolCalls: /* @__PURE__ */ new Map()
-    };
-    this.follows.add(follow);
-    const stream = await this.client.openStream(
-      session.acpSessionId,
-      (frame) => this.acceptAcpFrame(follow, frame),
-      (closed) => {
-        if (this.backend === "pi") {
-          session.running = false;
-          this.emitRemoteEvent("api-session/status", [session.sessionId, false]);
-        }
-        this.closeFollowAfterRemoteStreamClosed(follow, piStreamOutcome(closed.reason));
-      }
-    );
-    follow.close = async () => {
-      controller.abort();
-      await stream.close();
-    };
-  }
-  acceptAcpFrame(follow, frame) {
-    const method = frame.frame.method;
-    const params = record4(frame.frame.params);
-    if (method === "session/update") {
-      this.acceptSessionUpdate(follow, params);
-      return;
-    }
-    if (method === "session/request_permission" || method === "cursor/ask_question" || method === "cursor/create_plan") {
-      this.acceptApproval(follow, params, method);
-    }
-  }
-  acceptSessionUpdate(follow, params) {
-    const update = isRecord8(params.update) ? params.update : params;
-    const kind = string3(update.sessionUpdate) ?? string3(update.type);
-    const session = this.sessions.get(follow.sessionId);
-    if (kind === "model_selection" && isRecord8(update.selected) && update.selected.provider === this.backend && typeof update.selected.model === "string") {
-      this.selectedModels.set(follow.sessionId, update.selected);
-      this.publishProjection(follow.sessionId, "modelSelection", this.modelSelectionProjection(follow.sessionId), this.nextProjectionSeq());
-      return;
-    }
-    if (kind === "agent_message_chunk" || kind === "agent_message") {
-      const text = extractText(update);
-      if (text === void 0 || text.length === 0) return;
-      this.appendAssistantDelta(follow, text);
-      return;
-    }
-    if (kind === "tool_call" || kind === "tool_call_update") {
-      const toolName = string3(update.title) ?? string3(update.toolName) ?? string3(update.name) ?? "tool";
-      const status2 = string3(update.status);
-      const callId = string3(update.toolCallId) ?? string3(update.callId) ?? toolName;
-      const terminal = status2 === "completed" || status2 === "failed";
-      if (this.backend === "pi") {
-        const call = follow.piToolCalls.get(callId) ?? { name: toolName };
-        if (typeof update.title === "string") call.name = update.title;
-        if (update.rawInput !== void 0) call.input = update.rawInput;
-        follow.piToolCalls.set(callId, call);
-        const output = piToolResult(update);
-        const delta = record4(record4(update._meta).terminal_output).data;
-        if (typeof delta === "string") {
-          const buffered = follow.piToolOutputs.get(callId) ?? { text: "", overflow: false };
-          if (!buffered.overflow) {
-            if (buffered.text.length + delta.length > 1048576) {
-              buffered.text = "";
-              buffered.overflow = true;
-            } else buffered.text += delta;
-          }
-          follow.piToolOutputs.set(callId, buffered);
-        }
-        if (!terminal && status2 !== "in_progress") return;
-        if (!follow.activeToolCalls.has(callId)) {
-          this.ensurePiStep(follow, false);
-          this.finishPiAssistant(follow);
-          follow.piAfterTools = true;
-          this.pushEvent(follow, "tool/call", {
-            turn: follow.turn,
-            step: follow.piStep ?? 1,
-            callId,
-            toolCallId: callId,
-            name: call.name,
-            toolName: call.name,
-            arguments: typeof call.input === "string" ? call.input : call.input != null ? JSON.stringify(call.input) : "{}",
-            status: terminal ? status2 === "failed" ? "failed" : "finished" : "running"
-          });
-          follow.activeToolCalls.add(callId);
-        }
-        if (terminal) {
-          const buffered = follow.piToolOutputs.get(callId);
-          const content = buffered ? [{ type: "text", text: buffered.overflow ? "[PI tool output exceeds the live preview limit; reload history to read the bounded persisted result.]" : buffered.text }] : output.content;
-          this.pushEvent(follow, "tool/result", { turn: follow.turn, step: follow.piStep ?? 1, message: {
-            id: `${callId}:result`,
-            role: "user",
-            content: [{
-              type: "tool-result",
-              toolCallId: callId,
-              content,
-              ...output.isError ? { isError: true } : {}
-            }],
-            source: { kind: "tool", callId }
-          } });
-          follow.piToolOutputs.delete(callId);
-          follow.piToolCalls.delete(callId);
-          follow.activeToolCalls.delete(callId);
-        }
-        if (session !== void 0) session.updatedAt = Date.now();
-        return;
-      }
-      if (kind === "tool_call_update" && !terminal) return;
-      if (kind === "tool_call" && follow.activeToolCalls.has(callId)) return;
-      this.pushEvent(follow, "tool/call", {
-        turn: follow.turn,
-        step: 1,
-        callId,
-        name: toolName,
-        arguments: typeof update.parameters === "object" && update.parameters !== null ? JSON.stringify(update.parameters) : typeof update.rawInput === "object" && update.rawInput !== null ? JSON.stringify(update.rawInput) : "{}",
-        toolCallId: callId,
-        toolName,
-        status: status2 === "completed" ? "finished" : status2 === "failed" ? "failed" : "running"
-      });
-      if (terminal) follow.activeToolCalls.delete(callId);
-      else follow.activeToolCalls.add(callId);
-      if (session !== void 0) session.updatedAt = Date.now();
-      return;
-    }
-    if (kind === "agent_thought_chunk") {
-      const text = extractText(update);
-      if (text === void 0 || text.length === 0) return;
-      this.appendReasoningDelta(follow, text);
-      return;
-    }
-    if (kind === "prompt_completed" || kind === "prompt_failed") {
-      const hasLiveContent = follow.stepOpen || follow.streamActive;
-      if (!hasLiveContent && Array.isArray(update.catchUp)) {
-        for (const item of update.catchUp) {
-          if (!isRecord8(item) || typeof item.method !== "string") continue;
-          const params2 = isRecord8(item.params) ? item.params : {};
-          if (item.method === "session/update") this.acceptSessionUpdate(follow, params2);
-        }
-      }
-      if (session !== void 0) {
-        session.running = false;
-        session.updatedAt = Date.now();
-        this.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
-        if (kind === "prompt_completed") void this.refreshSessionTitle(session);
-      }
-      this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update));
-    }
-  }
-  acceptApproval(follow, params, method) {
-    const requestHandle = string3(params.requestHandle);
-    if (requestHandle === void 0) return;
-    this.pendingApprovals.set(requestHandle, { requestHandle, sessionId: follow.sessionId });
-    const toolName = method === "cursor/create_plan" ? string3(params.name) ?? "plan" : method === "cursor/ask_question" ? string3(params.title) ?? "question" : string3(params.toolName) ?? string3(record4(params.toolCall).title) ?? "permission";
-    const reason = method === "cursor/create_plan" ? string3(params.overview) ?? string3(params.plan) : method === "cursor/ask_question" ? summarizeQuestions(params) : string3(params.reason) ?? string3(record4(record4(params.toolCall).rawInput).message);
-    this.emitApproval({
-      eventId: requestHandle,
-      agentId: follow.sessionId,
-      request: {
-        toolName,
-        ...reason === void 0 ? {} : { reason }
-      }
-    });
-  }
-  pushAssistantChunk(follow, chunk) {
-    let attempt = follow.assistantAttempt;
-    if (attempt === void 0) {
-      attempt = {
-        attemptId: this.backend === "pi" ? `pi-attempt:${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}:${follow.nextSeq}` : `cursor-attempt:${follow.turn}:${follow.nextSeq}`,
-        startedAfterSeq: follow.nextSeq - 1,
-        nextIndex: 0,
-        stream: []
-      };
-      follow.assistantAttempt = attempt;
-      follow.assistantStreamRevision += 1;
-      follow.queue.push({
-        type: "assistant-stream",
-        frame: {
-          type: "start",
-          attemptId: attempt.attemptId,
-          revision: follow.assistantStreamRevision,
-          startedAfterSeq: attempt.startedAfterSeq,
-          turn: follow.turn,
-          step: this.backend === "pi" ? follow.piStep ?? 1 : 1
-        }
-      });
-    }
-    const time = Date.now();
-    const index = attempt.nextIndex++;
-    attempt.stream.push({ type: "chunk", time, chunk });
-    follow.assistantStreamRevision += 1;
-    follow.queue.push({
-      type: "assistant-stream",
-      frame: {
-        type: "chunk",
-        attemptId: attempt.attemptId,
-        revision: follow.assistantStreamRevision,
-        index,
-        time,
-        chunk
-      }
-    });
-  }
-  endAssistantAttempt(follow, outcome) {
-    const attempt = follow.assistantAttempt;
-    if (attempt === void 0) return;
-    follow.assistantAttempt = void 0;
-    follow.assistantStreamRevision += 1;
-    follow.queue.push({
-      type: "assistant-stream",
-      frame: {
-        type: "end",
-        attemptId: attempt.attemptId,
-        revision: follow.assistantStreamRevision,
-        index: attempt.nextIndex,
-        outcome
-      }
-    });
-  }
-  appendAssistantDelta(follow, delta) {
-    if (this.backend === "pi") this.ensurePiStep(follow, true);
-    if (!follow.stepOpen) {
-      follow.turn += 1;
-      follow.stepOpen = true;
-      this.pushEvent(follow, "turn/start", { turn: follow.turn });
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
-    }
-    if (follow.blockIndex === void 0) {
-      follow.blockIndex = (follow.reasoningBlockIndex ?? -1) + 1;
-      follow.streamActive = true;
-      this.pushAssistantChunk(follow, { type: "block-start", index: follow.blockIndex, blockType: "text" });
-    }
-    follow.accumulatedText += delta;
-    this.pushAssistantChunk(follow, { type: "text-delta", index: follow.blockIndex, text: delta });
-  }
-  appendReasoningDelta(follow, delta) {
-    if (this.backend === "pi") {
-      this.ensurePiStep(follow, true);
-      follow.piReasoning = (follow.piReasoning ?? "") + delta;
-    }
-    if (!follow.stepOpen) {
-      follow.turn += 1;
-      follow.stepOpen = true;
-      this.pushEvent(follow, "turn/start", { turn: follow.turn });
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
-    }
-    if (follow.reasoningBlockIndex === void 0) {
-      follow.reasoningBlockIndex = (follow.blockIndex ?? -1) + 1;
-      follow.streamActive = true;
-      this.pushAssistantChunk(follow, { type: "block-start", index: follow.reasoningBlockIndex, blockType: "reasoning" });
-    }
-    this.pushAssistantChunk(follow, { type: "reasoning-delta", index: follow.reasoningBlockIndex, text: delta });
-  }
-  /** PI model steps settle before tools; a tool round does not end the turn. */
-  ensurePiStep(follow, advanceAfterTools) {
-    if (!follow.stepOpen) {
-      follow.turn++;
-      follow.piStep = 1;
-      follow.stepOpen = true;
-      this.pushEvent(follow, "turn/start", { turn: follow.turn });
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: 1 });
-    } else if (advanceAfterTools && follow.piAfterTools) {
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
-      follow.piStep = (follow.piStep ?? 1) + 1;
-      this.pushEvent(follow, "step/start", { turn: follow.turn, step: follow.piStep });
-    }
-    if (advanceAfterTools) follow.piAfterTools = false;
-  }
-  finishPiAssistant(follow, outcome = { kind: "completed" }) {
-    if (!follow.streamActive) return;
-    const blocks = [
-      { index: follow.reasoningBlockIndex, type: "reasoning", text: follow.piReasoning ?? "" },
-      { index: follow.blockIndex, type: "text", text: follow.accumulatedText }
-    ].filter((block) => block.index !== void 0).sort((a, b) => a.index - b.index);
-    for (const { index, type, text } of blocks) this.pushAssistantChunk(follow, { type: "block-end", index, block: { type, text } });
-    const reason = outcome.kind === "error" ? { kind: "error", failure: outcome.error } : outcome.kind === "aborted" ? { kind: "aborted", failure: { code: "ABORTED", message: "PI reply interrupted." } } : { kind: outcome.kind === "max-tokens" ? "max-tokens" : "stop" };
-    this.pushAssistantChunk(follow, { type: "finish", reason });
-    const selection = this.modelSelection(follow.sessionId);
-    const seq = this.pushEvent(follow, "assistant/message", {
-      turn: follow.turn,
-      step: follow.piStep ?? 1,
-      message: {
-        id: `${follow.sessionId}:${follow.turn}:${follow.piStep ?? 1}`,
-        role: "assistant",
-        content: blocks.map(({ type, text }) => ({ type, text })),
-        source: { kind: "model", provider: selection.provider, model: selection.model }
-      },
-      stream: follow.assistantAttempt?.stream ?? []
-    });
-    this.endAssistantAttempt(follow, { kind: "committed", eventType: "assistant/message", seq });
-    follow.streamActive = false;
-    follow.blockIndex = void 0;
-    follow.reasoningBlockIndex = void 0;
-    follow.accumulatedText = "";
-    follow.piReasoning = "";
-  }
-  closeFollowAfterRemoteStreamClosed(follow, outcome = { kind: "completed" }) {
-    if (this.backend === "pi") {
-      this.finishPiAssistant(follow, outcome);
-      if (follow.stepOpen) {
-        this.pushEvent(follow, "step/end", { turn: follow.turn, step: follow.piStep ?? 1 });
-        this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: outcome });
-      }
-      follow.stepOpen = false;
-      follow.piStep = 1;
-      follow.piAfterTools = false;
-      follow.piToolOutputs.clear();
-      follow.piToolCalls.clear();
-      follow.activeToolCalls.clear();
-      return;
-    }
-    if (follow.streamActive) {
-      if (follow.reasoningBlockIndex !== void 0) {
-        this.pushAssistantChunk(follow, {
-          type: "block-end",
-          index: follow.reasoningBlockIndex,
-          block: { type: "reasoning", text: "" }
-        });
-        follow.reasoningBlockIndex = void 0;
-      }
-      if (follow.blockIndex !== void 0) {
-        const fullText2 = follow.accumulatedText;
-        this.pushAssistantChunk(follow, {
-          type: "block-end",
-          index: follow.blockIndex,
-          block: { type: "text", text: fullText2 }
-        });
-      }
-      this.pushAssistantChunk(follow, {
-        type: "finish",
-        reason: { kind: "stop" }
-      });
-      const fullText = follow.accumulatedText;
-      const selection = this.modelSelection(follow.sessionId);
-      const stream = follow.assistantAttempt?.stream ?? [];
-      const assistantMessageSeq = this.pushEvent(follow, "assistant/message", {
-        turn: follow.turn,
-        step: 1,
-        message: {
-          id: `${follow.sessionId}:${follow.turn}`,
-          role: "assistant",
-          content: [{ type: "text", text: fullText }],
-          source: { kind: "model", provider: selection.provider, model: selection.model }
-        },
-        stream
-      });
-      this.endAssistantAttempt(follow, {
-        kind: "committed",
-        eventType: "assistant/message",
-        seq: assistantMessageSeq
-      });
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
-    } else if (follow.stepOpen) {
-      this.pushEvent(follow, "step/end", { turn: follow.turn, step: 1 });
-      this.pushEvent(follow, "turn/end", { turn: follow.turn, reason: { kind: "completed" } });
-    }
-    follow.streamActive = false;
-    follow.stepOpen = false;
-    follow.blockIndex = void 0;
-    follow.reasoningBlockIndex = void 0;
-    follow.accumulatedText = "";
-    follow.piToolOutputs.clear();
-    follow.piToolCalls.clear();
-  }
-  pushEvent(follow, type, data2) {
-    const session = this.sessions.get(follow.sessionId);
-    const seq = session !== void 0 ? session.events.length : follow.nextSeq++;
-    const event = {
-      type,
-      seq,
-      time: Date.now(),
-      data: data2,
-      ...isSurfaceEvent2(type) ? { surfaceOp: "append" } : {}
-    };
-    if (session !== void 0) {
-      session.events.push({ type: "event", event });
-    }
-    for (const f of this.follows) {
-      if (f.sessionId === follow.sessionId) {
-        f.queue.push({ type: "event", event });
-        f.nextSeq = seq + 1;
-      }
-    }
-    this.broadcastRcMux({
-      type: "session/event",
-      sessionId: follow.sessionId,
-      event
-    });
-    return seq;
-  }
-  registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
-    const session = {
-      sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
-      acpSessionId,
-      cwd: cwd2,
-      ...title === void 0 ? {} : { title },
-      blank,
-      running: false,
-      createdAt,
-      updatedAt,
-      events: []
-    };
-    this.sessions.set(session.sessionId, session);
-    return session;
-  }
-  applyDiscoveredTitle(session, title) {
-    const next = title.trim();
-    if (this.closed || session.titleOverridden || !next || next === "Untitled Session" || next === session.title) return;
-    session.title = next;
-    this.publishProjection(session.sessionId, "title", next);
-  }
-  async refreshSessionTitle(session) {
-    if (this.backend === "cursor" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
-    try {
-      const items = await this.client.listSessions(session.cwd, this.backend, 30);
-      const current = items.find((item) => item.conversationId === session.acpSessionId);
-      if (current !== void 0 && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title);
-    } catch {
-    }
-  }
-  async discoverAndAttachSessions(workspace) {
-    if (this.backend === "cursor") return;
-    try {
-      let discovered = [];
-      if (this.client.listSessions !== void 0) {
-        try {
-          discovered = await this.client.listSessions(workspace.path, this.backend, 30);
-        } catch (error) {
-          if (this.backend === "pi") throw error;
-        }
-      }
-      for (const item of discovered) {
-        const sessionId = `${sessionPrefix(this.backend)}${item.conversationId}`;
-        if (!this.sessions.has(sessionId)) {
-          this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
-        }
-        const existing = this.sessions.get(sessionId);
-        if (existing !== void 0) this.applyDiscoveredTitle(existing, item.title);
-        if (!workspace.sessionIds.includes(sessionId)) {
-          workspace.sessionIds.push(sessionId);
-        }
-      }
-      workspace.sessionCount = workspace.sessionIds.length;
-      workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
-    } catch (error) {
-      if (this.backend === "pi") throw error;
-    }
-  }
-  attachSessionToWorkspace(cwd2, sessionId) {
-    const workspace = [...this.workspaceById.values()].find((item) => item.path === cwd2) ?? createAcpWorkspaceView(cwd2, this.backend);
-    const sessionIds = [sessionId, ...workspace.sessionIds.filter((id5) => id5 !== sessionId)];
-    const next = {
-      ...workspace,
-      sessionIds,
-      sessionCount: sessionIds.length,
-      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
-    };
-    this.workspaceById.set(next.workspaceId, next);
-    if (this.selectedWorkspaceId === void 0) this.selectedWorkspaceId = next.workspaceId;
-  }
-  async ensureInitialSession(workspace) {
-    const cwd2 = workspace.path;
-    const created = await this.client.createSession(cwd2, "agent", this.backend);
-    const sessionId = created.sessionId;
-    const title = this.backend === "antigravity" ? "Antigravity" : this.backend === "opencode" ? "OpenCode" : workspace.title;
-    const session = this.registerSession(sessionId, cwd2, title);
-    this.attachSessionToWorkspace(cwd2, session.sessionId);
-    this.emitRemoteEvent("api-session/added", [this.sessionSummary(session, 0)]);
-    this.publishWorkspaceBaseline();
-    return session;
-  }
-  async handleSessionList() {
-    for (const workspace of this.workspaceById.values()) {
-      await this.discoverAndAttachSessions(workspace);
-      if (workspace.sessionIds.length === 0) {
-        await this.ensureInitialSession(workspace);
-      }
-    }
-    return this.sessionSummaries();
-  }
-  sessionSummaries() {
-    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
-    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
-  }
-  sessionSummary(session, asOfSeq) {
-    return {
-      sessionId: session.sessionId,
-      agentAvailable: true,
-      running: session.running,
-      blank: session.blank,
-      cwd: session.cwd,
-      updatedAt: session.updatedAt,
-      projections: {
-        kind: "sequenced",
-        asOfSeq,
-        values: {
-          title: session.title ?? (this.backend === "pi" ? "PI" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
-          sessionListMetadata: { blank: session.blank, lastPromptAt: null },
-          modelSelection: this.modelSelectionProjection(session.sessionId),
-          imageLimits: acpImageLimits(this.backend)
-        }
-      }
-    };
-  }
-  modelSelection(sessionId) {
-    return this.selectedModels.get(sessionId) ?? modelCatalog2(this.backend).default;
-  }
-  modelSelectionProjection(sessionId) {
-    const selection = this.modelSelection(sessionId);
-    return { lastUsed: selection, next: selection };
-  }
-  async hostSessionModels(sessionId) {
-    if (this.backend === "cursor" || this.backend === "opencode" || !this.client.sessionModels) return { current: { provider: this.backend, model: "host-settings" }, routable: true, groups: [], failures: [] };
-    const models = await this.client.sessionModels(nativeAcpId(sessionId, this.backend), this.backend);
-    this.selectedModels.set(sessionId, models.current);
-    return models;
-  }
-  async selectModel(request) {
-    const sessionId = extractSessionId(request);
-    nativeAcpId(sessionId, this.backend);
-    const provider = requiredString2(request.provider, "provider");
-    const model = requiredString2(request.model, "model");
-    const reasoningEffort = string3(request.reasoningEffort);
-    const catalog = this.backend !== "cursor" ? await this.hostSessionModels(sessionId) : modelCatalog2(this.backend);
-    const group = catalog.groups.find((g) => g.id === provider);
-    const targetModel = group?.models.find((m) => m.id === model);
-    if (group === void 0 || targetModel === void 0) {
-      return failure2("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
-    }
-    const supportedEfforts = targetModel.reasoning?.efforts.map((effort) => effort.id) ?? [];
-    if (reasoningEffort !== void 0 && !supportedEfforts.includes(reasoningEffort)) {
-      return failure2("model-unavailable", `The selected reasoning effort is unavailable for this ${this.backend} model.`);
-    }
-    const selected = {
-      provider,
-      model,
-      ...reasoningEffort === void 0 ? {} : { reasoningEffort }
-    };
-    if (this.backend !== "cursor" && this.backend !== "opencode") {
-      if (!this.client.selectModel) return failure2("model-unavailable", "The Host does not support ACP model selection.");
-      const confirmed = await this.client.selectModel(nativeAcpId(sessionId, this.backend), this.backend, selected);
-      this.selectedModels.set(sessionId, confirmed);
-    } else return failure2("model-unavailable", `${this.backendLabel()} model selection follows Host settings.`);
-    const seq = this.nextProjectionSeq();
-    this.publishProjection(sessionId, "modelSelection", this.modelSelectionProjection(sessionId), seq);
-    return success2({ selected: this.modelSelection(sessionId) });
-  }
-  publishWorkspaceBaseline() {
-    for (const queue of this.workspaceStreams) {
-      for (const workspace of this.visibleWorkspaces()) {
-        queue.push({ type: "upsert", workspace: nativeWorkspace2(workspace) });
-      }
-      queue.push({ type: "archived", archivedSessionIds: [] });
-    }
-  }
-  publishProjection(sessionId, key, value, seq = this.nextProjectionSeq()) {
-    for (const queue of this.controlStreams) {
-      queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq, seq });
-    }
-    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
-  }
-  emitRemoteEvent(event, args) {
-    for (const queue of this.eventStreams.values()) queue.push({ type: "emit", event, args });
-    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
-    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
-      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
-    } else if (event === "api-session/removed" && sessionId !== void 0) {
-      this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord8(args[0])) {
-      const summary = args[0];
-      this.broadcastRcHost({
-        type: "host/session-added",
-        sessionId: summary.sessionId,
-        blank: summary.blank === true,
-        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
-      });
-    }
-  }
-  emitApproval(input2) {
-    for (const queue of this.eventStreams.values()) queue.push({
-      type: "waterfall",
-      event: "approval/request",
-      eventId: input2.eventId,
-      agentId: input2.agentId,
-      request: input2.request
-    });
-    this.broadcastRcMux({
-      type: "approval/requested",
-      sessionId: input2.agentId,
-      approvalId: input2.eventId,
-      toolName: string3(input2.request.toolName) ?? this.backendLabel(),
-      ...typeof input2.request.reason === "string" ? { reason: input2.request.reason } : {}
-    }, input2.eventId);
-  }
-  nextProjectionSeq() {
-    this.lastProjectionSeq += 1;
-    return this.lastProjectionSeq;
-  }
-  createApiProxy() {
-    const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord8(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
-      const result = await this.dispatch(rcEndpoint2(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
-      return {
-        rpcId: request.rpcId,
-        result: result.ok ? success2(result.value) : failure2(result.error.code, result.error.message, result.error.details)
-      };
-    };
-    return {
-      sessions: {
-        list: call("session.list"),
-        search: call("session.search"),
-        create: call("session.create"),
-        history: call("session.history"),
-        models: call("session.models"),
-        selectModel: call("session.selectModel"),
-        rename: call("session.rename"),
-        fork: call("session.fork"),
-        prompt: call("session.prompt"),
-        attachment: call("session.attachment"),
-        updateQueue: call("session.updateQueue"),
-        cancel: call("session.cancel")
-      },
-      workspace: {
-        list: call("workspace.list"),
-        create: call("workspace.create"),
-        rename: call("workspace.rename"),
-        delete: call("workspace.delete"),
-        insertBefore: call("workspace.insertBefore"),
-        insertSessionBefore: call("workspace.insertSessionBefore"),
-        archiveSession: call("workspace.archiveSession")
-      },
-      subagents: {},
-      host: {
-        describe: call("host.describe"),
-        listDirectory: call("host.listDirectory")
-      },
-      skills: { list: call("skills.list") },
-      agentPresets: {},
-      goals: {},
-      settings: {},
-      credentials: {},
-      llm: {},
-      events: {
-        mux: ((request, signal) => this.rcMux(request, signal)),
-        host: ((request, signal) => this.rcHost(request, signal))
-      },
-      downloads: {},
-      respond: async (message) => {
-        const pending = this.pendingApprovals.get(String(message.rpcId)) ?? [...this.pendingApprovals.values()].find((item) => item.requestHandle === String(message.rpcId));
-        if (pending === void 0) return { accepted: false, reason: "not-pending" };
-        const result = message.result;
-        const outcome = result.ok ? result.value : void 0;
-        const decision = outcome === "allowed-once" ? "allow-once" : outcome === "cancelled" ? "cancel" : "reject-once";
-        await this.client.respond(pending.requestHandle, decision);
-        this.pendingApprovals.delete(pending.requestHandle);
-        return { accepted: true };
-      }
-    };
-  }
-  async *rcMux(request, signal) {
-    const queue = new AsyncValueQueue3(signal);
-    this.rcMuxStreams.add(queue);
-    for (const session of this.sessions.values()) {
-      queue.push({
-        rpcId: `${String(request.rpcId)}:${session.sessionId}:subscribed`,
-        payload: { type: "session/subscribed", sessionId: session.sessionId, lastSeq: -1 }
-      });
-    }
-    try {
-      yield* queue;
-    } finally {
-      this.rcMuxStreams.delete(queue);
-      queue.close();
-    }
-  }
-  async *rcHost(_request, signal) {
-    const queue = new AsyncValueQueue3(signal);
-    this.rcHostStreams.add(queue);
-    try {
-      yield* queue;
-    } finally {
-      this.rcHostStreams.delete(queue);
-      queue.close();
-    }
-  }
-  broadcastRcMux(payload, rpcId2 = `cursor-mux:${Date.now()}:${Math.random()}`) {
-    for (const queue of this.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
-  }
-  broadcastRcHost(payload) {
-    const frame = { rpcId: `cursor-host:${Date.now()}:${Math.random()}`, payload };
-    for (const queue of this.rcHostStreams) queue.push(frame);
-  }
-};
-function recreateWorkspaceFromId(workspaceId, backend) {
-  const prefix = backend === "pi" ? "pi:cwd:" : backend === "opencode" ? OPENCODE_WORKSPACE_PREFIX : backend === "antigravity" ? AGY_WORKSPACE_PREFIX : CURSOR_WORKSPACE_PREFIX;
-  if (!workspaceId.startsWith(prefix)) return void 0;
-  try {
-    const path = decodeURIComponent(workspaceId.slice(prefix.length));
-    if (path.length > 0) return createAcpWorkspaceView(path, backend);
-  } catch {
-    return void 0;
-  }
-  return void 0;
-}
-function nativeWorkspace2(view) {
-  return {
-    workspaceId: view.workspaceId,
-    path: view.path,
-    title: view.title,
-    sessionIds: view.sessionIds,
-    createdAt: view.createdAt,
-    updatedAt: view.updatedAt
-  };
-}
-var CURSOR_MODELS = [
-  { id: "auto", name: "Auto" },
-  { id: "claude-3.7-sonnet", name: "Claude 3.7 Sonnet" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
-  { id: "gpt-4o", name: "GPT-4o" },
-  { id: "o3-mini", name: "o3-mini" },
-  { id: "deepseek-r1", name: "DeepSeek R1" }
-];
-var OPENCODE_MODELS = [
-  { id: "opencode", name: "OpenCode" }
-];
-function modelCatalog2(backend = "cursor") {
-  const provider = backend === "pi" ? "pi" : backend === "opencode" ? OPENCODE_PROVIDER : backend === "antigravity" ? "antigravity" : CURSOR_PROVIDER;
-  const name2 = backend === "pi" ? "PI" : backend === "opencode" ? "OpenCode" : backend === "antigravity" ? "Antigravity" : "Cursor";
-  const models = backend === "cursor" ? CURSOR_MODELS : backend === "opencode" ? OPENCODE_MODELS : [];
-  const defaultModel = models[0]?.id ?? "host-settings";
-  return {
-    default: { provider, model: defaultModel },
-    routableProviders: [provider],
-    groups: [{
-      id: provider,
-      name: name2,
-      models
-    }],
-    failures: []
-  };
-}
-function extractPromptText(content) {
-  const parts = content.flatMap((part) => {
-    const item = record4(part);
-    if (item.type === "text" && typeof item.text === "string") return [item.text];
-    return [];
-  });
-  const text = parts.join("");
-  return text.length === 0 ? void 0 : text;
-}
-function extractText(update) {
-  const content = update.content;
-  if (typeof content === "string") return content;
-  if (isRecord8(content) && typeof content.text === "string") return content.text;
-  if (Array.isArray(content)) {
-    const parts = content.map((part) => isRecord8(part) && typeof part.text === "string" ? part.text : void 0).filter((part) => part !== void 0);
-    return parts.length === 0 ? void 0 : parts.join("");
-  }
-  return typeof update.text === "string" ? update.text : void 0;
-}
-function summarizeQuestions(params) {
-  if (!Array.isArray(params.questions)) return void 0;
-  const lines = params.questions.map((question) => isRecord8(question) ? string3(question.prompt) : void 0).filter((line) => line !== void 0);
-  return lines.length === 0 ? void 0 : lines.join("\n");
-}
-function sessionIdFromAddress2(address) {
-  if (typeof address.sessionId === "string" && address.sessionId.length > 0) return address.sessionId;
-  if (typeof address.childSessionId === "string" && address.childSessionId.length > 0) return address.childSessionId;
-  if (address.kind === "session" && typeof address.sessionId === "string" && address.sessionId.length > 0) {
-    return address.sessionId;
-  }
-  throw new Error("The sessionId is required.");
-}
-function extractSessionId(request) {
-  if (typeof request.sessionId === "string" && request.sessionId.length > 0) return request.sessionId;
-  if (isRecord8(request.address)) return sessionIdFromAddress2(request.address);
-  throw new Error("The sessionId is required.");
-}
-function sessionPrefix(backend) {
-  return backend === "pi" ? "pi:" : backend === "opencode" ? OPENCODE_SESSION_PREFIX : backend === "antigravity" ? ACP_SESSION_PREFIX : CURSOR_SESSION_PREFIX;
-}
-function nativeAcpId(sessionId, backend) {
-  const prefix = sessionPrefix(backend);
-  if (!sessionId.startsWith(prefix) || sessionId.length === prefix.length) {
-    throw new Error("The selected Session does not belong to the virtual harness.");
-  }
-  return sessionId.slice(prefix.length);
-}
-function isSurfaceEvent2(type) {
-  return type === "user/message" || type === "assistant/message" || type === "tool/result";
-}
-function carrierArgs2(payload) {
-  return record4(record4(payload).args);
-}
-function requestArg2(args) {
-  return record4(args.request ?? args._request ?? args);
-}
-function rcEndpoint2(endpoint) {
-  if (endpoint === "workspace.list") return "workspace/list";
-  return endpoint.replace(".", "/");
-}
-function success2(value) {
-  return { ok: true, value };
-}
-function failure2(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
-}
-function business2(value) {
-  if (isRecord8(value) && value.ok === false && isRecord8(value.error)) {
-    return { ok: false, error: {
-      code: string3(value.error.code) ?? "internal",
-      message: string3(value.error.message) ?? "The virtual Harness request failed.",
-      details: isRecord8(value.error.details) ? value.error.details : {}
-    } };
-  }
-  if (isRecord8(value) && value.ok === true) return { ok: true, value: value.value };
-  return { ok: true, value };
-}
-function fail2(code, message, details = {}) {
-  return { ok: false, error: { code, message, details } };
-}
-function failFrom2(error) {
-  const source = error instanceof Error ? error : new Error(String(error));
-  const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-  return fail2(code, source.message);
-}
-function record4(value) {
-  return isRecord8(value) ? value : {};
-}
-function isRecord8(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function array2(value) {
-  return Array.isArray(value) ? value : [];
-}
-function string3(value) {
-  return typeof value === "string" ? value : void 0;
-}
-function integer2(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) ? value : void 0;
-}
-function optionalInteger2(value) {
-  if (value === void 0) return void 0;
-  const parsed = integer2(value);
-  if (parsed === void 0) throw new Error("The History cursor is invalid.");
-  return parsed;
-}
-function optionalPositiveInteger2(value) {
-  const parsed = optionalInteger2(value);
-  if (parsed !== void 0 && parsed <= 0) throw new Error("The History page size is invalid.");
-  return parsed;
-}
-function requiredString2(value, field) {
-  if (typeof value !== "string" || value.length === 0) throw new Error(`The ${field} is required.`);
-  return value;
-}
-var AsyncValueQueue3 = class {
-  constructor(signal) {
-    this.signal = signal;
-    this.onAbort = () => this.close();
-    signal.addEventListener("abort", this.onAbort, { once: true });
-    if (signal.aborted) this.close();
-  }
-  values = [];
-  waiters = [];
-  closed = false;
-  onAbort;
-  push(value) {
-    if (this.closed) return;
-    const waiter = this.waiters.shift();
-    if (waiter === void 0) this.values.push(value);
-    else waiter({ done: false, value });
-  }
-  close() {
-    if (this.closed) return;
-    this.closed = true;
-    this.signal.removeEventListener("abort", this.onAbort);
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
-  }
-  iterate(dispose) {
-    const queue = this;
-    return {
-      async *[Symbol.asyncIterator]() {
-        try {
-          yield* queue;
-        } finally {
-          dispose();
-          queue.close();
-        }
-      }
-    };
-  }
-  async *[Symbol.asyncIterator]() {
-    while (true) {
-      if (this.values.length > 0) {
-        yield this.values.shift();
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
-      if (next.done) return;
-      yield next.value;
-    }
-  }
-};
 
 // src/server-api.ts
 import { platform } from "node:os";
@@ -26773,13 +27797,13 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details = "details" in source && isRecord9(source.details) ? source.details : {};
+    const details = "details" in source && isRecord10(source.details) ? source.details : {};
     return { code, message: source.message, details };
   }
 };
 function workspaceConnectionResult(endpoint, result) {
   if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
-  if (!result.ok || !isRecord9(result.value) || !(result.value.data instanceof Uint8Array)) return result;
+  if (!result.ok || !isRecord10(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
     value: { ...result.value, data: null },
@@ -26825,7 +27849,7 @@ function requestFromCarrier(endpoint, payload, signal) {
   if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error("The Harness Gateway endpoint is invalid.");
   }
-  if (!isRecord9(payload) || !isRecord9(payload.args)) {
+  if (!isRecord10(payload) || !isRecord10(payload.args)) {
     throw new Error("The Harness Gateway payload is invalid.");
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
@@ -26840,7 +27864,7 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
-function isRecord9(value) {
+function isRecord10(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -27908,17 +28932,6 @@ function isPrivate(ip) {
 }
 
 // src/client-runtime.ts
-var REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16];
-var REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17];
-var DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
-var DIRECT_LAN_PROGRESS_DISPLAY_MS = 1400;
-var HOST_AUTHORIZATION_ERRORS = /* @__PURE__ */ new Set([
-  "ACCOUNT_AUTH_REQUIRED",
-  "AUTH_INVALID",
-  "DEVICE_OWNERSHIP_REQUIRED",
-  "DEVICE_REVOKED",
-  "TOKEN_EXPIRED"
-]);
 var ClientModeRuntime = class {
   constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory) {
     this.config = config;
@@ -27927,9 +28940,119 @@ var ClientModeRuntime = class {
     this.logger = logger;
     this.host = host;
     this.rtcFactoryProvider = rtcFactoryProvider;
+    const owner = this;
+    this.connection = new ClientConnection({
+      get connectionProgressRun() {
+        return owner.connectionProgressRun;
+      },
+      set connectionProgressRun(value) {
+        owner.connectionProgressRun = value;
+      },
+      get connectionProgress() {
+        return owner.connectionProgress;
+      },
+      set connectionProgress(value) {
+        owner.connectionProgress = value;
+      },
+      requireIdentity: (...args) => owner.requireIdentity(...args),
+      get server() {
+        return owner.server;
+      },
+      get config() {
+        return owner.config;
+      },
+      get rtcFactoryProvider() {
+        return owner.rtcFactoryProvider;
+      },
+      get logger() {
+        return owner.logger;
+      },
+      get connected() {
+        return owner.connected;
+      },
+      set connected(value) {
+        owner.connected = value;
+      },
+      closePreview: (...args) => owner.closePreview(...args),
+      get pendingWorkspaceSelection() {
+        return owner.pendingWorkspaceSelection;
+      },
+      set pendingWorkspaceSelection(value) {
+        owner.pendingWorkspaceSelection = value;
+      },
+      closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
+      closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
+      get proxySwitch() {
+        return owner.proxySwitch;
+      },
+      get gatewaySwitch() {
+        return owner.gatewaySwitch;
+      },
+      get identities() {
+        return owner.identities;
+      }
+    });
+    this.control = new ClientControl({
+      detailedStatus: (...args) => owner.detailedStatus(...args),
+      devices: (...args) => owner.devices(...args),
+      get server() {
+        return owner.server;
+      },
+      authorizeClientWithAccount: (...args) => owner.authorizeClientWithAccount(...args),
+      startClientOAuthQrLogin: (...args) => owner.startClientOAuthQrLogin(...args),
+      pollClientOAuthQrLogin: (...args) => owner.pollClientOAuthQrLogin(...args),
+      activeRemote: (...args) => owner.activeRemote(...args),
+      get preview() {
+        return owner.preview;
+      },
+      set preview(value) {
+        owner.preview = value;
+      },
+      listRemoteDirectory: (...args) => owner.listRemoteDirectory(...args),
+      listRemoteWorkspaces: (...args) => owner.listRemoteWorkspaces(...args),
+      listCodexWorkspaces: (...args) => owner.listCodexWorkspaces(...args),
+      openRemoteWorkspace: (...args) => owner.openRemoteWorkspace(...args),
+      openCodexWorkspace: (...args) => owner.openCodexWorkspace(...args),
+      createCodexWorkspace: (...args) => owner.createCodexWorkspace(...args),
+      listCursorWorkspaces: (...args) => owner.listCursorWorkspaces(...args),
+      openCursorWorkspace: (...args) => owner.openCursorWorkspace(...args),
+      createCursorWorkspace: (...args) => owner.createCursorWorkspace(...args),
+      consumeWorkspaceSelection: (...args) => owner.consumeWorkspaceSelection(...args),
+      callRemoteFileViewer: (...args) => owner.callRemoteFileViewer(...args),
+      activeCodexRemote: (...args) => owner.codexStreamBridge.activeCodexRemote(...args),
+      requireLocalCodex: (...args) => owner.codexStreamBridge.requireLocalCodex(...args),
+      localCodexAvailable: (...args) => owner.codexStreamBridge.localCodexAvailable(...args),
+      pluginRoute: (...args) => owner.pluginRoute(...args),
+      openCodexStream: (...args) => owner.codexStreamBridge.openCodexStream(...args),
+      nextCodexFrames: (...args) => owner.codexStreamBridge.nextCodexFrames(...args),
+      closeCodexStream: (...args) => owner.codexStreamBridge.closeCodexStream(...args),
+      get host() {
+        return owner.host;
+      },
+      setHostAuthorization: (...args) => owner.setHostAuthorization(...args),
+      setMode: (...args) => owner.setMode(...args)
+    });
+    this.codexStreamBridge = new ClientCodexStreams({
+      activeRemote: (...args) => owner.activeRemote(...args),
+      get codexStreams() {
+        return owner.codexStreams;
+      },
+      get host() {
+        return owner.host;
+      }
+    });
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
   }
+  connect(targetDeviceId, signal) {
+    return this.connection.connect(targetDeviceId, signal);
+  }
+  handleControl(endpoint, payload, signal) {
+    return this.control.handleControl(endpoint, payload, signal);
+  }
+  connection;
+  control;
+  codexStreamBridge;
   preview;
   identity;
   connected;
@@ -27979,7 +29102,7 @@ var ClientModeRuntime = class {
     }
   }
   registerControl(connection, webServer) {
-    return registerControlRoute(connection, (endpoint, payload, signal) => this.handleControl(endpoint, payload, signal), webServer);
+    return registerControlRoute(connection, (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal), webServer);
   }
   status() {
     const targetStatus = this.gatewaySwitch.supportsCarrier() ? this.gatewaySwitch.status() : this.proxySwitch?.status() ?? this.gatewaySwitch.status();
@@ -28041,7 +29164,7 @@ var ClientModeRuntime = class {
     const serverDevices = await this.server.listDevices();
     const remoteDevices = serverDevices.filter((device) => device.deviceId !== this.host?.hostStatus().deviceId);
     return Promise.all(remoteDevices.map(async (device) => {
-      await this.authorizeHostPeer(device);
+      await this.connection.authorizeHostPeer(device);
       const presence = await this.server.presenceFor(device.deviceId).catch(() => ({ online: false }));
       return { ...device, ...presence };
     }));
@@ -28099,7 +29222,7 @@ var ClientModeRuntime = class {
     this.proxySwitch?.selectLocal();
     await this.closePreview();
     this.gatewaySwitch.selectLocal();
-    await this.closeCodexStreams(previous?.client);
+    await this.codexStreamBridge.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
     await this.server.revokeCurrentDevice();
     this.identity = await this.identities.reset(this.config.deviceName);
@@ -28126,7 +29249,7 @@ var ClientModeRuntime = class {
       this.connected = void 0;
       this.connectionProgress = void 0;
       this.pendingWorkspaceSelection = void 0;
-      await this.closeCodexStreams(previous2?.client);
+      await this.codexStreamBridge.closeCodexStreams(previous2?.client);
       await previous2?.client.close().catch(() => void 0);
       this.logger.info("Harness target switched", { mode: "local" });
       return this.status();
@@ -28138,19 +29261,19 @@ var ClientModeRuntime = class {
     try {
       this.assertRemoteCompatible(next);
     } catch (error) {
-      this.clearConnectionProgress(next.progressRunId);
+      this.connection.clearConnectionProgress(next.progressRunId);
       await next.client.close().catch(() => void 0);
       throw error;
     }
     const previous = this.connected;
     await this.closePreview();
     this.connected = next;
-    this.clearConnectionProgress(next.progressRunId);
+    this.connection.clearConnectionProgress(next.progressRunId);
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
     this.selectRemoteTarget(next);
-    await this.closeCodexStreams(previous?.client);
+    await this.codexStreamBridge.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
     this.logger.info("Harness target switched", { mode: "remote", targetDeviceId: shortId(next.target.deviceId) });
     return this.status();
@@ -28283,12 +29406,12 @@ var ClientModeRuntime = class {
       throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The selected Host does not provide CodeX workspaces.");
     }
     this.assertLocalHarnessCarrierAvailable();
-    const result = record5(await new CodexRemoteClient(remote.client).request("project/create", {
+    const result = record2(await new CodexRemoteClient(remote.client).request("project/create", {
       name: remoteWorkspaceTitle(trimmedPath),
       roots: [{ path: trimmedPath }],
       idempotencyKey: uuidV7()
     }, signal));
-    const project = record5(result.project);
+    const project = record2(result.project);
     if (typeof project.id !== "string" || project.id.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "The Host returned an invalid CodeX project.");
     }
@@ -28384,7 +29507,7 @@ var ClientModeRuntime = class {
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
     await this.closeCursorVirtual();
-    await this.closeCodexStreams(this.connected?.client);
+    await this.codexStreamBridge.closeCodexStreams(this.connected?.client);
     await this.connected?.client.close().catch(() => void 0);
     this.connected = void 0;
     this.connectionProgress = void 0;
@@ -28413,135 +29536,6 @@ var ClientModeRuntime = class {
   }
   activeRemote() {
     return this.connected;
-  }
-  activeCodexRemote() {
-    const remote = this.activeRemote();
-    if (remote === void 0) return void 0;
-    if (!remote.features.codex) {
-      return void 0;
-    }
-    return remote;
-  }
-  async openCodexStream(payload, signal) {
-    const remote = this.activeCodexRemote();
-    const value = record5(payload);
-    if (typeof value.streamId !== "string" || value.streamId.length === 0 || value.streamId.length > 128 || typeof value.threadId !== "string" || value.threadId.length === 0) {
-      throw new ClientModeError("INVALID_MESSAGE", "A Codex stream and thread are required.");
-    }
-    if (this.codexStreams.has(value.streamId)) throw new ClientModeError("REQUEST_CONFLICT", "The Codex stream is already open.");
-    let wake = () => void 0;
-    const stream = {
-      target: remote === void 0 ? { kind: "local" } : { kind: "remote", client: remote.client },
-      frames: [],
-      unsubscribe: () => void 0,
-      close: async () => {
-        if (remote === void 0) {
-          await this.host?.codexCloseStream?.({ streamId: value.streamId }).catch(() => void 0);
-          return;
-        }
-        await remote.client.rpc("codex.app.stream.close", { streamId: value.streamId }).catch(() => void 0);
-      },
-      wake: () => wake()
-    };
-    if (remote === void 0) {
-      const host = this.requireLocalCodex();
-      this.codexStreams.set(value.streamId, stream);
-      try {
-        const result = await host.codexOpenStream({ streamId: value.streamId, threadId: value.threadId }, this.publishLocalCodexFrame, signal);
-        return result;
-      } catch (error) {
-        this.codexStreams.delete(value.streamId);
-        stream.wake();
-        throw error;
-      }
-    }
-    stream.unsubscribe = remote.client.onEvent((event) => {
-      if (event.event === "codex.app.frame" && isRecord10(event.data) && event.data.streamId === value.streamId) {
-        this.appendCodexFrame(stream, event.data);
-      }
-      if (event.event === "codex.app.stream.closed" && isRecord10(event.data) && event.data.streamId === value.streamId) {
-        stream.closed = typeof event.data.reason === "string" ? event.data.reason : "closed";
-        stream.wake();
-      }
-    });
-    try {
-      await remote.client.rpc("codex.app.stream.open", { streamId: value.streamId, threadId: value.threadId }, signal);
-    } catch (error) {
-      stream.unsubscribe();
-      throw error;
-    }
-    this.codexStreams.set(value.streamId, stream);
-    return { opened: true, streamId: value.streamId, threadId: value.threadId };
-  }
-  publishLocalCodexFrame = async (event, data2) => {
-    const streamId = data2.streamId;
-    const stream = this.codexStreams.get(streamId);
-    if (stream === void 0 || stream.target.kind !== "local") return;
-    if (event === "codex.app.frame") {
-      this.appendCodexFrame(stream, data2);
-      return;
-    }
-    const closed = data2;
-    stream.closed = typeof closed.reason === "string" ? closed.reason : "closed";
-    stream.wake();
-  };
-  appendCodexFrame(stream, data2) {
-    if (!isRecord10(data2) || !isRecord10(data2.frame) || typeof data2.frame.method !== "string") return;
-    if (stream.frames.length >= 256) {
-      stream.closed = "overflow";
-    } else {
-      stream.frames.push({ method: data2.frame.method, params: data2.frame.params });
-    }
-    stream.wake();
-  }
-  localCodexAvailable() {
-    return this.host?.codexStatus?.().available === true;
-  }
-  requireLocalCodex() {
-    if (!this.localCodexAvailable() || this.host?.codexCall === void 0 || this.host.codexRespond === void 0 || this.host.codexOpenStream === void 0 || this.host.codexCloseStream === void 0) {
-      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "Local CodeX is disabled or unavailable on this Host.");
-    }
-    return {
-      codexCall: this.host.codexCall.bind(this.host),
-      codexRespond: this.host.codexRespond.bind(this.host),
-      codexOpenStream: this.host.codexOpenStream.bind(this.host),
-      codexCloseStream: this.host.codexCloseStream.bind(this.host)
-    };
-  }
-  async nextCodexFrames(payload, signal) {
-    const value = record5(payload);
-    if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
-    const stream = this.codexStreams.get(value.streamId);
-    if (stream === void 0) throw new ClientModeError("STREAM_NOT_FOUND", "The Codex stream is not open.");
-    if (stream.frames.length === 0 && stream.closed === void 0) await waitForCodexFrames(stream, signal);
-    const frames = stream.frames.splice(0, 100);
-    return {
-      streamId: value.streamId,
-      frames,
-      closed: stream.closed !== void 0,
-      ...stream.closed === void 0 ? {} : { reason: stream.closed }
-    };
-  }
-  async closeCodexStream(payload) {
-    const value = record5(payload);
-    if (typeof value.streamId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Codex stream is required.");
-    const stream = this.codexStreams.get(value.streamId);
-    if (stream === void 0) return { closed: false, streamId: value.streamId };
-    this.codexStreams.delete(value.streamId);
-    stream.unsubscribe();
-    stream.wake();
-    await stream.close();
-    return { closed: true, streamId: value.streamId };
-  }
-  async closeCodexStreams(client) {
-    const targets = [...this.codexStreams.entries()].filter(([, stream]) => client === void 0 || stream.target.kind === "remote" && stream.target.client === client);
-    await Promise.all(targets.map(async ([streamId, stream]) => {
-      this.codexStreams.delete(streamId);
-      stream.unsubscribe();
-      stream.closed = "peer-disconnected";
-      stream.wake();
-      await stream.close();
-    }));
   }
   selectRemoteTarget(remote, transport = this.selectHarnessRemoteTransport(remote)) {
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
@@ -28630,150 +29624,6 @@ var ClientModeRuntime = class {
       "This Client does not provide a compatible Harness carrier for the selected remote workspace."
     );
   }
-  async connect(targetDeviceId, signal) {
-    signal?.throwIfAborted();
-    const progressRunId = this.connectionProgressRun + 1;
-    this.connectionProgressRun = progressRunId;
-    this.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
-    const identity = this.requireIdentity();
-    let client;
-    try {
-      const serverDevice = (await this.server.listDevices()).find((device) => device.deviceId === targetDeviceId);
-      if (serverDevice === void 0) {
-        throw new ClientModeError("MEMBERSHIP_REQUIRED", "The selected Host is not authorized for this account.");
-      }
-      this.updateConnectionProgress(progressRunId, "authorizing-peer");
-      const target2 = await this.authorizeHostPeer(serverDevice);
-      const presence = await this.server.presenceFor(targetDeviceId);
-      if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
-      const credentials = await this.server.authenticate(identity);
-      const rtcFactory = this.config.forceRelay ? void 0 : await this.rtcFactoryProvider({ routeTargets: [this.server.baseUrl] }).catch(() => void 0);
-      if (!this.config.forceRelay && rtcFactory === void 0) {
-        this.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
-          targetDeviceId: shortId(target2.deviceId)
-        });
-      }
-      let webRtcFallback = false;
-      const createTransport = (attempt) => new AdaptiveTransport(
-        websocketUrl(this.server.baseUrl),
-        {
-          role: "client",
-          deviceId: identity.deviceId,
-          accessToken: credentials.accessToken,
-          targetDeviceId,
-          forceRelay: this.config.forceRelay || attempt === "relay",
-          preferredTransports: preferredTransportsForAttempt(attempt),
-          negotiateTimeoutMs: attempt === "direct" ? DIRECT_WEBRTC_NEGOTIATE_TIMEOUT_MS : void 0,
-          ...rtcFactory === void 0 || attempt === "relay" ? {} : { rtcFactory },
-          fetchIceServers: async (connectionId) => iceServersForAttempt(attempt, await this.server.turnCredentials(connectionId)),
-          onWebRtcFallback: (error, diagnostics) => {
-            webRtcFallback = true;
-            this.logger.warn(attempt === "direct" ? "remote Harness direct WebRTC failed; trying TURN" : "remote Harness TURN WebRTC failed; using relay", {
-              targetDeviceId: shortId(target2.deviceId),
-              attempt,
-              reason: diagnosticReason(error)
-            });
-            if (diagnostics !== void 0) {
-              this.logger.debug("remote Harness WebRTC fallback diagnostics", {
-                targetDeviceId: shortId(target2.deviceId),
-                attempt,
-                ...webrtcDiagnosticsLogFields(diagnostics)
-              });
-            }
-          }
-        }
-      );
-      const attempts = this.config.forceRelay || rtcFactory === void 0 ? ["relay"] : ["direct", "turn", "relay"];
-      let transport;
-      for (const attempt of attempts) {
-        webRtcFallback = false;
-        const stopProgressTimer = this.beginAttemptProgress(progressRunId, attempt);
-        try {
-          transport = createTransport(attempt);
-          client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target2), 6e4);
-          const attemptClient = client;
-          const onAbort = () => {
-            void attemptClient.close();
-          };
-          signal?.addEventListener("abort", onAbort, { once: true });
-          try {
-            signal?.throwIfAborted();
-            await attemptClient.connect();
-          } finally {
-            signal?.removeEventListener("abort", onAbort);
-          }
-          signal?.throwIfAborted();
-        } finally {
-          stopProgressTimer();
-        }
-        if (attempt === "relay" || !webRtcFallback) break;
-        await client.close();
-        client = void 0;
-        transport = void 0;
-        if (attempt === "turn") {
-          this.logger.info("remote Harness relay fallback re-established", {
-            targetDeviceId: shortId(target2.deviceId)
-          });
-        }
-      }
-      if (client === void 0 || transport === void 0) {
-        throw new ClientModeError("CONNECTION_FAILED", "Unable to establish a remote transport.", true);
-      }
-      const connectedClient = client;
-      const connectedTransport = transport;
-      const connectedPreference = transportPreferenceForMode(connectedClient.getStats().mode);
-      this.updateConnectionProgress(
-        progressRunId,
-        "connected",
-        connectedPreference === void 0 ? void 0 : [connectedPreference]
-      );
-      connectedClient.onClose(() => {
-        if (this.connected?.client !== connectedClient) return;
-        void this.closePreview();
-        this.connected = void 0;
-        this.connectionProgress = void 0;
-        this.pendingWorkspaceSelection = void 0;
-        void this.closeCodexVirtual();
-        void this.closeCursorVirtual();
-        this.proxySwitch?.disconnectRemote();
-        this.gatewaySwitch.disconnectRemote();
-        void connectedClient.close().catch(() => void 0);
-        this.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
-          targetDeviceId: shortId(target2.deviceId)
-        });
-      });
-      const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
-      this.logger.info("remote Harness transport ready", {
-        targetDeviceId: shortId(target2.deviceId),
-        transport: connectedClient.getStats().mode,
-        ...connectionDetails === void 0 ? {} : {
-          preferredTransports: connectionDetails.preferredTransports,
-          negotiatedCapabilities: connectionDetails.negotiatedCapabilities,
-          webRtcEnabled: connectionDetails.webRtcEnabled
-        }
-      });
-      if (connectionDetails?.webRtc?.diagnostics !== void 0) {
-        this.logger.debug("remote Harness transport diagnostics", {
-          targetDeviceId: shortId(target2.deviceId),
-          ...webrtcDiagnosticsLogFields(connectionDetails.webRtc.diagnostics)
-        });
-      }
-      const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion);
-      return {
-        client: connectedClient,
-        target: target2,
-        transport: connectedTransport,
-        features,
-        progressRunId,
-        ...serverDevice.clientVersion === void 0 ? {} : { clientVersion: serverDevice.clientVersion },
-        ...serverDevice.harnessVersion === void 0 ? {} : { harnessVersion: serverDevice.harnessVersion }
-      };
-    } catch (error) {
-      this.clearConnectionProgress(progressRunId);
-      await client?.close().catch(() => void 0);
-      throw error;
-    }
-  }
   async ensureConnected(targetDeviceId, signal, isCurrent) {
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
     const next = await this.connect(targetDeviceId, signal);
@@ -28788,538 +29638,21 @@ var ClientModeRuntime = class {
       await this.closePreview();
       assertCurrent();
     } catch (error) {
-      this.clearConnectionProgress(next.progressRunId);
+      this.connection.clearConnectionProgress(next.progressRunId);
       await next.client.close().catch(() => void 0);
       throw error;
     }
     const previous = this.connected;
     this.connected = next;
-    this.clearConnectionProgress(next.progressRunId);
+    this.connection.clearConnectionProgress(next.progressRunId);
     await previous?.client.close().catch(() => void 0);
     return next;
-  }
-  beginAttemptProgress(runId, attempt) {
-    if (attempt !== "direct") {
-      this.updateConnectionProgress(runId, "probing", [attempt]);
-      return () => void 0;
-    }
-    this.updateConnectionProgress(runId, "probing", ["lan"]);
-    const timer = setTimeout(() => {
-      if (this.connectionProgress?.runId === runId && this.connectionProgress.phase === "probing") {
-        this.updateConnectionProgress(runId, "probing", ["p2p"]);
-      }
-    }, DIRECT_LAN_PROGRESS_DISPLAY_MS);
-    return () => clearTimeout(timer);
-  }
-  updateConnectionProgress(runId, phase, activeTransports) {
-    if (this.connectionProgress?.runId !== runId) return;
-    this.connectionProgress = {
-      runId,
-      targetDeviceId: this.connectionProgress.targetDeviceId,
-      phase,
-      ...activeTransports === void 0 ? {} : { activeTransports }
-    };
-  }
-  clearConnectionProgress(runId) {
-    if (this.connectionProgress?.runId === runId) this.connectionProgress = void 0;
-  }
-  async handleControl(endpoint, payload, signal) {
-    try {
-      if (endpoint === "status") return ok2(await this.detailedStatus());
-      if (endpoint === "devices") return ok2(await this.devices());
-      if (endpoint === "client.account.providers") return ok2(await this.server.oauthProviders());
-      if (endpoint === "client.account.login") {
-        const value = record5(payload);
-        if (typeof value.email !== "string" || typeof value.password !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
-        }
-        return ok2(await this.authorizeClientWithAccount(value.email, value.password));
-      }
-      if (endpoint === "client.account.qr.start") {
-        const value = record5(payload);
-        const provider = value.provider ?? "zhihu";
-        if (typeof provider !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$/.test(provider)) {
-          throw new ClientModeError("INVALID_MESSAGE", "An OAuth provider ID is required.");
-        }
-        return ok2(await this.startClientOAuthQrLogin(provider));
-      }
-      if (endpoint === "client.account.qr.poll") {
-        const value = record5(payload);
-        if (typeof value.qrId !== "string" || value.qrId.length < 20) {
-          throw new ClientModeError("INVALID_MESSAGE", "A QR login session is required.");
-        }
-        return ok2(await this.pollClientOAuthQrLogin(value.qrId));
-      }
-      if (endpoint === "preview.open") {
-        const remote = this.activeRemote();
-        if (remote === void 0) throw new ClientModeError("TRANSPORT_CLOSED", "Connect to a Remote Host first.");
-        this.preview ??= new LoopbackPreview(remote.client);
-        return ok2(await this.preview.open(record5(payload).port));
-      }
-      if (endpoint === "directory.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listRemoteDirectory(
-          value.targetDeviceId,
-          typeof value.path === "string" ? value.path : void 0,
-          signal
-        ));
-      }
-      if (endpoint === "workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listRemoteWorkspaces(value.targetDeviceId, signal));
-      }
-      if (endpoint === "codex.workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCodexWorkspaces(value.targetDeviceId, signal));
-      }
-      if (endpoint === "workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and working directory are required.");
-        }
-        return ok2(await this.openRemoteWorkspace(value.targetDeviceId, value.path, signal));
-      }
-      if (endpoint === "codex.workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX Workspace are required.");
-        }
-        return ok2(await this.openCodexWorkspace(value.targetDeviceId, value.workspaceId, signal));
-      }
-      if (endpoint === "codex.workspace.create") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and CodeX project directory are required.");
-        }
-        return ok2(await this.createCodexWorkspace(value.targetDeviceId, value.path, signal));
-      }
-      if (endpoint === "cursor.workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "cursor"));
-      }
-      if (endpoint === "cursor.workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor Workspace are required.");
-        }
-        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "cursor"));
-      }
-      if (endpoint === "cursor.workspace.create") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and Cursor project directory are required.");
-        }
-        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "cursor"));
-      }
-      if (endpoint === "antigravity.workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "antigravity"));
-      }
-      if (endpoint === "antigravity.workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity Workspace are required.");
-        }
-        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "antigravity"));
-      }
-      if (endpoint === "antigravity.workspace.create") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and Antigravity project directory are required.");
-        }
-        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "antigravity"));
-      }
-      if (endpoint === "pi.workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "pi"));
-      }
-      if (endpoint === "pi.workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI Workspace are required.");
-        }
-        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "pi"));
-      }
-      if (endpoint === "pi.workspace.create") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and PI project directory are required.");
-        }
-        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "pi"));
-      }
-      if (endpoint === "opencode.workspaces.list") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string") throw new ClientModeError("INVALID_MESSAGE", "A Host is required.");
-        return ok2(await this.listCursorWorkspaces(value.targetDeviceId, signal, "opencode"));
-      }
-      if (endpoint === "opencode.workspace.open") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and OpenCode Workspace are required.");
-        }
-        return ok2(await this.openCursorWorkspace(value.targetDeviceId, value.workspaceId, signal, "opencode"));
-      }
-      if (endpoint === "opencode.workspace.create") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.path !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and OpenCode project directory are required.");
-        }
-        return ok2(await this.createCursorWorkspace(value.targetDeviceId, value.path, signal, "opencode"));
-      }
-      if (endpoint === "workspace.selection.consume") {
-        const value = record5(payload);
-        if (typeof value.targetDeviceId !== "string" || typeof value.workspaceId !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host and Workspace are required.");
-        }
-        return ok2(this.consumeWorkspaceSelection({
-          targetDeviceId: value.targetDeviceId,
-          workspaceId: value.workspaceId,
-          ...value.backend === "codex" || value.backend === "cursor" || value.backend === "antigravity" || value.backend === "pi" || value.backend === "opencode" ? { backend: value.backend } : {},
-          ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {}
-        }));
-      }
-      if (endpoint === "fileviewer.stat" || endpoint === "fileviewer.readRange" || endpoint === "fileviewer.list") {
-        const method = endpoint === "fileviewer.stat" ? "stat" : endpoint === "fileviewer.readRange" ? "readRange" : "list";
-        return ok2(await this.callRemoteFileViewer(method, payload, signal));
-      }
-      if (endpoint === "codex.call") {
-        const value = record5(payload);
-        if (typeof value.method !== "string" || !("params" in value)) {
-          throw new ClientModeError("INVALID_MESSAGE", "A Codex method and params are required.");
-        }
-        const remote = this.activeCodexRemote();
-        if (remote !== void 0) return ok2(await new CodexRemoteClient(remote.client).request(value.method, value.params, signal));
-        const host = this.requireLocalCodex();
-        return ok2(await host.codexCall(value, signal));
-      }
-      if (endpoint === "codex.probe") {
-        const local = this.localCodexAvailable();
-        let remoteSupported = false;
-        const remote = this.activeRemote();
-        if (remote !== void 0) {
-          try {
-            remote.features = await probeRemoteHostFeatures(remote.client, remote.clientVersion);
-            remoteSupported = remote.features.codex;
-          } catch (error) {
-            if (!local) throw error;
-          }
-        }
-        return ok2({ supported: local || remoteSupported, local, remote: remoteSupported });
-      }
-      if (endpoint === "codex.respond") {
-        const value = record5(payload);
-        const remote = this.activeCodexRemote();
-        if (remote !== void 0) return ok2(await remote.client.rpc("codex.app.respond", value, signal));
-        const host = this.requireLocalCodex();
-        return ok2(await host.codexRespond(value, signal));
-      }
-      if (endpoint === "plugin.route") {
-        const value = record5(payload);
-        if (typeof value.route !== "string" || !isAllowedPluginRoute(value.route)) {
-          throw new ClientModeError("INVALID_MESSAGE", "A valid plugin route is required.");
-        }
-        if (!isRecord10(value.body)) throw new ClientModeError("INVALID_MESSAGE", "A plugin route body object is required.");
-        return ok2(await this.pluginRoute(value.route, value.body, signal));
-      }
-      if (endpoint === "codex.stream.open") return ok2(await this.openCodexStream(payload, signal));
-      if (endpoint === "codex.stream.next") return ok2(await this.nextCodexFrames(payload, signal));
-      if (endpoint === "codex.stream.close") return ok2(await this.closeCodexStream(payload));
-      if (endpoint === "host.account.login") {
-        if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record5(payload);
-        if (typeof value.email !== "string" || typeof value.password !== "string") {
-          throw new ClientModeError("INVALID_MESSAGE", "Email and password are required.");
-        }
-        return ok2(await this.host.authorizeHostWithAccount(value.email, value.password));
-      }
-      if (endpoint === "host.authorization.set") {
-        const value = record5(payload);
-        if (typeof value.enabled !== "boolean") {
-          throw new ClientModeError("INVALID_MESSAGE", "Host authorization state is required.");
-        }
-        return ok2(await this.setHostAuthorization(value.enabled));
-      }
-      if (endpoint === "host.registration-code.submit") {
-        if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
-        const value = record5(payload);
-        if (typeof value.code !== "string" || value.code.trim() === "") {
-          throw new ClientModeError("INVALID_MESSAGE", "A Host registration code is required.");
-        }
-        return ok2(await this.host.authorizeHostWithCode(value.code));
-      }
-      if (endpoint === "mode.set") {
-        const value = record5(payload);
-        if (value.mode !== "local" && value.mode !== "remote") throw new ClientModeError("INVALID_MESSAGE", "Mode must be local or remote.");
-        return ok2(await this.setMode(value.mode, typeof value.targetDeviceId === "string" ? value.targetDeviceId : void 0, signal));
-      }
-      throw new ClientModeError("METHOD_NOT_FOUND", "The remote-mode control method does not exist.");
-    } catch (error) {
-      return fail3(error);
-    }
   }
   requireIdentity() {
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
     return this.identity;
   }
-  async authorizeHostPeer(serverDevice) {
-    const descriptor = await this.server.deviceFor(serverDevice.deviceId);
-    assertAuthorizedHost(serverDevice, descriptor);
-    const existing = this.identities.trustedPeer(descriptor.deviceId);
-    if (existing !== void 0 && existing.publicKey !== descriptor.identityKey) {
-      throw new ClientModeError("PEER_IDENTITY_MISMATCH", "The authorized Host identity key changed unexpectedly.");
-    }
-    if (existing !== void 0 && existing.membershipId === descriptor.membershipId && existing.name === descriptor.name && existing.platform === descriptor.platform) {
-      return existing;
-    }
-    return this.identities.trustPeer({
-      deviceId: descriptor.deviceId,
-      name: descriptor.name,
-      platform: descriptor.platform,
-      publicKey: descriptor.identityKey,
-      membershipId: descriptor.membershipId
-    });
-  }
 };
-var ClientModeError = class extends Error {
-  constructor(code, message, retryable = false) {
-    super(message);
-    this.code = code;
-    this.retryable = retryable;
-  }
-};
-function assertAuthorizedHost(listed, descriptor) {
-  if (descriptor.role !== "host" || descriptor.deviceId !== listed.deviceId || descriptor.membershipId !== listed.membershipId) {
-    throw new ClientModeError("PEER_IDENTITY_MISMATCH", "Server Host details do not match the authorized device list.");
-  }
-}
-function websocketUrl(baseUrl) {
-  const url = new URL(baseUrl);
-  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-  url.pathname = `${url.pathname.replace(/\/$/, "")}/ws/v1/connect`;
-  return url.toString();
-}
-function webrtcDiagnosticsLogFields(diagnostics) {
-  if (diagnostics === void 0) return {};
-  return {
-    rtcConnectionState: diagnostics.connectionState,
-    rtcIceConnectionState: diagnostics.iceConnectionState,
-    rtcIceGatheringState: diagnostics.iceGatheringState,
-    rtcLocalCandidates: diagnostics.localCandidates,
-    rtcRemoteCandidates: diagnostics.remoteCandidates,
-    rtcCandidatePairs: diagnostics.candidatePairs,
-    rtcFilteredLocalCandidates: diagnostics.filteredLocalCandidates,
-    rtcFilteredCandidatePairs: diagnostics.filteredCandidatePairs,
-    ...diagnostics.selectedPath === void 0 ? {} : { rtcSelectedPath: diagnostics.selectedPath }
-  };
-}
-function record5(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
-  }
-  return value;
-}
-function isRecord10(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function ok2(value) {
-  return { ok: true, value };
-}
-async function invokeRemoteCommand(client, request) {
-  const rpcId2 = uuidV7();
-  const response = await client.rpc("harness.api.call", {
-    method: `${request.namespace}.${request.method}`,
-    rpcId: rpcId2,
-    payload: request.args
-  }, request.signal);
-  if (response.rpcId !== rpcId2) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid command response.");
-  }
-  return unwrapNativeResult(response);
-}
-async function readRemoteWorkspaceBaseline(gateway, signal) {
-  const lifetime = new AbortController();
-  const activeSignal = signal === void 0 ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]);
-  const source = await gateway.open("workspace/follow", { args: {} }, activeSignal);
-  const iterator = source[Symbol.asyncIterator]();
-  try {
-    const first = await iterator.next();
-    if (first.done || !isRecord10(first.value) || first.value.type !== "baseline" || !isRecord10(first.value.value) || !Array.isArray(first.value.value.items)) {
-      throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace baseline.");
-    }
-    return first.value.value.items.map((item) => {
-      if (!isRecord10(item) || typeof item.workspaceId !== "string" || typeof item.path !== "string" || typeof item.title !== "string") {
-        throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace row.");
-      }
-      return { workspaceId: item.workspaceId, path: item.path, title: item.title };
-    });
-  } finally {
-    lifetime.abort("workspace-baseline-read");
-    await iterator.return?.();
-  }
-}
-function unwrapNativeResult(response) {
-  const result = response.result;
-  if (typeof result !== "object" || result === null || !("ok" in result)) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid response.");
-  }
-  if (result.ok !== true || !("value" in result)) {
-    const message = "error" in result && typeof result.error === "object" && result.error !== null && "message" in result.error && typeof result.error.message === "string" ? result.error.message : "The remote Host rejected the request.";
-    throw new ClientModeError("REMOTE_API_ERROR", message);
-  }
-  return result.value;
-}
-function workspaceRecordId(value) {
-  if (typeof value !== "object" || value === null || !("workspaceId" in value) || typeof value.workspaceId !== "string" || value.workspaceId.length === 0) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid Workspace.");
-  }
-  return value.workspaceId;
-}
-function remoteWorkspaceTitle(path) {
-  const normalized = path.replace(/[\\/]+$/u, "");
-  return normalized.split(/[\\/]+/u).filter(Boolean).at(-1) ?? path;
-}
-function fail3(error) {
-  const source = error instanceof Error ? error : void 0;
-  const remoteCode = source !== void 0 && "code" in source && typeof source.code === "string" ? source.code : source instanceof ClientModeError ? source.code : void 0;
-  const retryable = source !== void 0 && "retryable" in source && typeof source.retryable === "boolean" ? source.retryable : source instanceof ClientModeError ? source.retryable : false;
-  return {
-    ok: false,
-    error: {
-      code: "internal",
-      message: source?.message ?? "The remote-mode operation failed.",
-      details: remoteCode === void 0 ? {} : { remoteCode, retryable }
-    }
-  };
-}
-function shortId(value) {
-  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
-}
-function remoteHostFeatures(clientVersion) {
-  return {
-    commandList: isVersionAtLeast(clientVersion, REMOTE_COMMAND_LIST_MIN_VERSION),
-    fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
-    terminal: false,
-    apiProxy: true,
-    remoteGateway: false,
-    codex: false,
-    cursor: false,
-    antigravity: false,
-    opencode: false,
-    pluginRoute: false
-  };
-}
-async function probeRemoteHostFeatures(client, clientVersion) {
-  const fallback = remoteHostFeatures(clientVersion);
-  let value;
-  try {
-    value = await client.rpc("harness.transport.describe", {});
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") return fallback;
-    throw error;
-  }
-  if (!isRecord10(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned invalid transport capabilities.");
-  }
-  const capabilities = new Set(value.capabilities);
-  const apiProxy = capabilities.has("harness.api.v1");
-  const remoteV1 = capabilities.has("harness.remote.v1");
-  const remoteV3 = capabilities.has("harness.remote.v3");
-  const terminal = capabilities.has("harness.terminal.v1");
-  const workspaceTypes = "workspaceTypes" in value ? parseRemoteWorkspaceTypes(value.workspaceTypes) : void 0;
-  const available = (id5, capability) => remoteWorkspaceTypeAvailable(value.capabilities, workspaceTypes, id5, capability);
-  const codex = available("codex", "codex.appserver.v1");
-  const cursor2 = available("cursor", "agent.acp.cursor.v1");
-  const antigravity = available("antigravity", "agent.acp.antigravity.v1");
-  const pi = available("pi", "agent.acp.pi.v1");
-  const opencode = available("opencode", "agent.acp.opencode.v1");
-  if (remoteV1 && remoteV3) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host advertised conflicting Harness Session formats.");
-  }
-  const sessionFormat = remoteV3 ? 3 : void 0;
-  const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode) {
-    throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
-  }
-  return {
-    commandList: remoteGateway || apiProxy && fallback.commandList,
-    fileViewer: capabilities.has("fileviewer.read.v1"),
-    terminal,
-    apiProxy,
-    remoteGateway,
-    ...sessionFormat === void 0 ? {} : { sessionFormat },
-    codex,
-    cursor: cursor2,
-    antigravity,
-    ...pi ? { pi: true } : {},
-    opencode,
-    ...capabilities.has("agent.acp.antigravity.model-load.v1") ? { acpModelLoadsSession: true } : {},
-    ...workspaceTypes === void 0 ? {} : { workspaceTypes },
-    pluginRoute: capabilities.has("plugin.route.v1")
-  };
-}
-async function waitForCodexFrames(stream, signal) {
-  if (signal?.aborted) throw new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled.");
-  await new Promise((resolve6, reject) => {
-    const previousWake = stream.wake;
-    const timer = setTimeout(done, 25e3);
-    const onAbort = () => {
-      cleanup();
-      reject(new ClientModeError("RPC_ABORTED", "The Codex event poll was cancelled."));
-    };
-    function cleanup() {
-      clearTimeout(timer);
-      stream.wake = previousWake;
-      signal?.removeEventListener("abort", onAbort);
-    }
-    function done() {
-      cleanup();
-      resolve6();
-    }
-    stream.wake = () => {
-      previousWake();
-      done();
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-function isVersionAtLeast(value, minimum) {
-  const match = value?.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-  if (match === void 0 || match === null) return false;
-  const version = match.slice(1, 4).map((part) => Number(part));
-  for (let index = 0; index < minimum.length; index += 1) {
-    const part = version[index] ?? 0;
-    const expected = minimum[index] ?? 0;
-    if (part > expected) return true;
-    if (part < expected) return false;
-  }
-  return true;
-}
-function diagnosticReason(error) {
-  const code = "code" in error && typeof error.code === "string" ? error.code : void 0;
-  const message = error.message.replace(/[\r\n\t]+/g, " ").slice(0, 240);
-  return code === void 0 ? message : `${code}: ${message}`;
-}
-function preferredTransportsForAttempt(attempt) {
-  if (attempt === "direct") return ["lan", "p2p", "relay"];
-  if (attempt === "turn") return ["turn", "relay"];
-  return ["relay"];
-}
-function transportPreferenceForMode(mode2) {
-  if (mode2 === "LAN") return "lan";
-  if (mode2 === "P2P") return "p2p";
-  if (mode2 === "TURN") return "turn";
-  if (mode2 === "Relay") return "relay";
-  return void 0;
-}
-function iceServersForAttempt(attempt, iceServers) {
-  return attempt === "direct" ? stunOnlyIceServers(iceServers) : iceServers;
-}
 
 // src/control-runtime.ts
 import { hostname as hostname2 } from "node:os";

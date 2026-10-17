@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Splits the four handwritten source files over 2,000 lines into Plugin client views, CodeX catalog/history projections, Android account/workspace actions and chat components. Existing public entries and protocol behavior are preserved; Harness lifecycle tests no longer start installed Agent CLIs.
+- 四个超过 2000 行的手写源码按领域完成首轮拆分，保留既有入口与协议行为；Harness 生命周期测试隔离本机 Agent CLI。
+- 修复 Android 账号刷新与工作区操作的迟到结果竞态：账号切换立即失效旧刷新，凭据及信任清理按序执行；工作区结果校验连接代次、后端实例和操作归属，旧成功或错误不能覆盖当前目录、错误与忙碌状态。新增 7 个核心契约测试（命名场景矩阵）；全仓 check、647 tests 和 Android Hermes 生产导出通过，未进行原生真机或跨设备验收。
+- 进一步将 Android store、CodeX/ACP virtual Harness、Plugin client runtime 按连接、会话、实时投影、事件载体和控制路由拆分；四个入口及本轮新模块均低于 1000 行。全仓 check、640 tests、生产 build/Hermes、DSH bundle 校验及浏览器投影烟测通过。
+
 - Centers Android home/single-action headers and removes raised button backgrounds from toolbar icons. Host details show the platform on the right and separate DSH and Remote plugin version rows.
 - Android 首页及单操作标题栏保持居中，移除工具栏图标外层按钮背景和阴影；主机列表在线/离线改为纯文字，移除列表改名图标；主机信息页在名称后提供重命名图标、右侧显示系统类型，DSH 和 Remote 插件版本分别成行；连接页版本信息以 `DSH 版本号 | Plugin 版本号` 单行居中展示。
 

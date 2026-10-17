@@ -1,7 +1,4 @@
 packages:
   - "apps/*"
-  # Container image inputs: built with npm and package-lock.json inside the image,
-  # so they must not join the workspace dependency graph.
-  - "!apps/cloud-host"
   - "packages/*"
   - "examples/*"

@@ -282,13 +282,6 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [ ] 完成 Docker 镜像构建与容器启动验收。记录健康检查和凭据持久化结果。
 - [ ] 真实 Desktop/Android/VS Code 跨机 E2E 与反向代理长期连接回归
 
-## 云 Host 镜像
-
-- [x] `apps/cloud-host` 提供固定依赖、bootstrap、凭据持久化与独立镜像更新记录。
-- [ ] 验证首次注册、普通重启和凭据复用。
-- [ ] 验证 assignment version 变化与错误实例卷拒绝。
-- [ ] 在独立 Server 仓库完成控制器与镜像联调。本仓库不增加实例生命周期 API。
-
 ## 原生侧栏与开发预览（2026-09-20）
 
 - [x] alpha.2 官方只读文件树/预览 API allowlist、默认开启且可在详细 Remote 设置中关闭的原生终端开关

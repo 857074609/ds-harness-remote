@@ -95,6 +95,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       publishProjection: (...args) => owner.events.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
       refreshSessionTitle: (...args) => owner.refreshSessionTitle(...args),
+      publishWorkspaceBaseline: () => owner.publishWorkspaceBaseline(),
       get pendingApprovals() { return owner.pendingApprovals },
       emitApproval: (...args) => owner.events.emitApproval(...args),
       modelSelection: (...args) => owner.modelSelection(...args),
@@ -136,6 +137,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   async workspaces(): Promise<AcpVirtualWorkspaceView[]> {
+    for (const workspace of this.workspaceById.values()) this.sortWorkspaceSessions(workspace)
     return [...this.workspaceById.values()]
   }
 
@@ -336,6 +338,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   }
 
   private visibleWorkspaces(): AcpVirtualWorkspaceView[] {
+    for (const workspace of this.workspaceById.values()) this.sortWorkspaceSessions(workspace)
     if (this.selectedWorkspaceId === undefined) return [...this.workspaceById.values()]
     const selected = this.workspaceById.get(this.selectedWorkspaceId)
     if (selected === undefined) return [...this.workspaceById.values()]
@@ -483,6 +486,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     session.running = true
     session.updatedAt = Date.now()
     this.events.emitRemoteEvent('api-session/status', [sessionId, true])
+    this.publishWorkspaceBaseline()
     await this.client.prompt(session.acpSessionId, text ?? '', signal, images, this.backend)
     return success({ accepted: true })
   }
@@ -560,7 +564,6 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     if (events.length > 0) {
       session.events = events as unknown as Array<{ type: 'event'; event: NativeEvent }>
       session.blank = false
-      session.updatedAt = Date.now()
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content))
     }
   }
@@ -722,12 +725,17 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false)
         }
         const existing = this.sessions.get(sessionId)
-        if (existing !== undefined) this.applyDiscoveredTitle(existing, item.title)
+        if (existing !== undefined) {
+          // Refresh activity from the Host without moving a live turn backwards.
+          if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt)
+          this.applyDiscoveredTitle(existing, item.title)
+        }
         if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId)
         }
       }
       workspace.sessionCount = workspace.sessionIds.length
+      this.sortWorkspaceSessions(workspace)
       workspace.updatedAt = new Date().toISOString()
     } catch (error) {
       if (this.backend === 'pi' || this.backend === 'claude') throw error
@@ -781,7 +789,13 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()])
     return [...this.sessions.values()]
       .filter(session => allowed.has(session.sessionId) && !this.archivedSessionIds.has(session.sessionId))
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId))
       .map(session => this.sessionSummary(session, 0))
+  }
+
+  private sortWorkspaceSessions(workspace: AcpVirtualWorkspaceView): void {
+    workspace.sessionIds.sort((a, b) =>
+      (this.sessions.get(b)?.updatedAt ?? 0) - (this.sessions.get(a)?.updatedAt ?? 0) || a.localeCompare(b))
   }
 
   private sessionSummary(session: AcpSessionState, asOfSeq: number): JsonRecord {

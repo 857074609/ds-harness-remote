@@ -1,5 +1,11 @@
 ## Unreleased
 
+- Fixes OpenCode Files/Terminal requests and file change subscriptions rejected by an incorrect Cursor tool scope; backend and session scope checks remain strict.
+- 修复 OpenCode Files/Terminal 请求和文件变化订阅被误按 Cursor 作用域拒绝的问题，保留严格的后端及会话隔离。
+
+- Keeps ACP workspace conversations newest first, refreshes existing activity timestamps from the Host, and preserves the saved update time when reading history.
+- 修复 ACP 工作区会话的时间排序：最近更新的会话优先，刷新时同步 Host 的更新时间，读取历史不再把时间改成当前时间。
+
 - Adds OpenCode native session archiving on Desktop/Android through the same Host ACP process's authenticated loopback HTTP API. OpenCode persists the archive state; default catalogs hide archived sessions across restart while retaining history. Clients wait for confirmation and share catalog updates. Active turns cannot be archived; unarchive and other ACP backends are not supported yet.
 - Desktop/Android 接入 OpenCode 原生会话归档，直接调用同一 Host ACP 进程的认证 loopback HTTP API；状态由 OpenCode 持久保存，重启后默认列表仍隐藏、历史保留。客户端确认后更新并同步目录；活动回复拒绝归档，暂不提供恢复或其他 ACP 后端原生归档。
 

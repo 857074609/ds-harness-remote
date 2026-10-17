@@ -11861,6 +11861,7 @@ var AcpLiveProjection = class {
         session.running = false;
         session.updatedAt = Date.now();
         this.context.emitRemoteEvent("api-session/status", [follow.sessionId, false]);
+        this.context.publishWorkspaceBaseline();
         if (kind === "prompt_completed") void this.context.refreshSessionTitle(session);
       }
       this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update));
@@ -12142,6 +12143,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       publishProjection: (...args) => owner.events.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
       refreshSessionTitle: (...args) => owner.refreshSessionTitle(...args),
+      publishWorkspaceBaseline: () => owner.publishWorkspaceBaseline(),
       get pendingApprovals() {
         return owner.pendingApprovals;
       },
@@ -12218,6 +12220,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier);
   }
   async workspaces() {
+    for (const workspace of this.workspaceById.values()) this.sortWorkspaceSessions(workspace);
     return [...this.workspaceById.values()];
   }
   backendLabel() {
@@ -12436,6 +12439,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.imageAttachments.clear();
   }
   visibleWorkspaces() {
+    for (const workspace of this.workspaceById.values()) this.sortWorkspaceSessions(workspace);
     if (this.selectedWorkspaceId === void 0) return [...this.workspaceById.values()];
     const selected = this.workspaceById.get(this.selectedWorkspaceId);
     if (selected === void 0) return [...this.workspaceById.values()];
@@ -12573,6 +12577,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     session.running = true;
     session.updatedAt = Date.now();
     this.events.emitRemoteEvent("api-session/status", [sessionId, true]);
+    this.publishWorkspaceBaseline();
     await this.client.prompt(session.acpSessionId, text ?? "", signal, images, this.backend);
     return success({ accepted: true });
   }
@@ -12645,7 +12650,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     if (events.length > 0) {
       session.events = events;
       session.blank = false;
-      session.updatedAt = Date.now();
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content));
     }
   }
@@ -12781,12 +12785,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           this.registerSession(item.conversationId, workspace.path, item.title, item.createdAt, item.updatedAt, false);
         }
         const existing = this.sessions.get(sessionId);
-        if (existing !== void 0) this.applyDiscoveredTitle(existing, item.title);
+        if (existing !== void 0) {
+          if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt);
+          this.applyDiscoveredTitle(existing, item.title);
+        }
         if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId);
         }
       }
       workspace.sessionCount = workspace.sessionIds.length;
+      this.sortWorkspaceSessions(workspace);
       workspace.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
     } catch (error) {
       if (this.backend === "pi" || this.backend === "claude") throw error;
@@ -12830,7 +12838,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
-    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId) && !this.archivedSessionIds.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
+    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId) && !this.archivedSessionIds.has(session.sessionId)).sort((a, b) => b.updatedAt - a.updatedAt || a.sessionId.localeCompare(b.sessionId)).map((session) => this.sessionSummary(session, 0));
+  }
+  sortWorkspaceSessions(workspace) {
+    workspace.sessionIds.sort((a, b) => (this.sessions.get(b)?.updatedAt ?? 0) - (this.sessions.get(a)?.updatedAt ?? 0) || a.localeCompare(b));
   }
   sessionSummary(session, asOfSeq) {
     return {
@@ -33869,7 +33880,7 @@ var AcpWorkspaceTools = class {
     this.terminal = terminal;
   }
   payload(sessionId, backend, args) {
-    const scopedId = `${backend === "antigravity" ? "acp" : backend === "pi" ? "pi" : "cursor"}:${sessionId}`;
+    const scopedId = `${backend === "antigravity" ? "acp" : backend}:${sessionId}`;
     const ids = [args.workspaceFileScopeId, args.agentId, args.sessionId].filter((id5) => id5 !== void 0);
     if (!ids.length || ids.some((id5) => id5 !== scopedId)) throw new RpcError("PERMISSION_DENIED", "The tool scope does not match the ACP session.");
     return { args };
@@ -36603,6 +36614,7 @@ var AcpRemoteGateway = class {
       if (backend === "pi" || backend === "claude" || backend === "opencode") {
         const cwd2 = path ? await this.requireExistingDirectory(path) : void 0;
         const sessions = await this.listCatalogSessions(backend, cwd2);
+        sessions.sort((a, b) => (Date.parse(b.updatedAt ?? "") || 0) - (Date.parse(a.updatedAt ?? "") || 0) || a.sessionId.localeCompare(b.sessionId));
         return { items: sessions.slice(0, limit).map((item) => ({ conversationId: item.sessionId, title: item.title ?? "Untitled Session", createdAt: Date.parse(item.updatedAt ?? "") || 0, updatedAt: Date.parse(item.updatedAt ?? "") || 0, cwd: item.cwd })) };
       }
       return { items: [] };

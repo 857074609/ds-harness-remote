@@ -40,6 +40,7 @@ export interface AcpLiveProjectionContext {
   readonly publishProjection: (sessionId: string, key: string, value: unknown, seq?: number) => void
   readonly nextProjectionSeq: () => number
   readonly refreshSessionTitle: (session: AcpSessionState) => Promise<void>
+  readonly publishWorkspaceBaseline: () => void
   readonly pendingApprovals: Map<string, PendingApproval>
   readonly emitApproval: (input: { eventId: string; agentId: string; request: JsonRecord; }) => void
   readonly modelSelection: (sessionId: string) => AcpModelSelection
@@ -275,6 +276,7 @@ export class AcpLiveProjection {
         session.running = false
         session.updatedAt = Date.now()
         this.context.emitRemoteEvent('api-session/status', [follow.sessionId, false])
+        this.context.publishWorkspaceBaseline()
         if (kind === 'prompt_completed') void this.context.refreshSessionTitle(session)
       }
       this.closeFollowAfterRemoteStreamClosed(follow, piPromptOutcome(kind, update))

@@ -75,45 +75,55 @@ it('ACP reconfiguration stops changed backends despite failed cleanup and retrie
 })
 
 it('ACP tools enforce session authority, containment, terminal ownership and stream closure', async () => {
-  const temp = await mkdtemp(join(tmpdir(), 'acp-tools-'))
-  const cwd = await realpath(temp)
-  await writeFile(join(cwd, 'a.txt'), 'shared workspace')
-  await symlink(tmpdir(), join(cwd, 'outside'))
-  let enabled = true
-  const writes: string[] = []
-  const acp = { start: async () => {}, isReady: () => true, call: async () => ({ sessionId: 'native-1' }),
-    respond: async () => {}, respondError: async () => {}, onInbound: () => () => {}, onUnavailable: () => () => {}, close: async () => {} }
-  const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'antigravity', enabled: true, command: 'agy', args: [] }] },
-    logger, () => acp, undefined, () => enabled, async () => ({ output: (async function* () {})(),
-      write: data => { writes.push(data) }, resize: () => {}, terminate: () => {}, completed: new Promise(() => {}) }))
-  const frames: Array<{ event: string; data: unknown }> = []
-  try {
-    await gateway.start()
-    const peer = gateway.createPeer({ connectionId: 'peer-1', peerDeviceId: 'device-1' }, async (event, data) => { frames.push({ event, data }) })!
-    const other = gateway.createPeer({ connectionId: 'peer-2', peerDeviceId: 'device-2' }, async () => {})!
-    await peer.call({ method: 'session/new', params: { backend: 'antigravity', cwd } })
-    const call = (endpoint: string, args: Record<string, unknown>) => peer.call({ method: 'dsh/toolCall', params: { backend: 'antigravity', sessionId: 'native-1', endpoint, args } })
-    await expect(call('workspaceFiles/list', { workspaceFileScopeId: 'acp:native-1', path: '.' })).resolves.toMatchObject({ path: '.', entries: expect.arrayContaining([expect.objectContaining({ name: 'a.txt' })]) })
-    for (const path of ['..', 'outside']) await expect(call('workspaceFiles/list', { workspaceFileScopeId: 'acp:native-1', path })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_PATH_DENIED' })
-    await expect(call('workspaceFiles/list', { workspaceFileScopeId: 'acp:other' })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-    await expect(other.call({ method: 'dsh/toolCall', params: { backend: 'antigravity', sessionId: 'native-1', endpoint: 'terminal/list', args: { sessionId: 'acp:native-1' } } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
-    await peer.openStream({ streamId: 'files-1', sessionId: 'native-1', tool: { backend: 'antigravity', endpoint: 'workspaceFiles/changes', args: { workspaceFileScopeId: 'acp:native-1' } } })
-    await writeFile(join(cwd, 'a.txt'), 'changed')
-    await vi.waitFor(() => expect(frames).toContainEqual({ event: 'agent.acp.frame', data: expect.objectContaining({ streamId: 'files-1', frame: { method: 'dsh/workspaceTool', params: { value: expect.objectContaining({ kind: 'change' }) } } }) }))
-    peer.closeStream({ streamId: 'files-1' })
-    const termArgs = { agentId: 'acp:native-1', id: 'term-1', attachmentId: 'attachment-1' }
-    await call('terminal/create', { agentId: 'acp:native-1', request: { id: 'term-1', cols: 80, rows: 24 } })
-    await peer.openStream({ streamId: 'tool-1', sessionId: 'native-1', tool: { backend: 'antigravity', endpoint: 'terminal/follow', args: termArgs } })
-    await vi.waitFor(() => expect(frames).toContainEqual({ event: 'agent.acp.frame', data: expect.objectContaining({ streamId: 'tool-1', frame: expect.objectContaining({ method: 'dsh/workspaceTool' }) }) }))
-    await expect(call('terminal/write', { ...termArgs, attachmentId: 'wrong', data: 'must not write' })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
-    await call('terminal/write', { ...termArgs, data: 'echo shared\n' })
-    expect(writes).toEqual(['echo shared\n'])
-    peer.closeStream({ streamId: 'tool-1' })
-    enabled = false
-    await expect(call('terminal/environment', { agentId: 'acp:native-1' })).rejects.toMatchObject({ code: 'TERMINAL_DISABLED' })
-    await expect(call('workspaceFiles/list', { workspaceFileScopeId: 'acp:native-1' })).resolves.toBeTruthy()
-    for (const endpoint of ['workspaceFiles/write', 'terminal/exec']) expect(() => parseAcpCall('dsh/toolCall', { sessionId: 'native-1', backend: 'antigravity', endpoint, args: {} })).toThrow()
-  } finally { await gateway.close(); await rm(temp, { recursive: true, force: true }) }
+  await runScenarios((['cursor', 'antigravity', 'pi', 'opencode'] as const).map(backend => ({ name: backend, run: async () => {
+    const prefix = backend === 'antigravity' ? 'acp' : backend
+    const scope = `${prefix}:native-1`
+    const otherScope = `${prefix}:other`
+    const wrongBackendScope = `${backend === 'cursor' ? 'opencode' : 'cursor'}:native-1`
+    const temp = await mkdtemp(join(tmpdir(), 'acp-tools-'))
+    const cwd = await realpath(temp)
+    await writeFile(join(cwd, 'a.txt'), 'shared workspace')
+    await symlink(tmpdir(), join(cwd, 'outside'))
+    let enabled = true
+    const writes: string[] = []
+    const acp = { start: async () => {}, isReady: () => true, call: async () => ({ sessionId: 'native-1' }),
+      respond: async () => {}, respondError: async () => {}, onInbound: () => () => {}, onUnavailable: () => () => {}, close: async () => {} }
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: backend, enabled: true, command: 'agy', args: [] }] },
+      logger, () => acp, undefined, () => enabled, async () => ({ output: (async function* () {})(),
+        write: data => { writes.push(data) }, resize: () => {}, terminate: () => {}, completed: new Promise(() => {}) }))
+    const frames: Array<{ event: string; data: unknown }> = []
+    try {
+      await gateway.start()
+      const peer = gateway.createPeer({ connectionId: 'peer-1', peerDeviceId: 'device-1' }, async (event, data) => { frames.push({ event, data }) })!
+      const other = gateway.createPeer({ connectionId: 'peer-2', peerDeviceId: 'device-2' }, async () => {})!
+      await peer.call({ method: 'session/new', params: { backend, cwd } })
+      const call = (endpoint: string, args: Record<string, unknown>) => peer.call({ method: 'dsh/toolCall', params: { backend, sessionId: 'native-1', endpoint, args } })
+      await expect(call('workspaceFiles/list', { workspaceFileScopeId: scope, path: '.' })).resolves.toMatchObject({ path: '.', entries: expect.arrayContaining([expect.objectContaining({ name: 'a.txt' })]) })
+      for (const path of ['..', 'outside']) await expect(call('workspaceFiles/list', { workspaceFileScopeId: scope, path })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_PATH_DENIED' })
+      await expect(call('workspaceFiles/list', { workspaceFileScopeId: otherScope })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      for (const args of [{}, { workspaceFileScopeId: wrongBackendScope }, { workspaceFileScopeId: scope, agentId: otherScope }]) {
+        await expect(call('workspaceFiles/list', args)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      }
+      await expect(peer.openStream({ streamId: 'wrong-scope', sessionId: 'native-1', tool: { backend, endpoint: 'workspaceFiles/changes', args: { workspaceFileScopeId: wrongBackendScope } } })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      await expect(other.call({ method: 'dsh/toolCall', params: { backend, sessionId: 'native-1', endpoint: 'terminal/list', args: { sessionId: scope } } })).rejects.toMatchObject({ code: 'CURSOR_SESSION_OWNED' })
+      await peer.openStream({ streamId: 'files-1', sessionId: 'native-1', tool: { backend, endpoint: 'workspaceFiles/changes', args: { workspaceFileScopeId: scope } } })
+      await writeFile(join(cwd, 'a.txt'), 'changed')
+      await vi.waitFor(() => expect(frames).toContainEqual({ event: 'agent.acp.frame', data: expect.objectContaining({ streamId: 'files-1', frame: { method: 'dsh/workspaceTool', params: { value: expect.objectContaining({ kind: 'change' }) } } }) }))
+      peer.closeStream({ streamId: 'files-1' })
+      const termArgs = { agentId: scope, id: 'term-1', attachmentId: 'attachment-1' }
+      await call('terminal/create', { agentId: scope, request: { id: 'term-1', cols: 80, rows: 24 } })
+      await peer.openStream({ streamId: 'tool-1', sessionId: 'native-1', tool: { backend, endpoint: 'terminal/follow', args: termArgs } })
+      await vi.waitFor(() => expect(frames).toContainEqual({ event: 'agent.acp.frame', data: expect.objectContaining({ streamId: 'tool-1', frame: expect.objectContaining({ method: 'dsh/workspaceTool' }) }) }))
+      await expect(call('terminal/write', { ...termArgs, attachmentId: 'wrong', data: 'must not write' })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' })
+      await call('terminal/write', { ...termArgs, data: 'echo shared\n' })
+      expect(writes).toEqual(['echo shared\n'])
+      peer.closeStream({ streamId: 'tool-1' })
+      enabled = false
+      await expect(call('terminal/environment', { agentId: scope })).rejects.toMatchObject({ code: 'TERMINAL_DISABLED' })
+      await expect(call('workspaceFiles/list', { workspaceFileScopeId: scope })).resolves.toBeTruthy()
+      for (const endpoint of ['workspaceFiles/write', 'terminal/exec']) expect(() => parseAcpCall('dsh/toolCall', { sessionId: 'native-1', backend, endpoint, args: {} })).toThrow()
+    } finally { await gateway.close(); await rm(temp, { recursive: true, force: true }) }
+  } })))
 })
 
 it('AGY model acknowledgement follows CLI resume with validated live model and effort flags', async () => {

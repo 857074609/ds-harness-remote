@@ -401,6 +401,8 @@ export class AcpRemoteGateway {
       if (backend === 'pi' || backend === 'claude' || backend === 'opencode') {
         const cwd = path ? await this.requireExistingDirectory(path) : undefined
         const sessions = await this.listCatalogSessions(backend, cwd)
+        sessions.sort((a, b) => (Date.parse(b.updatedAt ?? '') || 0) - (Date.parse(a.updatedAt ?? '') || 0)
+          || a.sessionId.localeCompare(b.sessionId))
         return { items: sessions.slice(0, limit).map(item => ({ conversationId: item.sessionId, title: item.title ?? 'Untitled Session', createdAt: Date.parse(item.updatedAt ?? '') || 0, updatedAt: Date.parse(item.updatedAt ?? '') || 0, cwd: item.cwd })) }
       }
       return { items: [] }

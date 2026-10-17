@@ -358,6 +358,8 @@ export interface ToolActivity extends ChatItemBase {
   summary?: string
   callDetail?: ToolDisplayDetail
   resultDetail?: ToolDisplayDetail
+  /** Complete native tool-result metadata; never truncated into ToolDisplayDetail. */
+  uiResultMeta?: unknown
   state: 'running' | 'finished' | 'failed'
 }
 

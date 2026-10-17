@@ -337,6 +337,8 @@ function applyToolCall(
     ? toolCallDetail(view, argumentsText)
     : toolResultDetail(view, data)
   const failed = state === 'finished' && toolResultFailed(data)
+  const uiMeta = state === 'finished' && !failed && ['ui_render', 'ui_patch', 'ui_render_widget'].includes(stringValue(data.name) ?? stringValue(data.toolName) ?? (current.find(item => item.id === id && item.kind === 'tool') as ToolActivity | undefined)?.toolKey ?? '')
+    ? data.meta : undefined
   const next: ToolActivity = {
     kind: 'tool',
     id,
@@ -345,6 +347,7 @@ function applyToolCall(
     ...(stringValue(data.name) ?? stringValue(data.toolName) ? { toolKey: stringValue(data.name) ?? stringValue(data.toolName) } : {}),
     ...(argumentsText.length > 0 ? { arguments: argumentsText } : {}),
     ...(summary === undefined ? {} : { summary }),
+    ...(uiMeta === undefined ? {} : { uiResultMeta: uiMeta }),
     ...(state === 'running' && detail !== undefined ? { callDetail: detail } : {}),
     ...(state === 'finished' && detail !== undefined ? { resultDetail: detail } : {}),
     state: failed ? 'failed' : state,
@@ -360,6 +363,8 @@ function applyToolCall(
         ...(summary === undefined ? {} : { summary }),
         ...(next.callDetail === undefined ? {} : { callDetail: next.callDetail }),
         ...(next.resultDetail === undefined ? {} : { resultDetail: next.resultDetail }),
+        // A new terminal result must not inherit an earlier success marker.
+        ...(state === 'finished' ? { uiResultMeta: next.uiResultMeta } : {}),
         state: next.state,
       }
     : item)
@@ -438,6 +443,7 @@ function toolResultContentText(data: UnknownRecord): string | undefined {
 function toolResultFailed(data: UnknownRecord): boolean {
   if (isRecord(data.error) || data.isError === true) return true
   const message = isRecord(data.message) ? data.message : {}
+  if (message.isError === true) return true
   const blocks = Array.isArray(message.content) ? message.content : []
   return blocks.some(block => isRecord(block) && block.type === 'tool-result' && block.isError === true)
 }

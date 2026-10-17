@@ -47,6 +47,7 @@ import { hasVisibleMessageText } from '../state/event-reducer'
 import type { ChatSection } from '../state/message-helpers'
 import { chatSections, inboxQueuedItems, inboxRpcIds, mergeReplyReasoning } from '../state/message-helpers'
 import { requireSessionTools, useAppStore } from '../state/store'
+import { placeUiArtifacts, projectUiArtifacts, type UiArtifact } from '../state/ui-artifacts'
 import type {
   ChatItem,
   ModelCatalogModel,
@@ -121,6 +122,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // without leaving the chat (the list screens unmount here).
   useLiveSessionStatus()
   const session = useAppStore(state => state.selectedSession)
+  const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)
   const busy = useAppStore(state => state.busyAction)
   const connection = useAppStore(state => state.connection)
@@ -287,6 +289,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       // turnEnd reason — it must stay visible so the failure is explainable.
       || item.turnEnd !== undefined))), [messages, session?.backend])
   const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
+  const uiBySection = useMemo(() => {
+    if (hostId === undefined || session === undefined
+      || (session.backend !== undefined && session.backend !== 'harness')) return new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
+    return placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
+  }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
+  const visibleUiIds = useMemo(() => new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
   const interleavedTurns = useMemo(() => {
     const seen = new Set<string>()
     const interleaved = new Set<string>()
@@ -445,9 +453,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} foldAllowed={!interleavedTurns.has(item.turn)} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? []} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? []} availableUiIds={visibleUiIds} foldAllowed={!interleavedTurns.has(item.turn)} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, interleavedTurns])
+  [busy, respondApproval, respondQuestion, interleavedTurns, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can

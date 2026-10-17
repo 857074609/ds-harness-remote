@@ -8,6 +8,7 @@ import type {
   AgentAcpTransferOpenParams,
   AgentAcpTransferReadParams,
   AgentAcpTransferReadResult,
+  AcpSessionArchivedData,
 } from '@dsh-remote/protocol'
 import {
   AGENT_ACP_TRANSFER_CHUNK_BYTES,
@@ -21,8 +22,8 @@ import { RpcError } from '../safe-error.js'
 import type { AcpRemoteGateway } from './gateway.js'
 
 export type PublishAcpFrame = (
-  event: 'agent.acp.frame' | 'agent.acp.stream.closed',
-  data: AgentAcpFrameData | AgentAcpStreamClosedData,
+  event: 'agent.acp.frame' | 'agent.acp.stream.closed' | 'agent.acp.catalog.changed',
+  data: AgentAcpFrameData | AgentAcpStreamClosedData | AcpSessionArchivedData,
 ) => Promise<void>
 
 interface IncomingTransfer {
@@ -81,6 +82,10 @@ export class AcpPeerBridge {
 
   async call(input: unknown): Promise<unknown> {
     return this.callDomain(input, true)
+  }
+
+  async publishArchived(data: AcpSessionArchivedData): Promise<void> {
+    if (!this.closed) await this.publish('agent.acp.catalog.changed', data)
   }
 
   private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {

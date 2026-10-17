@@ -56,10 +56,20 @@ AGY 会话发现按数据库中的 file URI 解码后与项目目录完整匹配
 | `dsh/directoryList` | Host 只读单层目录浏览（选 cwd；Remote 扩展） |
 | `dsh/workspaceList` | 指定后端的 Host 工作区发现 |
 | `dsh/sessionList` | AGY 持久化会话发现 |
-| `dsh/sessionHistory` | AGY 历史读取（有界 ACP transfer） |
+| `dsh/sessionHistory` | 历史读取（有界 ACP transfer） |
+| `dsh/sessionArchive` | OpenCode 原生归档；要求独立 capability |
 
 线 RPC：`agent.acp.call|respond|stream.*|transfer.*`<br>
-事件：`agent.acp.frame` / `agent.acp.stream.closed`
+事件：`agent.acp.frame` / `agent.acp.stream.closed` / `agent.acp.catalog.changed`
+
+## OpenCode 原生归档
+
+Desktop/Android 的 OpenCode 归档经 `dsh/sessionArchive` 直接调用同一个 Host
+`opencode acp` 进程的原生 HTTP API，设置 `time.archived`，原生确认后才移除默认目录成员。
+Host 声明 `agent.acp.opencode.archive.v1`，成功后以 `agent.acp.catalog.changed` 同步其他连接。
+归档状态由 OpenCode 持久保存，Host 重启后仍隐藏；历史保留可读。活动回复、加载、模型写入和
+待审批时拒绝归档，不隐式停止或删除会话。其他 ACP 后端尚无原生归档，不返回本地伪成功。
+当前不提供恢复或已归档列表；实现和上游版本边界见[原生归档设计](design/acp-session-archive.md)。
 
 ## Web 兼容边界
 

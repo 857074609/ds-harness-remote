@@ -22,6 +22,7 @@ export const acpToolStreamSchema = z.object({
 }).strict()
 
 const schemas = {
+  'dsh/sessionArchive': z.object({ sessionId: id.regex(/^[A-Za-z0-9_-]+$/), backend: z.literal('opencode') }).strict(),
   'dsh/toolCall': z.object({ sessionId: id, backend: z.enum(['cursor', 'antigravity', 'pi', 'opencode']),
     endpoint: z.enum(ACP_TOOL_CALL_ENDPOINTS), args: z.record(z.unknown()) }).strict(),
   'dsh/sessionModels': z.object({ sessionId: id, backend: z.enum(['cursor', 'claude', 'antigravity', 'pi', 'opencode']) }).strict(),

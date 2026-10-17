@@ -21,6 +21,7 @@ export interface AcpEventCarrierContext {
   readonly sessions: Map<string, AcpSessionState>
   readonly rcHostStreams: Set<AsyncValueQueue>
   readonly nextProjectionSeq: () => number
+  readonly archivedSessionIds: ReadonlySet<string>
 }
 
 export class AcpEventCarrier {
@@ -33,7 +34,7 @@ export class AcpEventCarrier {
       type: 'baseline',
       value: {
         items: this.context.visibleWorkspaces().map(nativeWorkspace),
-        archivedSessionIds: [],
+        archivedSessionIds: [...this.context.archivedSessionIds],
         pinnedSessionIds: [],
       },
     })

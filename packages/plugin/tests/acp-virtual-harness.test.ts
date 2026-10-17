@@ -6,7 +6,7 @@ import {
   acpCwdWorkspaceId,
   type AcpClientLike,
 } from '../src/acp/virtual-harness.js'
-import type { AgentAcpFrameData } from '@dsh-remote/protocol'
+import type { AcpSessionArchivedData, AgentAcpFrameData } from '@dsh-remote/protocol'
 
 type AgentAcpClientLike = AcpClientLike
 
@@ -52,6 +52,33 @@ describe('AcpVirtualHarness', () => {
         expect(await target.dispatch('session/models', { args: { request } }, signal)).toMatchObject({ ok: false })
       } finally { await target.close() }
     } })))
+  })
+
+  it('requires native archive confirmation, retains history and applies shared catalog events', async () => {
+    let notify!: (data: AcpSessionArchivedData) => void
+    const unsubscribe = vi.fn()
+    const client = { ...fakeAcp(), supportsArchive: () => true,
+      archiveSession: vi.fn(async () => { throw new Error('native rejected') }),
+      onSessionArchived: (handler: typeof notify) => { notify = handler; return unsubscribe },
+      loadSessionHistory: vi.fn(async () => []),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+    const signal = new AbortController().signal
+    try {
+      const workspace = await target.selectOrCreateWorkspace('/test')
+      const sessionId = workspace.sessionIds[0]!
+      const invoke = (endpoint: string) => target.dispatch(endpoint, { args: { request: { sessionId } } }, signal)
+      expect(await invoke('workspace/archiveSession')).toMatchObject({ ok: false })
+      expect(workspace.sessionIds).toContain(sessionId)
+      client.archiveSession.mockImplementationOnce(async () => undefined as never)
+      expect(await invoke('workspace/archiveSession')).toMatchObject({ ok: true, value: { archivedSessionIds: [sessionId] } })
+      expect(client.archiveSession).toHaveBeenLastCalledWith('remote-history', 'opencode')
+      expect(await invoke('session/history')).toMatchObject({ ok: true })
+      notify({ backend: 'opencode', sessionId: 'other', archived: true })
+      expect(await target.dispatch('workspace/list', { args: {} }, signal)).toMatchObject({ ok: true,
+        value: { archivedSessionIds: [sessionId, 'opencode:other'] } })
+    } finally { await target.close() }
+    expect(unsubscribe).toHaveBeenCalledOnce()
   })
 
   it('keeps a new AGY follow empty and reuses only the requested blank session', async () => {

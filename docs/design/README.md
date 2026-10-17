@@ -17,6 +17,7 @@
 | [共享基础](shared-foundation.md) | 身份、授权、加密、传输和共享包职责 |
 | [协议 Schema 对齐](protocol-schema-alignment.md) | schema、fixtures、版本与验证边界 |
 | [CodeX 内存展示投影](codex-session-history-projection-prompt.md) | App Server authority、原生 UI 载体与生命周期 |
+| [OpenCode 原生归档](acp-session-archive.md) | 直接调用原生 HTTP API、能力协商、跨连接目录同步及并发边界；不含恢复 |
 
 [原始需求提示词](../archive/vibe-coding.md)已归档，只用于追溯需求；当前设计不以原始提示词作为实现依据。
 

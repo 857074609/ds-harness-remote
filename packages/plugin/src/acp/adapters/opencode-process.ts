@@ -1,10 +1,12 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { Buffer } from 'node:buffer'
+import { realpath } from 'node:fs/promises'
 import type { SafeLogger } from '../../logging.js'
 import { PLUGIN_VERSION } from '../../version.js'
 import type { CursorAcpInbound, CursorAcpLike } from './cursor-process.js'
 import { acpHistoryEvents } from '../history-events.js'
 import { AcpSessionModelState } from './session-models.js'
+import { OpencodeNativeApi, opencodeLoopbackPort, opencodePrivateArgs } from './opencode-native-api.js'
 
 const ACP_REQUEST_TIMEOUT_MS = 60_000
 /** Full agent turns (tools + streaming) routinely exceed the short RPC budget. */
@@ -65,16 +67,14 @@ export class OpencodeAcpClient implements CursorAcpLike {
   private failureNotified = false
   private startPromise?: Promise<void>
   private historyBusy = false
+  private nativeApi?: OpencodeNativeApi
+  private readonly archivedSessions = new Set<string>()
+  private readonly archivingSessions = new Set<string>()
 
   constructor(
     private readonly binary: string = 'opencode',
     private readonly logger?: SafeLogger,
-    private readonly spawnAcp: SpawnOpencodeAcp = binary => spawn(binary, options.args ?? ['acp'], {
-      cwd: options.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-      env: process.env,
-    }),
+    private readonly spawnAcp?: SpawnOpencodeAcp,
     private readonly options: { args?: string[]; cwd?: string; historyReader?: boolean } = {},
   ) {}
 
@@ -86,6 +86,24 @@ export class OpencodeAcpClient implements CursorAcpLike {
   }
 
   isReady(): boolean { return this.ready }
+
+  async isSessionArchived(sessionId: string, cwd: string): Promise<boolean> {
+    if (!this.nativeApi) return this.archivedSessions.has(sessionId)
+    const archived = await this.nativeApi.isArchived(sessionId, cwd)
+    if (archived) this.archivedSessions.add(sessionId)
+    else this.archivedSessions.delete(sessionId)
+    return archived
+  }
+
+  async archiveSession(sessionId: string, cwd: string): Promise<void> {
+    if (!this.ready || !this.nativeApi) throw new OpencodeAcpError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The Host OpenCode native API is unavailable.')
+    if (this.busy.has(sessionId) || this.loads.has(sessionId) || this.archivingSessions.has(sessionId)) throw new OpencodeAcpError('PROMPT_IN_PROGRESS', 'Stop the OpenCode reply before archiving.')
+    this.archivingSessions.add(sessionId)
+    try {
+      await this.nativeApi.archive(sessionId, cwd)
+      this.archivedSessions.add(sessionId)
+    } finally { this.archivingSessions.delete(sessionId) }
+  }
 
   /**
    * Replay a saved session in one temporary ACP process so a history read never
@@ -135,6 +153,8 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (!this.ready) throw new OpencodeAcpError('OPENCODE_UNAVAILABLE', 'OpenCode ACP is not ready.')
     const p = isRecord(params) ? params : {}
     const id = typeof p.sessionId === 'string' ? p.sessionId : undefined
+    if (id && this.archivingSessions.has(id)) throw new OpencodeAcpError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
+    if (id && this.archivedSessions.has(id) && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(method)) throw new OpencodeAcpError('ACP_SESSION_ARCHIVED', 'This OpenCode session is archived.')
     const budget = timeoutMs ?? (method === 'session/prompt' ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS)
     if (method === 'session/load' && id) {
       // Re-reading models must never replay history into an active conversation.
@@ -164,7 +184,36 @@ export class OpencodeAcpClient implements CursorAcpLike {
       this.busy.add(id)
       try { return await this.request(method, params, budget) } finally { this.busy.delete(id) }
     }
-    return this.request(method, params, budget)
+    const result = await this.request(method, params, budget)
+    const nativeApi = this.nativeApi
+    if (method === 'session/list' && nativeApi && isRecord(result) && Array.isArray(result.sessions)) {
+      // ACP list may return archived native records, including after a restart.
+      // Recheck every item against OpenCode; process-local caches are insufficient.
+      if (result.sessions.length > 1000) throw new OpencodeAcpError('INVALID_MESSAGE', 'The OpenCode catalog page is too large.')
+      const items = result.sessions
+      const archivedItems = new Map<number, boolean>()
+      let next = 0
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+        for (;;) {
+          const index = next++
+          if (index >= items.length) return
+          const item = items[index]
+          if (!isRecord(item) || typeof item.sessionId !== 'string' || typeof item.cwd !== 'string') continue
+          const cwd = await realpath(item.cwd).catch(() => undefined)
+          if (!cwd) continue
+          const archived = await nativeApi.isArchived(item.sessionId, cwd)
+          if (archived) this.archivedSessions.add(item.sessionId)
+          else this.archivedSessions.delete(item.sessionId)
+          archivedItems.set(index, archived)
+        }
+      }))
+      // The gateway retains authority for archived history, but excludes these
+      // entries from its public/default catalog.
+      const sessions = items.flatMap((item, index) => archivedItems.has(index)
+        ? [{ ...(item as Record<string, unknown>), archived: archivedItems.get(index)! }] : [])
+      return { ...result, sessions }
+    }
+    return result
   }
 
   private async loadSession(method: string, params: unknown, budget: number, sessionId?: string): Promise<unknown> {
@@ -207,6 +256,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
     this.closed = true
     this.ready = false
     this.models.clear()
+    this.nativeApi?.close()
     this.failPending(new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.'))
     const child = this.process
     this.process = undefined
@@ -229,7 +279,17 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.process !== undefined) {
       throw new OpencodeAcpError('OPENCODE_STARTING', 'OpenCode ACP is already starting.')
     }
-    const child = this.spawnAcp(this.binary)
+    let child: ChildProcessWithoutNullStreams
+    if (this.spawnAcp) child = this.spawnAcp(this.binary)
+    else {
+      const port = await opencodeLoopbackPort()
+      if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
+      this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`)
+      child = spawn(this.binary, opencodePrivateArgs(this.options.args ?? ['acp'], port), {
+        cwd: this.options.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
+        env: { ...process.env, OPENCODE_SERVER_USERNAME: 'opencode', OPENCODE_SERVER_PASSWORD: this.nativeApi.password },
+      })
+    }
     this.process = child
     this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
@@ -243,6 +303,8 @@ export class OpencodeAcpClient implements CursorAcpLike {
       if (this.process !== child) return
       this.process = undefined
       this.ready = false
+      this.nativeApi?.close()
+      this.nativeApi = undefined
       this.models.clear()
       this.failPending(new OpencodeAcpError('OPENCODE_ACP_EXITED', 'OpenCode ACP exited unexpectedly.'))
       if (!this.closed) {
@@ -363,6 +425,8 @@ export class OpencodeAcpClient implements CursorAcpLike {
   }
 
   private handleProcessFailure(code: string, cause: Error): void {
+    this.nativeApi?.close()
+    this.nativeApi = undefined
     this.ready = false
     this.models.clear()
     this.failPending(new OpencodeAcpError(code, 'OpenCode ACP communication failed.', { cause }))

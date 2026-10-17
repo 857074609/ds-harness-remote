@@ -12,6 +12,7 @@ export type CloseHandler = () => void
 type RemoteHarnessClient = RemoteApiProxy | HarnessAlphaClient
 
 export interface AndroidConnectionOptions {
+  onOpencodeArchived?: (sessionId: string) => void
   preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
   forceRelay?: boolean
   fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
@@ -29,6 +30,7 @@ export class AndroidRemoteConnection {
   private sessionTools?: HarnessSessionTools
   private closeMux?: (notifyRemote?: boolean) => Promise<void>
   private unsubscribeClose?: () => void
+  private unsubscribeArchived?: () => void
   private muxHandler?: MuxFrameHandler
   private transport?: AdaptiveTransport
   private connectionAttempt = 0
@@ -137,6 +139,9 @@ export class AndroidRemoteConnection {
         this.muxHandler?.(frame)
       }
       this.applyBackendFeatures(core, features)
+      this.unsubscribeArchived = this.cursor?.onSessionArchived(data => {
+        if (this.core === core) options.onOpencodeArchived?.(data.sessionId)
+      })
       if (features.remoteGateway) {
         this.sessionTools = new HarnessSessionTools(new RemoteTypertGateway(core))
         const alpha = new HarnessAlphaClient(
@@ -289,6 +294,8 @@ export class AndroidRemoteConnection {
     // add another RPC timeout before recovery begins.
     this.unsubscribeClose?.()
     this.unsubscribeClose = undefined
+    this.unsubscribeArchived?.()
+    this.unsubscribeArchived = undefined
     this.transport = undefined
     this.proxy = undefined
     this.codex = undefined

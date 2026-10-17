@@ -29,6 +29,56 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('archives OpenCode natively with trusted authority and fences active turns, concurrent writes and backend replacement', async () => {
+    const cwd = await realpath(process.cwd())
+    let release!: () => void
+    let archived = false
+    const archiveSession = vi.fn(async () => { await new Promise<void>(resolve => { release = resolve }); archived = true })
+    const acp = Object.assign(readyAcp(), { archiveSession, isSessionArchived: async () => archived, history: vi.fn(async () => []) })
+    let finish!: (value: unknown) => void
+    acp.call = vi.fn(async method => method === 'session/list' ? { sessions: [{ sessionId: 'saved', cwd, archived }] }
+      : method === 'session/prompt' ? new Promise(resolve => { finish = resolve }) : {})
+    const gateway = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'opencode', enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => acp)
+    await gateway.start()
+    const publishArchive = vi.fn(async () => undefined)
+    gateway.createPeer({ connectionId: 'reader', peerDeviceId: 'same-account-device' } as never, publishArchive)
+    const archive = { method: 'dsh/sessionArchive', params: { backend: 'opencode', sessionId: 'saved' } }
+    const prompt = { method: 'session/prompt', params: { backend: 'opencode', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } }
+    try {
+      await expect(gateway.call('reader', { ...archive, params: { backend: 'opencode', sessionId: 'unknown' } })).rejects.toMatchObject({ code: 'ACP_WORKSPACE_UNAVAILABLE' })
+      await expect(gateway.call('reader', { ...archive, params: { backend: 'pi', sessionId: 'saved' } })).rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+      await gateway.call('owner', { method: 'session/load', params: { backend: 'opencode', sessionId: 'saved' } })
+      await gateway.call('owner', prompt)
+      await expect(gateway.call('reader', archive)).rejects.toMatchObject({ code: 'ACP_SESSION_BUSY' })
+      expect(archiveSession).not.toHaveBeenCalled()
+      finish({ stopReason: 'end_turn' })
+      await new Promise(resolve => setImmediate(resolve))
+      const pending = gateway.call('reader', archive)
+      await vi.waitFor(() => expect(archiveSession).toHaveBeenCalledTimes(1))
+      expect(archiveSession).toHaveBeenCalledWith('saved', cwd)
+      await expect(gateway.call('owner', prompt)).rejects.toMatchObject({ code: 'ACP_SESSION_BUSY' })
+      release()
+      await expect(pending).resolves.toEqual({ backend: 'opencode', sessionId: 'saved', archived: true })
+      expect(publishArchive).toHaveBeenCalledWith('agent.acp.catalog.changed', { backend: 'opencode', sessionId: 'saved', archived: true })
+      await expect(gateway.call('owner', prompt)).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+      await expect(gateway.call('reader', { method: 'dsh/sessionList', params: { backend: 'opencode', path: cwd } })).resolves.toEqual({ items: [] })
+      await expect(gateway.call('reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [] })
+      const restarted = new AcpRemoteGateway({ enabled: true, backends: [{ id: 'opencode', enabled: true, command: 'fixture', args: [] }] }, silentLogger(), () => Object.assign(readyAcp(), { call: acp.call, history: acp.history, isSessionArchived: acp.isSessionArchived }))
+      await restarted.start()
+      try {
+        await expect(restarted.call('new-reader', { method: 'session/prompt', params: { sessionId: 'saved', prompt: [{ type: 'text', text: 'blocked' }] } })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+        await expect(restarted.call('new-reader', { method: 'dsh/sessionHistory', params: { backend: 'opencode', sessionId: 'opencode:saved' } })).resolves.toEqual({ events: [] })
+      } finally { await restarted.close() }
+      archiveSession.mockRejectedValueOnce(new Error('native failed'))
+      await expect(gateway.call('reader', archive)).rejects.toThrow('native failed')
+      // A late native completion may not publish success for a replacement backend.
+      const late = gateway.call('reader', archive)
+      await vi.waitFor(() => expect(archiveSession).toHaveBeenCalledTimes(3))
+      await gateway.reconfigure({ enabled: false, backends: [] })
+      release()
+      await expect(late).rejects.toThrow()
+    } finally { finish?.({ stopReason: 'end_turn' }); await gateway.close() }
+  })
   it('loads Claude model catalogs only with trusted cwd and scopes Cursor/Claude changes to the owner', async () => {
     await runScenarios((['cursor', 'claude'] as const).map(backend => ({ name: backend, run: async () => {
       const acp = readyAcp(), cwd = await realpath(process.cwd())

@@ -10683,6 +10683,23 @@ var AgentAcpClient = class {
     this.core = core;
     this.capabilities = capabilities;
   }
+  supportsArchive(backend) {
+    return backend === "opencode" && this.capabilities.includes("agent.acp.opencode.archive.v1");
+  }
+  onSessionArchived(handler) {
+    return this.core.onEvent((event) => {
+      if (event.event === "agent.acp.catalog.changed" && isRecord2(event.data) && event.data.backend === "opencode" && event.data.archived === true && typeof event.data.sessionId === "string" && /^[A-Za-z0-9_-]{1,256}$/.test(event.data.sessionId))
+        handler(event.data);
+    });
+  }
+  async archiveSession(sessionId, backend, signal) {
+    if (!this.supportsArchive(backend))
+      throw new RemoteGatewayError("OPENCODE_ARCHIVE_UNAVAILABLE", "Update the Host plugin to support OpenCode native archiving.");
+    const result = await this.call("dsh/sessionArchive", { sessionId, backend }, signal);
+    if (!isRecord2(result) || result.backend !== backend || result.sessionId !== sessionId || result.archived !== true)
+      throw new RemoteGatewayError("INVALID_RESPONSE", "OpenCode did not confirm the session archive state.");
+    return result;
+  }
   async call(method, params = {}, signal) {
     const timeoutMs = method === "session/prompt" ? ACP_PROMPT_RPC_TIMEOUT_MS : void 0;
     return this.core.rpc("agent.acp.call", { method, params }, signal, timeoutMs);
@@ -11412,7 +11429,7 @@ var AcpEventCarrier = class {
       type: "baseline",
       value: {
         items: this.context.visibleWorkspaces().map(nativeWorkspace),
-        archivedSessionIds: [],
+        archivedSessionIds: [...this.context.archivedSessionIds],
         pinnedSessionIds: []
       }
     });
@@ -12133,6 +12150,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args)
     });
     this.events = new AcpEventCarrier({
+      get archivedSessionIds() {
+        return owner.archivedSessionIds;
+      },
       get workspaceStreams() {
         return owner.workspaceStreams;
       },
@@ -12169,6 +12189,10 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args)
     });
     this.api = this.events.createApiProxy();
+    this.unsubscribeArchived = client.onSessionArchived?.((data2) => {
+      if (this.closed || data2.backend !== this.backend) return;
+      this.applyArchived(`${sessionPrefix(this.backend)}${data2.sessionId}`);
+    });
   }
   live;
   events;
@@ -12188,6 +12212,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   lastProjectionSeq = 0;
   imageAttachments = /* @__PURE__ */ new Map();
   closed = false;
+  archivedSessionIds = /* @__PURE__ */ new Set();
+  unsubscribeArchived;
   static remote(core, host, backend = "cursor", capabilities = [], hostCarrier) {
     return new _AcpVirtualHarness(new AgentAcpClient(core, capabilities), host, backend, hostCarrier);
   }
@@ -12269,7 +12295,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         case "workspace/list":
           return business(success({
             items: this.visibleWorkspaces().map(nativeWorkspace),
-            archivedSessionIds: [],
+            archivedSessionIds: [...this.archivedSessionIds],
             pinnedSessionIds: []
           }));
         case "workspace/create":
@@ -12389,6 +12415,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.unsubscribeArchived?.();
     for (const stream of this.workspaceStreams) stream.close();
     for (const stream of this.controlStreams) stream.close();
     for (const stream of this.eventStreams.values()) stream.close();
@@ -12442,7 +12469,16 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   async archiveSession(request) {
     const sessionId = extractSessionId(request);
-    this.sessions.delete(sessionId);
+    if (this.backend === "opencode") {
+      if (!this.client.supportsArchive?.(this.backend) || !this.client.archiveSession) return failure("archive-unavailable", "Update the Host plugin to archive OpenCode conversations.");
+      await this.client.archiveSession(nativeAcpId(sessionId, this.backend), this.backend);
+      this.applyArchived(sessionId);
+      return success({ archivedSessionIds: [...this.archivedSessionIds] });
+    }
+    return failure("archive-unavailable", `Native session archiving is unavailable for ${this.backendLabel()}.`);
+  }
+  applyArchived(sessionId) {
+    this.archivedSessionIds.add(sessionId);
     for (const [workspaceId, workspace] of this.workspaceById) {
       if (!workspace.sessionIds.includes(sessionId)) continue;
       const sessionIds = workspace.sessionIds.filter((id5) => id5 !== sessionId);
@@ -12455,7 +12491,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     this.events.emitRemoteEvent("api-session/removed", [sessionId]);
     this.publishWorkspaceBaseline();
-    return success({ archivedSessionIds: [sessionId] });
   }
   async createSession(request, signal) {
     const workspaceId = string(request.workspaceId) ?? this.selectedWorkspaceId;
@@ -12747,7 +12782,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         }
         const existing = this.sessions.get(sessionId);
         if (existing !== void 0) this.applyDiscoveredTitle(existing, item.title);
-        if (!workspace.sessionIds.includes(sessionId)) {
+        if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId);
         }
       }
@@ -12795,7 +12830,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   sessionSummaries() {
     const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()]);
-    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
+    return [...this.sessions.values()].filter((session) => allowed.has(session.sessionId) && !this.archivedSessionIds.has(session.sessionId)).map((session) => this.sessionSummary(session, 0));
   }
   sessionSummary(session, asOfSeq) {
     return {
@@ -12906,7 +12941,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       for (const workspace of this.visibleWorkspaces()) {
         queue.push({ type: "upsert", workspace: nativeWorkspace(workspace) });
       }
-      queue.push({ type: "archived", archivedSessionIds: [] });
+      queue.push({ type: "archived", archivedSessionIds: [...this.archivedSessionIds] });
     }
   }
   nextProjectionSeq() {
@@ -16559,7 +16594,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
   });
   const { prehash } = eddsaOpts;
   const { BASE, Fp: Fp2, Fn: Fn2 } = Point;
-  const randomBytes8 = eddsaOpts.randomBytes || randomBytes2;
+  const randomBytes9 = eddsaOpts.randomBytes || randomBytes2;
   const adjustScalarBytes3 = eddsaOpts.adjustScalarBytes || ((bytes) => bytes);
   const domain = eddsaOpts.domain || ((data2, ctx, phflag) => {
     _abool2(phflag, "phflag");
@@ -16641,7 +16676,7 @@ function eddsa(Point, cHash, eddsaOpts = {}) {
     signature: 2 * _size,
     seed: _size
   };
-  function randomSecretKey(seed = randomBytes8(lengths.seed)) {
+  function randomSecretKey(seed = randomBytes9(lengths.seed)) {
     return _abytes2(seed, lengths.seed, "seed");
   }
   function keygen(seed) {
@@ -18965,18 +19000,18 @@ function validateTableBytes(numPoints, fpBytes) {
   if (bytes > TABLE_BYTES_MAX)
     throw new Error("invalid window size: table would need ~" + Math.ceil(bytes / 2 ** 20) + " MiB, max " + TABLE_BYTES_MAX / 2 ** 20 + " MiB");
 }
-function probeRandomBytes(randomBytes8, length) {
-  if (randomBytes8 === void 0)
+function probeRandomBytes(randomBytes9, length) {
+  if (randomBytes9 === void 0)
     return void 0;
-  afunction(randomBytes8, "randomBytes");
+  afunction(randomBytes9, "randomBytes");
   try {
-    const probe = randomBytes8(length);
+    const probe = randomBytes9(length);
     if (!isBytes3(probe) || probe.length !== length)
       return void 0;
   } catch {
     return void 0;
   }
-  return randomBytes8;
+  return randomBytes9;
 }
 function validateMSMPoints2(points, c) {
   aarray(points, "points");
@@ -19069,9 +19104,9 @@ var ScalarMultiplier = class {
   baseCanBeBlinded;
   bits;
   // Parametrized with a given Point class (not individual point)
-  constructor(Point, randomBytes8) {
+  constructor(Point, randomBytes9) {
     validatePointCons(Point);
-    this.randomBytes = probeRandomBytes(randomBytes8, BLIND_BYTES);
+    this.randomBytes = probeRandomBytes(randomBytes9, BLIND_BYTES);
     this.Point = Point;
     this.BASE = Point.BASE;
     this.ZERO = Point.ZERO;
@@ -19342,7 +19377,7 @@ function edwards2(params, extraOpts = {}) {
   if (FpLegendre2(Fp2, CURVE.d) !== -1)
     throw new Error("edwards: CURVE.d must be a non-square in Fp for complete addition formulas");
   validateObject2(opts, {}, { uvRatio: "function", randomBytes: "function" });
-  const randomBytes8 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
+  const randomBytes9 = opts.randomBytes === void 0 ? randomBytes4 : opts.randomBytes;
   const MASK = _2n6 << BigInt(Fp2.BYTES * 8) - _1n10;
   function isOdd(n) {
     if (!Fp2.isOdd)
@@ -19603,7 +19638,7 @@ function edwards2(params, extraOpts = {}) {
     }
   }
   const normalize = (points) => normalizeZ2(Point, points);
-  const wnaf = new ScalarMultiplier(Point, randomBytes8);
+  const wnaf = new ScalarMultiplier(Point, randomBytes9);
   if (wnaf.bits >= 6)
     Point.BASE.precompute(6);
   Object.freeze(Point.prototype);
@@ -33867,7 +33902,7 @@ var AcpWorkspaceTools = class {
 
 // src/acp/gateway.ts
 import { randomUUID as randomUUID4 } from "node:crypto";
-import { readdir as readdir3, realpath as realpath3, stat as stat5 } from "node:fs/promises";
+import { readdir as readdir3, realpath as realpath5, stat as stat5 } from "node:fs/promises";
 import { homedir as homedir5 } from "node:os";
 import { basename as basename4, isAbsolute as isAbsolute6, join as join11, relative as relative4, resolve as resolve4 } from "node:path";
 
@@ -35020,6 +35055,99 @@ function withoutSelectionArgs(args) {
 // src/acp/adapters/opencode-process.ts
 import { spawn as spawn6 } from "node:child_process";
 import { Buffer as Buffer7 } from "node:buffer";
+import { realpath as realpath4 } from "node:fs/promises";
+
+// src/acp/adapters/opencode-native-api.ts
+import { randomBytes as randomBytes8 } from "node:crypto";
+import { createServer as createServer2 } from "node:net";
+import { realpath as realpath3 } from "node:fs/promises";
+var MAX_RESPONSE_BYTES = 64 * 1024;
+var OpencodeNativeApi = class {
+  constructor(origin, request = fetch) {
+    this.origin = origin;
+    this.request = request;
+    if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(origin) || Number(new URL(origin).port) > 65535) throw unavailable();
+  }
+  password = randomBytes8(32).toString("hex");
+  shutdown = new AbortController();
+  async isArchived(sessionId, cwd2) {
+    const session = await this.session("GET", sessionId, cwd2);
+    return typeof session.time.archived === "number" && Number.isFinite(session.time.archived);
+  }
+  async archive(sessionId, cwd2) {
+    if (await this.isArchived(sessionId, cwd2)) return;
+    const session = await this.session("PATCH", sessionId, cwd2);
+    if (typeof session.time.archived !== "number" || !Number.isFinite(session.time.archived)) throw unavailable();
+  }
+  close() {
+    this.shutdown.abort();
+  }
+  async session(method, sessionId, cwd2) {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(sessionId)) throw new RpcError("INVALID_MESSAGE", "The OpenCode session ID is invalid.");
+    try {
+      const url = new URL(`/session/${encodeURIComponent(sessionId)}`, this.origin);
+      url.searchParams.set("directory", cwd2);
+      const response = await this.request(url, {
+        method,
+        redirect: "error",
+        signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(2e4)]),
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString("base64")}`, "content-type": "application/json" },
+        ...method === "PATCH" ? { body: JSON.stringify({ time: { archived: Date.now() } }) } : {}
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw unavailable();
+      }
+      const reader = response.body?.getReader();
+      if (!reader) throw unavailable();
+      const chunks = [];
+      let bytes = 0;
+      try {
+        for (; ; ) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          bytes += chunk.value.byteLength;
+          if (bytes > MAX_RESPONSE_BYTES) throw unavailable();
+          chunks.push(chunk.value);
+        }
+      } finally {
+        await reader.cancel().catch(() => void 0);
+      }
+      const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      if (!result || result.id !== sessionId || typeof result.directory !== "string" || !result.time || typeof result.time !== "object" || await realpath3(result.directory) !== cwd2) throw unavailable();
+      return result;
+    } catch {
+      throw unavailable();
+    }
+  }
+};
+async function opencodeLoopbackPort() {
+  const server = createServer2();
+  await new Promise((resolve6, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve6());
+  });
+  const address = server.address();
+  await new Promise((resolve6, reject) => server.close((error) => error ? reject(error) : resolve6()));
+  if (!address || typeof address === "string") throw unavailable();
+  return address.port;
+}
+function opencodePrivateArgs(args, port) {
+  if (args.includes("--")) throw unavailable();
+  const kept = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (/^--(?:port|hostname|mdns|no-mdns)(?:=|$)/.test(arg)) {
+      if (arg === "--port" || arg === "--hostname" || arg === "--mdns" && /^(true|false)$/.test(args[i + 1] ?? "")) i++;
+    } else kept.push(arg);
+  }
+  return [...kept, `--hostname=127.0.0.1`, `--port=${port}`, "--mdns=false"];
+}
+function unavailable() {
+  return new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "OpenCode did not confirm the archive operation. Check the Host OpenCode version and retry after refreshing its session list.");
+}
+
+// src/acp/adapters/opencode-process.ts
 var ACP_REQUEST_TIMEOUT_MS2 = 6e4;
 var ACP_PROMPT_TIMEOUT_MS3 = 10 * 6e4;
 var ACP_START_TIMEOUT_MS3 = 2e4;
@@ -35033,12 +35161,7 @@ var OpencodeAcpError = class extends Error {
   }
 };
 var OpencodeAcpClient = class _OpencodeAcpClient {
-  constructor(binary = "opencode", logger, spawnAcp = (binary2) => spawn6(binary2, options.args ?? ["acp"], {
-    cwd: options.cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    windowsHide: true,
-    env: process.env
-  }), options = {}) {
+  constructor(binary = "opencode", logger, spawnAcp, options = {}) {
     this.binary = binary;
     this.logger = logger;
     this.spawnAcp = spawnAcp;
@@ -35056,6 +35179,9 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   failureNotified = false;
   startPromise;
   historyBusy = false;
+  nativeApi;
+  archivedSessions = /* @__PURE__ */ new Set();
+  archivingSessions = /* @__PURE__ */ new Set();
   start() {
     if (this.closed) return Promise.reject(new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed."));
     if (this.ready) return Promise.resolve();
@@ -35066,6 +35192,24 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   isReady() {
     return this.ready;
+  }
+  async isSessionArchived(sessionId, cwd2) {
+    if (!this.nativeApi) return this.archivedSessions.has(sessionId);
+    const archived = await this.nativeApi.isArchived(sessionId, cwd2);
+    if (archived) this.archivedSessions.add(sessionId);
+    else this.archivedSessions.delete(sessionId);
+    return archived;
+  }
+  async archiveSession(sessionId, cwd2) {
+    if (!this.ready || !this.nativeApi) throw new OpencodeAcpError("OPENCODE_ARCHIVE_UNAVAILABLE", "The Host OpenCode native API is unavailable.");
+    if (this.busy.has(sessionId) || this.loads.has(sessionId) || this.archivingSessions.has(sessionId)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before archiving.");
+    this.archivingSessions.add(sessionId);
+    try {
+      await this.nativeApi.archive(sessionId, cwd2);
+      this.archivedSessions.add(sessionId);
+    } finally {
+      this.archivingSessions.delete(sessionId);
+    }
   }
   /**
    * Replay a saved session in one temporary ACP process so a history read never
@@ -35110,6 +35254,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
     const p = isRecord17(params) ? params : {};
     const id5 = typeof p.sessionId === "string" ? p.sessionId : void 0;
+    if (id5 && this.archivingSessions.has(id5)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
+    if (id5 && this.archivedSessions.has(id5) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS3 : ACP_REQUEST_TIMEOUT_MS2);
     if (method === "session/load" && id5) {
       if (this.models.has(id5)) return { sessionId: id5 };
@@ -35131,12 +35277,12 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       if (this.busy.has(id5)) throw new OpencodeAcpError("PROMPT_IN_PROGRESS", "Stop the OpenCode reply before changing its model.");
       this.busy.add(id5);
       try {
-        const result = await models.select(id5, p.model, p.reasoningEffort, (method2, params2) => this.request(method2, params2, budget));
+        const result2 = await models.select(id5, p.model, p.reasoningEffort, (method2, params2) => this.request(method2, params2, budget));
         this.publish({ kind: "notification", method: "session/update", params: {
           sessionId: id5,
-          update: { sessionUpdate: "model_selection", selected: result.selected }
+          update: { sessionUpdate: "model_selection", selected: result2.selected }
         } });
-        return result;
+        return result2;
       } finally {
         this.busy.delete(id5);
       }
@@ -35150,7 +35296,31 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         this.busy.delete(id5);
       }
     }
-    return this.request(method, params, budget);
+    const result = await this.request(method, params, budget);
+    const nativeApi = this.nativeApi;
+    if (method === "session/list" && nativeApi && isRecord17(result) && Array.isArray(result.sessions)) {
+      if (result.sessions.length > 1e3) throw new OpencodeAcpError("INVALID_MESSAGE", "The OpenCode catalog page is too large.");
+      const items = result.sessions;
+      const archivedItems = /* @__PURE__ */ new Map();
+      let next = 0;
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+        for (; ; ) {
+          const index = next++;
+          if (index >= items.length) return;
+          const item = items[index];
+          if (!isRecord17(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+          const cwd2 = await realpath4(item.cwd).catch(() => void 0);
+          if (!cwd2) continue;
+          const archived = await nativeApi.isArchived(item.sessionId, cwd2);
+          if (archived) this.archivedSessions.add(item.sessionId);
+          else this.archivedSessions.delete(item.sessionId);
+          archivedItems.set(index, archived);
+        }
+      }));
+      const sessions = items.flatMap((item, index) => archivedItems.has(index) ? [{ ...item, archived: archivedItems.get(index) }] : []);
+      return { ...result, sessions };
+    }
+    return result;
   }
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
@@ -35186,6 +35356,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.closed = true;
     this.ready = false;
     this.models.clear();
+    this.nativeApi?.close();
     this.failPending(new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed."));
     const child = this.process;
     this.process = void 0;
@@ -35207,7 +35378,19 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.process !== void 0) {
       throw new OpencodeAcpError("OPENCODE_STARTING", "OpenCode ACP is already starting.");
     }
-    const child = this.spawnAcp(this.binary);
+    let child;
+    if (this.spawnAcp) child = this.spawnAcp(this.binary);
+    else {
+      const port = await opencodeLoopbackPort();
+      if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
+      this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`);
+      child = spawn6(this.binary, opencodePrivateArgs(this.options.args ?? ["acp"], port), {
+        cwd: this.options.cwd,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+        env: { ...process.env, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: this.nativeApi.password }
+      });
+    }
     this.process = child;
     this.failureNotified = false;
     this.stdoutBuffer = Buffer7.alloc(0);
@@ -35221,6 +35404,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       if (this.process !== child) return;
       this.process = void 0;
       this.ready = false;
+      this.nativeApi?.close();
+      this.nativeApi = void 0;
       this.models.clear();
       this.failPending(new OpencodeAcpError("OPENCODE_ACP_EXITED", "OpenCode ACP exited unexpectedly."));
       if (!this.closed) {
@@ -35331,6 +35516,8 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.publish(inbound);
   }
   handleProcessFailure(code, cause) {
+    this.nativeApi?.close();
+    this.nativeApi = void 0;
     this.ready = false;
     this.models.clear();
     this.failPending(new OpencodeAcpError(code, "OpenCode ACP communication failed.", { cause }));
@@ -35392,6 +35579,7 @@ var acpToolStreamSchema = external_exports.object({
   args: external_exports.record(external_exports.unknown())
 }).strict();
 var schemas2 = {
+  "dsh/sessionArchive": external_exports.object({ sessionId: id4.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports.literal("opencode") }).strict(),
   "dsh/toolCall": external_exports.object({
     sessionId: id4,
     backend: external_exports.enum(["cursor", "antigravity", "pi", "opencode"]),
@@ -35816,6 +36004,9 @@ var AcpPeerBridge = class {
   async call(input3) {
     return this.callDomain(input3, true);
   }
+  async publishArchived(data2) {
+    if (!this.closed) await this.publish("agent.acp.catalog.changed", data2);
+  }
   async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
@@ -36180,6 +36371,8 @@ var AcpRemoteGateway = class {
   startingClients = /* @__PURE__ */ new Map();
   /** Desired configuration is saved immediately; unfinished cleanup must remain retryable. */
   pendingReconfiguration = /* @__PURE__ */ new Set();
+  archivingSessions = /* @__PURE__ */ new Set();
+  opencodeOperations = /* @__PURE__ */ new Map();
   /** Only implemented adapters are advertised; registry entries never select an adapter by executable name. */
   enabledBackends() {
     if (!this.config.enabled) return [];
@@ -36255,6 +36448,24 @@ var AcpRemoteGateway = class {
   async call(connectionId, input3) {
     const envelope = parseCallEnvelope2(input3);
     const call = parseAcpCall(envelope.method, envelope.params);
+    const sessionId = sessionIdFromParams(call.method, call.params);
+    const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0);
+    const reserve = backend === "opencode" && sessionId !== void 0 && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method);
+    if (reserve) {
+      if (this.archivingSessions.has(sessionId)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
+      this.opencodeOperations.set(sessionId, (this.opencodeOperations.get(sessionId) ?? 0) + 1);
+    }
+    try {
+      return await this.callInternal(connectionId, call);
+    } finally {
+      if (reserve) {
+        const remaining = (this.opencodeOperations.get(sessionId) ?? 1) - 1;
+        if (remaining) this.opencodeOperations.set(sessionId, remaining);
+        else this.opencodeOperations.delete(sessionId);
+      }
+    }
+  }
+  async callInternal(connectionId, call) {
     this.logger.info("ACP call received", {
       method: call.method,
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
@@ -36275,6 +36486,44 @@ var AcpRemoteGateway = class {
       const requestedBackend = typeof call.params?.backend === "string" ? call.params.backend : void 0;
       this.requireAcp(requestedBackend);
       return this.initializeResult(call.params, requestedBackend);
+    }
+    if (call.method === "dsh/sessionArchive") {
+      const sessionId2 = String(call.params.sessionId);
+      if (this.archivingSessions.has(sessionId2) || this.opencodeOperations.has(sessionId2)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is busy.");
+      this.archivingSessions.add(sessionId2);
+      try {
+        const backend = "opencode";
+        const client = this.requireAcp(backend);
+        const instance = this.backendInstances.get(backend);
+        const cwd2 = await this.catalogSessionCwd(backend, sessionId2);
+        if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The OpenCode backend changed. Refresh the session list.");
+        if (this.promptsInProgress.has(sessionId2) || [...this.approvals.values()].some((item) => item.sessionId === sessionId2)) throw new RpcError("ACP_SESSION_BUSY", "Stop the OpenCode reply and resolve its approvals before archiving.");
+        if (!client.archiveSession) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The Host OpenCode adapter does not support native archiving.");
+        await client.archiveSession(sessionId2, cwd2);
+        if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The OpenCode backend changed. Refresh the session list to confirm the archive state.");
+        const result = { backend, sessionId: sessionId2, archived: true };
+        this.inboundChain = this.inboundChain.then(async () => {
+          if (!this.closed && this.backendInstances.get(backend) === instance) {
+            await Promise.allSettled([...this.peers.values()].map((peer) => peer.publishArchived(result)));
+          }
+        });
+        await this.inboundChain;
+        if (this.closed || this.backendInstances.get(backend) !== instance) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The OpenCode backend changed. Refresh the session list to confirm the archive state.");
+        return result;
+      } finally {
+        this.archivingSessions.delete(sessionId2);
+      }
+    }
+    if (typeof call.params.sessionId === "string" && this.archivingSessions.has(call.params.sessionId) && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
+    const controlId = sessionIdFromParams(call.method, call.params);
+    if (controlId && (call.params.backend ?? this.sessionBackends.get(controlId) ?? this.defaultBackend()) === "opencode" && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method)) {
+      const client = this.requireAcp("opencode");
+      if (client.isSessionArchived) {
+        const cwd2 = await this.catalogSessionCwd("opencode", controlId);
+        const archived = await client.isSessionArchived(controlId, cwd2);
+        if (this.closed || this.requireAcp("opencode") !== client) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The OpenCode backend changed.");
+        if (archived) throw new RpcError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
+      }
     }
     if (call.method === "dsh/directoryList") {
       return this.listDirectory(String(call.params.path));
@@ -37013,6 +37262,7 @@ var AcpRemoteGateway = class {
         if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue;
         this.sessionCwds.set(item.sessionId, { backend, cwd: canonical });
         this.sessionBackends.set(item.sessionId, backend);
+        if (backend === "opencode" && item.archived === true) continue;
         items.push({
           sessionId: item.sessionId,
           cwd: canonical,
@@ -37048,7 +37298,7 @@ var AcpRemoteGateway = class {
       throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an absolute path.");
     }
     try {
-      const canonical = await realpath3(path);
+      const canonical = await realpath5(path);
       const info = await stat5(canonical);
       if (!info.isDirectory()) {
         throw new RpcError("CURSOR_PATH_NOT_ALLOWED", "The Cursor working directory must be an existing directory.");
@@ -40913,6 +41163,7 @@ var HostPluginRuntime = class {
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
     if (this.acp.enabledBackends().length > 0) {
       capabilities.push("agent.acp.v1", "agent.acp.transfer.v1", "agent.acp.workspace-files.v1");
+      if (this.acp.enabledBackends().includes("opencode")) capabilities.push("agent.acp.opencode.archive.v1");
       if (this.terminalEnabled) capabilities.push("agent.acp.terminal.v1");
       if (this.acp.enabledBackends().includes("antigravity")) capabilities.push("agent.acp.antigravity.models.v1", "agent.acp.antigravity.model-load.v1");
       for (const backend of this.acp.enabledBackends()) {

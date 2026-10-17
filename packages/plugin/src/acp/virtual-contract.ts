@@ -92,6 +92,9 @@ export interface PendingApproval {
 }
 
 export interface AcpClientLike {
+  supportsArchive?(backend: string): boolean
+  archiveSession?(sessionId: string, backend: string, signal?: AbortSignal): Promise<unknown>
+  onSessionArchived?(handler: (data: { backend: 'opencode'; sessionId: string; archived: true }) => void): () => void
   sessionModels?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", signal?: AbortSignal): Promise<AcpSessionModels>
   selectModel?(sessionId: string, backend: "cursor" | "claude" | "antigravity" | "pi" | "opencode", selection: AcpModelSelection, signal?: AbortSignal): Promise<AcpModelSelection>
   workspaceToolCall?(sessionId: string, backend: "cursor" | "antigravity" | "pi" | "opencode", endpoint: typeof ACP_TOOL_CALL_ENDPOINTS[number], args: JsonRecord, signal?: AbortSignal): Promise<unknown>

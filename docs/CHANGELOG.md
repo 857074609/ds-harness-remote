@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Adds OpenCode native session archiving on Desktop/Android through the same Host ACP process's authenticated loopback HTTP API. OpenCode persists the archive state; default catalogs hide archived sessions across restart while retaining history. Clients wait for confirmation and share catalog updates. Active turns cannot be archived; unarchive and other ACP backends are not supported yet.
+- Desktop/Android 接入 OpenCode 原生会话归档，直接调用同一 Host ACP 进程的认证 loopback HTTP API；状态由 OpenCode 持久保存，重启后默认列表仍隐藏、历史保留。客户端确认后更新并同步目录；活动回复拒绝归档，暂不提供恢复或其他 ACP 后端原生归档。
+
 - Adds confirmed Cursor/Claude model selection on Desktop/Android, isolates Cursor model settings by session, and adds Claude workspace/history/chat entry points with the display name Claude. Restored Claude prompts load the trusted session before starting; cancellation during loading cannot start a late turn.
 - 接入 Desktop/Android 的 Cursor、Claude 真实模型目录及切换；Cursor 按会话隔离模型设置，补齐 Claude 工作区、历史和文字会话入口，显示名统一为 Claude。恢复 Claude 会话时先加载可信目录，加载期间取消不会启动迟到回复。
 

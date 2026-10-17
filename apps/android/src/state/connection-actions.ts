@@ -82,6 +82,15 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             fetchIceServers: async connectionId => api.turnCredentials(connectionId),
             preferredTransports: [...preferredTransports],
             forceRelay,
+            onOpencodeArchived: nativeId => {
+              if (generation !== runtime.connectionGeneration) return
+              const sessionId = `opencode:${nativeId}`
+              set(state => ({
+                sessions: state.sessions.filter(item => item.sessionId !== sessionId),
+                workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),
+              }))
+              void get().refreshWorkspaces()
+            },
             onSecureHandshake: () => {
               if (generation !== runtime.connectionGeneration) return
               set(state => ({

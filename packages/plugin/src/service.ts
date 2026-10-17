@@ -514,6 +514,7 @@ export class HostPluginRuntime {
     // Protocol support is stable during background warmup; workspaceTypes reports readiness.
     if (this.acp.enabledBackends().length > 0) {
       capabilities.push('agent.acp.v1', 'agent.acp.transfer.v1', 'agent.acp.workspace-files.v1')
+      if (this.acp.enabledBackends().includes('opencode')) capabilities.push('agent.acp.opencode.archive.v1')
       if (this.terminalEnabled) capabilities.push('agent.acp.terminal.v1')
       if (this.acp.enabledBackends().includes('antigravity')) capabilities.push('agent.acp.antigravity.models.v1', 'agent.acp.antigravity.model-load.v1')
       for (const backend of this.acp.enabledBackends()) {

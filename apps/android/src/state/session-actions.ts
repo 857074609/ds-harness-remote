@@ -545,6 +545,9 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           return true
         }
         if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') {
+          if (session.backend !== 'opencode') throw new Error(`Native session archiving is unavailable for ${session.backend}.`)
+          await runtime.connection.requireOpencode().archiveSession(cursorNativeId(session), 'opencode')
+          if (generation !== runtime.connectionGeneration) return false
           if (get().selectedSession?.sessionId === sessionId) await runtime.closeActiveCursorStream()
           if (generation !== runtime.connectionGeneration) return false
           set(state => ({
@@ -553,7 +556,6 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
               ...workspace,
               sessionIds: workspace.sessionIds.filter(id => id !== sessionId),
             })),
-            messages: Object.fromEntries(Object.entries(state.messages).filter(([id]) => id !== sessionId)),
             busyAction: undefined,
             selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
             sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,

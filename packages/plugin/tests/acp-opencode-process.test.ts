@@ -1,4 +1,6 @@
 import { EventEmitter } from 'node:events'
+import { realpath } from 'node:fs/promises'
+import { OpencodeNativeApi } from '../src/acp/adapters/opencode-native-api.js'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
@@ -89,6 +91,34 @@ describe('OpencodeAcpClient', () => {
     } })))
   })
 
+  it('rechecks persisted native archive state without relying on a loaded-session cache', async () => {
+    const fake = fakeProcess()
+    const cwd = await realpath(process.cwd())
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line)
+        const result = message.method === 'initialize' ? { protocolVersion: 1 }
+          : { sessions: ['archived', 'active'].map(sessionId => ({ sessionId, cwd })), nextCursor: 'next-page' }
+        fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id: message.id, result })}\n`)
+      }
+    })
+    const request = vi.fn(async (url: unknown) => {
+      const id = new URL(String(url)).pathname.split('/').at(-1)
+      return new Response(JSON.stringify({ id, directory: cwd, time: id === 'archived' ? { archived: 123 } : {} }))
+    })
+    const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+    // Inject the native transport while retaining the real ACP request path.
+    Object.assign(client, { nativeApi: new OpencodeNativeApi('http://127.0.0.1:12345', request as typeof fetch) })
+    try {
+      await client.start()
+      await expect(client.call('session/list', {})).resolves.toMatchObject({
+        sessions: [{ sessionId: 'archived', archived: true }, { sessionId: 'active', archived: false }], nextCursor: 'next-page',
+      })
+      expect(request).toHaveBeenCalledTimes(2)
+      await expect(client.call('session/prompt', { sessionId: 'archived', prompt: [] })).rejects.toMatchObject({ code: 'ACP_SESSION_ARCHIVED' })
+    } finally { await client.close() }
+  })
+
   it('initializes with standard ACP initialize and correlates JSON-RPC responses (without authenticate)', async () => {
     const fake = fakeProcess()
     const outbound: Array<Record<string, unknown>> = []
@@ -164,6 +194,9 @@ describe('OpencodeAcpClient', () => {
       }
     })
     const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+    const nativeApi = new OpencodeNativeApi('http://127.0.0.1:12345')
+    const closeNative = vi.spyOn(nativeApi, 'close')
+    Object.assign(client, { nativeApi })
     await client.start()
 
     const pending = client.call('session/prompt', { sessionId: 'sess_1', prompt: [] })
@@ -171,6 +204,7 @@ describe('OpencodeAcpClient', () => {
     fake.child.emit('exit', 1, null)
 
     await expect(pending).rejects.toThrow(OpencodeAcpError)
+    expect(closeNative).toHaveBeenCalledOnce()
   })
 })
 

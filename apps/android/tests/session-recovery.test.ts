@@ -10,7 +10,7 @@ const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() =>
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
-  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn() },
+  acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
   codex: { request: vi.fn() },
   authenticate: vi.fn(),
@@ -128,6 +128,37 @@ describe('Host-confirmed Harness archive recovery', () => {
       } else {
         expect(useAppStore.getState()).toMatchObject({ archivedSessionIds: ['other-host'], busyAction: 'other-operation', error: 'other-error' })
       }
+    } })), prepareScenario1)
+  })
+})
+
+describe('OpenCode native archive confirmation', () => {
+  it('updates only after native success and preserves state on rejection or retired connections', async () => {
+    await runScenarios(['success', 'rejected', 'late-success', 'late-error'].map(name => ({ name, run: async () => {
+      const current = { ...session, backend: 'opencode' as const, sessionId: 'opencode:ses_1', acpSessionId: 'ses_1' }
+      const workspace = { workspaceId: 'opencode:cwd:fixture', title: 'Project', path: '/project', backend: 'opencode' as const,
+        sessionIds: [current.sessionId], createdAt: '', updatedAt: '' }
+      useAppStore.setState({ sessions: [current], selectedSession: current, workspaces: [workspace], messages: { [current.sessionId]: [] } })
+      let resolve!: () => void, reject!: (error: Error) => void
+      acp.archiveSession.mockImplementation(() => new Promise<void>((yes, no) => { resolve = yes; reject = no }))
+      const pending = useAppStore.getState().archiveSession(current.sessionId)
+      expect(acp.archiveSession).toHaveBeenCalledWith('ses_1', 'opencode')
+      expect(useAppStore.getState().sessions).toEqual([current])
+      if (name.startsWith('late')) {
+        await useAppStore.getState().disconnect()
+        useAppStore.setState({ sessions: [session], busyAction: 'new-host', error: 'new-error' })
+      }
+      if (name === 'success' || name === 'late-success') resolve()
+      else reject(new Error('native archive rejected'))
+      expect(await pending).toBe(name === 'success')
+      if (name === 'success') {
+        expect(useAppStore.getState().sessions).toEqual([])
+        expect(useAppStore.getState().workspaces[0]?.sessionIds).toEqual([])
+        expect(useAppStore.getState().messages[current.sessionId]).toEqual([])
+      } else if (name === 'rejected') {
+        expect(useAppStore.getState().sessions).toEqual([current])
+        expect(useAppStore.getState().selectedSession).toEqual(current)
+      } else expect(useAppStore.getState()).toMatchObject({ sessions: [session], busyAction: 'new-host', error: 'new-error' })
     } })), prepareScenario1)
   })
 })

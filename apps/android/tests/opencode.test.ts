@@ -14,7 +14,10 @@ describe('OpenCode catalog and recovery', () => {
     const blank = createOpencodeSession({ acpSessionId: 'new-blank', cwd: '/host/project' })
     const running = { ...catalog.sessions[0]!, title: 'Old title', running: true }
     const workspace = { ...createOpencodeWorkspace('/host/project'), sessionIds: [blank.sessionId, running.sessionId] }
-    const merged = mergeOpencodeCatalog(catalog, [workspace], [blank, running])
+    const stale = { ...createOpencodeSession({ acpSessionId: 'archived', cwd: '/host/project' }), blank: false }
+    workspace.sessionIds.push(stale.sessionId)
+    const merged = mergeOpencodeCatalog(catalog, [workspace], [blank, running, stale])
+    expect(merged.sessions.some(item => item.sessionId === stale.sessionId)).toBe(false)
     expect(merged.workspaces[0]?.sessionIds).toEqual(['opencode:opc-conv-1', 'opencode:new-blank'])
     expect(merged.sessions.find(item => item.nativeId === 'opc-conv-1')).toMatchObject({ title: 'Saved opencode conversation', running: true, updatedAt: 456, backend: 'opencode' })
     expect(merged.sessions.find(item => item.nativeId === 'new-blank')).toMatchObject({ blank: true, backend: 'opencode' })

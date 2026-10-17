@@ -121,6 +121,8 @@ export class AcpRemoteGateway {
   private readonly startingClients = new Map<CursorAcpLike, ResolvedAcpBackendConfig>()
   /** Desired configuration is saved immediately; unfinished cleanup must remain retryable. */
   private readonly pendingReconfiguration = new Set<string>()
+  private readonly archivingSessions = new Set<string>()
+  private readonly opencodeOperations = new Map<string, number>()
 
   constructor(
     public config: ResolvedAcpConfig,
@@ -227,6 +229,24 @@ export class AcpRemoteGateway {
   async call(connectionId: string, input: unknown): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
     const call = parseAcpCall(envelope.method, envelope.params)
+    const sessionId = sessionIdFromParams(call.method, call.params)
+    const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
+    const reserve = backend === 'opencode' && sessionId !== undefined && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)
+    if (reserve) {
+      if (this.archivingSessions.has(sessionId!)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
+      this.opencodeOperations.set(sessionId!, (this.opencodeOperations.get(sessionId!) ?? 0) + 1)
+    }
+    try { return await this.callInternal(connectionId, call) }
+    finally {
+      if (reserve) {
+        const remaining = (this.opencodeOperations.get(sessionId!) ?? 1) - 1
+        if (remaining) this.opencodeOperations.set(sessionId!, remaining)
+        else this.opencodeOperations.delete(sessionId!)
+      }
+    }
+  }
+
+  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>): Promise<unknown> {
     this.logger.info('ACP call received', {
       method: call.method,
       sessionId: typeof call.params?.sessionId === 'string' ? shortSessionId(call.params.sessionId) : undefined,
@@ -251,6 +271,47 @@ export class AcpRemoteGateway {
       const requestedBackend = typeof call.params?.backend === 'string' ? call.params.backend : undefined
       this.requireAcp(requestedBackend)
       return this.initializeResult(call.params, requestedBackend)
+    }
+
+    if (call.method === 'dsh/sessionArchive') {
+      const sessionId = String(call.params.sessionId)
+      if (this.archivingSessions.has(sessionId) || this.opencodeOperations.has(sessionId)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is busy.')
+      this.archivingSessions.add(sessionId)
+      try {
+        const backend = 'opencode'
+        const client = this.requireAcp(backend) as CursorAcpLike & { archiveSession?: (sessionId: string, cwd: string) => Promise<void> }
+        const instance = this.backendInstances.get(backend)
+        const cwd = await this.catalogSessionCwd(backend, sessionId)
+        if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The OpenCode backend changed. Refresh the session list.')
+        if (this.promptsInProgress.has(sessionId) || [...this.approvals.values()].some(item => item.sessionId === sessionId)) throw new RpcError('ACP_SESSION_BUSY', 'Stop the OpenCode reply and resolve its approvals before archiving.')
+        if (!client.archiveSession) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The Host OpenCode adapter does not support native archiving.')
+        await client.archiveSession(sessionId, cwd)
+        if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The OpenCode backend changed. Refresh the session list to confirm the archive state.')
+        const result = { backend, sessionId, archived: true } as const
+        this.inboundChain = this.inboundChain.then(async () => {
+          if (!this.closed && this.backendInstances.get(backend) === instance) {
+            await Promise.allSettled([...this.peers.values()].map(peer => peer.publishArchived(result)))
+          }
+        })
+        await this.inboundChain
+        if (this.closed || this.backendInstances.get(backend) !== instance) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The OpenCode backend changed. Refresh the session list to confirm the archive state.')
+        return result
+      } finally { this.archivingSessions.delete(sessionId) }
+    }
+
+    if (typeof call.params.sessionId === 'string' && this.archivingSessions.has(call.params.sessionId)
+      && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
+
+    const controlId = sessionIdFromParams(call.method, call.params)
+    if (controlId && (call.params.backend ?? this.sessionBackends.get(controlId) ?? this.defaultBackend()) === 'opencode'
+      && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)) {
+      const client = this.requireAcp('opencode') as CursorAcpLike & { isSessionArchived?: (sessionId: string, cwd: string) => Promise<boolean> }
+      if (client.isSessionArchived) {
+        const cwd = await this.catalogSessionCwd('opencode', controlId)
+        const archived = await client.isSessionArchived(controlId, cwd)
+        if (this.closed || this.requireAcp('opencode') !== client) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The OpenCode backend changed.')
+        if (archived) throw new RpcError('ACP_SESSION_ARCHIVED', 'This OpenCode session is archived.')
+      }
     }
 
     if (call.method === 'dsh/directoryList') {
@@ -1069,6 +1130,7 @@ export class AcpRemoteGateway {
         if (trusted && (trusted.backend !== backend || trusted.cwd !== canonical)) continue
         this.sessionCwds.set(item.sessionId, { backend, cwd: canonical })
         this.sessionBackends.set(item.sessionId, backend)
+        if (backend === 'opencode' && item.archived === true) continue
         items.push({ sessionId: item.sessionId, cwd: canonical,
           ...(typeof item.title === 'string' ? { title: item.title } : {}),
           ...(typeof item.updatedAt === 'string' ? { updatedAt: item.updatedAt } : {}) })

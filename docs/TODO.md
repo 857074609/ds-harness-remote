@@ -117,6 +117,8 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P1：Agent ACP / Cursor / Antigravity（实验）
 
+- [x] [OpenCode 原生归档](design/acp-session-archive.md)：直接调用同一 ACP 进程的认证 loopback HTTP API，持久状态由 OpenCode 管理；固定 capability/扩展、可信 cwd、并发隔离、跨连接事件与 Desktop/Android 确认后更新。
+- [ ] OpenCode 归档的 Windows、APK/真机及加密跨设备 E2E；独立 Remote Web 在 Server 仓库同步。恢复/已归档列表与其他 ACP 后端原生归档仍未实现；不得将 `session/delete` 当作归档。
 - [x] OpenCode 模型目录与切换使用真实 ACP 上游响应，按会话隔离；Pi / AGY / OpenCode 投影只提交确认状态，Android 接入 AGY 模型/思考强度。
 - [x] Cursor / Claude Remote 真实模型目录与上游确认的切换，Cursor 按会话隔离进程；Claude Desktop/Android 工作区、历史与文字会话入口。
 - [ ] Cursor / Claude 模型选择的 APK/真机、Windows 与加密跨设备验收。

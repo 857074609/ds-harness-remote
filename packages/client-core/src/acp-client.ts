@@ -7,6 +7,7 @@ import type {
   AgentAcpStreamClosedData,
   AgentAcpTransferCommitResult,
   AgentAcpTransferReadResult,
+  AcpSessionArchivedData,
 } from '@dsh-remote/protocol'
 import {
   AGENT_ACP_TRANSFER_CHUNK_BYTES,
@@ -37,6 +38,24 @@ export interface AcpStream {
 /** Shared Web/Android client for the generic Agent ACP domain in Remote. */
 export class AgentAcpClient {
   constructor(private readonly core: RemoteClientCore, private readonly capabilities: readonly string[] = []) {}
+
+  supportsArchive(backend: string): boolean {
+    return backend === 'opencode' && this.capabilities.includes('agent.acp.opencode.archive.v1')
+  }
+
+  onSessionArchived(handler: (data: AcpSessionArchivedData) => void): () => void {
+    return this.core.onEvent(event => {
+      if (event.event === 'agent.acp.catalog.changed' && isRecord(event.data) && event.data.backend === 'opencode'
+        && event.data.archived === true && typeof event.data.sessionId === 'string' && /^[A-Za-z0-9_-]{1,256}$/.test(event.data.sessionId)) handler(event.data as unknown as AcpSessionArchivedData)
+    })
+  }
+
+  async archiveSession(sessionId: string, backend: string, signal?: AbortSignal): Promise<AcpSessionArchivedData> {
+    if (!this.supportsArchive(backend)) throw new RemoteGatewayError('OPENCODE_ARCHIVE_UNAVAILABLE', 'Update the Host plugin to support OpenCode native archiving.')
+    const result = await this.call('dsh/sessionArchive', { sessionId, backend }, signal)
+    if (!isRecord(result) || result.backend !== backend || result.sessionId !== sessionId || result.archived !== true) throw new RemoteGatewayError('INVALID_RESPONSE', 'OpenCode did not confirm the session archive state.')
+    return result as unknown as AcpSessionArchivedData
+  }
 
   async call(method: string, params: unknown = {}, signal?: AbortSignal): Promise<unknown> {
     const timeoutMs = method === 'session/prompt' ? ACP_PROMPT_RPC_TIMEOUT_MS : undefined

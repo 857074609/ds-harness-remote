@@ -65,6 +65,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private lastProjectionSeq = 0
   private readonly imageAttachments = new Map<string, { sessionId: string; attachment: unknown; data: string }>()
   private closed = false
+  private readonly archivedSessionIds = new Set<string>()
+  private readonly unsubscribeArchived?: () => void
 
   constructor(
     private readonly client: AcpClientLike,
@@ -99,6 +101,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args),
     })
     this.events = new AcpEventCarrier({
+      get archivedSessionIds() { return owner.archivedSessionIds },
       get workspaceStreams() { return owner.workspaceStreams },
       visibleWorkspaces: (...args) => owner.visibleWorkspaces(...args),
       get controlStreams() { return owner.controlStreams },
@@ -116,6 +119,10 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     })
 
     this.api = this.events.createApiProxy()
+    this.unsubscribeArchived = client.onSessionArchived?.(data => {
+      if (this.closed || data.backend !== this.backend) return
+      this.applyArchived(`${sessionPrefix(this.backend)}${data.sessionId}`)
+    })
   }
 
   static remote(
@@ -212,7 +219,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case '$events/result': return business(await this.events.answerRemoteEvent(args, signal))
         case 'workspace/list': return business(success({
           items: this.visibleWorkspaces().map(nativeWorkspace),
-          archivedSessionIds: [],
+          archivedSessionIds: [...this.archivedSessionIds],
           pinnedSessionIds: [],
         }))
         case 'workspace/create': return business(await this.createWorkspace(requestArg(args)))
@@ -307,6 +314,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.unsubscribeArchived?.()
     for (const stream of this.workspaceStreams) stream.close()
     for (const stream of this.controlStreams) stream.close()
     for (const stream of this.eventStreams.values()) stream.close()
@@ -367,7 +375,17 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 
   private async archiveSession(request: JsonRecord): Promise<unknown> {
     const sessionId = extractSessionId(request)
-    this.sessions.delete(sessionId)
+    if (this.backend === 'opencode') {
+      if (!this.client.supportsArchive?.(this.backend) || !this.client.archiveSession) return failure('archive-unavailable', 'Update the Host plugin to archive OpenCode conversations.')
+      await this.client.archiveSession(nativeAcpId(sessionId, this.backend), this.backend)
+      this.applyArchived(sessionId)
+      return success({ archivedSessionIds: [...this.archivedSessionIds] })
+    }
+    return failure('archive-unavailable', `Native session archiving is unavailable for ${this.backendLabel()}.`)
+  }
+
+  private applyArchived(sessionId: string): void {
+    this.archivedSessionIds.add(sessionId)
     for (const [workspaceId, workspace] of this.workspaceById) {
       if (!workspace.sessionIds.includes(sessionId)) continue
       const sessionIds = workspace.sessionIds.filter(id => id !== sessionId)
@@ -380,7 +398,6 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
     this.events.emitRemoteEvent('api-session/removed', [sessionId])
     this.publishWorkspaceBaseline()
-    return success({ archivedSessionIds: [sessionId] })
   }
 
   private async createSession(request: JsonRecord, signal: AbortSignal): Promise<unknown> {
@@ -706,7 +723,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         }
         const existing = this.sessions.get(sessionId)
         if (existing !== undefined) this.applyDiscoveredTitle(existing, item.title)
-        if (!workspace.sessionIds.includes(sessionId)) {
+        if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId)
         }
       }
@@ -763,7 +780,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       : this.workspaceById.get(this.selectedWorkspaceId)
     const allowed = new Set(selected?.sessionIds ?? [...this.sessions.keys()])
     return [...this.sessions.values()]
-      .filter(session => allowed.has(session.sessionId))
+      .filter(session => allowed.has(session.sessionId) && !this.archivedSessionIds.has(session.sessionId))
       .map(session => this.sessionSummary(session, 0))
   }
 
@@ -885,7 +902,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       for (const workspace of this.visibleWorkspaces()) {
         queue.push({ type: 'upsert', workspace: nativeWorkspace(workspace) })
       }
-      queue.push({ type: 'archived', archivedSessionIds: [] })
+      queue.push({ type: 'archived', archivedSessionIds: [...this.archivedSessionIds] })
     }
   }
 

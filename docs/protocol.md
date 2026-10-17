@@ -1218,10 +1218,10 @@ adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.bina
 现有 `harness.api.*` / `harness.remote.*` 和 `codex.app.*` 的线协议、路由与能力不受影响。
 
 业务 RPC 固定为 `agent.acp.call|respond|stream.*|transfer.*`，事件固定为
-`agent.acp.frame|stream.closed`，所有 Client（包括 Web）使用同一独立 ACP 数据面。
+`agent.acp.frame|stream.closed|catalog.changed`，所有 Client（包括 Web）使用同一独立 ACP 数据面。
 `agent.acp.call` 不是通用代理；编译期 allowlist 仅含 `initialize`、`session/new`、`session/load`、
 `session/prompt`、`session/cancel`、以及 Host 扩展 `dsh/directoryList`、`dsh/workspaceList`、
-`dsh/sessionList`、`dsh/sessionHistory`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
+`dsh/sessionList`、`dsh/sessionHistory`、`dsh/sessionArchive`。这些 `dsh/` 名称是 ACP call 内的 Host 扩展，
 不得通过 Harness ApiProxy / Typert 业务端点调用。
 
 `dsh/sessionHistory` 是只读访问：已认证且受信任的同账号连接通过 backend、会话目录 authority
@@ -1229,6 +1229,22 @@ adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.bina
 读取不得取得或转移 live session owner。Pi / Claude / OpenCode 使用独立 history reader，
 不向 live stream 重放历史。`session/load`、Prompt、cancel、模型切换、审批和工具的既有
 归属与权限检查保持不变。
+
+OpenCode 原生归档要求 `agent.acp.opencode.archive.v1`。`dsh/sessionArchive` 的严格参数
+为 `{ backend: "opencode", sessionId: nativeId }`，不接受 Client cwd、URL 或附加 payload。
+Host 以可信 catalog / realpath 和原生返回的 ID/目录确认会话归属，只调用同一 ACP 进程的
+认证 loopback 原生 HTTP GET / PATCH，将 `time.archived` 设为当前时间。原生确认后返回
+`{ backend: "opencode", sessionId: nativeId, archived: true }`，并向当前认证 ACP peers 发布
+`agent.acp.catalog.changed`，data 同响应。事件用于目录更新，不表示 turn 完成，不断线重放。
+原生列表逐项核对归档状态，默认目录隐藏归档项，但保留其可信 cwd 以读取历史；分页遍历后再
+应用 limit。无 Host 归档索引、不写 DSH 持久化、不删除会话，不提供 unarchive 或已归档查询。
+
+加载、Prompt 准备/执行、模型写入、待审批与归档互斥；冲突返回 `ACP_SESSION_BUSY`。
+归档后写操作返回 `ACP_SESSION_ARCHIVED`；只读历史仍不要求 live owner。空闲会话允许其他
+受信任同账号连接归档。原生失败或响应未确认返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，后端
+关闭或替换不能返回迟到成功。Desktop/Android 在成功确认后更新内存，失败保留原状态。
+其他 ACP 后端无此能力，禁止仅移除本地投影并返回归档成功。具体进程隔离与验证边界见
+[OpenCode 原生归档设计](design/acp-session-archive.md)。
 
 Client 侧 `initialize` 由 Gateway 返回 backend-neutral 能力描述，不把 Cursor 私有 method 名暴露为公共面。AGY 的
 `dsh/sessionList` 在指定有效工作目录时可异步预热该目录的一个空闲进程，不等待初始化、

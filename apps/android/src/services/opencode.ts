@@ -38,7 +38,8 @@ export async function loadOpencodeCatalog(client: AgentAcpClient, remembered: Wo
 
 /** Preserve new empty sessions and active turns until OpenCode writes its durable summary. */
 export function mergeOpencodeCatalog(catalog: OpencodeCatalog, workspaces: WorkspaceView[], sessions: RemoteSession[]): OpencodeCatalog {
-  const byId = new Map(sessions.filter(item => item.backend === 'opencode').map(item => [item.sessionId, item]))
+  const catalogIds = new Set(catalog.sessions.map(item => item.sessionId))
+  const byId = new Map(sessions.filter(item => item.backend === 'opencode' && (catalogIds.has(item.sessionId) || item.blank || item.running)).map(item => [item.sessionId, item]))
   for (const session of catalog.sessions) {
     const previous = byId.get(session.sessionId)
     byId.set(session.sessionId, { ...previous, ...session, running: previous?.running ?? false })
@@ -46,7 +47,7 @@ export function mergeOpencodeCatalog(catalog: OpencodeCatalog, workspaces: Works
   const roots = new Map(workspaces.filter(item => item.backend === 'opencode').map(item => [item.workspaceId, item]))
   for (const workspace of catalog.workspaces) {
     const previous = roots.get(workspace.workspaceId)
-    roots.set(workspace.workspaceId, { ...workspace, sessionIds: [...new Set([...workspace.sessionIds, ...(previous?.sessionIds ?? [])])] })
+    roots.set(workspace.workspaceId, { ...workspace, sessionIds: [...new Set([...workspace.sessionIds, ...(previous?.sessionIds ?? []).filter(id => byId.has(id))])] })
   }
   return { workspaces: [...roots.values()], sessions: [...byId.values()] }
 }

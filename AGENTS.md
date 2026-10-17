@@ -452,3 +452,19 @@ Cursor `2026.10.16-e3cb207` 在本机初始化超时，真实 CLI 模型切换�
 client-core 与 protocol 测试及 Android Hermes export 通过。Plugin 并发运行曾出现
 Control 超时及文件监听时序失败，串行全量通过；Metro noble/hashes exports fallback
 警告仍存在。上述检查不等于原生 APK 或跨设备验收。
+
+## OpenCode native archive (2026-10-18)
+
+按用户明确要求，OpenCode 归档直接调用同一个 `opencode acp` 进程自带的认证 loopback
+HTTP API，仅允许经 Host catalog/realpath 验证会话的 GET 与 PATCH `time.archived`。
+这是限定的原生会话元数据写入，不开放通用 HTTP、数据库写入、删除或文件写入 RPC。
+强制 127.0.0.1、临时端口、关闭 mDNS 和每进程随机认证；关闭进程时中止请求。
+独立 capability `agent.acp.opencode.archive.v1`、ACP 扩展 `dsh/sessionArchive` 及目录事件
+`agent.acp.catalog.changed` 只服务 OpenCode。原生确认后客户端更新投影，状态由 OpenCode
+持久保存，不建立 Host 归档索引；其他 ACP 后端不能返回本地伪归档成功。
+归档与加载/Prompt/模型写入/审批互斥，历史读取不抢 owner；不提供恢复归档或已归档列表。
+真实 v1.19.3 隔离临时目录验证了原生确认、跨连接、幂等、重启隐藏及历史读取；Windows、
+APK/真机、跨设备和独立 Remote Web 尚未验收。详细边界见 `docs/design/acp-session-archive.md`。
+本次 Plugin check/build、359 个测试、client-core 41 个测试、Protocol 78 个测试、Android
+check/132 个测试及 Hermes export、DSH bundle 校验通过；Metro 的 noble/hashes exports
+fallback 警告仍存在。

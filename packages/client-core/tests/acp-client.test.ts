@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { ACP_PROMPT_RPC_TIMEOUT_MS, AgentAcpClient } from '../src/acp-client.js'
 
 describe('ACP image transfer', () => {
+  it('requires archive capability and the exact OpenCode confirmation', async () => {
+    const confirmed = { backend: 'opencode', sessionId: 'ses_1', archived: true }
+    const rpc = vi.fn(async () => confirmed)
+    await expect(new AgentAcpClient({ rpc } as never).archiveSession('ses_1', 'opencode')).rejects.toMatchObject({ code: 'OPENCODE_ARCHIVE_UNAVAILABLE' })
+    expect(rpc).not.toHaveBeenCalled()
+    const client = new AgentAcpClient({ rpc } as never, ['agent.acp.opencode.archive.v1'])
+    await expect(client.archiveSession('ses_1', 'opencode')).resolves.toEqual(confirmed)
+    expect(rpc).toHaveBeenCalledWith('agent.acp.call', { method: 'dsh/sessionArchive', params: { sessionId: 'ses_1', backend: 'opencode' } }, undefined, undefined)
+    for (const response of [{ ...confirmed, archived: false }, { ...confirmed, sessionId: 'other' }, {}]) {
+      rpc.mockResolvedValueOnce(response as typeof confirmed)
+      await expect(client.archiveSession('ses_1', 'opencode')).rejects.toMatchObject({ code: 'INVALID_RESPONSE' })
+    }
+    await expect(client.archiveSession('ses_1', 'cursor')).rejects.toMatchObject({ code: 'OPENCODE_ARCHIVE_UNAVAILABLE' })
+  })
   it('preserves PI catalog/history failures instead of returning an empty successful baseline', async () => {
     await runScenarios(['workspaces', 'catalog', 'history'].flatMap(kind => ['transport', 'malformed', 'empty'].map(outcome => ({
       name: `${kind}: ${outcome}`,

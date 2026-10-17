@@ -1,0 +1,87 @@
+import { randomBytes } from 'node:crypto'
+import { createServer } from 'node:net'
+import { realpath } from 'node:fs/promises'
+import { RpcError } from '../../safe-error.js'
+
+const MAX_RESPONSE_BYTES = 64 * 1024
+
+/** The native HTTP listener belongs to the same Host-local `opencode acp` process. */
+export class OpencodeNativeApi {
+  readonly password = randomBytes(32).toString('hex')
+  private readonly shutdown = new AbortController()
+  constructor(private readonly origin: string, private readonly request: typeof fetch = fetch) {
+    if (!/^http:\/\/127\.0\.0\.1:[1-9][0-9]{0,4}$/.test(origin) || Number(new URL(origin).port) > 65535) throw unavailable()
+  }
+
+  async isArchived(sessionId: string, cwd: string): Promise<boolean> {
+    const session = await this.session('GET', sessionId, cwd)
+    return typeof session.time.archived === 'number' && Number.isFinite(session.time.archived)
+  }
+
+  async archive(sessionId: string, cwd: string): Promise<void> {
+    if (await this.isArchived(sessionId, cwd)) return
+    const session = await this.session('PATCH', sessionId, cwd)
+    if (typeof session.time.archived !== 'number' || !Number.isFinite(session.time.archived)) throw unavailable()
+  }
+
+  close(): void { this.shutdown.abort() }
+
+  private async session(method: 'GET' | 'PATCH', sessionId: string, cwd: string): Promise<{ time: { archived?: number } }> {
+    if (!/^[A-Za-z0-9_-]{1,256}$/.test(sessionId)) throw new RpcError('INVALID_MESSAGE', 'The OpenCode session ID is invalid.')
+    try {
+      const url = new URL(`/session/${encodeURIComponent(sessionId)}`, this.origin)
+      url.searchParams.set('directory', cwd)
+      const response = await this.request(url, {
+        method, redirect: 'error', signal: AbortSignal.any([this.shutdown.signal, AbortSignal.timeout(20_000)]),
+        headers: { authorization: `Basic ${Buffer.from(`opencode:${this.password}`).toString('base64')}`, 'content-type': 'application/json' },
+        ...(method === 'PATCH' ? { body: JSON.stringify({ time: { archived: Date.now() } }) } : {}),
+      })
+      if (!response.ok) { await response.body?.cancel(); throw unavailable() }
+      const reader = response.body?.getReader()
+      if (!reader) throw unavailable()
+      const chunks: Uint8Array[] = []
+      let bytes = 0
+      try {
+        for (;;) {
+          const chunk = await reader.read()
+          if (chunk.done) break
+          bytes += chunk.value.byteLength
+          if (bytes > MAX_RESPONSE_BYTES) throw unavailable()
+          chunks.push(chunk.value)
+        }
+      } finally { await reader.cancel().catch(() => undefined) }
+      const result = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      if (!result || result.id !== sessionId || typeof result.directory !== 'string' || !result.time || typeof result.time !== 'object'
+        || await realpath(result.directory) !== cwd) throw unavailable()
+      return result
+    } catch {
+      throw unavailable()
+    }
+  }
+}
+
+export async function opencodeLoopbackPort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', () => resolve()) })
+  const address = server.address()
+  await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  if (!address || typeof address === 'string') throw unavailable()
+  return address.port
+}
+
+/** Explicit flags override user network defaults, including mDNS's public bind. */
+export function opencodePrivateArgs(args: readonly string[], port: number): string[] {
+  if (args.includes('--')) throw unavailable()
+  const kept: string[] = []
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!
+    if (/^--(?:port|hostname|mdns|no-mdns)(?:=|$)/.test(arg)) {
+      if ((arg === '--port' || arg === '--hostname') || (arg === '--mdns' && /^(true|false)$/.test(args[i + 1] ?? ''))) i++
+    } else kept.push(arg)
+  }
+  return [...kept, `--hostname=127.0.0.1`, `--port=${port}`, '--mdns=false']
+}
+
+function unavailable(): RpcError {
+  return new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'OpenCode did not confirm the archive operation. Check the Host OpenCode version and retry after refreshing its session list.')
+}

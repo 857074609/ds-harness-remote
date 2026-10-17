@@ -84,7 +84,33 @@
 
 ---
 
-## 6. Pull Request 提交记录 (PR #128)
+## 6. Android 15 真实模拟器实机截图（Android 15 Emulator Verification）
+
+在 Google APIs Android 15 (API 35, "VanillaIceCream", `x86_64`, Pixel 8) 真实官方模拟器上完整部署运行最新 release APK，分别在全面屏手势导航（Gesture Nav）与传统三键导航（3-Button Nav）下捕获实测界面：
+
+### 实测 1：Android 15 手势导航模式主页沉浸式穿透
+顶部状态栏（时间、信号、电池）完全透明穿透，背景直通屏幕边缘；底部手势小白条与底部文字提示留出自然安全间距，无死板黑边与裁剪。
+
+![Android 15 Gesture Nav Home](./08-emulator-android15-gesture-nav-home.png)
+
+### 实测 2：Android 15 半屏模态框与软键盘（IME/Gboard）联动
+呼出设备修改弹窗并调起系统软键盘（Gboard）：模态框蒙层平滑穿透状态栏（`statusBarTranslucent`），输入框与操作按钮随软键盘升起自适应避让，零遮挡、无双倍内边距（Double Padding）。
+
+![Android 15 Modal & Keyboard](./09-emulator-android15-modal-keyboard-ime.png)
+
+### 实测 3：Android 15 三键导航模式下半屏弹窗统一 Inset 处理
+切换为系统三键导航栏（返回、主页、多任务按键底座）：半屏模态框与三键底栏自然贴齐，证实移除内部多余 `insets.bottom` 后彻底消除 42dp 的冗余留白。
+
+![Android 15 3-Button Modal](./10-emulator-android15-3button-modal.png)
+
+### 实测 4：Android 15 三键导航模式主界面安全避让
+在系统三键底栏下：列表底部内容与提示文案精准避让物理导航底栏，滑动至底部时控件清晰无遮挡。
+
+![Android 15 3-Button Home](./11-emulator-android15-3button-home.png)
+
+---
+
+## 7. Pull Request 提交记录 (PR #128)
 
 - **PR 链接**: [GitHub PR #128](https://github.com/liguobao/ds-harness-remote/pull/128)
 - **目标分支**: `liguobao/ds-harness-remote:main` <- `dreamfarer-space/ds-harness-remote:feat/android-edge-to-edge`

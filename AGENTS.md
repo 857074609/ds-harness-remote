@@ -116,13 +116,17 @@ pnpm --filter @dsh-remote/server build
 
 本地启动、环境变量与 Docker 部署见 `apps/server/README.md` 和 `apps/server/README.zh.md`。Server 设备凭据数据和 `.env` 不得提交。
 
-macOS/Linux 和 Windows 安装/卸载脚本只调用已有 `dsh plugin` 添加/移除 Remote，禁止安装、
-升级或卸载 DSH、Node.js、pnpm，禁止修改 PATH、npm 配置或注册/清理后台服务。普通用户运行。
-脚本支持 `DSH_COMMAND`、`DSH_PROFILE` 和安装版本 `REMOTE_VERSION`，保留已有 `DSH_HOME`。
-Desktop 应通过官方插件管理安装 npm 包 `ds-harness-remote@0.5.10`，或复用 Desktop 官方 `dsh` launcher 管理保留的
-`desktop` profile；普通独立 CLI 默认 `web`。macOS 支持标准 app 目录启动器回退，Windows
-支持官方 HKCU 命令目录回退。找不到已有命令时给出 Desktop 操作说明并失败，不能宣称已安装。
-旧 service/runtime 不自动迁移或删除；token 安装包装脚本已停用。Windows 真机安装回归仍待完成。
+安装相关入口仅保留 `scripts/install.sh`（macOS/Linux）。不提供 Windows、独立卸载或 Token 包装脚本；
+构建/测试辅助脚本不在此清理范围内。按用户本轮明确授权，Linux 要求 root，缺少 DSH 时允许安装配套
+Node.js、DSH 和私有 pnpm，支持一次性 Host 注册 Token，并配置、启用和启动 systemd 系统服务，无需 linger。
+系统服务以 root 运行时必须明确提示其 Host/终端具有 root 权限。只操作归属匹配的安装器管理服务，不接管其他
+DSH_HOME 或未知旧服务。已有 DSH 复用而不自动升级；不修改系统 Node.js、全局 PATH 或 npm 配置。
+macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已有 CLI；两者都没有才报错，不安装 Desktop/DSH/Node.js
+或创建后台服务。支持 `DSH_COMMAND`、`DSH_PROFILE`、`REMOTE_VERSION`，保留已有 `DSH_HOME`；独立 CLI 默认 `web`，
+Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
+不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
+卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
+凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.10`。
 
 ## Validation Baseline
 

@@ -79,16 +79,15 @@ Restart DeepSeek Harness after installation.
 For CLI installation, use `dsh plugin` to install the npm package into the selected profile
 and add its bundle configuration layer.
 
-### Plugin installation scripts
+### Plugin installer
 
-The scripts use your existing Harness command to install or update only Remote.
-Run as your normal user. They preserve your DSH installation and do not create a service.
+The sole installer is `scripts/install.sh`:
 
-macOS / Linux:
+- **Linux:** requires root; reuses an existing DSH or bootstraps private Node.js/DSH, accepts a one-time Host registration token, and enables/starts a systemd system service. The Host and remote tools run as **root**; grant access only to trusted accounts.
+- **macOS:** run as a normal user; reuses Desktop's official launcher or an existing CLI, without installing DSH or creating services.
+- Windows users use official Plugin management or existing Harness commands; no Windows installer is provided.
 
-```sh
-curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
-```
+See the [installation guide](docs/installation.md) for private token input, updates, service controls and validation limits. Repository changes do not automatically deploy the hosted installer.
 
 ### Android client
 

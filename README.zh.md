@@ -81,14 +81,13 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.10
 
 ### 插件安装脚本
 
-脚本使用已有 Harness 命令，只安装或更新 Remote。使用普通用户运行，保留用户的 DSH
-安装，不创建后台服务。
+安装入口只保留 `scripts/install.sh`：
 
-macOS / Linux：
+- **Linux：**要求 root，复用已有 DSH，缺少时安装私有 Node.js/DSH；支持一次性 Host Token 注册，并启用、启动 systemd 系统服务。Host 和远程工具以 **root** 运行，仅向可信账号开放。
+- **macOS：**普通用户运行，复用 Desktop 官方启动器或已有 CLI，不安装 DSH、不创建服务。
+- Windows 使用官方插件管理或已有 Harness 命令，不再提供安装脚本。
 
-```sh
-curl -fsSL https://dsh.r2049.cn/app/install.sh | bash
-```
+隐藏输入 Token、更新、服务管理和验证边界见[安装指南](docs/installation.zh.md)。仓库修改不会自动部署到线上安装入口。
 
 ### Android 客户端
 

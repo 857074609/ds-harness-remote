@@ -96,7 +96,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 ## P0：Plugin 可用链路
 
-- [ ] Windows 插件安装/卸载实机回归：复用已有 CLI 与 Desktop 官方 launcher、desktop/web profile 选择、失败提示和保留已有 DSH/运行环境；旧服务安装器已停用
+- [ ] 单一安装入口实机回归：Linux root 干净 x64/arm64 上的 Node.js/DSH 引导、真实一次性 Token 注册、systemd 系统服务立即启动/重启自启及客户端在线确认；macOS 已有 CLI/Desktop launcher、desktop/web profile 选择和注册回归。模拟下载/systemctl 与回环 API 烟测不等于目标机验收；Windows 使用官方插件管理或命令，不维护专用脚本。
 
 - [x] 在真实 dsh-desktop 中验证 GitHub 安装、重启、Host/Client 配置和 Bundle 入口
 - [x] 在真实 dsh-TUI alpha.2 profile 中验证 `/remote` 补全、GitHub/知乎扫码、上线与跨机 Session/Prompt/approval

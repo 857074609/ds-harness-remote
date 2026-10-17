@@ -3,6 +3,12 @@
 - Fixes RC.1 Desktop web boot against older Harness Hosts whose `ui-theme` settings omit the new font fields. Remote supplies missing display defaults in received settings views while preserving Host schemas, revisions and write refusals.
 - 修复 RC.1 Desktop 连接旧 Harness Host 时，`ui-theme` 缺少新字体字段导致主题初始化失败、界面模块无法激活的问题。Remote 仅为接收到的设置视图补齐显示默认值，保留 Host schema、revision 和写入拒绝结果。
 
+- Restores full Linux installation in the sole installer: requires root, bootstraps private Node.js/DSH/pnpm when DSH is missing, accepts one-time Host registration tokens and enables/starts a root systemd system service. Existing DSH is reused; unit ownership and Web capability are preflighted before token redemption. Real clean-server/reboot acceptance remains pending.
+- 单一安装器恢复 Linux 完整安装：要求 root，缺少 DSH 时安装私有 Node.js/DSH/pnpm，支持一次性 Host Token 注册并启用、启动 root systemd 系统服务；复用已有 DSH，兑换 Token 前检查服务归属与 Web 能力。真实干净服务器和重启验收仍待完成。
+
+- Keeps only the macOS/Linux installation entry, removes Windows installation/check scripts and separate uninstall/token wrappers, and directs removal to official Plugin management or CLI commands. Build/test utilities are unchanged.
+- 安装相关脚本仅保留 macOS/Linux 单一入口，移除 Windows 安装/检查脚本及独立卸载、Token 包装入口；卸载统一使用官方插件管理或命令，构建/测试辅助脚本不变。
+
 ## 0.5.10 - 2026-10-17
 
 - Unifies all first-party package versions at `0.5.10`, including Plugin, Android, VS Code, Browser, Server and shared packages; Android `versionCode` and Expo iOS `buildNumber` are both `48`.

@@ -417,3 +417,9 @@ attach 双向流，按 Host ack 确认，保留有界队列、设备归属与断
 RC.1 官方 Gateway/Peer 与核心终端回归、全仓 check/test、生产 build/Hermes 和 DSH bundle
 校验通过；Plugin 最终 52 文件/349 测试。跨设备、Desktop UI、Android
 APK/原生真机与独立 Remote Web 尚未验收，详见 docs/compatibility.zh.md 与 docs/TODO.md。
+
+2026-10-17 启动兼容修复（未发布）：`RemoteTypertGateway` 为旧 Host 返回的 `ui-theme`
+视图补齐 RC.1 所需的缺失字体默认值，避免官方 ThemeRuntime 在 `undefined.split` 处初始化
+失败并阻塞界面。只处理 describe 和成功写入返回值；不修改 Host schema、revision、用户
+配置或拒绝结果。已用安装版官方 RC.1 bundle 复现并验证初始化修复，Plugin check/build、
+20 个相关 Gateway 测试与 bundle 校验通过；未增加纯展示测试，真实跨设备恢复仍待验收。

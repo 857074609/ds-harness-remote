@@ -16,6 +16,8 @@ RC.1 原生终端的 `terminal/attach` 双向流在本地转换为既有 Remote 
 
 验证覆盖 RC.1 npm 实现的真实 Gateway/Peer 隔离、核心终端状态转换、全仓类型检查、自动化测试、生产构建（含 Android Hermes 导出）与 DSH bundle 校验。Desktop UI、Android APK/原生真机、独立 Remote Web 和加密跨设备 E2E 尚待验收。
 
+2026-10-17 启动兼容补充（未发布）：RC.1 主题模块会直接读取新增字体字段，旧 `0.2.0-rc.2` Host 的合法 `ui-theme` 配置缺少这些字段时，会在主题初始化抛出 `undefined.split` 并阻塞依赖模块。Remote 在设置读取及成功写入的返回视图中补齐缺失显示默认值，不修改 Host schema、revision、持久化配置或写入授权。旧 Host 不支持的新字体设置仍可能被其拒绝。已用本机安装的官方 RC.1 主题 bundle 复现异常并验证修复后的初始化、旧 schema 校验与返回结果保真；Plugin check/build、相关 20 个 Gateway 测试和 bundle 校验通过，真实跨设备启动恢复尚未验收。
+
 ## 历史实现记录（不代表当前维护承诺）
 
 **破坏性更新声明：** Plugin `0.4.1` 已移除早期实验性的 Remote 业务 RPC

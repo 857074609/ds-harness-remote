@@ -16,6 +16,8 @@ The native RC.1 `terminal/attach` duplex stream is translated locally to the exi
 
 Validation covers the actual RC.1 npm Gateway/Peer implementation, core terminal state transitions, workspace type checks, automated tests, production builds (including Android Hermes export) and DSH bundle verification. Desktop UI, Android APK/device, independent Remote Web and encrypted cross-device E2E acceptance remain pending.
 
+2026-10-17 boot compatibility fix (unreleased): the RC.1 theme reads new font fields directly. A valid `ui-theme` section from a `0.2.0-rc.2` Host lacks those fields, causing `undefined.split` during theme initialization and blocking dependent modules. Remote fills absent display defaults in settings reads and successful write responses, preserving Host schemas, revisions, persistence and write authorization. The older Host may still reject unsupported new font settings. The installed official RC.1 theme bundle reproduced the failure and passed initialization with the corrected view, including validation against the old schema and response preservation checks. Plugin check/build, 20 related Gateway tests and bundle verification passed; actual cross-device boot recovery remains unverified.
+
 ## Historical implementation (not current maintenance targets)
 
 **Breaking change notice:** Plugin `0.4.1` removes the earlier experimental

@@ -1,3 +1,8 @@
+## Unreleased
+
+- Fixes RC.1 Desktop web boot against older Harness Hosts whose `ui-theme` settings omit the new font fields. Remote supplies missing display defaults in received settings views while preserving Host schemas, revisions and write refusals.
+- 修复 RC.1 Desktop 连接旧 Harness Host 时，`ui-theme` 缺少新字体字段导致主题初始化失败、界面模块无法激活的问题。Remote 仅为接收到的设置视图补齐显示默认值，保留 Host schema、revision 和写入拒绝结果。
+
 ## 0.5.10 - 2026-10-17
 
 - Unifies all first-party package versions at `0.5.10`, including Plugin, Android, VS Code, Browser, Server and shared packages; Android `versionCode` and Expo iOS `buildNumber` are both `48`.

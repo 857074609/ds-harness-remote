@@ -26679,7 +26679,7 @@ var RemoteTypertGateway2 = class {
         response = await this.callTransferred(encoded, signal);
       }
     }
-    const result = parseRpcResult(response);
+    const result = normalizeThemeSettingsResult(endpoint, parseRpcResult(response));
     const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result);
     if (settingsResult !== void 0) return settingsResult;
     if (result.ok) {
@@ -26936,6 +26936,36 @@ function patchWelcomeDescribe2(value) {
 function normalizeProjectionResult(endpoint, value) {
   if (endpoint !== "session/projections" || !isRecord9(value) || value.kind !== void 0) return value;
   return Number.isSafeInteger(value.asOfSeq) && isRecord9(value.values) ? { ...value, kind: "sequenced" } : value;
+}
+function normalizeThemeSettingsResult(endpoint, result) {
+  if (!result.ok || !isRecord9(result.value)) return result;
+  const value = result.value;
+  if (endpoint === "settings/describe" && Array.isArray(value.namespaces)) {
+    const original = value.namespaces;
+    const namespaces = original.map(normalizeThemeNamespace);
+    return namespaces.some((row, index) => row !== original[index]) ? { ...result, value: { ...value, namespaces } } : result;
+  }
+  if (["settings/update", "settings/replace", "settings/mutate"].includes(endpoint) && value.ok === true) {
+    const namespace = normalizeThemeNamespace(value.value);
+    if (namespace !== value.value) return { ...result, value: { ...value, value: namespace } };
+  }
+  return result;
+}
+function normalizeThemeNamespace(namespace) {
+  if (!isRecord9(namespace) || namespace.ns !== "ui-theme" || !isRecord9(namespace.value)) return namespace;
+  const section = namespace.value;
+  const defaults = {
+    codeFontSize: 11,
+    terminalFontSize: 13,
+    textFontFamily: "",
+    codeFontFamily: "",
+    terminalFontFamily: ""
+  };
+  const missing = Object.entries(defaults).filter(([field]) => section[field] === void 0);
+  return missing.length === 0 ? namespace : {
+    ...namespace,
+    value: { ...section, ...Object.fromEntries(missing) }
+  };
 }
 
 // src/server-api.ts

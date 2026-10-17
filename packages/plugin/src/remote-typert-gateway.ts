@@ -64,7 +64,7 @@ export class RemoteTypertGateway implements RemoteTypertGatewayTarget {
         response = await this.callTransferred(encoded, signal)
       }
     }
-    const result = parseRpcResult(response)
+    const result = normalizeThemeSettingsResult(endpoint, parseRpcResult(response))
     const settingsResult = this.normalizeLegacyWelcomeSettings(endpoint, payload, result)
     if (settingsResult !== undefined) return settingsResult
     if (result.ok) {
@@ -372,4 +372,44 @@ function patchWelcomeDescribe(value: Record<string, unknown>): Record<string, un
 function normalizeProjectionResult(endpoint: string, value: unknown): unknown {
   if (endpoint !== 'session/projections' || !isRecord(value) || value.kind !== undefined) return value
   return Number.isSafeInteger(value.asOfSeq) && isRecord(value.values) ? { ...value, kind: 'sequenced' } : value
+}
+
+/**
+ * RC.1's ThemeRuntime reads the new font fields before providing `theme`.
+ * A 0.2.0 Host's valid theme section lacks them and otherwise crashes web boot.
+ * Supply only absent display defaults in the received view; keep the Host's
+ * schema, revision, write results and persisted settings authoritative.
+ */
+function normalizeThemeSettingsResult(endpoint: string, result: TypertRpcResult): TypertRpcResult {
+  if (!result.ok || !isRecord(result.value)) return result
+  const value = result.value
+  if (endpoint === 'settings/describe' && Array.isArray(value.namespaces)) {
+    const original = value.namespaces
+    const namespaces = original.map(normalizeThemeNamespace)
+    return namespaces.some((row, index) => row !== original[index])
+      ? { ...result, value: { ...value, namespaces } }
+      : result
+  }
+  if (['settings/update', 'settings/replace', 'settings/mutate'].includes(endpoint) && value.ok === true) {
+    const namespace = normalizeThemeNamespace(value.value)
+    if (namespace !== value.value) return { ...result, value: { ...value, value: namespace } }
+  }
+  return result
+}
+
+function normalizeThemeNamespace(namespace: unknown): unknown {
+  if (!isRecord(namespace) || namespace.ns !== 'ui-theme' || !isRecord(namespace.value)) return namespace
+  const section = namespace.value
+  const defaults: Record<string, string | number> = {
+    codeFontSize: 11,
+    terminalFontSize: 13,
+    textFontFamily: '',
+    codeFontFamily: '',
+    terminalFontFamily: '',
+  }
+  const missing = Object.entries(defaults).filter(([field]) => section[field] === undefined)
+  return missing.length === 0 ? namespace : {
+    ...namespace,
+    value: { ...section, ...Object.fromEntries(missing) },
+  }
 }

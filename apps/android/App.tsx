@@ -278,7 +278,7 @@ function AppNavigator() {
 
   return (
     <View style={styles.flex}>
-      {error !== undefined && route.name !== 'connecting' && <ErrorBanner message={error} onDismiss={clearError} />}
+      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && <ErrorBanner message={error} onDismiss={clearError} />}
       {route.name === 'server' && <ServerSetupScreen onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
       {route.name === 'devices' && (
         <DevicesScreen

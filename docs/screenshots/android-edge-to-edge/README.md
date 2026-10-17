@@ -116,3 +116,29 @@
 - **目标分支**: `liguobao/ds-harness-remote:main` <- `dreamfarer-space/ds-harness-remote:feat/android-edge-to-edge`
 
 ![GitHub PR #128 Submission](./github-pr-128-submission.png)
+
+---
+
+## 8. Android 15 官方虚拟机原生 ActionBar 消除与毛玻璃会话流实测（Frosted Blur & Chat Session）
+
+针对 Reviewer 与用户重点关注的“顶部透明毛玻璃背景（Frosted Translucent BlurView）恢复”与“会话流真实界面表现”，在运行中的 Android 15 (API 35) Pixel 8 官方模拟器上捕获了修复后的完整实机截图：
+
+### 实测 1：原生 ActionBar 彻底消除与首页毛玻璃穿透
+恢复 `MainActivity.kt` 中的 `setTheme(R.style.AppTheme)` 并禁用 `windowActionBar`，彻底消除了 AppCompat 注入的灰色顶栏。状态栏（时间、信号、电池）完全穿透 React Native 的 `BlurHeaderFrame`。
+
+![Android 15 Home Edge-to-Edge](./01-real-android15-home-edge-to-edge.png)
+
+### 实测 2：会话流（ChatScreen）界面全景
+顶部沉浸式 `TopBar` 承载汉堡抽屉、会话标题、工具箱与新建按钮；中段呈现 Assistant 消息卡片、多级列表、User 气泡与操作项；底部圆角 Composer 卡片随手势横条保持安全避让。
+
+![Android 15 Chat Session Overview](./02-real-android15-chat-session-overview.png)
+
+### 实测 3：聊天消息向上滚动毛玻璃穿透（Scroll Penetration）
+消息流向上滑动时，消息卡片文字滑入顶部 `TopBar` 与系统状态栏后方，呈现半透明高斯模糊（`expo-blur` / `dimezisBlurViewSdk31Plus`）掠过效果。
+
+![Android 15 Chat Scroll Penetration](./03-real-android15-chat-scroll-penetration.png)
+
+### 实测 4：会话内软键盘联动与 IME Insets 贴合
+在聊天输入框内呼出系统软键盘（Google Gboard）后，输入框卡片紧密贴合软键盘顶边，零黑条、零双倍内边距，顶部状态栏与聊天消息依然保持通透。
+
+![Android 15 Chat Keyboard IME](./04-real-android15-chat-keyboard-ime.png)

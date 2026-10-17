@@ -1,4 +1,14 @@
-## Unreleased
+## 0.5.11 - 2026-10-18
+
+- Unifies all first-party package/client versions at `0.5.11`; Android `versionCode` and Expo iOS `buildNumber` are both `49`.
+- 本仓库各自有包与客户端版本统一为 `0.5.11`；Android `versionCode` 与 Expo iOS `buildNumber` 均为 `49`。
+- Improves Android reply visibility and current-work navigation, adds conversation information, and removes cloud Host image packaging from this repository.
+- 改进 Android 回复展示与当前工作导航，新增会话信息，并移除本仓库的云主机镜像打包入口。
+- Thanks @sugershun for the Windows Desktop/Android compatibility report and version-pinned reinstall confirmation (#129). Continuing thanks to @pengyz (#115), @dreamfarer-space (#118, #126, #128) and @luojiyin1987 (#121, #123) for the earlier contributions this release builds on; these are not new 0.5.11 code contributions.
+- 感谢 @sugershun 在 #129 中反馈 Windows Desktop/Android 兼容问题并确认指定版本重装有效；也感谢 @pengyz（#115）、@dreamfarer-space（#118、#126、#128）和 @luojiyin1987（#121、#123）此前贡献的代码、测试与文档，它们是本版持续改进的基础，并非本版新增代码贡献。
+
+- Fixes the installer on macOS's system Bash 3.2, rejects unknown ACP model-selection session IDs, prioritizes exact model IDs and rejects ambiguous aliases, and preserves OpenCode history errors so failed reads can be retried instead of appearing empty.
+- 修复安装器在 macOS 系统 Bash 3.2 下的语法错误；ACP 模型切换拒绝未知会话，模型 ID 优先精确匹配并拒绝有歧义的别名；OpenCode 历史读取失败保留错误供重试，不再显示为成功的空历史。
 
 - Fixes OpenCode Files/Terminal requests and file change subscriptions rejected by an incorrect Cursor tool scope; backend and session scope checks remain strict.
 - 修复 OpenCode Files/Terminal 请求和文件变化订阅被误按 Cursor 作用域拒绝的问题，保留严格的后端及会话隔离。
@@ -26,6 +36,9 @@
 
 - Keeps only the macOS/Linux installation entry, removes Windows installation/check scripts and separate uninstall/token wrappers, and directs removal to official Plugin management or CLI commands. Build/test utilities are unchanged.
 - 安装相关脚本仅保留 macOS/Linux 单一入口，移除 Windows 安装/检查脚本及独立卸载、Token 包装入口；卸载统一使用官方插件管理或命令，构建/测试辅助脚本不变。
+
+- Validation: workspace check, 683 tests in 101 files, production build including Android Hermes export, DSH bundle validation and npm package-entry checks pass. Bash 3.2/modern Bash installer file/pipe smoke checks pass. Windows, native APK/device, encrypted cross-device and clean-server/reboot acceptance remain pending; the Metro noble/hashes exports fallback warning remains.
+- 验证：全仓 check、101 个文件 / 683 个测试、含 Android Hermes 导出的生产 build、DSH bundle 与 npm 打包入口检查通过；Bash 3.2/新版 Bash 安装器文件和管道执行烟测通过。Windows、原生 APK/真机、加密跨设备及干净服务器/重启自启验收仍待完成；Metro noble/hashes exports fallback 警告保留。
 
 ## 0.5.10 - 2026-10-17
 

@@ -252,22 +252,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }))
         }
         case 'session/models': {
-          const rawId = extractSessionId(requestArg(args))
-          const resolvedId = this.resolveSessionId(rawId)
-          if (resolvedId) {
-            try {
-              return business(success(await this.hostSessionModels(resolvedId)))
-            } catch {
-              return business(failure('model-unavailable', 'The Host model catalog is unavailable.'))
-            }
+          const sessionId = this.resolveSessionId(extractSessionId(requestArg(args)))
+          try {
+            return business(success(await this.hostSessionModels(sessionId)))
+          } catch {
+            return business(failure('model-unavailable', 'The Host model catalog is unavailable.'))
           }
-          const catalog = modelCatalog(this.backend)
-          return business(success({
-            current: this.modelSelection(resolvedId || rawId),
-            routable: false,
-            groups: catalog.groups,
-            failures: [],
-          }))
         }
         case 'session/selectModel': return business(await this.selectModel(requestArg(args)))
         case 'session/initializeDefaultModel': return business(success(undefined))
@@ -555,9 +545,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend)
       } catch (error) {
-        // A failed Pi read is not a successful empty baseline; do not continue
+        // A failed history read is not a successful empty baseline; do not continue
         // a restored conversation until its authoritative history is available.
-        if (this.backend === 'pi' || this.backend === 'claude') throw error
+        if (this.backend === 'pi' || this.backend === 'claude' || this.backend === 'opencode') throw error
         // Preserve legacy AGY history availability behavior.
       }
     }
@@ -819,32 +809,15 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     }
   }
 
-  private resolveSessionId(rawId?: string): string {
-    if (!rawId) {
-      return this.preferredSessionIdSync() ?? ''
-    }
-    const prefix = sessionPrefix(this.backend)
-    if (rawId.startsWith(prefix) && this.sessions.has(rawId)) {
-      return rawId
-    }
+  private resolveSessionId(rawId: string): string {
     if (this.sessions.has(rawId)) {
       return rawId
     }
-    const prefixed = `${prefix}${rawId}`
+    const prefixed = `${sessionPrefix(this.backend)}${rawId}`
     if (this.sessions.has(prefixed)) {
       return prefixed
     }
-    for (const [id] of this.sessions) {
-      if (id.endsWith(rawId)) return id
-    }
-    return this.preferredSessionIdSync() ?? rawId
-  }
-
-  private preferredSessionIdSync(): string | undefined {
-    const selected = this.selectedWorkspaceId === undefined
-      ? undefined
-      : this.workspaceById.get(this.selectedWorkspaceId)
-    return selected?.sessionIds[0] ?? [...this.sessions.keys()][0]
+    throw Object.assign(new Error('The Session was not found.'), { code: 'session-not-found' })
   }
 
   private modelSelection(sessionId: string): AcpModelSelection {
@@ -881,12 +854,11 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     const reasoningEffort = string(request.reasoningEffort)
     const catalog = await this.hostSessionModels(sessionId)
     const group = catalog.groups.find(g => g.id === provider || g.id.toLowerCase() === provider.toLowerCase())
-    const targetModel = group?.models.find(m => {
-      if (m.id === model) return true
-      if (m.id.endsWith(`/${model}`)) return true
-      if (model.endsWith(`/${m.id}`)) return true
-      return false
-    })
+    let targetModel = group?.models.find(item => item.id === model)
+    if (targetModel === undefined) {
+      const aliases = group?.models.filter(item => item.id.endsWith(`/${model}`) || model.endsWith(`/${item.id}`))
+      if (aliases?.length === 1) targetModel = aliases[0]
+    }
     if (group === undefined || targetModel === undefined) {
       return failure('model-unavailable', `The selected ${this.backend} model is unavailable on this Host.`)
     }

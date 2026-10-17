@@ -29,6 +29,101 @@ function fakeAcp() {
 }
 
 describe('AcpVirtualHarness', () => {
+  it('requires exact registered session identities for model reads and changes', async () => {
+    await runScenarios([
+      { id: 'opencode:remote-history', nativeId: 'remote-history' },
+      { id: 'other-history', nativeId: 'other-history' },
+      { id: 'history' },
+      { id: 'opencode:missing' },
+      { id: 'claude:remote-history' },
+    ].map(scenario => ({ name: scenario.id, run: async () => {
+      const current = { provider: 'opencode', model: 'host/a' }
+      const selected = { provider: 'opencode', model: 'host/b' }
+      const client = { ...fakeAcp(),
+        listSessions: vi.fn(async () => ['remote-history', 'other-history'].map(conversationId => ({ conversationId, title: conversationId, createdAt: 1, updatedAt: 2 }))),
+        sessionModels: vi.fn(async () => ({ current, routable: true, failures: [],
+          groups: [{ id: 'opencode', name: 'OpenCode', models: [{ id: 'host/a', name: 'A' }, { id: 'host/b', name: 'B' }] }] })),
+        selectModel: vi.fn(async () => selected),
+      }
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+      const signal = new AbortController().signal
+      try {
+        await target.selectOrCreateWorkspace('/test')
+        const request = { sessionId: scenario.id, ...selected }
+        const models = await target.dispatch('session/models', { args: { request } }, signal)
+        const selection = await target.dispatch('session/selectModel', { args: { request } }, signal)
+        if (scenario.nativeId) {
+          expect(models).toMatchObject({ ok: true, value: { current } })
+          expect(selection).toMatchObject({ ok: true, value: { selected } })
+          expect(client.sessionModels).toHaveBeenCalledWith(scenario.nativeId, 'opencode')
+          expect(client.selectModel).toHaveBeenCalledTimes(1)
+          expect(client.selectModel).toHaveBeenCalledWith(scenario.nativeId, 'opencode', selected)
+        } else {
+          expect(models).toMatchObject({ ok: false, error: { code: 'session-not-found' } })
+          expect(selection).toMatchObject({ ok: false, error: { code: 'session-not-found' } })
+          expect(client.sessionModels).not.toHaveBeenCalled()
+          expect(client.selectModel).not.toHaveBeenCalled()
+        }
+      } finally { await target.close() }
+    } })))
+  })
+
+  it('prefers exact model IDs and rejects ambiguous aliases before upstream mutation', async () => {
+    await runScenarios([
+      { model: 'openrouter/anthropic/sonnet', expected: 'openrouter/anthropic/sonnet' },
+      { model: 'anthropic/sonnet', expected: 'anthropic/sonnet' },
+      { model: 'haiku', expected: 'vendor/haiku' },
+      { model: 'router/vendor/haiku', expected: 'vendor/haiku' },
+      { model: 'sonnet' },
+      { model: 'router/openrouter/anthropic/sonnet' },
+      { model: 'missing' },
+    ].map(scenario => ({ name: scenario.model, run: async () => {
+      const client = { ...fakeAcp(),
+        sessionModels: vi.fn(async () => ({ current: { provider: 'opencode', model: 'anthropic/sonnet' }, routable: true, failures: [],
+          groups: [{ id: 'opencode', name: 'OpenCode', models: ['anthropic/sonnet', 'openrouter/anthropic/sonnet', 'vendor/haiku'].map(id => ({ id, name: id })) }] })),
+        selectModel: vi.fn(async (_id: string, _backend: string, selection: { provider: string; model: string }) => selection),
+      }
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+      const signal = new AbortController().signal
+      try {
+        const workspace = await target.selectOrCreateWorkspace('/test')
+        const request = { sessionId: workspace.sessionIds[0]!, provider: 'opencode', model: scenario.model }
+        const result = await target.dispatch('session/selectModel', { args: { request } }, signal)
+        if (scenario.expected) {
+          const selected = { provider: 'opencode', model: scenario.expected }
+          expect(result).toMatchObject({ ok: true, value: { selected } })
+          expect(client.selectModel).toHaveBeenCalledTimes(1)
+          expect(client.selectModel).toHaveBeenCalledWith('remote-history', 'opencode', selected)
+          expect(await target.dispatch('session/projections', { args: { request } }, signal)).toMatchObject({ ok: true,
+            value: { values: { modelSelection: { next: selected } } } })
+        } else {
+          expect(result).toMatchObject({ ok: false, error: { code: 'model-unavailable' } })
+          expect(client.selectModel).not.toHaveBeenCalled()
+        }
+      } finally { await target.close() }
+    } })))
+  })
+
+  it('preserves authoritative history failures and permits recovery after retry', async () => {
+    await runScenarios((['pi', 'claude', 'opencode'] as const).map(backend => ({ name: backend, run: async () => {
+      const client = { ...fakeAcp(), loadSessionHistory: vi.fn(async () => [] as unknown[]) }
+      const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, backend)
+      const signal = new AbortController().signal
+      try {
+        const workspace = await target.selectOrCreateWorkspace('/test')
+        const request = { sessionId: workspace.sessionIds[0]! }
+        for (const endpoint of ['session/history', 'session/page']) {
+          client.loadSessionHistory.mockRejectedValueOnce(Object.assign(new Error('History reader is busy'), { code: 'ACP_HISTORY_BUSY' }))
+          expect(await target.dispatch(endpoint, { args: { request } }, signal)).toMatchObject({ ok: false, error: { code: 'ACP_HISTORY_BUSY' } })
+          expect(await target.dispatch(endpoint, { args: { request } }, signal)).toMatchObject({ ok: true, value: { records: [] } })
+        }
+        const events = [{ type: 'event', event: { type: 'user/message', seq: 0, time: 1, data: { content: [{ type: 'text', text: 'Saved prompt' }] } } }]
+        client.loadSessionHistory.mockResolvedValueOnce(events)
+        expect(await target.dispatch('session/history', { args: { request } }, signal)).toMatchObject({ ok: true, value: { records: events } })
+      } finally { await target.close() }
+    } })))
+  })
+
   it('commits ACP model projections only after Host confirmation and fails closed on discovery errors', async () => {
     await runScenarios((['cursor', 'claude', 'pi', 'opencode', 'antigravity'] as const).map(backend => ({ name: backend, run: async () => {
       const current = { provider: backend, model: 'host/a' }

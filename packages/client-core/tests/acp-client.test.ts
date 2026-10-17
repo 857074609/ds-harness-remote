@@ -17,22 +17,27 @@ describe('ACP image transfer', () => {
     }
     await expect(client.archiveSession('ses_1', 'cursor')).rejects.toMatchObject({ code: 'OPENCODE_ARCHIVE_UNAVAILABLE' })
   })
-  it('preserves PI catalog/history failures instead of returning an empty successful baseline', async () => {
-    await runScenarios(['workspaces', 'catalog', 'history'].flatMap(kind => ['transport', 'malformed', 'empty'].map(outcome => ({
-      name: `${kind}: ${outcome}`,
+  it('preserves authoritative ACP catalog/history failures instead of returning an empty successful baseline', async () => {
+    const reads = [
+      { backend: 'pi', kind: 'workspaces' }, { backend: 'pi', kind: 'catalog' },
+      ...['pi', 'claude', 'opencode'].map(backend => ({ backend, kind: 'history' })),
+    ]
+    await runScenarios(reads.flatMap(({ backend, kind }) => ['transport', 'malformed', 'empty', ...(kind === 'history' ? ['busy', 'oversized'] : [])].map(outcome => ({
+      name: `${backend} ${kind}: ${outcome}`,
       run: async () => {
+        const errorCode = outcome === 'busy' ? 'OPENCODE_HISTORY_BUSY' : outcome === 'oversized' ? 'ACP_HISTORY_TOO_LARGE' : 'DISCONNECTED'
         const rpc = vi.fn(async (method: string) => {
           if ((kind !== 'history' && method === 'agent.acp.call') || method === 'agent.acp.transfer.commit') {
-            if (outcome === 'transport') throw Object.assign(new Error('Disconnected'), { code: 'DISCONNECTED' })
+            if (['transport', 'busy', 'oversized'].includes(outcome)) throw Object.assign(new Error('History unavailable'), { code: errorCode })
             const response = outcome === 'empty' ? kind === 'workspaces' ? [] : kind === 'catalog' ? { items: [] } : { events: [] } : { unexpected: [] }
             return kind !== 'history' ? response : { kind: 'inline', response }
           }
           return {}
         })
         const client = new AgentAcpClient({ rpc } as never)
-        const read = kind === 'workspaces' ? client.listWorkspaces('pi') : kind === 'catalog' ? client.listSessions('/project', 'pi') : client.loadSessionHistory('pi:saved', 'pi')
+        const read = kind === 'workspaces' ? client.listWorkspaces(backend) : kind === 'catalog' ? client.listSessions('/project', backend) : client.loadSessionHistory('saved', backend)
         if (outcome === 'empty') await expect(read).resolves.toEqual([])
-        else await expect(read).rejects.toMatchObject({ code: outcome === 'transport' ? 'DISCONNECTED' : 'INVALID_RESPONSE' })
+        else await expect(read).rejects.toMatchObject({ code: outcome === 'malformed' ? 'INVALID_RESPONSE' : errorCode })
         if (kind === 'history') expect(rpc.mock.calls.at(-1)?.[0]).toBe('agent.acp.transfer.close')
       },
     }))))

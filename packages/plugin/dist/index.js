@@ -10770,11 +10770,11 @@ var AgentAcpClient = class {
       sessionId,
       ...backend === void 0 ? {} : { backend }
     }, signal).catch((error) => {
-      if (backend === "pi" || backend === "claude")
+      if (backend === "pi" || backend === "claude" || backend === "opencode")
         throw error;
       return { events: [] };
     });
-    if ((backend === "pi" || backend === "claude") && (!isRecord2(result) || !Array.isArray(result.events))) {
+    if ((backend === "pi" || backend === "claude" || backend === "opencode") && (!isRecord2(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError("INVALID_RESPONSE", "ACP session history is invalid.");
     }
     return isRecord2(result) && Array.isArray(result.events) ? result.events : [];
@@ -12347,22 +12347,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
           return business(success({ default: models.current, routableProviders: models.routable ? [models.current.provider] : [], groups: models.groups, failures: models.failures }));
         }
         case "session/models": {
-          const rawId = extractSessionId(requestArg(args));
-          const resolvedId = this.resolveSessionId(rawId);
-          if (resolvedId) {
-            try {
-              return business(success(await this.hostSessionModels(resolvedId)));
-            } catch {
-              return business(failure("model-unavailable", "The Host model catalog is unavailable."));
-            }
+          const sessionId = this.resolveSessionId(extractSessionId(requestArg(args)));
+          try {
+            return business(success(await this.hostSessionModels(sessionId)));
+          } catch {
+            return business(failure("model-unavailable", "The Host model catalog is unavailable."));
           }
-          const catalog = modelCatalog(this.backend);
-          return business(success({
-            current: this.modelSelection(resolvedId || rawId),
-            routable: false,
-            groups: catalog.groups,
-            failures: []
-          }));
         }
         case "session/selectModel":
           return business(await this.selectModel(requestArg(args)));
@@ -12644,7 +12634,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       try {
         events = await this.client.loadSessionHistory(session.sessionId, this.backend);
       } catch (error) {
-        if (this.backend === "pi" || this.backend === "claude") throw error;
+        if (this.backend === "pi" || this.backend === "claude" || this.backend === "opencode") throw error;
       }
     }
     if (events.length > 0) {
@@ -12864,28 +12854,14 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     };
   }
   resolveSessionId(rawId) {
-    if (!rawId) {
-      return this.preferredSessionIdSync() ?? "";
-    }
-    const prefix = sessionPrefix(this.backend);
-    if (rawId.startsWith(prefix) && this.sessions.has(rawId)) {
-      return rawId;
-    }
     if (this.sessions.has(rawId)) {
       return rawId;
     }
-    const prefixed = `${prefix}${rawId}`;
+    const prefixed = `${sessionPrefix(this.backend)}${rawId}`;
     if (this.sessions.has(prefixed)) {
       return prefixed;
     }
-    for (const [id5] of this.sessions) {
-      if (id5.endsWith(rawId)) return id5;
-    }
-    return this.preferredSessionIdSync() ?? rawId;
-  }
-  preferredSessionIdSync() {
-    const selected = this.selectedWorkspaceId === void 0 ? void 0 : this.workspaceById.get(this.selectedWorkspaceId);
-    return selected?.sessionIds[0] ?? [...this.sessions.keys()][0];
+    throw Object.assign(new Error("The Session was not found."), { code: "session-not-found" });
   }
   modelSelection(sessionId) {
     const resolved = this.resolveSessionId(sessionId);
@@ -12918,12 +12894,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     const reasoningEffort = string(request.reasoningEffort);
     const catalog = await this.hostSessionModels(sessionId);
     const group = catalog.groups.find((g) => g.id === provider || g.id.toLowerCase() === provider.toLowerCase());
-    const targetModel = group?.models.find((m) => {
-      if (m.id === model) return true;
-      if (m.id.endsWith(`/${model}`)) return true;
-      if (model.endsWith(`/${m.id}`)) return true;
-      return false;
-    });
+    let targetModel = group?.models.find((item) => item.id === model);
+    if (targetModel === void 0) {
+      const aliases = group?.models.filter((item) => item.id.endsWith(`/${model}`) || model.endsWith(`/${item.id}`));
+      if (aliases?.length === 1) targetModel = aliases[0];
+    }
     if (group === void 0 || targetModel === void 0) {
       return failure("model-unavailable", `The selected ${this.backend} model is unavailable on this Host.`);
     }
@@ -27331,7 +27306,7 @@ function normalizeServerUrl(value) {
 }
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.10";
+var PLUGIN_VERSION = "0.5.11";
 
 // src/server-api.ts
 var TERMINAL_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;

@@ -97,7 +97,9 @@ REMOTE_VERSION=${REMOTE_VERSION:-latest}
 [[ "$REMOTE_VERSION" != -* && "$REMOTE_VERSION" != *[[:space:]]* ]] || fail 'Invalid REMOTE_VERSION.'
 # This helper runs in the actual profile package directory with its own Node.
 # !!js is represented as inert data, never evaluated.
-helper=$(cat <<'NODE'
+# Avoid command-substitution heredoc parsing bugs in macOS Bash 3.2. read
+# preserves the helper literally and returns nonzero at EOF (there is no NUL).
+IFS= read -r -d '' helper <<'NODE' || :
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
@@ -232,7 +234,6 @@ function abort(message) { const error = new Error(message); error.installerSafe 
   process.stderr.write('[dsh-plugin] ' + message + '\n'); process.exitCode=1;
 });
 NODE
-)
 run_helper() { "$DSH_COMMAND" plugin --profile "$DSH_PROFILE" exec node -e "$helper" "$DSH_COMMAND" "$DSH_PROFILE" "$1" "$autostart" "$DSH_SYSTEMD_DIR"; }
 # Check service ownership before changing packages, then capabilities before redemption.
 if [[ "$autostart" = 1 ]]; then run_helper owner; fi

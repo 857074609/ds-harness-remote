@@ -153,10 +153,10 @@ export class AgentAcpClient {
       sessionId,
       ...(backend === undefined ? {} : { backend }),
     }, signal).catch(error => {
-      if (backend === 'pi' || backend === 'claude') throw error
+      if (backend === 'pi' || backend === 'claude' || backend === 'opencode') throw error
       return { events: [] }
     })
-    if ((backend === 'pi' || backend === 'claude') && (!isRecord(result) || !Array.isArray(result.events))) {
+    if ((backend === 'pi' || backend === 'claude' || backend === 'opencode') && (!isRecord(result) || !Array.isArray(result.events))) {
       throw new RemoteGatewayError('INVALID_RESPONSE', 'ACP session history is invalid.')
     }
     return isRecord(result) && Array.isArray(result.events) ? result.events : []

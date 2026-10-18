@@ -9,7 +9,11 @@ import type {
   CodexAppServerLike,
   CodexAppServerUnavailableHandler,
 } from '../src/codex/app-server.js'
-import { CodexAppServerError } from '../src/codex/app-server.js'
+import {
+  CODEX_THREAD_UNMATERIALIZED,
+  CODEX_UNMATERIALIZED_THREAD_MESSAGE,
+  CodexAppServerError,
+} from '../src/codex/app-server.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import type { SafeLogger } from '../src/logging.js'
 
@@ -707,6 +711,73 @@ describe('CodexRemoteDomain', () => {
     )
   }, 10000)
 
+  it('projects a new unmaterialized Thread as empty history so it can be followed', async () => {
+    await runScenarios([
+      {
+        name: 'empty first turn page from an unmaterialized Thread',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          app.unmaterializedThread = true
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          try {
+            await domain.start()
+            const history = await domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread', maxMessages: 1 },
+            })
+            expect(history).toMatchObject({ cursor: -1, records: [], hasMore: false })
+            expect(app.calls.filter(call => call.method === 'thread/turns/list')).toHaveLength(1)
+            expect(app.calls.some(call => call.method === 'thread/read'
+              && isRecord(call.params) && call.params.includeTurns === true)).toBe(false)
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'legacy full Thread read on an unmaterialized Thread',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          app.legacyUnmaterializedThread = true
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          try {
+            await domain.start()
+            const history = await domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread', maxMessages: 1 },
+            })
+            expect(history).toMatchObject({ cursor: -1, records: [], hasMore: false })
+            expect(app.calls.some(call => call.method === 'thread/read'
+              && isRecord(call.params) && call.params.includeTurns === true)).toBe(true)
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+      {
+        name: 'a later page failure never replaces already-read history with a blank',
+        run: async () => {
+          const { root } = await directories()
+          const app = new FakeAppServer(root)
+          app.unmaterializedAfterFirstPage = true
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+          try {
+            await domain.start()
+            await expect(domain.call('connection-1', {
+              method: 'dsh/sessionHistory',
+              params: { threadId: 'allowed-thread' },
+            })).rejects.toMatchObject({ code: CODEX_THREAD_UNMATERIALIZED })
+            expect(app.calls.some(call => isRecord(call.params) && call.params.cursor === 'page-2')).toBe(true)
+          } finally {
+            await domain.close()
+          }
+        },
+      },
+    ])
+  }, 10000)
+
   it('does not replace a populated reconnect baseline with empty history on read failures', async () => {
     const scenarios = [
       { name: 'busy turn read', stage: 'turns', error: new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Thread has an active writer.'), code: 'CODEX_THREAD_BUSY' },
@@ -1085,6 +1156,9 @@ class FakeAppServer implements CodexAppServerLike {
   rejectResume = false
   resumeRolloutMissing = false
   rejectTurnPagination = false
+  unmaterializedThread = false
+  unmaterializedAfterFirstPage = false
+  legacyUnmaterializedThread = false
   rejectTurnStartBusy = false
   rejectSettings = false
   projectListMode: 'normal' | 'empty' | 'unsupported' = 'normal'
@@ -1152,6 +1226,9 @@ class FakeAppServer implements CodexAppServerLike {
     if (method === 'thread/read') {
       const threadId = isRecord(params) ? params.threadId : undefined
       const includeTurns = isRecord(params) && params.includeTurns === true
+      if (includeTurns && (this.unmaterializedThread || this.legacyUnmaterializedThread)) {
+        throw new CodexAppServerError(CODEX_THREAD_UNMATERIALIZED, CODEX_UNMATERIALIZED_THREAD_MESSAGE)
+      }
       const cwd = threadId === 'outside-thread'
         ? this.outside
         : threadId === 'unprojected-thread'
@@ -1171,6 +1248,27 @@ class FakeAppServer implements CodexAppServerLike {
       } }
     }
     if (method === 'thread/turns/list') {
+      if (this.unmaterializedThread) {
+        throw new CodexAppServerError(CODEX_THREAD_UNMATERIALIZED, CODEX_UNMATERIALIZED_THREAD_MESSAGE)
+      }
+      if (this.legacyUnmaterializedThread) {
+        throw new CodexAppServerError('METHOD_NOT_FOUND', 'method not found')
+      }
+      if (this.unmaterializedAfterFirstPage) {
+        if (isRecord(params) && params.cursor !== undefined) {
+          throw new CodexAppServerError(CODEX_THREAD_UNMATERIALIZED, CODEX_UNMATERIALIZED_THREAD_MESSAGE)
+        }
+        return {
+          data: [{
+            id: 'turn-1',
+            status: 'completed',
+            itemsView: 'full',
+            items: [{ id: 'user-1', type: 'userMessage', text: 'First' }],
+          }],
+          nextCursor: 'page-2',
+          backwardsCursor: null,
+        }
+      }
       if (this.rejectTurnPagination) {
         throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex App Server rejected the request.')
       }

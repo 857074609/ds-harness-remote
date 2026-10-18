@@ -25962,8 +25962,15 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       }, signal));
     } catch (error) {
       if (!isLegacySessionHistoryUnsupported(error)) throw error;
-      const result = record4(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
-      const thread = record4(result.thread);
+      let thread;
+      try {
+        const result = record4(await this.client.request("thread/read", { threadId, includeTurns: true }, signal));
+        thread = record4(result.thread);
+      } catch (historyError) {
+        const code = historyError instanceof Error ? errorCode(historyError) : void 0;
+        if (!this.blankThreads.has(threadId) || code !== "CODEX_UPSTREAM_ERROR") throw historyError;
+        thread = { id: threadId, turns: [] };
+      }
       if (string2(thread.id) !== threadId) throw new Error("CodeX returned an invalid Thread history.");
       value = paginateCodexNativeHistory(
         projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),
@@ -30563,7 +30570,7 @@ var CodexAppServerClient = class {
       const pending = this.takePending(value.id);
       if (pending === void 0) return;
       if ("error" in value && value.error !== void 0) {
-        pending.reject(new CodexAppServerError("CODEX_UPSTREAM_ERROR", safeUpstreamError(value.error)));
+        pending.reject(safeUpstreamError(value.error));
       } else {
         pending.resolve(value.result);
       }
@@ -30599,12 +30606,26 @@ var CodexAppServerClient = class {
     for (const id5 of [...this.pending.keys()]) this.takePending(id5)?.reject(error);
   }
 };
+var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
+var CODEX_UNMATERIALIZED_THREAD_MESSAGE = "Codex thread has no turns yet.";
 function safeUpstreamError(value) {
-  if (!isRecord12(value) || typeof value.message !== "string") return "Codex App Server rejected the request.";
+  if (!isRecord12(value) || typeof value.message !== "string") {
+    return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex App Server rejected the request.");
+  }
   const message = value.message.toLowerCase();
-  if (message.includes("active writer")) return "Codex thread already has an active writer.";
-  if (message.includes("no rollout found")) return "Codex thread state is not persisted yet.";
-  return message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request.";
+  if (message.includes("active writer")) {
+    return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex thread already has an active writer.");
+  }
+  if (message.includes("not materialized yet") || message.includes("before first user message")) {
+    return new CodexAppServerError(CODEX_THREAD_UNMATERIALIZED, CODEX_UNMATERIALIZED_THREAD_MESSAGE);
+  }
+  if (message.includes("no rollout found")) {
+    return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex thread state is not persisted yet.");
+  }
+  return new CodexAppServerError(
+    "CODEX_UPSTREAM_ERROR",
+    message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request."
+  );
 }
 function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -31231,7 +31252,7 @@ var CodexRemoteDomain = class {
         result = await this.callUpstream(call.method, upstreamParams);
       } catch (error) {
         assertCurrent();
-        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
+        if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && (error.code === "CODEX_UPSTREAM_ERROR" || error.code === CODEX_THREAD_UNMATERIALIZED) && call.params.permissionPreset === void 0) {
           return { thread: allowedThread.thread };
         }
         throw error;
@@ -31571,13 +31592,13 @@ var CodexRemoteDomain = class {
   async readThreadForHistory(connectionId, threadId) {
     const { thread: metadata } = await this.readKnownThread(threadId);
     try {
-      return { ...metadata, turns: await this.readThreadTurns(threadId, "full") };
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "full") };
     } catch (fullError) {
       if (!isHistoryFormatFallback(fullError)) throw fullError;
       this.logHistoryFallback(connectionId, "turns-full", fullError);
     }
     try {
-      return { ...metadata, turns: await this.readThreadTurns(threadId, "summary") };
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, "summary") };
     } catch (summaryError) {
       if (!isHistoryFormatFallback(summaryError)) throw summaryError;
       this.logHistoryFallback(connectionId, "turns-summary", summaryError);
@@ -31593,22 +31614,35 @@ var CodexRemoteDomain = class {
       }
       return legacyThread;
     } catch (legacyError) {
+      if (isUnmaterializedThreadError(legacyError)) {
+        this.logEmptyUnmaterializedHistory(connectionId, "thread-read-full");
+        return { ...metadata, turns: [] };
+      }
       if (!isHistoryReadRecoverable(legacyError)) throw legacyError;
       this.logHistoryFallback(connectionId, "thread-read-full", legacyError);
       throw legacyError;
     }
   }
-  async readThreadTurns(threadId, itemsView) {
+  async readThreadTurns(connectionId, threadId, itemsView) {
     const turns = [];
     let cursor2;
     for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream("thread/turns/list", {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: "asc",
-        itemsView,
-        ...cursor2 === void 0 ? {} : { cursor: cursor2 }
-      });
+      let result;
+      try {
+        result = await this.callUpstream("thread/turns/list", {
+          threadId,
+          limit: CODEX_HISTORY_PAGE_LIMIT,
+          sortDirection: "asc",
+          itemsView,
+          ...cursor2 === void 0 ? {} : { cursor: cursor2 }
+        });
+      } catch (error) {
+        if (page === 0 && isUnmaterializedThreadError(error)) {
+          this.logEmptyUnmaterializedHistory(connectionId, `turns-${itemsView}`);
+          return [];
+        }
+        throw error;
+      }
       if (!isRecord14(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Turn page.");
       }
@@ -31659,6 +31693,12 @@ var CodexRemoteDomain = class {
       connectionId: maskId(connectionId),
       stage,
       code: errorCode2(error)
+    });
+  }
+  logEmptyUnmaterializedHistory(connectionId, stage) {
+    this.logger.debug("Codex history projected as empty unmaterialized thread", {
+      connectionId: maskId(connectionId),
+      stage
     });
   }
   async assertResultThreadAllowed(result) {
@@ -32207,6 +32247,9 @@ function isActiveWriterMessage(message) {
 }
 function isUnpersistedThreadError(error) {
   return error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && error.message.toLowerCase().includes("not persisted yet");
+}
+function isUnmaterializedThreadError(error) {
+  return error instanceof RpcError && error.code === CODEX_THREAD_UNMATERIALIZED;
 }
 
 // src/acp/adapters/session-models.ts

@@ -3,8 +3,10 @@
 - Fence ACP/CodeX requests and ownership rollback against disconnected peers and replaced backends; isolate retired Prompt completions and stop OpenCode history readers on shutdown or overflow.
 - Fix Pi modern model/Thinking state confirmation and bound CodeX/ACP file-preview allocation before reading oversized files.
 - Update compatible security patches in direct and transitive dependencies. Production-dependency audit findings drop from 32 to 5; the remaining Expo/Metro build-chain advisories and acceptance limits are tracked in [TODO](TODO.md).
+- Fix CodeX new conversations with current App Server versions: a Thread without its first user message is projected as an empty history baseline instead of a failed read, so the Session opens and can be followed.
 - 修复 ACP/CodeX 迟到请求与归属回滚越过断线/后端替换边界、旧 Prompt 污染新任务，以及 OpenCode 历史子进程关闭和超限清理。
 - 修复 Pi 现代模型/Thinking 快照和切换确认，文件预览在读取超大文件前执行内存限额。同步兼容的依赖安全补丁，剩余 5 项 Expo/Metro 构建链公告与验收边界见 TODO。未升级或发布版本。
+- 修复当前 App Server 版本下 CodeX 无法新建对话：尚未收到首条用户消息的 Thread 不再被当作历史读取失败，而是投影为空历史基线，新会话可以打开并跟随。未升级或发布版本。
 
 ## 0.5.11 - 2026-10-18
 

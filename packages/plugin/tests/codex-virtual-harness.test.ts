@@ -817,6 +817,56 @@ describe('CodexVirtualHarness', () => {
           await target.close()
         },
       },
+      {
+        name: 'projects a just-created blank Session when an old Host cannot read an unmaterialized Thread',
+        run: async () => {
+          const client = fakeCodex()
+          const originalRequest = client.request.getMockImplementation() as
+            | ((method: string, params?: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>)
+            | undefined
+          client.request.mockImplementation(
+            async (method: string, params?: Record<string, unknown>, signal?: AbortSignal) => {
+              if (method === 'dsh/sessionHistory') {
+                throw Object.assign(new Error('The requested Codex method is not available over Remote.'), {
+                  code: 'METHOD_NOT_ALLOWED',
+                })
+              }
+              if (method === 'thread/read' && params?.includeTurns === true
+                && String(params.threadId).startsWith('new_')) {
+                throw Object.assign(new Error('Codex App Server rejected the request.'), {
+                  code: 'CODEX_UPSTREAM_ERROR',
+                })
+              }
+              return originalRequest?.(method, params, signal)
+            },
+          )
+          const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+          await target.selectWorkspace('codex-workspace:project:repo-project')
+          const created = await target.dispatch('session/create', {
+            args: { request: { workspaceId: 'codex-workspace:project:repo-project' } },
+          }, new AbortController().signal)
+          expect(created).toEqual({ ok: true, value: { sessionId: 'codex:new_1' } })
+
+          const history = await target.api.sessions.history({
+            rpcId: 'history-blank' as never,
+            payload: { sessionId: 'codex:new_1' as never },
+          })
+          expect(history.result).toMatchObject({
+            ok: true,
+            value: {
+              events: [],
+              hasMore: false,
+              projections: { values: { sessionListMetadata: { blank: true } } },
+            },
+          })
+          expect(client.request).toHaveBeenCalledWith(
+            'thread/read',
+            { threadId: 'new_1', includeTurns: true },
+            expect.any(AbortSignal),
+          )
+          await target.close()
+        },
+      },
     ])
   }, 10000)
 
@@ -849,6 +899,43 @@ describe('CodexVirtualHarness', () => {
       model: 'gpt-5.6-sol',
       effort: 'low',
     }, expect.any(AbortSignal))
+    await target.close()
+  })
+
+  it('opens a freshly created blank CodeX Thread with empty history and a follow snapshot', async () => {
+    const client = fakeCodex()
+    const target = new CodexVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
+    const controller = new AbortController()
+    await target.selectWorkspace('codex-workspace:project:repo-project')
+    const created = await target.dispatch('session/create', {
+      args: { request: { workspaceId: 'codex-workspace:project:repo-project' } },
+    }, controller.signal)
+    expect(created).toEqual({ ok: true, value: { sessionId: 'codex:new_1' } })
+
+    const history = await target.dispatch('session/history', {
+      args: { request: { sessionId: 'codex:new_1' } },
+    }, controller.signal)
+    expect(history).toMatchObject({
+      ok: true,
+      value: {
+        events: [],
+        hasMore: false,
+        projections: { values: { sessionListMetadata: { blank: true } } },
+      },
+    })
+
+    const source = await target.open('session/follow', {
+      args: { request: { address: { kind: 'session', sessionId: 'codex:new_1' } } },
+    }, controller.signal)
+    const iterator = source[Symbol.asyncIterator]()
+    const snapshot = await iterator.next()
+    expect(snapshot.value).toMatchObject({
+      type: 'snapshot',
+      cursor: -1,
+      records: [],
+      projections: { values: { sessionListMetadata: { blank: true } } },
+    })
+    await iterator.return?.()
     await target.close()
   })
 

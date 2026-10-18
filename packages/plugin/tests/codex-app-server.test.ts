@@ -2,7 +2,11 @@ import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import { describe, expect, it, vi } from 'vitest'
-import { CodexAppServerClient } from '../src/codex/app-server.js'
+import {
+  CODEX_THREAD_UNMATERIALIZED,
+  CODEX_UNMATERIALIZED_THREAD_MESSAGE,
+  CodexAppServerClient,
+} from '../src/codex/app-server.js'
 import type { SafeLogger } from '../src/logging.js'
 
 describe('CodexAppServerClient', () => {
@@ -96,6 +100,34 @@ describe('CodexAppServerClient', () => {
 
     await expect(client.call('turn/start', { threadId: 'redacted' }))
       .rejects.toMatchObject({ message: 'Codex thread already has an active writer.' })
+    await client.close()
+  })
+
+  it('keeps an unmaterialized new Thread in a dedicated empty-history error code', async () => {
+    const fake = fakeProcess()
+    fake.child.stdin.on('data', chunk => {
+      for (const line of String(chunk).trim().split('\n')) {
+        const message = JSON.parse(line) as Record<string, unknown>
+        if (message.method === 'initialize') {
+          fake.stdout.write(`${JSON.stringify({ id: message.id, result: { userAgent: 'codex' } })}\n`)
+        } else if (message.method === 'thread/turns/list') {
+          fake.stdout.write(`${JSON.stringify({
+            id: message.id,
+            error: {
+              code: -32600,
+              message: 'thread 01a05bd0-8d55-7e23-bc95-97fec98aa8f4 is not materialized yet; thread/turns/list is unavailable before first user message',
+            },
+          })}\n`)
+        }
+      }
+    })
+    const client = new CodexAppServerClient('codex', logger(), () => fake.child)
+    await client.start()
+
+    await expect(client.call('thread/turns/list', { threadId: 'redacted' })).rejects.toMatchObject({
+      code: CODEX_THREAD_UNMATERIALIZED,
+      message: CODEX_UNMATERIALIZED_THREAD_MESSAGE,
+    })
     await client.close()
   })
 })

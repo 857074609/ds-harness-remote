@@ -62,6 +62,7 @@ import { CodexLiveProjection } from './virtual-live.js'
 import type { CodexClientLike, JsonRecord } from './virtual-values.js'
 import {
   array,
+  errorCode,
   nativeThreadId,
   optionalInteger,
   optionalNonNegativeInteger,
@@ -800,8 +801,19 @@ export class CodexVirtualHarness implements RemoteTypertGatewayTarget {
       }, signal))
     } catch (error) {
       if (!isLegacySessionHistoryUnsupported(error)) throw error
-      const result = record(await this.client.request('thread/read', { threadId, includeTurns: true }, signal))
-      const thread = record(result.thread)
+      let thread: JsonRecord
+      try {
+        const result = record(await this.client.request('thread/read', { threadId, includeTurns: true }, signal))
+        thread = record(result.thread)
+      } catch (historyError) {
+        // A Host old enough to lack paginated history cannot read a Thread that
+        // current Codex has not materialized yet. Only a Thread this client just
+        // created is known blank, and only an upstream rejection (not a timeout
+        // or disconnect) may be projected as its empty baseline.
+        const code = historyError instanceof Error ? errorCode(historyError) : undefined
+        if (!this.blankThreads.has(threadId) || code !== 'CODEX_UPSTREAM_ERROR') throw historyError
+        thread = { id: threadId, turns: [] }
+      }
       if (string(thread.id) !== threadId) throw new Error('CodeX returned an invalid Thread history.')
       value = paginateCodexNativeHistory(
         projectCodexNativeHistory(thread, `codex:${threadId}`, this.sessionGeneration),

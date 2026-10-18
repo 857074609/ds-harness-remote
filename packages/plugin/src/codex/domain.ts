@@ -10,6 +10,7 @@ import type { PeerConnectionContext } from '../connection-controller.js'
 import type { SafeLogger } from '../logging.js'
 import { RpcError } from '../safe-error.js'
 import {
+  CODEX_THREAD_UNMATERIALIZED,
   CodexAppServerClient,
   CodexAppServerError,
   type CodexAppServerInbound,
@@ -333,7 +334,7 @@ export class CodexRemoteDomain {
         if (call.method === 'thread/resume'
           && allowedThread !== undefined
           && error instanceof RpcError
-          && error.code === 'CODEX_UPSTREAM_ERROR'
+          && (error.code === 'CODEX_UPSTREAM_ERROR' || error.code === CODEX_THREAD_UNMATERIALIZED)
           && call.params.permissionPreset === undefined) {
           return { thread: allowedThread.thread }
         }
@@ -705,13 +706,13 @@ export class CodexRemoteDomain {
   private async readThreadForHistory(connectionId: string, threadId: string): Promise<Record<string, unknown>> {
     const { thread: metadata } = await this.readKnownThread(threadId)
     try {
-      return { ...metadata, turns: await this.readThreadTurns(threadId, 'full') }
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'full') }
     } catch (fullError) {
       if (!isHistoryFormatFallback(fullError)) throw fullError
       this.logHistoryFallback(connectionId, 'turns-full', fullError)
     }
     try {
-      return { ...metadata, turns: await this.readThreadTurns(threadId, 'summary') }
+      return { ...metadata, turns: await this.readThreadTurns(connectionId, threadId, 'summary') }
     } catch (summaryError) {
       if (!isHistoryFormatFallback(summaryError)) throw summaryError
       this.logHistoryFallback(connectionId, 'turns-summary', summaryError)
@@ -728,6 +729,12 @@ export class CodexRemoteDomain {
       }
       return legacyThread
     } catch (legacyError) {
+      // Only a single legacy read happened here, so there is no earlier
+      // baseline to protect: an unmaterialized Thread is empty history.
+      if (isUnmaterializedThreadError(legacyError)) {
+        this.logEmptyUnmaterializedHistory(connectionId, 'thread-read-full')
+        return { ...metadata, turns: [] }
+      }
       if (!isHistoryReadRecoverable(legacyError)) throw legacyError
       this.logHistoryFallback(connectionId, 'thread-read-full', legacyError)
       // A failed read is not an empty conversation. Let clients retry instead
@@ -737,19 +744,32 @@ export class CodexRemoteDomain {
   }
 
   private async readThreadTurns(
+    connectionId: string,
     threadId: string,
     itemsView: 'full' | 'summary',
   ): Promise<Record<string, unknown>[]> {
     const turns: Record<string, unknown>[] = []
     let cursor: string | undefined
     for (let page = 0; page < MAX_CODEX_HISTORY_PAGES; page += 1) {
-      const result = await this.callUpstream('thread/turns/list', {
-        threadId,
-        limit: CODEX_HISTORY_PAGE_LIMIT,
-        sortDirection: 'asc',
-        itemsView,
-        ...(cursor === undefined ? {} : { cursor }),
-      })
+      let result: unknown
+      try {
+        result = await this.callUpstream('thread/turns/list', {
+          threadId,
+          limit: CODEX_HISTORY_PAGE_LIMIT,
+          sortDirection: 'asc',
+          itemsView,
+          ...(cursor === undefined ? {} : { cursor }),
+        })
+      } catch (error) {
+        // A Thread created in this App Server process has no turns until its
+        // first user message materializes it. Only an empty first page is that
+        // state; a later failure must not replace turns already read.
+        if (page === 0 && isUnmaterializedThreadError(error)) {
+          this.logEmptyUnmaterializedHistory(connectionId, `turns-${itemsView}`)
+          return []
+        }
+        throw error
+      }
       if (!isRecord(result) || !Array.isArray(result.data)) {
         throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Turn page.')
       }
@@ -806,6 +826,15 @@ export class CodexRemoteDomain {
       connectionId: maskId(connectionId),
       stage,
       code: errorCode(error),
+    })
+  }
+
+  private logEmptyUnmaterializedHistory(connectionId: string, stage: string): void {
+    // Empty history is a normal state for a new Thread; keep this at debug so
+    // the reason is still observable without warning noise on every open.
+    this.logger.debug('Codex history projected as empty unmaterialized thread', {
+      connectionId: maskId(connectionId),
+      stage,
     })
   }
 
@@ -1481,4 +1510,10 @@ function isUnpersistedThreadError(error: unknown): boolean {
   return error instanceof RpcError
     && error.code === 'CODEX_UPSTREAM_ERROR'
     && error.message.toLowerCase().includes('not persisted yet')
+}
+
+/** A new Thread is materialized by its first user message; before that its
+ * turn list is unavailable and must be projected as an empty history. */
+function isUnmaterializedThreadError(error: unknown): boolean {
+  return error instanceof RpcError && error.code === CODEX_THREAD_UNMATERIALIZED
 }

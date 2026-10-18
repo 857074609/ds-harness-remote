@@ -244,7 +244,7 @@ export class CodexAppServerClient implements CodexAppServerLike {
       const pending = this.takePending(value.id)
       if (pending === undefined) return
       if ('error' in value && value.error !== undefined) {
-        pending.reject(new CodexAppServerError('CODEX_UPSTREAM_ERROR', safeUpstreamError(value.error)))
+        pending.reject(safeUpstreamError(value.error))
       } else {
         pending.resolve(value.result)
       }
@@ -287,16 +287,38 @@ export class CodexAppServerClient implements CodexAppServerLike {
   }
 }
 
-function safeUpstreamError(value: unknown): string {
-  if (!isRecord(value) || typeof value.message !== 'string') return 'Codex App Server rejected the request.'
+/**
+ * Dedicated error code for a Thread that exists but has no turns yet. Current
+ * Codex App Server versions materialize a Thread on its first user message and
+ * reject turn listing (and legacy `includeTurns` reads) before that. Callers
+ * must project this as empty history, not as a failed read, and must classify
+ * it by code rather than by the sanitized upstream message.
+ */
+export const CODEX_THREAD_UNMATERIALIZED = 'CODEX_THREAD_UNMATERIALIZED'
+
+/** Safe Remote-facing message for an unmaterialized Thread. */
+export const CODEX_UNMATERIALIZED_THREAD_MESSAGE = 'Codex thread has no turns yet.'
+
+function safeUpstreamError(value: unknown): CodexAppServerError {
+  if (!isRecord(value) || typeof value.message !== 'string') {
+    return new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex App Server rejected the request.')
+  }
   // Upstream messages may contain paths or prompt fragments. Only retain a
   // short generic category for the Remote boundary.
   const message = value.message.toLowerCase()
-  if (message.includes('active writer')) return 'Codex thread already has an active writer.'
-  if (message.includes('no rollout found')) return 'Codex thread state is not persisted yet.'
-  return message.includes('not initialized')
-    ? 'Codex App Server is not initialized.'
-    : 'Codex App Server rejected the request.'
+  if (message.includes('active writer')) {
+    return new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex thread already has an active writer.')
+  }
+  if (message.includes('not materialized yet') || message.includes('before first user message')) {
+    return new CodexAppServerError(CODEX_THREAD_UNMATERIALIZED, CODEX_UNMATERIALIZED_THREAD_MESSAGE)
+  }
+  if (message.includes('no rollout found')) {
+    return new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Codex thread state is not persisted yet.')
+  }
+  return new CodexAppServerError(
+    'CODEX_UPSTREAM_ERROR',
+    message.includes('not initialized') ? 'Codex App Server is not initialized.' : 'Codex App Server rejected the request.',
+  )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

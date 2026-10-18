@@ -1,6 +1,6 @@
 # TODO
 
-更新日期：2026-10-18。本次发布版本统一为 `0.5.11`，Android `versionCode 49`；发布状态以 GitHub Release 工作流为准。
+更新日期：2026-10-18。本次发布版本统一为 `0.5.12`，Android `versionCode 50`；发布状态以 GitHub Release 工作流为准。
 
 Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
 peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。

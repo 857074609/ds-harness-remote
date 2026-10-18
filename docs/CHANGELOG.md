@@ -1,5 +1,7 @@
-## Unreleased
+## 0.5.12 - 2026-10-18
 
+- Unifies all first-party package/client versions at `0.5.12`; Android `versionCode` and Expo iOS `buildNumber` are both `50`.
+- 本仓库各自有包与客户端版本统一为 `0.5.12`；Android `versionCode` 与 Expo iOS `buildNumber` 均为 `50`。
 - Fence ACP/CodeX requests and ownership rollback against disconnected peers and replaced backends; isolate retired Prompt completions and stop OpenCode history readers on shutdown or overflow.
 - Fix Pi modern model/Thinking state confirmation and bound CodeX/ACP file-preview allocation before reading oversized files.
 - Update compatible security patches in direct and transitive dependencies. Production-dependency audit findings drop from 32 to 5; the remaining Expo/Metro build-chain advisories and acceptance limits are tracked in [TODO](TODO.md).

@@ -10,11 +10,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "io.github.liguobao.dshremote",
-      "buildNumber": "51"
+      "buildNumber": "57"
     },
     "android": {
       "package": "io.github.liguobao.dshremote",
-      "versionCode": 51,
+      "versionCode": 57,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES",

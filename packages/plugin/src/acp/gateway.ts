@@ -63,6 +63,11 @@ interface BufferedAcpFrame {
   at: number
 }
 
+interface PromptTask {
+  backend: string
+  client: CursorAcpLike
+}
+
 interface AcpDirectoryEntry {
   name: string
   path: string
@@ -111,7 +116,7 @@ export class AcpRemoteGateway {
   /** Catch-up buffer for turns that finish while the Client is reconnecting. */
   private readonly recentFrames = new Map<string, BufferedAcpFrame[]>()
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
-  private readonly promptsInProgress = new Set<string>()
+  private readonly promptsInProgress = new Map<string, PromptTask>()
   private readonly cancelledSessions = new Set<string>()
   /** Identity fences asynchronous Pi preparation from a later retry of the same session. */
   private readonly preparingPrompts = new Map<string, { cancelled: boolean }>()
@@ -231,12 +236,17 @@ export class AcpRemoteGateway {
     const call = parseAcpCall(envelope.method, envelope.params)
     const sessionId = sessionIdFromParams(call.method, call.params)
     const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : undefined)
+    const assertCurrent = this.captureCallScope(connectionId, typeof backend === 'string' ? backend : this.defaultBackend())
     const reserve = backend === 'opencode' && sessionId !== undefined && ['session/load', 'session/prompt', 'dsh/selectModel'].includes(call.method)
     if (reserve) {
       if (this.archivingSessions.has(sessionId!)) throw new RpcError('ACP_SESSION_BUSY', 'The OpenCode session is being archived.')
       this.opencodeOperations.set(sessionId!, (this.opencodeOperations.get(sessionId!) ?? 0) + 1)
     }
-    try { return await this.callInternal(connectionId, call) }
+    try {
+      const result = await this.callInternal(connectionId, call, assertCurrent)
+      assertCurrent()
+      return result
+    }
     finally {
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId!) ?? 1) - 1
@@ -246,7 +256,22 @@ export class AcpRemoteGateway {
     }
   }
 
-  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>): Promise<unknown> {
+  private captureCallScope(connectionId: string, backend: string): () => void {
+    const peer = this.peers.get(connectionId)
+    const instance = this.backendInstances.get(backend)
+    return () => {
+      if (this.closed || this.backendInstances.get(backend) !== instance
+        || (instance !== undefined && this.requireAcp(backend) !== instance.client)) {
+        throw new RpcError('CURSOR_UNAVAILABLE', 'The ACP backend changed while handling the request.')
+      }
+      if (peer !== undefined && this.peers.get(connectionId) !== peer) {
+        throw new RpcError('ACP_CONNECTION_CLOSED', 'The ACP connection is closed.')
+      }
+    }
+  }
+
+  private async callInternal(connectionId: string, call: ReturnType<typeof parseAcpCall>, assertCurrent: () => void): Promise<unknown> {
+    assertCurrent()
     this.logger.info('ACP call received', {
       method: call.method,
       sessionId: typeof call.params?.sessionId === 'string' ? shortSessionId(call.params.sessionId) : undefined,
@@ -282,6 +307,7 @@ export class AcpRemoteGateway {
         const client = this.requireAcp(backend) as CursorAcpLike & { archiveSession?: (sessionId: string, cwd: string) => Promise<void> }
         const instance = this.backendInstances.get(backend)
         const cwd = await this.catalogSessionCwd(backend, sessionId)
+        assertCurrent()
         if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The OpenCode backend changed. Refresh the session list.')
         if (this.promptsInProgress.has(sessionId) || [...this.approvals.values()].some(item => item.sessionId === sessionId)) throw new RpcError('ACP_SESSION_BUSY', 'Stop the OpenCode reply and resolve its approvals before archiving.')
         if (!client.archiveSession) throw new RpcError('OPENCODE_ARCHIVE_UNAVAILABLE', 'The Host OpenCode adapter does not support native archiving.')
@@ -313,6 +339,7 @@ export class AcpRemoteGateway {
         if (archived) throw new RpcError('ACP_SESSION_ARCHIVED', 'This OpenCode session is archived.')
       }
     }
+    assertCurrent()
 
     if (call.method === 'dsh/directoryList') {
       return this.listDirectory(String(call.params.path))
@@ -388,11 +415,13 @@ export class AcpRemoteGateway {
         // Prepare one idle process in that directory without awaiting startup.
         if (path.trim() !== '' && call.params.prewarm !== false) {
           const cwd = await this.requireExistingDirectory(path)
+          assertCurrent()
           this.requireAcp('antigravity').prewarmSession?.(cwd)
         }
         const items = await discoverAntigravitySessions(path, limit)
         if (path) {
           const cwd = await this.requireExistingDirectory(path)
+          assertCurrent()
           for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd })
         }
         this.logger.info('ACP session list fetched', { count: items.length })
@@ -447,6 +476,7 @@ export class AcpRemoteGateway {
 
     if (call.method === 'session/new') {
       const cwd = await this.requireExistingDirectory(String(call.params.cwd))
+      assertCurrent()
       const requestedBackend = typeof call.params.backend === 'string'
         ? call.params.backend
         : this.defaultBackend()
@@ -456,6 +486,7 @@ export class AcpRemoteGateway {
         mcpServers: [],
         ...(typeof call.params.mode === 'string' ? { mode: call.params.mode } : {}),
       })
+      assertCurrent()
       const sessionId = readSessionId(result)
       if (sessionId !== undefined) {
         const bound = this.sessionBackends.get(sessionId)
@@ -495,9 +526,14 @@ export class AcpRemoteGateway {
         throw new RpcError('INVALID_MESSAGE', 'The ACP session backend does not match.')
       }
       if (targetBackend === 'pi' || targetBackend === 'claude' || targetBackend === 'opencode') await this.catalogSessionCwd(targetBackend, sessionId!)
+      assertCurrent()
       this.requireSessionOwner(connectionId, sessionId!)
       const acp = this.requireAcp(targetBackend)
+      // Track pending loads too, so reconfiguration revokes their ownership
+      // before an upstream result can arrive.
+      this.sessionBackends.set(sessionId!, targetBackend)
       const result = await acp.call(call.method, { ...call.params, ...(sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId)!.cwd, mcpServers: [] } : {}) })
+      assertCurrent()
       const loadedId = readSessionId(result) ?? sessionId
       if (loadedId !== undefined) {
         if (loadedId !== sessionId || (this.sessionBackends.has(loadedId) && targetBackend !== undefined && this.sessionBackends.get(loadedId) !== targetBackend)) {
@@ -517,7 +553,9 @@ export class AcpRemoteGateway {
       this.requireSessionOwner(connectionId, sessionId!)
       const backend = call.params.backend
       const cwd = await this.catalogSessionCwd(backend, sessionId!)
+      assertCurrent()
       await this.requireAcp(backend).call('session/load', { sessionId, cwd, mcpServers: [] })
+      assertCurrent()
     }
 
     if (call.method === 'dsh/selectModel') {
@@ -529,6 +567,7 @@ export class AcpRemoteGateway {
       // Resume straight into the target model. Loading the old model first
       // starts a second CLI process that would immediately be discarded.
       const result = await this.requireAcp(session.backend).call(call.method, { ...call.params, cwd: session.cwd })
+      assertCurrent()
       this.sessionBackends.set(sessionId!, session.backend)
       return sanitizeSessionResult(result)
     }
@@ -539,7 +578,9 @@ export class AcpRemoteGateway {
     // thought/text). Accept immediately and finish via stream updates.
     if (call.method === 'session/prompt' && sessionId !== undefined) {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError('PROMPT_IN_PROGRESS', 'An ACP reply is already in progress.')
-      this.promptsInProgress.add(sessionId)
+      const backend = this.sessionBackends.get(sessionId) ?? this.defaultBackend()
+      const task: PromptTask = { backend, client: this.requireAcp(backend) }
+      this.promptsInProgress.set(sessionId, task)
       this.cancelledSessions.delete(sessionId)
       const preparationBackend = this.sessionBackends.get(sessionId)
       if (preparationBackend === 'pi' || preparationBackend === 'claude') {
@@ -548,16 +589,18 @@ export class AcpRemoteGateway {
         try {
           const cwd = await this.catalogSessionCwd(preparationBackend, sessionId)
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
-          await this.requireAcp(preparationBackend).call('session/load', { sessionId, cwd, mcpServers: [] })
+          assertCurrent()
+          await task.client.call('session/load', { sessionId, cwd, mcpServers: [] })
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
+          assertCurrent()
         } catch (error) {
           if (preparation.cancelled) return { accepted: false, stopReason: 'cancelled' }
-          this.promptsInProgress.delete(sessionId)
+          if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId)
           throw error
         } finally {
           if (this.preparingPrompts.get(sessionId) === preparation) {
             this.preparingPrompts.delete(sessionId)
-            if (preparation.cancelled) this.promptsInProgress.delete(sessionId)
+            if (preparation.cancelled && this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId)
           }
         }
       }
@@ -568,7 +611,7 @@ export class AcpRemoteGateway {
         })
       }
       this.turnCatchUp.set(sessionId, [])
-      void this.runPromptInBackground(sessionId, call.params)
+      void this.runPromptInBackground(sessionId, call.params, task)
       return { accepted: true, stopReason: 'in_progress' }
     }
 
@@ -597,15 +640,16 @@ export class AcpRemoteGateway {
     return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === 'string' ? call.params.backend : sessionBackend).call(call.method, call.params))
   }
 
-  private async runPromptInBackground(sessionId: string, params: unknown): Promise<void> {
+  private async runPromptInBackground(sessionId: string, params: unknown, task: PromptTask): Promise<void> {
+    const current = () => !this.closed && this.promptsInProgress.get(sessionId) === task
+      && !this.pendingReconfiguration.has(task.backend) && this.backendInstances.get(task.backend)?.client === task.client
     try {
-      const sessionBackend = this.sessionBackends.get(sessionId)
-      const acp = this.requireAcp(sessionBackend)
-      const result = await acp.call('session/prompt', params)
+      const result = await task.client.call('session/prompt', params)
       // Cursor emits final session/update lines before the JSON-RPC result.
       // Those notifications are queued on inboundChain; drain it before we
       // snapshot catch-up or the Client only sees an empty prompt_completed.
       await this.inboundChain
+      if (!current()) return
       const stopReason = isRecord(result) && typeof result.stopReason === 'string'
         ? result.stopReason
         : 'end_turn'
@@ -627,8 +671,10 @@ export class AcpRemoteGateway {
         },
       })
     } catch (error) {
+      if (!current()) return
       this.logger?.warn('ACP session/prompt failed', { code: errorCode(error) })
       await this.inboundChain.catch(() => undefined)
+      if (!current()) return
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId)
       await this.publishToSession(sessionId, {
         method: 'session/update',
@@ -641,7 +687,9 @@ export class AcpRemoteGateway {
           },
         },
       }).catch(() => undefined)
-    } finally { this.promptsInProgress.delete(sessionId) }
+    } finally {
+      if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId)
+    }
   }
 
   async respond(connectionId: string, input: unknown): Promise<{ resolved: true }> {
@@ -758,7 +806,12 @@ export class AcpRemoteGateway {
     for (const [id, session] of this.sessionCwds) if (changed.has(session.backend)) this.sessionCwds.delete(id)
     const terminalError = await this.workspaceState.dispose(sessionId => changed.has(sessionId.startsWith('acp:') ? 'antigravity' : sessionId.startsWith('pi:') ? 'pi' : sessionId.startsWith('opencode:') ? 'opencode' : 'cursor'))
       .then(() => undefined, () => new RpcError('TERMINAL_CLEANUP_FAILED', 'Some ACP terminal processes could not be stopped. Save the backend settings again to retry.'))
-    for (const id of sessions) {      this.sessionOwners.delete(id)
+    for (const id of sessions) {
+      this.sessionOwners.delete(id)
+      this.promptsInProgress.delete(id)
+      const preparation = this.preparingPrompts.get(id)
+      if (preparation) preparation.cancelled = true
+      this.preparingPrompts.delete(id)
       this.sessionBackends.delete(id)
       this.recentFrames.delete(id)
       this.turnCatchUp.delete(id)
@@ -796,6 +849,9 @@ export class AcpRemoteGateway {
     this.sessionBackends.clear()
     this.recentFrames.clear()
     this.turnCatchUp.clear()
+    this.promptsInProgress.clear()
+    for (const preparation of this.preparingPrompts.values()) preparation.cancelled = true
+    this.preparingPrompts.clear()
     this.approvals.clear()
     const processes = await Promise.allSettled([...this.startingClients.keys()].map(client => client.close()).concat(this.disposeAllInstances()))
     const terminalError = await terminals

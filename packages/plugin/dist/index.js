@@ -28072,7 +28072,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open2 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -28081,7 +28081,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open,
+      open: open2,
       failure: (error) => this.failure(error),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -28108,12 +28108,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open = this.originalOpen;
-      const rc1 = usesRc1Arity(open);
+      const open2 = this.originalOpen;
+      const rc1 = usesRc1Arity(open2);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open, this.runtime, callArgs) : open.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open2, this.runtime, callArgs) : open2.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -28197,8 +28197,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open) {
-  return open.length >= 5;
+function usesRc1Arity(open2) {
+  return open2.length >= 5;
 }
 function endedUplink() {
   return {
@@ -28214,9 +28214,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open = runtime.openWireStream;
-  if (open !== void 0) {
-    return usesRc1Arity(open) ? (endpoint, payload, signal, uplink, peer) => open.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open.call(runtime, endpoint, payload, signal);
+  const open2 = runtime.openWireStream;
+  if (open2 !== void 0) {
+    return usesRc1Arity(open2) ? (endpoint, payload, signal, uplink, peer) => open2.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open2.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -30788,6 +30788,7 @@ var CodexPeerBridge = class {
       method: "thread/read",
       params: { threadId: params.threadId, includeTurns: false }
     });
+    this.requireOpen();
     this.streams.set(params.streamId, params.threadId);
     return { opened: true, streamId: params.streamId, threadId: params.threadId };
   }
@@ -30868,6 +30869,7 @@ var CodexPeerBridge = class {
       });
       throw error;
     }
+    this.requireOpen();
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
@@ -30950,11 +30952,11 @@ var CodexPeerBridge = class {
     this.streams.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
-    await Promise.all(streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
+    const detach = this.domain.detachPeer(this.context.connectionId);
+    await Promise.all([detach, ...streamIds.map((streamId) => this.publish("codex.app.stream.closed", {
       streamId,
       reason: "peer-disconnected"
-    }).catch(() => void 0)));
-    await this.domain.detachPeer(this.context.connectionId);
+    }).catch(() => void 0))]);
   }
   pruneTransfers() {
     const staleBefore = Date.now() - TRANSFER_IDLE_MS;
@@ -31066,7 +31068,9 @@ var CodexRemoteDomain = class {
   async resolveThreadWorkspace(connectionId, threadId) {
     if (!this.peers.has(connectionId)) throw new RpcError("CODEX_THREAD_UNAVAILABLE", "The CodeX thread is not available on this connection.");
     try {
+      const assertCurrent = this.captureCallScope(connectionId);
       const known = await this.readKnownThread(threadId);
+      assertCurrent();
       return known.cwd;
     } catch (error) {
       if (error instanceof RpcError && error.code === "CODEX_THREAD_NOT_ALLOWED") {
@@ -31084,7 +31088,25 @@ var CodexRemoteDomain = class {
   async call(connectionId, input3) {
     const envelope = parseCallEnvelope(input3);
     const call = parseCodexCall(envelope.method, envelope.params);
-    this.requireAppServer();
+    const assertCurrent = this.captureCallScope(connectionId);
+    const result = await this.callInternal(connectionId, call, assertCurrent);
+    assertCurrent();
+    return result;
+  }
+  captureCallScope(connectionId) {
+    const appServer = this.requireAppServer();
+    const peer = this.peers.get(connectionId);
+    return () => {
+      if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
+        throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
+      }
+      if (peer !== void 0 && this.peers.get(connectionId) !== peer) {
+        throw new RpcError("CODEX_CONNECTION_CLOSED", "The Codex connection is closed.");
+      }
+    };
+  }
+  async callInternal(connectionId, call, assertCurrent) {
+    assertCurrent();
     if (call.method === "account/read") {
       return sanitizeAccount(await this.callUpstream(call.method, call.params));
     }
@@ -31094,6 +31116,7 @@ var CodexRemoteDomain = class {
     if (call.method === "project/create") {
       const roots = call.params.roots;
       const path = await this.requireNewCodexProjectPath(roots[0].path);
+      assertCurrent();
       return sanitizeProjectCreate(await this.callUpstream(call.method, {
         name: call.params.name,
         roots: [{ path }],
@@ -31109,6 +31132,7 @@ var CodexRemoteDomain = class {
     }
     if (call.method === "thread/start") {
       const cwd2 = await this.requireCodexWorkspacePath(call.params.cwd);
+      assertCurrent();
       const permission = codexPermission(call.params, "workspace-write");
       const result = await this.callUpstream(call.method, {
         ...permission.params,
@@ -31116,6 +31140,7 @@ var CodexRemoteDomain = class {
         ...codexThreadPermissionParams(permission),
         serviceName: "deepseek_harness_remote"
       });
+      assertCurrent();
       if (extractThread(result)?.id === void 0) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread.");
       }
@@ -31154,12 +31179,13 @@ var CodexRemoteDomain = class {
       return this.listCodexDirectory(call.params.path);
     }
     const allowedThread = threadId === void 0 ? void 0 : await this.readKnownThread(threadId);
+    assertCurrent();
     if (call.method === "thread/resume" && call.params.permissionPreset !== void 0) {
       const owner = this.turnOwners.get(threadId);
       if (owner !== void 0 && owner.connectionId !== connectionId) {
         throw new RpcError("CODEX_THREAD_BUSY", "Another Remote client is writing to this CodeX thread.");
       }
-      return this.changeThreadPermission(threadId, call.params, allowedThread);
+      return this.changeThreadPermission(threadId, call.params, allowedThread, assertCurrent);
     }
     if (call.method === "thread/read") {
       return this.callUpstream(call.method, call.params);
@@ -31172,6 +31198,7 @@ var CodexRemoteDomain = class {
     }
     let claimed = false;
     let previousOwner;
+    let claimedOwner;
     if (isThreadMutation(call.method) && threadId !== void 0) {
       const claim = this.claimTurn(
         threadId,
@@ -31181,6 +31208,7 @@ var CodexRemoteDomain = class {
       );
       claimed = claim.claimed;
       previousOwner = claim.previous;
+      claimedOwner = this.turnOwners.get(threadId);
     }
     try {
       const permission = codexPermission(call.params);
@@ -31202,13 +31230,16 @@ var CodexRemoteDomain = class {
       try {
         result = await this.callUpstream(call.method, upstreamParams);
       } catch (error) {
+        assertCurrent();
         if (call.method === "thread/resume" && allowedThread !== void 0 && error instanceof RpcError && error.code === "CODEX_UPSTREAM_ERROR" && call.params.permissionPreset === void 0) {
           return { thread: allowedThread.thread };
         }
         throw error;
       }
+      assertCurrent();
       if (call.method === "thread/resume" || call.method === "thread/fork" || call.method === "thread/unarchive") {
         await this.assertResultThreadAllowed(result);
+        assertCurrent();
       }
       if (call.method === "thread/resume" || call.method === "thread/fork") {
         const resultId = extractThread(result)?.id;
@@ -31225,7 +31256,7 @@ var CodexRemoteDomain = class {
       }
       return result;
     } catch (error) {
-      if (claimed && threadId !== void 0) {
+      if (claimed && threadId !== void 0 && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === void 0) this.turnOwners.delete(threadId);
         else this.turnOwners.set(threadId, previousOwner);
       }
@@ -31319,6 +31350,7 @@ var CodexRemoteDomain = class {
     const appServer = this.createAppServer(binary, this.logger);
     this.appServer = appServer;
     this.unsubscribeInbound = appServer.onInbound((message) => {
+      if (this.appServer !== appServer) return;
       void this.handleInbound(message).catch((error) => {
         this.logger.warn("Codex inbound handling failed", { code: errorCode2(error) });
       });
@@ -31434,7 +31466,7 @@ var CodexRemoteDomain = class {
     if (preset === void 0) this.permissionPresets.delete(threadId);
     else this.permissionPresets.set(threadId, preset);
   }
-  async changeThreadPermission(threadId, params, allowed) {
+  async changeThreadPermission(threadId, params, allowed, assertCurrent) {
     const permission = codexPermission(params);
     const settings = {
       ...codexTurnPermissionParams(permission, allowed.cwd),
@@ -31443,8 +31475,10 @@ var CodexRemoteDomain = class {
     let result;
     try {
       await this.callUpstream("thread/settings/update", { threadId, ...settings });
+      assertCurrent();
       result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
     } catch (error) {
+      assertCurrent();
       if (isUnpersistedThreadError(error)) {
         return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
       }
@@ -31455,15 +31489,19 @@ var CodexRemoteDomain = class {
           ...codexThreadPermissionParams(permission),
           excludeTurns: true
         });
+        assertCurrent();
       } catch (resumeError) {
+        assertCurrent();
         if (isUnpersistedThreadError(resumeError)) {
           return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy };
         }
         throw resumeError;
       }
       await this.assertResultThreadAllowed(result);
+      assertCurrent();
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
+        assertCurrent();
         result = { ...isRecord14(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
@@ -31478,6 +31516,7 @@ var CodexRemoteDomain = class {
   async handleServerRequest(message) {
     const appServer = this.requireAppServer();
     await this.expireApprovals();
+    if (this.appServer !== appServer || !this.isAvailable()) return;
     if (message.method !== "item/commandExecution/requestApproval" && message.method !== "item/fileChange/requestApproval") {
       await appServer.respondError(message.id, -32601, "This Remote client does not support the server request.");
       return;
@@ -31702,8 +31741,13 @@ var CodexRemoteDomain = class {
     return this.appServer;
   }
   async callUpstream(method, params) {
+    const appServer = this.requireAppServer();
     try {
-      return await this.requireAppServer().call(method, params);
+      const result = await appServer.call(method, params);
+      if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
+        throw new RpcError("CODEX_UNAVAILABLE", "The Codex App Server changed while handling the request.");
+      }
+      return result;
     } catch (error) {
       throw mapAppServerError(error);
     }
@@ -32803,6 +32847,9 @@ var IsolatedAcpClient = class {
         if (typeof id6 !== "string" || !/^[A-Za-z0-9_-]{1,240}$/.test(id6) || this.clients.has(id6) || this.closed || method === "session/load" && typeof result.sessionId === "string" && result.sessionId !== id6) throw new CursorAcpError("ACP_INVALID_SESSION", `${this.label} returned an invalid session.`);
         this.clients.set(id6, client2);
         const config = { ...result };
+        this.updateConfiguration(id6, { kind: "notification", method: "session/update", params: {
+          update: { sessionUpdate: "config_option_update", configOptions: config.configOptions }
+        } }, config);
         for (const key of ["models", "modes"]) {
           if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] };
         }
@@ -32831,10 +32878,12 @@ var IsolatedAcpClient = class {
       try {
         const modelResult = await client.call("session/set_config_option", { sessionId: id5, configId: "model", value: p.model });
         this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: modelResult.configOptions } } });
+        if (this.configurations.get(id5)?.models?.currentModelId !== p.model) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the model change.`);
         if (p.reasoningEffort !== void 0) {
           if (!this.configurations.get(id5)?.modes?.availableModes?.some((item) => item.id === p.reasoningEffort)) throw new CursorAcpError("INVALID_MESSAGE", "The selected model does not support this thinking level.");
           const thinkingResult = await client.call("session/set_config_option", { sessionId: id5, configId: "thought_level", value: p.reasoningEffort });
           this.updateConfiguration(id5, { kind: "notification", method: "session/update", params: { update: { sessionUpdate: "config_option_update", configOptions: thinkingResult.configOptions } } });
+          if (this.configurations.get(id5)?.modes?.currentModeId !== p.reasoningEffort) throw new CursorAcpError("ACP_MODEL_NOT_CONFIRMED", `${this.label} did not confirm the thinking change.`);
         }
         return { selected: this.models(id5).current };
       } finally {
@@ -32860,14 +32909,15 @@ var IsolatedAcpClient = class {
     if (update.sessionUpdate === "current_mode_update" && typeof update.currentModeId === "string") config.modes = { ...config.modes, currentModeId: update.currentModeId };
     if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
       for (const option of update.configOptions) {
-        if (option.type !== "select" || !Array.isArray(option.options)) continue;
+        if (option?.type !== "select" || !Array.isArray(option.options)) continue;
+        const options = option.options.flatMap((item) => Array.isArray(item?.options) ? item.options : [item]).filter((item) => typeof item?.value === "string" && typeof item?.name === "string");
         if (option.id === "model") config.models = {
           currentModelId: option.currentValue,
-          availableModels: option.options.map((item) => ({ modelId: item.value, name: item.name }))
+          availableModels: options.map((item) => ({ modelId: item.value, name: item.name }))
         };
         if (option.id === "thought_level") config.modes = {
           currentModeId: option.currentValue,
-          availableModes: option.options.map((item) => ({ id: item.value, name: item.name }))
+          availableModes: options.map((item) => ({ id: item.value, name: item.name }))
         };
       }
     }
@@ -32956,7 +33006,7 @@ var IsolatedAcpClient = class {
 };
 
 // src/workspace-bridge.ts
-import { realpath as realpath2, lstat, readdir as readdir2, readFile as readFile4, stat as stat4, watch } from "node:fs/promises";
+import { realpath as realpath2, lstat, readdir as readdir2, open, stat as stat4, watch } from "node:fs/promises";
 import { isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/remote-terminal-controller.ts
@@ -33652,10 +33702,26 @@ var WorkspaceBridge = class {
         return { ok: true, value: { absolutePath, version, bytes: info.size } };
       }
       if (!info.isFile()) throw this.scopeError("WORKSPACE_INVALID_PATH", "The requested workspace path is not a file.");
+      if (info.size > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
       const offset = readOffset(args);
       const limit = readLimit(args);
-      const bytes = await readFile4(target2);
-      if (bytes.byteLength > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
+      const file = await open(target2, "r");
+      let bytes;
+      try {
+        const buffer = Buffer.allocUnsafe(info.size + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          signal.throwIfAborted();
+          const read = await file.read(buffer, length, buffer.length - length, length);
+          if (read.bytesRead === 0) break;
+          length += read.bytesRead;
+        }
+        if (length > MAX_READ_BYTES) throw this.scopeError("WORKSPACE_TOO_LARGE", "The requested workspace file is too large.");
+        if (length !== info.size) throw this.scopeError("WORKSPACE_CHANGED", "The workspace file changed while reading it. Retry the request.");
+        bytes = buffer.subarray(0, length);
+      } finally {
+        await file.close();
+      }
       if (endpoint === "workspaceFiles/readBytes") {
         const slice2 = bytes.subarray(offset, Math.min(offset + limit, bytes.length));
         return {
@@ -35165,6 +35231,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   failureNotified = false;
   startPromise;
   historyBusy = false;
+  historyStop;
   nativeApi;
   archivedSessions = /* @__PURE__ */ new Set();
   archivingSessions = /* @__PURE__ */ new Set();
@@ -35206,7 +35273,10 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "The OpenCode domain is closed.");
     if (this.historyBusy) throw new OpencodeAcpError("OPENCODE_HISTORY_BUSY", "An OpenCode history read is already in progress.");
     this.historyBusy = true;
-    const client = new _OpencodeAcpClient(this.binary, this.logger, void 0, { ...this.options, historyReader: true });
+    const client = new _OpencodeAcpClient(this.binary, this.logger, this.spawnAcp, { ...this.options, historyReader: true });
+    let stopping;
+    const stop = () => stopping ??= client.close();
+    this.historyStop = stop;
     const updates = [];
     let bytes = 0;
     let count = 0;
@@ -35219,18 +35289,29 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       if (message.method !== "session/update" || message.params?.sessionId !== sessionId || overflow) return;
       count++;
       bytes += Buffer7.byteLength(JSON.stringify(message));
-      if (bytes > 8 * 1024 * 1024 || count > 1e4) overflow = true;
-      else updates.push(message);
+      if (bytes > 8 * 1024 * 1024 || count > 1e4) {
+        overflow = true;
+        void stop().catch(() => void 0);
+      } else updates.push(message);
     });
     try {
       await client.start();
+      if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       await client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
       return acpHistoryEvents(updates, sessionId, "opencode");
+    } catch (error) {
+      if (overflow) throw new OpencodeAcpError("OPENCODE_HISTORY_TOO_LARGE", "OpenCode history exceeds the transfer limit.");
+      throw error;
     } finally {
       unsubscribe();
-      await client.close().catch(() => void 0);
-      this.historyBusy = false;
+      try {
+        await stop();
+      } finally {
+        this.historyStop = void 0;
+        this.historyBusy = false;
+      }
     }
   }
   models = /* @__PURE__ */ new Map();
@@ -35344,10 +35425,14 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.models.clear();
     this.nativeApi?.close();
     this.failPending(new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed."));
+    const history = this.historyStop?.();
     const child = this.process;
     this.process = void 0;
-    if (child === void 0 || child.exitCode !== null || child.killed) return;
-    await new Promise((resolve6) => {
+    if (child === void 0 || child.exitCode !== null || child.killed) {
+      await history;
+      return;
+    }
+    await Promise.all([history, new Promise((resolve6) => {
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
         resolve6();
@@ -35358,7 +35443,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
         resolve6();
       });
       child.kill("SIGTERM");
-    });
+    })]);
   }
   async startOnce() {
     if (this.process !== void 0) {
@@ -35381,11 +35466,16 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.failureNotified = false;
     this.stdoutBuffer = Buffer7.alloc(0);
     this.stderrBytes = 0;
-    child.stdout.on("data", (chunk) => this.consumeStdout(Buffer7.from(chunk)));
+    child.stdout.on("data", (chunk) => {
+      if (this.process === child) this.consumeStdout(Buffer7.from(chunk));
+    });
     child.stderr.on("data", (chunk) => {
+      if (this.process !== child) return;
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES4, this.stderrBytes + Buffer7.byteLength(chunk));
     });
-    child.on("error", (error) => this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", error));
+    child.on("error", (error) => {
+      if (this.process === child) this.handleProcessFailure("OPENCODE_BINARY_UNAVAILABLE", error);
+    });
     child.on("exit", (code, signal) => {
       if (this.process !== child) return;
       this.process = void 0;
@@ -35393,6 +35483,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.nativeApi?.close();
       this.nativeApi = void 0;
       this.models.clear();
+      void this.historyStop?.().catch(() => void 0);
       this.failPending(new OpencodeAcpError("OPENCODE_ACP_EXITED", "OpenCode ACP exited unexpectedly."));
       if (!this.closed) {
         this.logger?.warn("OpenCode ACP exited", {
@@ -35415,6 +35506,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           version: PLUGIN_VERSION
         }
       }, ACP_START_TIMEOUT_MS3);
+      if (this.closed || this.process !== child) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
       this.ready = true;
       this.logger?.info("OpenCode ACP ready");
     } catch (error) {
@@ -35502,6 +35594,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     this.publish(inbound);
   }
   handleProcessFailure(code, cause) {
+    void this.historyStop?.().catch(() => void 0);
     this.nativeApi?.close();
     this.nativeApi = void 0;
     this.ready = false;
@@ -36150,6 +36243,7 @@ var AcpPeerBridge = class {
       });
       throw error;
     }
+    this.requireOpen();
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES2) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
@@ -36243,11 +36337,11 @@ var AcpPeerBridge = class {
     this.toolControllers.clear();
     this.incomingTransfers.clear();
     this.outgoingTransfers.clear();
+    this.domain.dropPeer(this.context.connectionId);
     await Promise.all(streamIds.map((streamId) => this.publish("agent.acp.stream.closed", {
       streamId,
       reason: "peer-disconnected"
     }).catch(() => void 0)));
-    this.domain.dropPeer(this.context.connectionId);
   }
   pruneTransfers() {
     const staleBefore = Date.now() - TRANSFER_IDLE_MS2;
@@ -36348,7 +36442,7 @@ var AcpRemoteGateway = class {
   /** Catch-up buffer for turns that finish while the Client is reconnecting. */
   recentFrames = /* @__PURE__ */ new Map();
   /** Per-prompt live updates; attached to prompt_completed when streaming was lossy. */
-  promptsInProgress = /* @__PURE__ */ new Set();
+  promptsInProgress = /* @__PURE__ */ new Map();
   cancelledSessions = /* @__PURE__ */ new Set();
   /** Identity fences asynchronous Pi preparation from a later retry of the same session. */
   preparingPrompts = /* @__PURE__ */ new Map();
@@ -36436,13 +36530,16 @@ var AcpRemoteGateway = class {
     const call = parseAcpCall(envelope.method, envelope.params);
     const sessionId = sessionIdFromParams(call.method, call.params);
     const backend = call.params.backend ?? (sessionId ? this.sessionBackends.get(sessionId) ?? this.defaultBackend() : void 0);
+    const assertCurrent = this.captureCallScope(connectionId, typeof backend === "string" ? backend : this.defaultBackend());
     const reserve = backend === "opencode" && sessionId !== void 0 && ["session/load", "session/prompt", "dsh/selectModel"].includes(call.method);
     if (reserve) {
       if (this.archivingSessions.has(sessionId)) throw new RpcError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
       this.opencodeOperations.set(sessionId, (this.opencodeOperations.get(sessionId) ?? 0) + 1);
     }
     try {
-      return await this.callInternal(connectionId, call);
+      const result = await this.callInternal(connectionId, call, assertCurrent);
+      assertCurrent();
+      return result;
     } finally {
       if (reserve) {
         const remaining = (this.opencodeOperations.get(sessionId) ?? 1) - 1;
@@ -36451,7 +36548,20 @@ var AcpRemoteGateway = class {
       }
     }
   }
-  async callInternal(connectionId, call) {
+  captureCallScope(connectionId, backend) {
+    const peer = this.peers.get(connectionId);
+    const instance = this.backendInstances.get(backend);
+    return () => {
+      if (this.closed || this.backendInstances.get(backend) !== instance || instance !== void 0 && this.requireAcp(backend) !== instance.client) {
+        throw new RpcError("CURSOR_UNAVAILABLE", "The ACP backend changed while handling the request.");
+      }
+      if (peer !== void 0 && this.peers.get(connectionId) !== peer) {
+        throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP connection is closed.");
+      }
+    };
+  }
+  async callInternal(connectionId, call, assertCurrent) {
+    assertCurrent();
     this.logger.info("ACP call received", {
       method: call.method,
       sessionId: typeof call.params?.sessionId === "string" ? shortSessionId(call.params.sessionId) : void 0
@@ -36482,6 +36592,7 @@ var AcpRemoteGateway = class {
         const client = this.requireAcp(backend);
         const instance = this.backendInstances.get(backend);
         const cwd2 = await this.catalogSessionCwd(backend, sessionId2);
+        assertCurrent();
         if (this.closed || this.requireAcp(backend) !== client || this.backendInstances.get(backend) !== instance) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The OpenCode backend changed. Refresh the session list.");
         if (this.promptsInProgress.has(sessionId2) || [...this.approvals.values()].some((item) => item.sessionId === sessionId2)) throw new RpcError("ACP_SESSION_BUSY", "Stop the OpenCode reply and resolve its approvals before archiving.");
         if (!client.archiveSession) throw new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "The Host OpenCode adapter does not support native archiving.");
@@ -36511,6 +36622,7 @@ var AcpRemoteGateway = class {
         if (archived) throw new RpcError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
       }
     }
+    assertCurrent();
     if (call.method === "dsh/directoryList") {
       return this.listDirectory(String(call.params.path));
     }
@@ -36576,11 +36688,13 @@ var AcpRemoteGateway = class {
       if (backend === "antigravity") {
         if (path.trim() !== "" && call.params.prewarm !== false) {
           const cwd2 = await this.requireExistingDirectory(path);
+          assertCurrent();
           this.requireAcp("antigravity").prewarmSession?.(cwd2);
         }
         const items = await discoverAntigravitySessions(path, limit);
         if (path) {
           const cwd2 = await this.requireExistingDirectory(path);
+          assertCurrent();
           for (const item of items) this.sessionCwds.set(item.conversationId, { backend, cwd: cwd2 });
         }
         this.logger.info("ACP session list fetched", { count: items.length });
@@ -36619,6 +36733,7 @@ var AcpRemoteGateway = class {
     }
     if (call.method === "session/new") {
       const cwd2 = await this.requireExistingDirectory(String(call.params.cwd));
+      assertCurrent();
       const requestedBackend = typeof call.params.backend === "string" ? call.params.backend : this.defaultBackend();
       const acp = this.requireAcp(requestedBackend);
       const result = await acp.call("session/new", {
@@ -36626,6 +36741,7 @@ var AcpRemoteGateway = class {
         mcpServers: [],
         ...typeof call.params.mode === "string" ? { mode: call.params.mode } : {}
       });
+      assertCurrent();
       const sessionId2 = readSessionId(result);
       if (sessionId2 !== void 0) {
         const bound = this.sessionBackends.get(sessionId2);
@@ -36661,9 +36777,12 @@ var AcpRemoteGateway = class {
         throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       }
       if (targetBackend === "pi" || targetBackend === "claude" || targetBackend === "opencode") await this.catalogSessionCwd(targetBackend, sessionId);
+      assertCurrent();
       this.requireSessionOwner(connectionId, sessionId);
       const acp = this.requireAcp(targetBackend);
+      this.sessionBackends.set(sessionId, targetBackend);
       const result = await acp.call(call.method, { ...call.params, ...sessionId && this.sessionCwds.get(sessionId) ? { cwd: this.sessionCwds.get(sessionId).cwd, mcpServers: [] } : {} });
+      assertCurrent();
       const loadedId = readSessionId(result) ?? sessionId;
       if (loadedId !== void 0) {
         if (loadedId !== sessionId || this.sessionBackends.has(loadedId) && targetBackend !== void 0 && this.sessionBackends.get(loadedId) !== targetBackend) {
@@ -36681,7 +36800,9 @@ var AcpRemoteGateway = class {
       this.requireSessionOwner(connectionId, sessionId);
       const backend = call.params.backend;
       const cwd2 = await this.catalogSessionCwd(backend, sessionId);
+      assertCurrent();
       await this.requireAcp(backend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+      assertCurrent();
     }
     if (call.method === "dsh/selectModel") {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "Stop the ACP reply before changing its model.");
@@ -36690,12 +36811,15 @@ var AcpRemoteGateway = class {
         throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
       }
       const result = await this.requireAcp(session.backend).call(call.method, { ...call.params, cwd: session.cwd });
+      assertCurrent();
       this.sessionBackends.set(sessionId, session.backend);
       return sanitizeSessionResult(result);
     }
     if (call.method === "session/prompt" && sessionId !== void 0) {
       if (this.promptsInProgress.has(sessionId)) throw new RpcError("PROMPT_IN_PROGRESS", "An ACP reply is already in progress.");
-      this.promptsInProgress.add(sessionId);
+      const backend = this.sessionBackends.get(sessionId) ?? this.defaultBackend();
+      const task = { backend, client: this.requireAcp(backend) };
+      this.promptsInProgress.set(sessionId, task);
       this.cancelledSessions.delete(sessionId);
       const preparationBackend = this.sessionBackends.get(sessionId);
       if (preparationBackend === "pi" || preparationBackend === "claude") {
@@ -36704,16 +36828,18 @@ var AcpRemoteGateway = class {
         try {
           const cwd2 = await this.catalogSessionCwd(preparationBackend, sessionId);
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
-          await this.requireAcp(preparationBackend).call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
+          assertCurrent();
+          await task.client.call("session/load", { sessionId, cwd: cwd2, mcpServers: [] });
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
+          assertCurrent();
         } catch (error) {
           if (preparation.cancelled) return { accepted: false, stopReason: "cancelled" };
-          this.promptsInProgress.delete(sessionId);
+          if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId);
           throw error;
         } finally {
           if (this.preparingPrompts.get(sessionId) === preparation) {
             this.preparingPrompts.delete(sessionId);
-            if (preparation.cancelled) this.promptsInProgress.delete(sessionId);
+            if (preparation.cancelled && this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId);
           }
         }
       }
@@ -36724,7 +36850,7 @@ var AcpRemoteGateway = class {
         });
       }
       this.turnCatchUp.set(sessionId, []);
-      void this.runPromptInBackground(sessionId, call.params);
+      void this.runPromptInBackground(sessionId, call.params, task);
       return { accepted: true, stopReason: "in_progress" };
     }
     if (call.method === "session/cancel" && sessionId !== void 0) {
@@ -36747,12 +36873,12 @@ var AcpRemoteGateway = class {
     const sessionBackend = sessionId !== void 0 ? this.sessionBackends.get(sessionId) : void 0;
     return sanitizeSessionResult(await this.requireAcp(typeof call.params.backend === "string" ? call.params.backend : sessionBackend).call(call.method, call.params));
   }
-  async runPromptInBackground(sessionId, params) {
+  async runPromptInBackground(sessionId, params, task) {
+    const current = () => !this.closed && this.promptsInProgress.get(sessionId) === task && !this.pendingReconfiguration.has(task.backend) && this.backendInstances.get(task.backend)?.client === task.client;
     try {
-      const sessionBackend = this.sessionBackends.get(sessionId);
-      const acp = this.requireAcp(sessionBackend);
-      const result = await acp.call("session/prompt", params);
+      const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
+      if (!current()) return;
       const stopReason = isRecord19(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
@@ -36772,8 +36898,10 @@ var AcpRemoteGateway = class {
         }
       });
     } catch (error) {
+      if (!current()) return;
       this.logger?.warn("ACP session/prompt failed", { code: errorCode3(error) });
       await this.inboundChain.catch(() => void 0);
+      if (!current()) return;
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       await this.publishToSession(sessionId, {
         method: "session/update",
@@ -36787,7 +36915,7 @@ var AcpRemoteGateway = class {
         }
       }).catch(() => void 0);
     } finally {
-      this.promptsInProgress.delete(sessionId);
+      if (this.promptsInProgress.get(sessionId) === task) this.promptsInProgress.delete(sessionId);
     }
   }
   async respond(connectionId, input3) {
@@ -36898,6 +37026,10 @@ var AcpRemoteGateway = class {
     const terminalError = await this.workspaceState.dispose((sessionId) => changed.has(sessionId.startsWith("acp:") ? "antigravity" : sessionId.startsWith("pi:") ? "pi" : sessionId.startsWith("opencode:") ? "opencode" : "cursor")).then(() => void 0, () => new RpcError("TERMINAL_CLEANUP_FAILED", "Some ACP terminal processes could not be stopped. Save the backend settings again to retry."));
     for (const id5 of sessions) {
       this.sessionOwners.delete(id5);
+      this.promptsInProgress.delete(id5);
+      const preparation = this.preparingPrompts.get(id5);
+      if (preparation) preparation.cancelled = true;
+      this.preparingPrompts.delete(id5);
       this.sessionBackends.delete(id5);
       this.recentFrames.delete(id5);
       this.turnCatchUp.delete(id5);
@@ -36932,6 +37064,9 @@ var AcpRemoteGateway = class {
     this.sessionBackends.clear();
     this.recentFrames.clear();
     this.turnCatchUp.clear();
+    this.promptsInProgress.clear();
+    for (const preparation of this.preparingPrompts.values()) preparation.cancelled = true;
+    this.preparingPrompts.clear();
     this.approvals.clear();
     const processes = await Promise.allSettled([...this.startingClients.keys()].map((client) => client.close()).concat(this.disposeAllInstances()));
     const terminalError = await terminals;

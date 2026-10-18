@@ -1,4 +1,4 @@
-import { realpath, lstat, readdir, readFile, stat, watch } from 'node:fs/promises'
+import { realpath, lstat, readdir, open, stat, watch } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { RpcError } from './safe-error.js'
 import type { TypertRpcResult } from './typert-gateway-contract.js'
@@ -115,10 +115,26 @@ export class WorkspaceBridge {
         return { ok: true, value: { absolutePath, version, bytes: info.size } }
       }
       if (!info.isFile()) throw this.scopeError('WORKSPACE_INVALID_PATH', 'The requested workspace path is not a file.')
+      if (info.size > MAX_READ_BYTES) throw this.scopeError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
       const offset = readOffset(args)
       const limit = readLimit(args)
-      const bytes = await readFile(target)
-      if (bytes.byteLength > MAX_READ_BYTES) throw this.scopeError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+      const file = await open(target, 'r')
+      let bytes: Buffer
+      try {
+        // Bound allocation even if the file grows after stat. One extra byte
+        // detects growth instead of silently returning a truncated snapshot.
+        const buffer = Buffer.allocUnsafe(info.size + 1)
+        let length = 0
+        while (length < buffer.length) {
+          signal.throwIfAborted()
+          const read = await file.read(buffer, length, buffer.length - length, length)
+          if (read.bytesRead === 0) break
+          length += read.bytesRead
+        }
+        if (length > MAX_READ_BYTES) throw this.scopeError('WORKSPACE_TOO_LARGE', 'The requested workspace file is too large.')
+        if (length !== info.size) throw this.scopeError('WORKSPACE_CHANGED', 'The workspace file changed while reading it. Retry the request.')
+        bytes = buffer.subarray(0, length)
+      } finally { await file.close() }
       if (endpoint === 'workspaceFiles/readBytes') {
         const slice = bytes.subarray(offset, Math.min(offset + limit, bytes.length))
         return {

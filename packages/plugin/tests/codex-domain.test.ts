@@ -937,6 +937,107 @@ describe('CodexRemoteDomain', () => {
     await domain.close()
   })
 
+  it('invalidates pending workspace authority when its connection or App Server changes', async () => {
+    await runScenarios(['disconnect', 'replace', 'close'].flatMap(action =>
+      ['thread/start', 'turn/start', 'permission', 'workspace'].map(operation => ({
+        name: `${operation}: ${action}`,
+        run: async () => {
+          const { root } = await directories()
+          const first = new FakeAppServer(root)
+          const second = new FakeAppServer(root)
+          const create = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second)
+          const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), create)
+          await domain.start()
+          const peer = domain.createPeer({ connectionId: 'old', peerDeviceId: 'device' }, async () => undefined)!
+          let release!: () => void
+          let entered!: () => void
+          const blocked = new Promise<void>(resolve => { release = resolve })
+          const waiting = new Promise<void>(resolve => { entered = resolve })
+          const original = first.call.bind(first)
+          vi.spyOn(first, 'call').mockImplementation(async (method, params) => {
+            const result = await original(method, params)
+            if (method === 'project/list') { entered(); await blocked }
+            return result
+          })
+          const pending = operation === 'workspace'
+            ? domain.resolveThreadWorkspace('old', 'allowed-thread')
+            : peer.call(operation === 'thread/start'
+              ? { method: operation, params: { cwd: root } }
+              : operation === 'permission'
+                ? { method: 'thread/resume', params: { threadId: 'allowed-thread', permissionPreset: 'workspace-write' } }
+                : { method: operation, params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'hello' }] } })
+          const outcome = pending.then(value => ({ value }), error => ({ error }))
+          try {
+            await Promise.race([waiting, outcome.then(result => { throw new Error(`Request settled before authority check: ${JSON.stringify(result)}`) })])
+            if (action === 'disconnect') await peer.closeAll()
+            else if (action === 'replace') await domain.reconfigure({ enabled: true, binary: 'replacement' })
+            else await domain.close()
+            release()
+            expect(await outcome).toHaveProperty('error')
+            expect([...first.calls, ...second.calls].some(call =>
+              ['thread/start', 'turn/start', 'thread/resume', 'thread/settings/update'].includes(call.method))).toBe(false)
+          } finally {
+            release()
+            await outcome
+            await domain.close()
+          }
+        },
+      }))), cleanupScenario1)
+  })
+
+  it('keeps a replacement writer lease when an old turn settles late', async () => {
+    await runScenarios(['success', 'failure'].map(result => ({
+      name: `late ${result}`,
+      run: async () => {
+        const { root } = await directories()
+        const app = new FakeAppServer(root)
+        const domain = new CodexRemoteDomain({ enabled: true, binary: 'codex' }, logger(), () => app)
+        await domain.start()
+        let finishClose!: () => void
+        const closeGate = new Promise<void>(resolve => { finishClose = resolve })
+        const old = domain.createPeer({ connectionId: 'old', peerDeviceId: 'old-device' }, async event => {
+          if (event === 'codex.app.stream.closed') await closeGate
+        })!
+        await old.openStream({ streamId: 'existing', threadId: 'allowed-thread' })
+        const next = domain.createPeer({ connectionId: 'next', peerDeviceId: 'next-device' }, async () => undefined)!
+        const observer = domain.createPeer({ connectionId: 'observer', peerDeviceId: 'observer-device' }, async () => undefined)!
+        let release!: () => void
+        let entered!: () => void
+        const blocked = new Promise<void>(resolve => { release = resolve })
+        const waiting = new Promise<void>(resolve => { entered = resolve })
+        const original = app.call.bind(app)
+        let first = true
+        vi.spyOn(app, 'call').mockImplementation(async (method, params) => {
+          if (method === 'turn/start' && first) {
+            first = false
+            entered()
+            await blocked
+            if (result === 'failure') throw new CodexAppServerError('CODEX_UPSTREAM_ERROR', 'Rejected')
+          }
+          return original(method, params)
+        })
+        const request = { method: 'turn/start', params: { threadId: 'allowed-thread', input: [{ type: 'text', text: 'hello' }] } }
+        const outcome = old.call(request).then(value => ({ value }), error => ({ error }))
+        let closing: Promise<void> | undefined
+        try {
+          await waiting
+          closing = old.closeAll()
+          await next.call(request)
+          release()
+          expect(await outcome).toHaveProperty('error')
+          await expect(observer.call(request)).rejects.toMatchObject({ code: 'CODEX_TURN_OWNED' })
+          await expect(next.call({ method: 'turn/interrupt', params: { threadId: 'allowed-thread', turnId: 'turn-1' } })).resolves.toEqual({})
+        } finally {
+          release()
+          finishClose()
+          await closing
+          await outcome
+          await domain.close()
+        }
+      },
+    })), cleanupScenario1)
+  })
+
   it('closes live streams and restarts after an App Server crash without replaying mutations', async () => {
     const { root } = await directories()
     const first = new FakeAppServer(root)

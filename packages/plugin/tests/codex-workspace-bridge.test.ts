@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, writeFile, rm, truncate } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -83,6 +83,12 @@ describe('CodeX workspace and terminal bridge', () => {
     await expect(bridge.call('workspaceFiles/stat', { args: { workspaceFileScopeId: 'codex:one', path: 'hello.txt' } }, signal)).resolves.toMatchObject({ ok: true, value: { absolutePath: join(resolvedRoot, 'hello.txt'), version: expect.any(String), bytes: 5 } })
     await expect(bridge.call('workspaceFiles/readBytes', { args: { workspaceFileScopeId: 'codex:one', path: 'hello.txt', range: { offset: 1, length: 3 } } }, signal)).resolves.toMatchObject({ ok: true, value: { absolutePath: join(resolvedRoot, 'hello.txt'), version: expect.any(String), bytes: 5, offset: 1, data: 'ZWxs', eof: false } })
     await expect(bridge.call('workspaceFiles/readBytes', { args: { workspaceFileScopeId: 'codex:one', path: '../secret.txt' } }, signal)).rejects.toMatchObject({ code: 'CODEX_WORKSPACE_PATH_DENIED' })
+    // Sparse multi-GiB files must be rejected before an unbounded read/allocation.
+    await writeFile(join(root, 'oversized.bin'), '')
+    await truncate(join(root, 'oversized.bin'), 8 * 1024 * 1024 * 1024)
+    for (const endpoint of ['workspaceFiles/read', 'workspaceFiles/readBytes']) {
+      await expect(bridge.call(endpoint, { args: { workspaceFileScopeId: 'codex:one', path: 'oversized.bin' } }, signal)).rejects.toMatchObject({ code: 'CODEX_WORKSPACE_TOO_LARGE' })
+    }
     await bridge.closeAll(); await rm(root, { recursive: true, force: true }); await rm(other, { recursive: true, force: true })
   })
 

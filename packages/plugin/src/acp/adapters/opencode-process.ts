@@ -67,6 +67,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
   private failureNotified = false
   private startPromise?: Promise<void>
   private historyBusy = false
+  private historyStop?: () => Promise<void>
   private nativeApi?: OpencodeNativeApi
   private readonly archivedSessions = new Set<string>()
   private readonly archivingSessions = new Set<string>()
@@ -114,7 +115,10 @@ export class OpencodeAcpClient implements CursorAcpLike {
     if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'The OpenCode domain is closed.')
     if (this.historyBusy) throw new OpencodeAcpError('OPENCODE_HISTORY_BUSY', 'An OpenCode history read is already in progress.')
     this.historyBusy = true
-    const client = new OpencodeAcpClient(this.binary, this.logger, undefined, { ...this.options, historyReader: true })
+    const client = new OpencodeAcpClient(this.binary, this.logger, this.spawnAcp, { ...this.options, historyReader: true })
+    let stopping: Promise<void> | undefined
+    const stop = () => stopping ??= client.close()
+    this.historyStop = stop
     const updates: CursorAcpInbound[] = []
     let bytes = 0
     let count = 0
@@ -130,18 +134,25 @@ export class OpencodeAcpClient implements CursorAcpLike {
         || overflow) return
       count++
       bytes += Buffer.byteLength(JSON.stringify(message))
-      if (bytes > 8 * 1024 * 1024 || count > 10_000) overflow = true
+      if (bytes > 8 * 1024 * 1024 || count > 10_000) {
+        overflow = true
+        void stop().catch(() => undefined)
+      }
       else updates.push(message)
     })
     try {
       await client.start()
+      if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       await client.call('session/load', { sessionId, cwd, mcpServers: [] })
+      if (this.closed) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       if (overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
       return acpHistoryEvents(updates, sessionId, 'opencode')
+    } catch (error) {
+      if (overflow) throw new OpencodeAcpError('OPENCODE_HISTORY_TOO_LARGE', 'OpenCode history exceeds the transfer limit.')
+      throw error
     } finally {
       unsubscribe()
-      await client.close().catch(() => undefined)
-      this.historyBusy = false
+      try { await stop() } finally { this.historyStop = undefined; this.historyBusy = false }
     }
   }
 
@@ -258,10 +269,11 @@ export class OpencodeAcpClient implements CursorAcpLike {
     this.models.clear()
     this.nativeApi?.close()
     this.failPending(new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.'))
+    const history = this.historyStop?.()
     const child = this.process
     this.process = undefined
-    if (child === undefined || child.exitCode !== null || child.killed) return
-    await new Promise<void>(resolve => {
+    if (child === undefined || child.exitCode !== null || child.killed) { await history; return }
+    await Promise.all([history, new Promise<void>(resolve => {
       const timer = setTimeout(() => {
         child.kill('SIGKILL')
         resolve()
@@ -272,7 +284,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
         resolve()
       })
       child.kill('SIGTERM')
-    })
+    })])
   }
 
   private async startOnce(): Promise<void> {
@@ -294,11 +306,16 @@ export class OpencodeAcpClient implements CursorAcpLike {
     this.failureNotified = false
     this.stdoutBuffer = Buffer.alloc(0)
     this.stderrBytes = 0
-    child.stdout.on('data', chunk => this.consumeStdout(Buffer.from(chunk as Uint8Array)))
+    child.stdout.on('data', chunk => {
+      if (this.process === child) this.consumeStdout(Buffer.from(chunk as Uint8Array))
+    })
     child.stderr.on('data', chunk => {
+      if (this.process !== child) return
       this.stderrBytes = Math.min(MAX_STDERR_CAPTURE_BYTES, this.stderrBytes + Buffer.byteLength(chunk))
     })
-    child.on('error', error => this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', error))
+    child.on('error', error => {
+      if (this.process === child) this.handleProcessFailure('OPENCODE_BINARY_UNAVAILABLE', error)
+    })
     child.on('exit', (code, signal) => {
       if (this.process !== child) return
       this.process = undefined
@@ -306,6 +323,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
       this.nativeApi?.close()
       this.nativeApi = undefined
       this.models.clear()
+      void this.historyStop?.().catch(() => undefined)
       this.failPending(new OpencodeAcpError('OPENCODE_ACP_EXITED', 'OpenCode ACP exited unexpectedly.'))
       if (!this.closed) {
         this.logger?.warn('OpenCode ACP exited', {
@@ -329,6 +347,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
           version: PLUGIN_VERSION,
         },
       }, ACP_START_TIMEOUT_MS)
+      if (this.closed || this.process !== child) throw new OpencodeAcpError('OPENCODE_CLOSED', 'OpenCode ACP was closed.')
       this.ready = true
       this.logger?.info('OpenCode ACP ready')
     } catch (error) {
@@ -425,6 +444,7 @@ export class OpencodeAcpClient implements CursorAcpLike {
   }
 
   private handleProcessFailure(code: string, cause: Error): void {
+    void this.historyStop?.().catch(() => undefined)
     this.nativeApi?.close()
     this.nativeApi = undefined
     this.ready = false

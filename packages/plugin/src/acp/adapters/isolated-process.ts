@@ -100,6 +100,9 @@ export class IsolatedAcpClient implements CursorAcpLike {
           || (method === 'session/load' && typeof (result as Record<string, unknown>).sessionId === 'string' && (result as Record<string, unknown>).sessionId !== id)) throw new CursorAcpError('ACP_INVALID_SESSION', `${this.label} returned an invalid session.`)
         this.clients.set(id, client)
         const config = { ...(result as Record<string, any>) }
+        this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: {
+          update: { sessionUpdate: 'config_option_update', configOptions: config.configOptions },
+        } }, config)
         for (const key of ['models', 'modes']) {
           if (replayConfiguration[key]) config[key] = { ...config[key], ...replayConfiguration[key] }
         }
@@ -126,10 +129,12 @@ export class IsolatedAcpClient implements CursorAcpLike {
       try {
         const modelResult = await client.call('session/set_config_option', { sessionId: id, configId: 'model', value: p.model })
         this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: { update: { sessionUpdate: 'config_option_update', configOptions: (modelResult as { configOptions?: unknown }).configOptions } } })
+        if (this.configurations.get(id)?.models?.currentModelId !== p.model) throw new CursorAcpError('ACP_MODEL_NOT_CONFIRMED', `${this.label} did not confirm the model change.`)
         if (p.reasoningEffort !== undefined) {
           if (!this.configurations.get(id)?.modes?.availableModes?.some((item: any) => item.id === p.reasoningEffort)) throw new CursorAcpError('INVALID_MESSAGE', 'The selected model does not support this thinking level.')
           const thinkingResult = await client.call('session/set_config_option', { sessionId: id, configId: 'thought_level', value: p.reasoningEffort })
           this.updateConfiguration(id, { kind: 'notification', method: 'session/update', params: { update: { sessionUpdate: 'config_option_update', configOptions: (thinkingResult as { configOptions?: unknown }).configOptions } } })
+          if (this.configurations.get(id)?.modes?.currentModeId !== p.reasoningEffort) throw new CursorAcpError('ACP_MODEL_NOT_CONFIRMED', `${this.label} did not confirm the thinking change.`)
         }
         return { selected: this.models(id).current }
       } finally { this.busy.delete(id) }
@@ -149,11 +154,13 @@ export class IsolatedAcpClient implements CursorAcpLike {
     if (update.sessionUpdate === 'current_mode_update' && typeof update.currentModeId === 'string') config.modes = { ...config.modes, currentModeId: update.currentModeId }
     if (update.sessionUpdate === 'config_option_update' && Array.isArray(update.configOptions)) {
       for (const option of update.configOptions) {
-        if (option.type !== 'select' || !Array.isArray(option.options)) continue
+        if (option?.type !== 'select' || !Array.isArray(option.options)) continue
+        const options = option.options.flatMap((item: any) => Array.isArray(item?.options) ? item.options : [item])
+          .filter((item: any) => typeof item?.value === 'string' && typeof item?.name === 'string')
         if (option.id === 'model') config.models = { currentModelId: option.currentValue,
-          availableModels: option.options.map((item: any) => ({ modelId: item.value, name: item.name })) }
+          availableModels: options.map((item: any) => ({ modelId: item.value, name: item.name })) }
         if (option.id === 'thought_level') config.modes = { currentModeId: option.currentValue,
-          availableModes: option.options.map((item: any) => ({ id: item.value, name: item.name })) }
+          availableModes: options.map((item: any) => ({ id: item.value, name: item.name })) }
       }
     }
   }

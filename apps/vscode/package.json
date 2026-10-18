@@ -88,7 +88,7 @@
     "@dsh-remote/crypto": "workspace:*",
     "@dsh-remote/protocol": "workspace:*",
     "@dsh-remote/webrtc": "workspace:*",
-    "markdown-it": "^14.1.0",
+    "markdown-it": "^14.3.3",
     "qrcode": "^1.5.4",
     "werift": "0.24.4",
     "ws": "^8.18.0"

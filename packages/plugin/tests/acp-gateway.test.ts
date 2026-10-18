@@ -29,6 +29,79 @@ function readyAcp(): CursorAcpLike {
 }
 
 describe('AcpRemoteGateway', () => {
+  it('does not restore session ownership from new/load results after disconnect, replacement or shutdown', async () => {
+    const cwd = await realpath(process.cwd())
+    await runScenarios((['cursor', 'pi', 'opencode'] as const).flatMap(backend =>
+      (['session/new', 'session/load'] as const).flatMap(method =>
+        (['disconnect', 'replace', 'close'] as const).map(transition => ({ name: `${backend}: ${method} / ${transition}`, run: async () => {
+          let entered!: () => void, release!: () => void
+          const blocked = new Promise<void>(resolve => { entered = resolve })
+          const gate = new Promise<void>(resolve => { release = resolve })
+          const previous = readyAcp(), next = readyAcp()
+          previous.call = vi.fn(async current => {
+            if (current === 'session/list') return { sessions: [{ sessionId: 'saved', cwd }] }
+            if (current === method) { entered(); await gate }
+            return { sessionId: 'saved' }
+          })
+          const initial = { enabled: true, backends: [{ id: backend, enabled: true, command: 'previous', args: [] }] }
+          const gateway = new AcpRemoteGateway(initial, silentLogger(), binary => binary === 'previous' ? previous : next)
+          await gateway.start()
+          let finishClose!: () => void
+          const closeGate = new Promise<void>(resolve => { finishClose = resolve })
+          const peer = gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, async event => {
+            if (event === 'agent.acp.stream.closed') await closeGate
+          })!
+          if (transition === 'disconnect') await peer.openStream({ streamId: 'existing', sessionId: 'saved' })
+          const pending = gateway.call('owner', { method, params: method === 'session/new' ? { backend, cwd } : { backend, sessionId: 'saved' } })
+            .then(result => ({ result, error: undefined }), error => ({ result: undefined, error }))
+          let closing: Promise<void> | undefined
+          try {
+            await blocked
+            if (transition === 'disconnect') closing = peer.closeAll()
+            else if (transition === 'close') await gateway.close()
+            else await gateway.reconfigure({ ...initial, backends: [{ ...initial.backends[0]!, command: 'next' }] })
+            release()
+            expect((await pending).error).toBeDefined()
+            const state = gateway as unknown as { sessionOwners: Map<string, string>; sessionCwds: Map<string, unknown> }
+            expect(state.sessionOwners.get('saved')).not.toBe('owner')
+            if (transition !== 'disconnect') expect(state.sessionCwds.has('saved')).toBe(false)
+          } finally { release(); finishClose(); await closing; await pending; await gateway.close() }
+        } })))),
+    )
+  })
+
+  it('keeps late prompt completion from a retired backend out of a replacement turn', async () => {
+    const cwd = await realpath(process.cwd())
+    let finishOld!: (value: unknown) => void, finishNew!: (value: unknown) => void
+    const previous = readyAcp(), next = readyAcp()
+    previous.call = vi.fn(async method => method === 'session/new' ? { sessionId: 'saved' }
+      : new Promise(resolve => { finishOld = resolve }))
+    next.call = vi.fn(async method => method === 'session/new' ? { sessionId: 'saved' }
+      : new Promise(resolve => { finishNew = resolve }))
+    const initial = { enabled: true, backends: [{ id: 'cursor', enabled: true, command: 'previous', args: [] }] }
+    const gateway = new AcpRemoteGateway(initial, silentLogger(), binary => binary === 'previous' ? previous : next)
+    await gateway.start()
+    const publish = vi.fn(async () => undefined)
+    gateway.createPeer({ connectionId: 'owner', peerDeviceId: 'device' } as never, publish)
+    const prompt = { method: 'session/prompt', params: { backend: 'cursor', sessionId: 'saved', prompt: [{ type: 'text', text: 'hello' }] } }
+    try {
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd } })
+      await gateway.call('owner', prompt)
+      await gateway.reconfigure({ ...initial, backends: [{ ...initial.backends[0]!, command: 'next' }] })
+      await gateway.call('owner', { method: 'session/new', params: { backend: 'cursor', cwd } })
+      await expect(gateway.call('owner', prompt)).resolves.toMatchObject({ accepted: true })
+      publish.mockClear()
+      finishOld({ stopReason: 'end_turn' })
+      await new Promise(resolve => setImmediate(resolve))
+      expect(publish).not.toHaveBeenCalled()
+      await expect(gateway.call('owner', prompt)).rejects.toMatchObject({ code: 'PROMPT_IN_PROGRESS' })
+      finishNew({ stopReason: 'end_turn' })
+      await vi.waitFor(() => expect(publish).toHaveBeenCalledWith('agent.acp.frame', expect.objectContaining({
+        frame: { method: 'session/update', params: { sessionId: 'saved', update: { sessionUpdate: 'prompt_completed', stopReason: 'end_turn' } } },
+      })))
+    } finally { finishOld?.({}); finishNew?.({}); await gateway.close() }
+  })
+
   it('archives OpenCode natively with trusted authority and fences active turns, concurrent writes and backend replacement', async () => {
     const cwd = await realpath(process.cwd())
     let release!: () => void

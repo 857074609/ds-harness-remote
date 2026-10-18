@@ -9,6 +9,40 @@ import type { SafeLogger } from '../src/logging.js'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
 describe('OpencodeAcpClient', () => {
+  it('bounds isolated history readers and stops them with the parent during startup or load', async () => {
+    await runScenarios(['history', 'close during initialize', 'close during load', 'overflow'].map(scenario => ({ name: scenario, run: async () => {
+      const fake = fakeProcess()
+      const outbound: Array<{ method: string; id: number }> = []
+      const respond = (id: number, result: unknown) => fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`)
+      fake.child.stdin.on('data', chunk => {
+        for (const line of String(chunk).trim().split('\n')) {
+          const message = JSON.parse(line)
+          outbound.push(message)
+          if (message.method === 'initialize' && scenario !== 'close during initialize') respond(message.id, { protocolVersion: 1 })
+          if (message.method === 'session/load' && (scenario === 'history' || scenario === 'overflow')) {
+            fake.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'saved',
+              update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: scenario === 'overflow' ? 'x'.repeat(8 * 1024 * 1024) : 'saved answer' } },
+            } })}\n`)
+            if (scenario === 'history') respond(message.id, {})
+          }
+        }
+      })
+      const client = new OpencodeAcpClient('opencode', logger(), () => fake.child)
+      const pending = client.history('saved', '/tmp').then(result => ({ result, error: undefined }), error => ({ result: undefined, error }))
+      try {
+        if (scenario.startsWith('close')) {
+          await vi.waitFor(() => expect(outbound.some(message => message.method === (scenario === 'close during initialize' ? 'initialize' : 'session/load'))).toBe(true))
+          await client.close()
+        }
+        const outcome = await pending
+        if (scenario === 'history') expect(outcome.result).toEqual(expect.arrayContaining([expect.objectContaining({ event: expect.objectContaining({ type: 'assistant/message' }) })]))
+        else expect(outcome.error).toMatchObject({ code: scenario === 'overflow' ? 'OPENCODE_HISTORY_TOO_LARGE' : 'OPENCODE_CLOSED' })
+        expect(fake.kill).toHaveBeenCalled()
+        expect(client.isReady()).toBe(false)
+      } finally { await client.close() }
+    } })))
+  })
+
   it('uses upstream model contracts with session isolation, rejection and prompt exclusion', async () => {
     await runScenarios(['configOptions', 'legacy'].map(format => ({ name: format, run: async () => {
       const fake = fakeProcess()

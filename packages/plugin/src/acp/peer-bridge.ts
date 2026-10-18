@@ -243,6 +243,7 @@ export class AcpPeerBridge {
       })
       throw error
     }
+    this.requireOpen()
     const responseBytes = new TextEncoder().encode(JSON.stringify(response))
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: 'inline', response }
     if (responseBytes.byteLength > MAX_AGENT_ACP_TRANSFER_BYTES) {
@@ -342,11 +343,11 @@ export class AcpPeerBridge {
     this.toolControllers.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
+    this.domain.dropPeer(this.context.connectionId)
     await Promise.all(streamIds.map(streamId => this.publish('agent.acp.stream.closed', {
       streamId,
       reason: 'peer-disconnected',
     }).catch(() => undefined)))
-    this.domain.dropPeer(this.context.connectionId)
   }
 
   private pruneTransfers(): void {

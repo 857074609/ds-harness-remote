@@ -141,7 +141,9 @@ export class CodexRemoteDomain {
   async resolveThreadWorkspace(connectionId: string, threadId: string): Promise<string | undefined> {
     if (!this.peers.has(connectionId)) throw new RpcError('CODEX_THREAD_UNAVAILABLE', 'The CodeX thread is not available on this connection.')
     try {
+      const assertCurrent = this.captureCallScope(connectionId)
       const known = await this.readKnownThread(threadId)
+      assertCurrent()
       return known.cwd
     } catch (error) {
       if (error instanceof RpcError && error.code === 'CODEX_THREAD_NOT_ALLOWED') {
@@ -161,7 +163,27 @@ export class CodexRemoteDomain {
   async call(connectionId: string, input: unknown): Promise<unknown> {
     const envelope = parseCallEnvelope(input)
     const call = parseCodexCall(envelope.method, envelope.params)
-    this.requireAppServer()
+    const assertCurrent = this.captureCallScope(connectionId)
+    const result = await this.callInternal(connectionId, call, assertCurrent)
+    assertCurrent()
+    return result
+  }
+
+  private captureCallScope(connectionId: string): () => void {
+    const appServer = this.requireAppServer()
+    const peer = this.peers.get(connectionId)
+    return () => {
+      if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
+        throw new RpcError('CODEX_UNAVAILABLE', 'The Codex App Server changed while handling the request.')
+      }
+      if (peer !== undefined && this.peers.get(connectionId) !== peer) {
+        throw new RpcError('CODEX_CONNECTION_CLOSED', 'The Codex connection is closed.')
+      }
+    }
+  }
+
+  private async callInternal(connectionId: string, call: ReturnType<typeof parseCodexCall>, assertCurrent: () => void): Promise<unknown> {
+    assertCurrent()
 
     if (call.method === 'account/read') {
       return sanitizeAccount(await this.callUpstream(call.method, call.params))
@@ -172,6 +194,7 @@ export class CodexRemoteDomain {
     if (call.method === 'project/create') {
       const roots = call.params.roots as Array<{ path: string }>
       const path = await this.requireNewCodexProjectPath(roots[0]!.path)
+      assertCurrent()
       return sanitizeProjectCreate(await this.callUpstream(call.method, {
         name: call.params.name,
         roots: [{ path }],
@@ -189,6 +212,7 @@ export class CodexRemoteDomain {
     }
     if (call.method === 'thread/start') {
       const cwd = await this.requireCodexWorkspacePath(call.params.cwd as string)
+      assertCurrent()
       const permission = codexPermission(call.params, 'workspace-write')
       const result = await this.callUpstream(call.method, {
         ...permission.params,
@@ -196,6 +220,7 @@ export class CodexRemoteDomain {
         ...codexThreadPermissionParams(permission),
         serviceName: 'deepseek_harness_remote',
       })
+      assertCurrent()
       if (extractThread(result)?.id === undefined) {
         throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid thread.')
       }
@@ -239,13 +264,14 @@ export class CodexRemoteDomain {
     }
 
     const allowedThread = threadId === undefined ? undefined : await this.readKnownThread(threadId)
+    assertCurrent()
 
     if (call.method === 'thread/resume' && call.params.permissionPreset !== undefined) {
       const owner = this.turnOwners.get(threadId!)
       if (owner !== undefined && owner.connectionId !== connectionId) {
         throw new RpcError('CODEX_THREAD_BUSY', 'Another Remote client is writing to this CodeX thread.')
       }
-      return this.changeThreadPermission(threadId!, call.params, allowedThread!)
+      return this.changeThreadPermission(threadId!, call.params, allowedThread!, assertCurrent)
     }
 
     if (call.method === 'thread/read') {
@@ -262,6 +288,7 @@ export class CodexRemoteDomain {
 
     let claimed = false
     let previousOwner: ActiveTurnOwner | undefined
+    let claimedOwner: ActiveTurnOwner | undefined
     if (isThreadMutation(call.method) && threadId !== undefined) {
       const claim = this.claimTurn(
         threadId,
@@ -271,6 +298,7 @@ export class CodexRemoteDomain {
       )
       claimed = claim.claimed
       previousOwner = claim.previous
+      claimedOwner = this.turnOwners.get(threadId)
     }
     try {
       const permission = codexPermission(call.params)
@@ -298,6 +326,7 @@ export class CodexRemoteDomain {
       try {
         result = await this.callUpstream(call.method, upstreamParams)
       } catch (error) {
+        assertCurrent()
         // App Server rejects thread/resume when this process already has the
         // thread loaded. Remote callers should be able to resume defensively
         // before every turn, including immediately after thread/start.
@@ -310,8 +339,10 @@ export class CodexRemoteDomain {
         }
         throw error
       }
+      assertCurrent()
       if (call.method === 'thread/resume' || call.method === 'thread/fork' || call.method === 'thread/unarchive') {
         await this.assertResultThreadAllowed(result)
+        assertCurrent()
       }
       if (call.method === 'thread/resume' || call.method === 'thread/fork') {
         const resultId = extractThread(result)?.id
@@ -328,7 +359,7 @@ export class CodexRemoteDomain {
       }
       return result
     } catch (error) {
-      if (claimed && threadId !== undefined) {
+      if (claimed && threadId !== undefined && this.turnOwners.get(threadId) === claimedOwner) {
         if (previousOwner === undefined) this.turnOwners.delete(threadId)
         else this.turnOwners.set(threadId, previousOwner)
       }
@@ -428,6 +459,7 @@ export class CodexRemoteDomain {
     const appServer = this.createAppServer(binary, this.logger)
     this.appServer = appServer
     this.unsubscribeInbound = appServer.onInbound(message => {
+      if (this.appServer !== appServer) return
       void this.handleInbound(message).catch(error => {
         this.logger.warn('Codex inbound handling failed', { code: errorCode(error) })
       })
@@ -554,6 +586,7 @@ export class CodexRemoteDomain {
     threadId: string,
     params: Record<string, unknown>,
     allowed: { thread: Record<string, unknown>; cwd?: string },
+    assertCurrent: () => void,
   ): Promise<unknown> {
     const permission = codexPermission(params)
     const settings: Record<string, unknown> = {
@@ -564,8 +597,10 @@ export class CodexRemoteDomain {
     try {
       // Loaded threads can reject resume or ignore its configuration overrides.
       await this.callUpstream('thread/settings/update', { threadId, ...settings })
+      assertCurrent()
       result = { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy }
     } catch (error) {
+      assertCurrent()
       // Threads created in this App Server process may not be persisted yet;
       // the resume contract rejects them even though the thread is usable.
       // Treating that as a loaded thread keeps new-session permission changes
@@ -583,15 +618,19 @@ export class CodexRemoteDomain {
           ...codexThreadPermissionParams(permission),
           excludeTurns: true,
         })
+        assertCurrent()
       } catch (resumeError) {
+        assertCurrent()
         if (isUnpersistedThreadError(resumeError)) {
           return { thread: allowed.thread, ...settings, sandbox: settings.sandboxPolicy }
         }
         throw resumeError
       }
       await this.assertResultThreadAllowed(result)
+      assertCurrent()
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream('thread/settings/update', { threadId, ...settings })
+        assertCurrent()
         result = { ...(isRecord(result) ? result : {}), ...settings, sandbox: settings.sandboxPolicy }
       }
     }
@@ -608,6 +647,7 @@ export class CodexRemoteDomain {
   private async handleServerRequest(message: Extract<CodexAppServerInbound, { kind: 'request' }>): Promise<void> {
     const appServer = this.requireAppServer()
     await this.expireApprovals()
+    if (this.appServer !== appServer || !this.isAvailable()) return
     if (message.method !== 'item/commandExecution/requestApproval'
       && message.method !== 'item/fileChange/requestApproval') {
       await appServer.respondError(message.id, -32601, 'This Remote client does not support the server request.')
@@ -865,8 +905,13 @@ export class CodexRemoteDomain {
   }
 
   private async callUpstream(method: string, params: unknown): Promise<unknown> {
+    const appServer = this.requireAppServer()
     try {
-      return await this.requireAppServer().call(method, params)
+      const result = await appServer.call(method, params)
+      if (this.closed || this.appServer !== appServer || !this.isAvailable()) {
+        throw new RpcError('CODEX_UNAVAILABLE', 'The Codex App Server changed while handling the request.')
+      }
+      return result
     } catch (error) {
       throw mapAppServerError(error)
     }

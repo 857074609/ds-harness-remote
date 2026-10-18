@@ -114,6 +114,7 @@ export class CodexPeerBridge {
       method: 'thread/read',
       params: { threadId: params.threadId, includeTurns: false },
     })
+    this.requireOpen()
     this.streams.set(params.streamId, params.threadId)
     return { opened: true, streamId: params.streamId, threadId: params.threadId }
   }
@@ -198,6 +199,7 @@ export class CodexPeerBridge {
       })
       throw error
     }
+    this.requireOpen()
     const responseBytes = new TextEncoder().encode(JSON.stringify(response))
     if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES) return { kind: 'inline', response }
     if (responseBytes.byteLength > MAX_CODEX_APP_TRANSFER_BYTES) {
@@ -289,11 +291,11 @@ export class CodexPeerBridge {
     this.streams.clear()
     this.incomingTransfers.clear()
     this.outgoingTransfers.clear()
-    await Promise.all(streamIds.map(streamId => this.publish('codex.app.stream.closed', {
+    const detach = this.domain.detachPeer(this.context.connectionId)
+    await Promise.all([detach, ...streamIds.map(streamId => this.publish('codex.app.stream.closed', {
       streamId,
       reason: 'peer-disconnected',
-    }).catch(() => undefined)))
-    await this.domain.detachPeer(this.context.connectionId)
+    }).catch(() => undefined))])
   }
 
   private pruneTransfers(): void {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { PiAcpClient } from '../src/acp/adapters/pi-process.js'
 import type { CursorAcpLike, CursorAcpInboundHandler } from '../src/acp/adapters/cursor-process.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 
 function fake(replay?: Array<Record<string, unknown>>, loadError?: Error) {
   const handlers: CursorAcpInboundHandler[] = []
@@ -26,6 +27,31 @@ function fake(replay?: Array<Record<string, unknown>>, loadError?: Error) {
 }
 
 describe('PI standard ACP isolation', () => {
+  it('reads modern model snapshots and rejects unconfirmed model or thinking changes', async () => {
+    await runScenarios(['modern snapshot', 'unconfirmed model', 'unconfirmed thinking'].map(scenario => ({ name: scenario, run: async () => {
+      const client = fake([])
+      if (scenario === 'modern snapshot') vi.mocked(client.call).mockResolvedValueOnce({ sessionId: 'saved', configOptions: [
+        { type: 'select', id: 'model', currentValue: 'model', options: [{ name: 'Provider', options: [{ value: 'model', name: 'Model' }] }] },
+        { type: 'select', id: 'thought_level', currentValue: 'low', options: [{ value: 'low', name: 'Low' }] },
+      ] })
+      const pi = new PiAcpClient('pi-acp', undefined, {}, () => client)
+      try {
+        await pi.call('session/load', { sessionId: 'saved', cwd: '/tmp' })
+        if (scenario === 'modern snapshot') {
+          await expect(pi.call('dsh/sessionModels', { sessionId: 'saved' })).resolves.toMatchObject({ current: { model: 'model', reasoningEffort: 'low' }, groups: [{ models: [{ id: 'model', name: 'Model' }] }] })
+        } else {
+          if (scenario === 'unconfirmed model') {
+            vi.mocked(client.call).mockResolvedValueOnce({ configOptions: [{ type: 'select', id: 'model', currentValue: 'other', options: [{ value: 'model', name: 'Model' }] }] })
+          } else {
+            // A valid model acknowledgement followed by a missing thinking acknowledgement.
+            vi.mocked(client.call).mockResolvedValueOnce({ configOptions: [{ type: 'select', id: 'model', currentValue: 'model', options: [{ value: 'model', name: 'Model' }] }] }).mockResolvedValueOnce({})
+          }
+          await expect(pi.call('dsh/selectModel', { sessionId: 'saved', model: 'model', reasoningEffort: 'high' })).rejects.toThrow('did not confirm')
+        }
+      } finally { await pi.close() }
+    } })))
+  })
+
   it('preserves first new-session and synchronous prompt frames', async () => {
     const client = fake()
     let receive!: CursorAcpInboundHandler

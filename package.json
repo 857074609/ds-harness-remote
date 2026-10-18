@@ -72,6 +72,17 @@
     }
   },
   "packageManager": "pnpm@9.15.4",
+  "pnpm": {
+    "overrides": {
+      "@xmldom/xmldom@0.8": "^0.8.15",
+      "@xmldom/xmldom@0.9": "^0.9.12",
+      "brace-expansion@5": "^5.0.12",
+      "compression@1": "^1.8.2",
+      "js-yaml@4": "^4.3.2",
+      "shell-quote@1": "^1.11.0",
+      "source-map-js@1": "^1.2.2"
+    }
+  },
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.5",
     "qrcode": "^1.5.4",

@@ -1,5 +1,6 @@
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
+import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
   AgentPresetOption,
   ChatItem,
@@ -29,6 +30,19 @@ import type { ThemePreference } from '../ui/theme'
 type BootPhase = 'loading' | 'ready' | 'error'
 
 type AuthPhase = 'idle' | 'authenticating' | 'complete' | 'error'
+
+/** Provider discovery result for QR sign-in; the Base URL is already normalized. */
+export interface QrProviderList {
+  baseUrl: string
+  providers: OAuthProviderInfo[]
+}
+
+/** A QR sign-in session bound to the Server and provider that created it. */
+export interface QrLoginStart {
+  baseUrl: string
+  provider: OAuthProviderInfo
+  session: OAuthQrSession
+}
 
 export interface AppState {
   bootPhase: BootPhase
@@ -99,6 +113,10 @@ export interface AppState {
   startOAuth(input: string): Promise<string | undefined>
   startGithubOAuth(input: string): Promise<string | undefined>
   completeOAuth(token: string): Promise<boolean>
+  listQrProviders(input: string): Promise<QrProviderList | undefined>
+  startQrLogin(input: string, providerId: string): Promise<QrLoginStart | undefined>
+  pollQrLogin(baseUrl: string, qrId: string): Promise<OAuthQrPollResult | undefined>
+  completeQrLogin(baseUrl: string, token: string, method: RedirectLoginMethod): Promise<boolean>
   refreshDevices(): Promise<void>
   refreshWorkspaces(): Promise<void>
   refreshSessionStatus(): Promise<void>

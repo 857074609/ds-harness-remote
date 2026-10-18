@@ -126,7 +126,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.12`。
+凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.13`。
 
 ## Validation Baseline
 
@@ -491,3 +491,29 @@ IME inset 在窗口尺寸变化后重新读取 `Keyboard.metrics()`，避免沿�
 面板在竖屏与横屏往返切换后均可用；横屏 Gboard 走系统全屏输入编辑界面，未验证普通内联 IME
 布局。未验证平板、折叠屏/分屏、大字体、TalkBack、Terminal/PDF 原生交互及 iOS 旋转布局
 （该改动同时解除 iOS 方向锁定，需另行验收）。
+
+## Android QR sign-in (2026-10-18)
+
+Android 登录页新增「扫码登录」点击入口：`RemoteServerApi.oauthProviders()` 使用 Server 返回的
+`/api/v1/auth/oauth/providers`（404 时回退旧的 per-provider status 接口），只接受同源
+`/api/v1/auth/` 入口；只有用户点击入口后才请求 provider 并展示二维码，不在登录页加载时
+自动创建会话。`startOAuthQrLogin` 校验 `qrId`、`expiresIn` 与同源 `scanUrl`，
+`pollOAuthQrLogin` 只接受 pending/expired/complete+token。手机与大屏都保留知乎/GitHub
+浏览器 OAuth 与邮箱密码登录；大屏使用更大的二维码。二维码由 `qrcode-generator` 本地生成并通过
+`react-native-svg` 渲染；离开扫码页停止轮询，切换服务地址会使旧会话失效；完成后用一次性 token
+注册本机设备并复用现有 LoginFlow。领取到 `complete` 后立即停止轮询；注册与页面跳转不依赖会随
+store/父组件渲染变化的 effect 依赖，避免已消费的一次性 token 被再次轮询判为过期后覆盖成功状态。
+token 与二维码内容不写日志。
+
+验证：Android check、24 文件 / 136 测试（含 QR provider/start/poll 同源与状态矩阵）、
+`tsc --noEmit` 通过；真实 Server `dsh.r2049.cn` 的 providers、QR start 与 poll 合约已用 curl
+核对。本轮未完成大屏真机 UI 扫码端到端验收。
+
+## Android tablet split view (2026-10-18)
+
+聊天页在宽度 ≥760 dp 且（高度 ≥520 dp 或宽度 ≥1000 dp）时启用双栏：左侧复用
+`HostSessionsDrawer` 的 `inline` 模式常驻会话列表（当前工作/工作区/其他对话分组、刷新与
+分页），右侧保留聊天头部、消息列表与输入栏。左栏切换会话只更新右侧内容，不离开聊天；
+返回按钮回到工作区。窄屏和横屏手机仍为单栏，`HostSessionsDrawer` 的 Modal 模式不变。
+模拟 800×1280 dp 窗口的真机烟测通过：进入会话、左栏切换“新对话”、恢复窄屏后回到单栏；
+真实平板/折叠屏、分屏、大字体与 TalkBack 尚未验收。

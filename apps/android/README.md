@@ -43,6 +43,11 @@ CodeX App Server domain advertised by the Host.
   reuse the same route/connection state; chat content and the composer stay in a readable centred
   column on wide windows, bottom sheets and workspace dialogs are capped by the live window height
   and scroll their bodies on short landscape windows, and the IME inset is re-synced after rotation.
+- Sign in by scanning a Server QR code on phones, tablets and other large screens. A **Scan**
+  entry on the sign-in screen requests the Server-owned provider list and shows the QR code only
+  after it is tapped; the app renders the same-origin `scanUrl` locally, polls the one-time QR
+  session and then registers this Android device with the returned account token. Large screens
+  use a larger code; browser OAuth and email/password sign-in remain available.
 - Show the interface in English or Simplified Chinese, follow Android's current locale by default,
   and persist an explicit in-app language choice across launches.
 - Show the installed app/build version and the complete open-source repository and latest-release

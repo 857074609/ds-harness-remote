@@ -1,3 +1,16 @@
+## 0.5.13 - 2026-10-18
+
+- Unifies all first-party package/client versions at `0.5.13`; Android `versionCode` and Expo iOS `buildNumber` are both `51`.
+- 本仓库各自有包与客户端版本统一为 `0.5.13`；Android `versionCode` 与 Expo iOS `buildNumber` 均为 `51`。
+- Adds QR sign-in to the Android client through an explicit “Sign in with QR code” entry. The login screen requests the Server provider list and displays the locally rendered same-origin `scanUrl` only after the entry is tapped; large screens use a bigger code, while browser OAuth and email/password sign-in remain available.
+- Android 客户端新增「扫码登录」点击入口：只有点击后才会请求 Server provider 并展示本地渲染的同源二维码；大屏使用更大的二维码，浏览器 OAuth 与邮箱密码登录保留。
+- Validates provider/QR responses against same-origin and malformed payloads, falls back to the legacy per-provider OAuth status endpoints on older Servers, and stops polling off-view or when the Server changes.
+- 校验 provider/二维码响应的同源与格式；旧 Server 回退到 per-provider OAuth status 接口；离开扫码视图或修改服务地址时停止轮询/作废旧会话。
+- Completes QR sign-in after the one-time token is claimed: the client stops polling immediately and drives device registration/navigation without render-dependent effect restarts, so a successful scan no longer ends with “QR code expired” or a skipped login.
+- 修复扫码登录完成阶段：领取一次性 token 后立即停止轮询，设备注册与跳转不再依赖会随渲染变化的 effect 依赖，扫码成功后不会再次轮询已消费会话而显示二维码过期或跳过登录。
+- Adds a tablet split view to the Android chat: at ≥760 dp wide the session list stays on the left and the conversation, header and composer render on the right; selecting another conversation updates only the right pane. Narrow and short windows keep the single-pane phone layout.
+- Android 聊天页新增平板双栏：宽度 ≥760 dp 时左侧常驻会话列表，右侧显示会话头部、消息与输入栏；在左栏切换会话只更新右侧内容。窄屏和短窗口保持手机单栏布局。
+
 ## 0.5.12 - 2026-10-18
 
 - Unifies all first-party package/client versions at `0.5.12`; Android `versionCode` and Expo iOS `buildNumber` are both `50`.

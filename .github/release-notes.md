@@ -1,45 +1,31 @@
 ## 中文
 
-**0.5.12** 汇总自 `v0.5.11` 以来的更新，重点加入 Android 横竖屏适配、修复 CodeX 新会话历史投影，并补充依赖安全与 Agent 可靠性更新。本仓库各自有包与客户端版本统一为 **0.5.12**；Android `versionCode` 与 Expo iOS `buildNumber` 均为 **50**。
+**0.5.13** 汇总下一版本的 Android 大屏扫码登录。本仓库各自有包与客户端版本统一为 **0.5.13**；Android `versionCode` 与 Expo iOS `buildNumber` 均为 **51**。
 
-- **Android 横竖屏适配**：解除竖屏锁定，跟随系统自动旋转；聊天消息、输入栏和轨迹页在宽窗口使用可读列，底部弹层按窗口高度收缩并可滚动，工作区对话框、设备重命名、Home 菜单、连接页与启动页适配横屏和短窗口；旋转后重新同步 IME inset。已在 Android 15 真机完成横竖屏往返烟测。
-- **CodeX 新会话可打开**：当前 App Server 版本会在首条用户消息之后才 materialize Thread。尚未 materialize 的 Thread 不再被当作历史读取失败，而是投影为空历史基线；旧 Host 的 legacy `thread/read` 回退仍保留。
-- **依赖安全更新**：同步兼容的安全补丁，生产依赖 audit 发现由 32 项降至 5 项；剩余 Expo/Metro 构建链公告与验收边界记录在 [TODO](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/docs/TODO.md)。
-- **Agent 可靠性**：修复 Pi 现代模型/Thinking 状态确认，并在读取超大文件前执行文件预览内存限额。ACP/CodeX 请求与归属回滚在断线、后端替换时 fail closed，退役 Prompt 结果不再污染新任务；OpenCode 历史子进程在关闭或超限时停止。
+- **显式扫码入口**：登录页先展示知乎/GitHub 浏览器 OAuth 与邮箱密码登录；点击「扫码登录」后才请求 Server provider 并在页内显示二维码，大屏使用更大的二维码。
+- **本地渲染与一次性会话**：二维码由 App 本地渲染 Server 返回的同源 `scanUrl`；轮询拿到一次性 token 后注册本机设备，token 不进入二维码或日志。
+- **完成阶段修复**：领取 token 后立即停止轮询，注册与跳转不再依赖会随渲染变化的 effect 依赖，扫码成功后不会因为再次轮询已消费会话而显示“二维码过期”或跳过登录。
+- **安全边界**：只接受同源 provider/QR URL，拒绝外域与畸形响应；离开扫码视图停止轮询，修改服务地址作废旧二维码，旧 Server 回退到 per-provider OAuth status 接口。
+- **平板双栏**：聊天页在宽度 ≥760 dp 时左侧常驻会话列表（按当前工作/工作区/其他对话分组），右侧显示消息和输入栏；左栏切换会话只更新右侧内容，窄屏与短窗口仍为单栏。
 
 ### 验证与待验收范围
 
-全仓类型检查、**692 个测试**、生产构建（含 Android Hermes 导出）、DSH GitHub bundle 与 npm 打包入口检查通过；Android 旋转已在真机完成横竖屏往返烟测。本次未完成 Windows、原生 APK/TalkBack、平板/折叠屏/分屏及加密跨设备全量验收；iOS 方向锁定也随本版解除，iOS 旋转布局尚未验证。新增能力不代表独立 Remote Web runtime 已完成接入。
-
-本机缺少 Intelligent UI renderer 时使用安全降级；Release APK 工作流会另行打包固定审核版本。本次本机构建不能替代该 APK 的验收。Metro 的 `@noble/hashes/crypto.js` exports fallback 警告仍存在。
-
-升级时请指定 **`ds-harness-remote@0.5.12`** 并同步更新 Host 插件和 Android 客户端；若 Desktop 仍显示旧插件，可按官方插件管理流程移除后指定版本重装。
-
-### 感谢贡献者
-
-感谢参与代码、审查、测试、文档和问题反馈的所有人。本版未引入新的外部代码贡献，发布整合由 [@liguobao](https://github.com/liguobao) 完成。
+Android `check`、**24 个测试文件 / 136 个测试**与类型检查通过；真实 Server 的 providers、QR start 与 poll 合约已核验。平板双栏已在模拟 800×1280 dp 窗口的真机上验证会话切换，真实平板/折叠屏、扫码端到端仍需在设备上完成。
 
 ## English
 
-**0.5.12** brings together changes since `v0.5.11`, adding Android screen rotation, fixing CodeX new-conversation history projection, and including dependency-security and Agent reliability updates. All first-party package and client versions are **0.5.12**; Android `versionCode` and Expo iOS `buildNumber` are **50**.
+**0.5.13** brings the next Android large-screen QR sign-in release. All first-party package and client versions are **0.5.13**; Android `versionCode` and Expo iOS `buildNumber` are **51**.
 
-- **Android screen rotation:** removes the portrait lock and follows the system rotation setting. Chat content, the composer and the trajectory view use a readable column on wide windows; bottom sheets shrink to the live window height and scroll; workspace dialogs, device rename, the home menu, connection and boot screens adapt to landscape and short windows; IME insets are re-synced after rotation. Verified with portrait/landscape round trips on an Android 15 device.
-- **CodeX new conversations open:** current App Server versions materialize a Thread only after its first user message. Threads that are not materialized yet are projected as an empty history baseline instead of a failed read; the legacy `thread/read` fallback for older Hosts remains.
-- **Dependency security:** compatible security patches are applied; production-dependency audit findings drop from 32 to 5, with the remaining Expo/Metro build-chain advisories and acceptance limits tracked in [TODO](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/docs/TODO.md).
-- **Agent reliability:** fixes Pi modern model/Thinking state confirmation and bounds file-preview allocation before reading oversized files. ACP/CodeX requests and ownership rollback fail closed on disconnect or backend replacement, retired Prompt results cannot pollute new tasks, and OpenCode history subprocesses stop on shutdown or overflow.
+- **Explicit QR entry:** the login screen first offers Zhihu/GitHub browser OAuth and email/password sign-in. Tapping **Sign in with QR code** requests the Server providers and shows the code in place; large screens use a bigger code.
+- **Local rendering and one-time sessions:** the app renders the Server-provided same-origin `scanUrl` locally, polls a one-time token and registers this device. Tokens never enter the QR code or logs.
+- **Completion fix:** polling stops once the token is claimed, and registration/navigation no longer depend on render-dependent effect dependencies. A successful scan no longer re-polls a consumed session and reports “QR code expired” or skips login.
+- **Safety boundaries:** only same-origin provider/QR URLs are accepted and malformed responses are rejected; leaving the scan view stops polling, changing the Server invalidates the code, and older Servers fall back to the per-provider OAuth status endpoints.
+- **Tablet split view:** at ≥760 dp wide the chat keeps the grouped session list on the left and the conversation header, messages and composer on the right; picking another conversation updates only the right pane. Narrow and short windows keep the single-pane layout.
 
 ### Validation and acceptance limits
 
-Workspace type checks, **692 tests**, production builds including Android Hermes export, DSH GitHub bundle validation and npm package-entry checks pass. Android rotation was smoke-tested on a real device. This release has not completed Windows, native APK/TalkBack, tablet/foldable/split-screen or full encrypted cross-device acceptance. iOS orientation locking is also removed by this release, but iOS rotation layouts have not been verified. New capabilities do not imply integration into the independent Remote Web runtime.
-
-Local builds use a safe fallback when the Intelligent UI renderer is absent; the Release APK workflow separately bundles its pinned, audited renderer. Local builds do not replace acceptance of that APK. The existing Metro `@noble/hashes/crypto.js` exports fallback warning remains.
-
-Pin **`ds-harness-remote@0.5.12`** when upgrading and update both the Host plugin and Android client. If Desktop still shows an older plugin, remove it through official plugin management and reinstall the pinned version.
-
-### Contributors
-
-Thank you to everyone who contributed code, reviews, tests, documentation and feedback. This release introduces no new external code contributions; release integration is by [@liguobao](https://github.com/liguobao).
+Android `check`, **24 test files / 136 tests** and type checks pass; the providers, QR start and poll contracts were verified against the real Server. The split view was exercised on a real device at a simulated 800×1280 dp window, including switching conversations; real tablets/foldables and end-to-end QR scanning still need device verification.
 
 ---
 
-[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.12/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.11...v0.5.12)
+[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.12...v0.5.13)

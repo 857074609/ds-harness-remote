@@ -11747,6 +11747,12 @@ var AcpLiveProjection = class {
     const update = isRecord3(params.update) ? params.update : params;
     const kind = string(update.sessionUpdate) ?? string(update.type);
     const session = this.context.sessions.get(follow.sessionId);
+    if (kind === "session_info_update") {
+      if (session && params.sessionId === follow.acpSessionId && typeof update.title === "string") {
+        this.context.applySessionTitle(session, update.title);
+      }
+      return;
+    }
     if (kind === "model_selection" && isRecord3(update.selected) && update.selected.provider === this.context.backend && typeof update.selected.model === "string") {
       this.context.selectedModels.set(follow.sessionId, update.selected);
       this.context.publishProjection(follow.sessionId, "modelSelection", this.context.modelSelectionProjection(follow.sessionId), this.context.nextProjectionSeq());
@@ -12111,6 +12117,86 @@ var AcpLiveProjection = class {
   }
 };
 
+// src/acp/virtual-titles.ts
+var OPENCODE_DEFAULT_TITLE = /^(?:New|Child) session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+var AcpSessionTitles = class {
+  constructor(backend, client, sessions, publish) {
+    this.backend = backend;
+    this.client = client;
+    this.sessions = sessions;
+    this.publish = publish;
+  }
+  pending = /* @__PURE__ */ new Map();
+  closed = false;
+  nativeTitle(title) {
+    const next = title?.trim();
+    if (!next || next === "Untitled Session" || this.backend === "opencode" && OPENCODE_DEFAULT_TITLE.test(next)) return void 0;
+    return next;
+  }
+  applyNative(session, title) {
+    const next = this.nativeTitle(title);
+    if (this.closed || session.titleOverridden || !next || this.sessions.get(session.sessionId) !== session) return;
+    session.titleFromPrompt = false;
+    this.pending.get(session.sessionId)?.abort();
+    if (next === session.title) return;
+    session.title = next;
+    this.publish(session.sessionId, next);
+  }
+  applyPrompt(session, text) {
+    if (this.backend !== "opencode" || this.closed || session.titleOverridden || session.titleFromPrompt || !session.blank && this.nativeTitle(session.title) !== void 0) return;
+    const next = Array.from(text?.replace(/\s+/g, " ").trim() ?? "").slice(0, 60).join("");
+    if (!next) return;
+    session.titleFromPrompt = true;
+    session.title = next;
+    this.publish(session.sessionId, next);
+  }
+  async refresh(session) {
+    if (this.backend === "cursor" || this.closed || session.titleOverridden || !this.client.listSessions) return;
+    this.pending.get(session.sessionId)?.abort();
+    const controller = new AbortController();
+    const signal = controller.signal;
+    this.pending.set(session.sessionId, controller);
+    const deadline = this.backend === "opencode" ? setTimeout(() => controller.abort(), 2e4) : void 0;
+    try {
+      for (const delay of this.backend === "opencode" ? [0, 1e3, 3e3, 6e3, 9e3] : [0]) {
+        if (delay) await waitForTitle(delay, signal);
+        if (signal.aborted || this.closed || session.titleOverridden) return;
+        const previous = session.title;
+        try {
+          const items = await this.client.listSessions(session.cwd, this.backend, 30, signal);
+          if (signal.aborted || this.sessions.get(session.sessionId) !== session || session.title !== previous) return;
+          const current = items.find((item) => item.conversationId === session.acpSessionId);
+          if (current && this.nativeTitle(current.title) !== void 0) {
+            this.applyNative(session, current.title);
+            return;
+          }
+        } catch {
+        }
+      }
+    } finally {
+      if (deadline !== void 0) clearTimeout(deadline);
+      if (this.pending.get(session.sessionId) === controller) this.pending.delete(session.sessionId);
+    }
+  }
+  close() {
+    this.closed = true;
+    for (const controller of this.pending.values()) controller.abort();
+    this.pending.clear();
+  }
+};
+function waitForTitle(delay, signal) {
+  return new Promise((resolve6) => {
+    const finish = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve6();
+    };
+    const timer = setTimeout(finish, delay);
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
+  });
+}
+
 // src/acp/virtual-harness.ts
 var AcpVirtualHarness = class _AcpVirtualHarness {
   constructor(client, host, backend = "cursor", hostCarrier) {
@@ -12142,7 +12228,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       },
       publishProjection: (...args) => owner.events.publishProjection(...args),
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
-      refreshSessionTitle: (...args) => owner.refreshSessionTitle(...args),
+      refreshSessionTitle: (...args) => owner.titles.refresh(...args),
+      applySessionTitle: (...args) => owner.titles.applyNative(...args),
       publishWorkspaceBaseline: () => owner.publishWorkspaceBaseline(),
       get pendingApprovals() {
         return owner.pendingApprovals;
@@ -12190,6 +12277,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       },
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args)
     });
+    this.titles = new AcpSessionTitles(
+      backend,
+      client,
+      this.sessions,
+      (sessionId, title) => this.events.publishProjection(sessionId, "title", title)
+    );
     this.api = this.events.createApiProxy();
     this.unsubscribeArchived = client.onSessionArchived?.((data2) => {
       if (this.closed || data2.backend !== this.backend) return;
@@ -12198,6 +12291,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   }
   live;
   events;
+  titles;
   api;
   workspaceById = /* @__PURE__ */ new Map();
   sessions = /* @__PURE__ */ new Map();
@@ -12408,6 +12502,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.titles.close();
     this.unsubscribeArchived?.();
     for (const stream of this.workspaceStreams) stream.close();
     for (const stream of this.controlStreams) stream.close();
@@ -12563,6 +12658,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         source: requestId ? { kind: "user", rpcId: requestId } : { kind: "user" }
       });
     }
+    this.titles.applyPrompt(session, text);
     session.blank = false;
     session.running = true;
     session.updatedAt = Date.now();
@@ -12639,6 +12735,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     }
     if (events.length > 0) {
       session.events = events;
+      const firstUser = session.events.find((entry) => entry.event.type === "user/message");
+      this.titles.applyPrompt(session, extractPromptText(array(record(firstUser?.event.data).content)));
       session.blank = false;
       for (const event of session.events) this.cacheImageAttachments(session.sessionId, array(record(event.event.data).content ?? record(record(event.event.data).message).content));
     }
@@ -12729,11 +12827,12 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     return success(await this.client.listDirectory(path, signal));
   }
   registerSession(acpSessionId, cwd2, title, createdAt = Date.now(), updatedAt = Date.now(), blank = true) {
+    const nativeTitle = this.titles.nativeTitle(title);
     const session = {
       sessionId: `${sessionPrefix(this.backend)}${acpSessionId}`,
       acpSessionId,
       cwd: cwd2,
-      ...title === void 0 ? {} : { title },
+      ...nativeTitle === void 0 ? {} : { title: nativeTitle },
       blank,
       running: false,
       createdAt,
@@ -12743,23 +12842,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     this.sessions.set(session.sessionId, session);
     return session;
   }
-  applyDiscoveredTitle(session, title) {
-    const next = title.trim();
-    if (this.closed || session.titleOverridden || !next || next === "Untitled Session" || next === session.title) return;
-    session.title = next;
-    this.events.publishProjection(session.sessionId, "title", next);
-  }
-  async refreshSessionTitle(session) {
-    if (this.backend === "cursor" || this.closed || session.titleOverridden || this.client.listSessions === void 0) return;
-    try {
-      const items = await this.client.listSessions(session.cwd, this.backend, 30);
-      const current = items.find((item) => item.conversationId === session.acpSessionId);
-      if (current !== void 0 && this.sessions.get(session.sessionId) === session) this.applyDiscoveredTitle(session, current.title);
-    } catch {
-    }
-  }
   async discoverAndAttachSessions(workspace) {
     if (this.backend === "cursor") return;
+    const previousTitles = new Map([...this.sessions].map(([id5, session]) => [id5, session.title]));
     try {
       let discovered = [];
       if (this.client.listSessions !== void 0) {
@@ -12777,7 +12862,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         const existing = this.sessions.get(sessionId);
         if (existing !== void 0) {
           if (Number.isFinite(item.updatedAt)) existing.updatedAt = Math.max(existing.updatedAt, item.updatedAt);
-          this.applyDiscoveredTitle(existing, item.title);
+          if (!previousTitles.has(sessionId) || existing.title === previousTitles.get(sessionId)) {
+            this.titles.applyNative(existing, item.title);
+          }
         }
         if (!this.archivedSessionIds.has(sessionId) && !workspace.sessionIds.includes(sessionId)) {
           workspace.sessionIds.push(sessionId);

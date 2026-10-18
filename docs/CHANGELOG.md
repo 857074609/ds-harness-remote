@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Recover OpenCode titles in the shared browser projection: consume ACP title updates, retry catalog reads for up to twenty seconds after completion, and use the first user message temporarily when the native title is missing. History restores that fallback; stale reads and native placeholders cannot replace newer or manually renamed titles. No native database writes; independent Remote Web deployment remains pending.
+- 修复 OpenCode 共享浏览器投影的标题恢复：接收 ACP 标题事件，回复结束后最多二十秒限时重读列表，原生标题缺失时临时显示首条提问；历史可恢复该临时标题，旧读取与原生占位标题不能覆盖新标题或手动改名。不写原生数据库；独立 Remote Web 部署仍待同步。
 - Detect OpenCode ACP network options before startup, retaining the authenticated private listener on compatible CLIs and using stdio-only ACP when those options are absent. Unsupported native archiving fails explicitly without blocking session discovery or history; failed/partial probes fail closed and are cancelled on shutdown.
 - 启动前检测 OpenCode ACP 网络参数能力：兼容 CLI 保留认证私有监听器，缺少这些参数时使用纯 stdio ACP。原生归档不可用会明确失败，不阻塞会话发现或历史；检测失败或参数不完整时拒绝启动，关闭后端取消检测。
 - Verified with official OpenCode `1.19.3` (`opencode-ai`) and `2.0.32` (`@opencode/cli`), including both help formats, session discovery/recovery and v2 model selection; v1 native archive remains available. No Prompt or encrypted cross-device acceptance was performed.

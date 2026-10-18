@@ -83,6 +83,13 @@ Host 声明 `agent.acp.opencode.archive.v1`，成功后以 `agent.acp.catalog.ch
 
 ## Web 兼容边界
 
+共享浏览器投影接收标准 `session_info_update.title`。OpenCode 的标题生成独立于回复，
+V2 ACP 未必转发原生 rename，因此回复后以有界重试在二十秒内恢复列表标题；关闭投影
+取消重读。`New session - <ISO 时间>` / `Child session - <ISO 时间>` 视为占位，
+原生标题缺失时仅在内存中使用首条提问前 60 个字符，打开历史时同样恢复；后续正式标题
+可替换临时标题，但占位、迟到读取不能覆盖较新的投影，手动改名优先。不写 OpenCode
+或 Harness 数据库。独立 Remote Web 需同步该投影后部署，不能视为线上已生效。
+
 Web、Desktop 和 Android 共用独立 `agent.acp.*` RPC / stream / transfer / event。
 `dsh/` 扩展只存在于 ACP call 内，不注册到 Harness 或 Codex 业务 API。
 `virtual-harness.ts` 是可在浏览器使用的内存 UI 投影，不读取本机 AGY 文件；工作区和历史

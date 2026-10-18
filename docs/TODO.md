@@ -125,6 +125,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 
 - [x] [OpenCode 原生归档](design/acp-session-archive.md)：直接调用同一 ACP 进程的认证 loopback HTTP API，持久状态由 OpenCode 管理；固定 capability/扩展、可信 cwd、并发隔离、跨连接事件与 Desktop/Android 确认后更新。
 - [x] OpenCode ACP 启动按 CLI 参数能力检测，兼容带网络参数与纯 stdio 构建；无原生 HTTP API 时归档明确不可用，列表/历史继续工作。修复尚未发布。
+- [x] OpenCode 共享浏览器内存投影接收标准标题事件，回复后限时恢复异步标题，占位标题用首条提问临时替代并从历史恢复；保护手动改名和迟到目录读取。独立 Remote Web 需同步投影并部署，真实模型命名与跨设备验收仍待完成；本机隔离 `2.0.32` Prompt 尝试遇到上游模型错误。
 - [x] 核实官方 OpenCode v2 已改用 `@opencode/cli`；真实 `2.0.32` 隔离验证初始化、新建、列表、42 个模型目录与模型切换、独立历史及重启恢复。v1 `1.19.3` 原生归档回归通过；v2 无该私有 HTTP API，归档明确不可用。未发送 Prompt，跨设备验收仍待完成。
 - [ ] OpenCode 归档的 Windows、APK/真机及加密跨设备 E2E；独立 Remote Web 在 Server 仓库同步。恢复/已归档列表与其他 ACP 后端原生归档仍未实现；不得将 `session/delete` 当作归档。
 - [x] OpenCode 模型目录与切换使用真实 ACP 上游响应，按会话隔离；Pi / AGY / OpenCode 投影只提交确认状态，Android 接入 AGY 模型/思考强度。

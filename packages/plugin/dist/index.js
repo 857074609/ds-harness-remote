@@ -9574,6 +9574,10 @@ var controlFrameTypes = [
   "error"
 ];
 var rpcMethods = [
+  "workspace.upload.open",
+  "workspace.upload.chunk",
+  "workspace.upload.commit",
+  "workspace.upload.abort",
   "harness.transport.describe",
   "harness.api.call",
   "harness.api.transfer.open",
@@ -14190,11 +14194,11 @@ function isLanCandidatePair(localType, remoteType, localScope, remoteScope) {
     return true;
   return localType === "host" && isLocalNetworkScope(localScope) && remoteType === "prflx" && remoteScope === "unknown" || remoteType === "host" && isLocalNetworkScope(remoteScope) && localType === "prflx" && localScope === "unknown";
 }
-function isLocalNetworkScope(scope) {
-  return scope === "private" || scope === "link-local" || scope === "loopback";
+function isLocalNetworkScope(scope2) {
+  return scope2 === "private" || scope2 === "link-local" || scope2 === "loopback";
 }
-function isExplicitlyNonLanScope(scope) {
-  return scope === "public" || scope === "cgnat" || scope === "reserved";
+function isExplicitlyNonLanScope(scope2) {
+  return scope2 === "public" || scope2 === "cgnat" || scope2 === "reserved";
 }
 function increment(map, key) {
   map[key] = (map[key] ?? 0) + 1;
@@ -27043,11 +27047,11 @@ function routeStreamEvent2(event, streamId, queue) {
   const data2 = event.data;
   if (data2.streamId !== streamId) return;
   if (data2.reason === "failed") {
-    const failure3 = data2.failure;
+    const failure4 = data2.failure;
     queue.fail(remoteFailure({
-      code: typeof failure3?.code === "string" ? failure3.code : "internal",
-      message: typeof failure3?.message === "string" ? failure3.message : "The remote Harness stream failed.",
-      details: isRecord9(failure3?.details) ? failure3.details : {}
+      code: typeof failure4?.code === "string" ? failure4.code : "internal",
+      message: typeof failure4?.message === "string" ? failure4.message : "The remote Harness stream failed.",
+      details: isRecord9(failure4?.details) ? failure4.details : {}
     }));
   } else {
     queue.close();
@@ -27064,11 +27068,11 @@ function parseRpcResult(value) {
     error: { code: value.error.code, message: value.error.message, details: value.error.details }
   };
 }
-function remoteFailure(failure3) {
-  return Object.assign(new Error(failure3.message), {
+function remoteFailure(failure4) {
+  return Object.assign(new Error(failure4.message), {
     isDSHRemoteError: true,
-    code: failure3.code,
-    details: failure3.details
+    code: failure4.code,
+    details: failure4.details
   });
 }
 function bytesToBase643(bytes) {
@@ -28166,7 +28170,7 @@ var TypertGatewaySwitch = class {
         return { ok: false, error: this.failure(error) };
       }
     }) : (endpoint, payload, signal) => this.localDispatch(endpoint, payload, signal, peer);
-    const open2 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
+    const open3 = this.localOpen === void 0 ? (async (endpoint, payload, signal) => {
       if (this.localStream === void 0) throw new Error("The local Harness Gateway does not support Remote streams.");
       return this.localStream({ ...requestFromCarrier(endpoint, payload, signal), ...peer === void 0 ? {} : { peer } });
     }) : (endpoint, payload, signal, uplink) => this.localOpen(endpoint, payload, signal, uplink, peer);
@@ -28175,7 +28179,7 @@ var TypertGatewaySwitch = class {
       peer,
       ...this.localStream === void 0 ? {} : { stream: (request) => this.localStream({ ...request, ...peer === void 0 ? {} : { peer } }) },
       dispatch,
-      open: open2,
+      open: open3,
       failure: (error) => this.failure(error),
       supportsCarrier: this.localDispatch !== void 0 && this.localOpen !== void 0
     };
@@ -28202,12 +28206,12 @@ var TypertGatewaySwitch = class {
       };
     }
     if (this.originalOpen !== void 0) {
-      const open2 = this.originalOpen;
-      const rc1 = usesRc1Arity(open2);
+      const open3 = this.originalOpen;
+      const rc1 = usesRc1Arity(open3);
       this.runtime.openWireStream = (...callArgs) => {
         const endpoint = callArgs[0];
         if (this.remoteTarget === void 0 || isLocalOnlyEndpoint(endpoint)) {
-          return rc1 ? Reflect.apply(open2, this.runtime, callArgs) : open2.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
+          return rc1 ? Reflect.apply(open3, this.runtime, callArgs) : open3.call(this.runtime, endpoint, callArgs[1], callArgs[2]);
         }
         const signal = rc1 ? callArgs[4] : callArgs[2];
         return this.openRemote(endpoint, callArgs[1], signal ?? new AbortController().signal, rc1 ? callArgs[2] : void 0);
@@ -28291,8 +28295,8 @@ function workspaceConnectionResult(endpoint, result) {
     ]
   };
 }
-function usesRc1Arity(open2) {
-  return open2.length >= 5;
+function usesRc1Arity(open3) {
+  return open3.length >= 5;
 }
 function endedUplink() {
   return {
@@ -28308,9 +28312,9 @@ function linkControl(signal) {
   return control;
 }
 function createLocalOpen(gateway, runtime) {
-  const open2 = runtime.openWireStream;
-  if (open2 !== void 0) {
-    return usesRc1Arity(open2) ? (endpoint, payload, signal, uplink, peer) => open2.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open2.call(runtime, endpoint, payload, signal);
+  const open3 = runtime.openWireStream;
+  if (open3 !== void 0) {
+    return usesRc1Arity(open3) ? (endpoint, payload, signal, uplink, peer) => open3.call(runtime, endpoint, payload, uplink ?? endedUplink(), peer, signal, linkControl(signal)) : (endpoint, payload, signal) => open3.call(runtime, endpoint, payload, signal);
   }
   const wire = gateway.wireStream;
   if (wire === void 0) return void 0;
@@ -28453,10 +28457,10 @@ function isUsableExternalNode(candidate, requireFrom) {
 }
 function isExecutableFile(candidate) {
   try {
-    const stat8 = statSync(candidate);
-    if (!stat8.isFile()) return false;
+    const stat9 = statSync(candidate);
+    if (!stat9.isFile()) return false;
     if (process.platform === "win32") return true;
-    return (stat8.mode & 73) !== 0;
+    return (stat9.mode & 73) !== 0;
   } catch {
     return false;
   }
@@ -30273,8 +30277,8 @@ var IdentityStore = class {
 };
 function serverStorageDirectory(root, serverUrl, role) {
   const origin = new URL(serverUrl).origin;
-  const scope = createHash("sha256").update(origin).digest("hex").slice(0, 24);
-  return join4(root, "servers", scope, role);
+  const scope2 = createHash("sha256").update(origin).digest("hex").slice(0, 24);
+  return join4(root, "servers", scope2, role);
 }
 function fingerprint(publicKey) {
   const compact = createHash("sha256").update(fromBase64Url2(publicKey)).digest("hex").slice(0, 12).toUpperCase();
@@ -33757,11 +33761,11 @@ var AsyncQueue = class {
   }
 };
 var WorkspaceBridge = class {
-  constructor(resolveCwd, terminalEnabled, state = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner(), scope) {
+  constructor(resolveCwd, terminalEnabled, state = new WorkspaceBridgeState(), spawnTerminal = pipeTerminalSpawner(), scope2) {
     this.resolveCwd = resolveCwd;
     this.terminalEnabled = terminalEnabled;
     this.state = state;
-    this.scope = scope;
+    this.scope = scope2;
     this.terminal = new RemoteTerminalController(state, spawnTerminal, terminalEnabled, (code, message) => this.scopeError(code, message));
   }
   terminal;
@@ -34559,16 +34563,16 @@ var TranscriptWatcher = class extends EventEmitter {
     await this.readNewLines();
   }
   async readNewLines() {
-    let stat8;
+    let stat9;
     try {
-      stat8 = await fs2.stat(this.transcriptPath);
+      stat9 = await fs2.stat(this.transcriptPath);
     } catch {
       return;
     }
-    if (stat8.size <= this.offset) return;
+    if (stat9.size <= this.offset) return;
     const handle = await fs2.open(this.transcriptPath, "r");
     try {
-      const bytesToRead = stat8.size - this.offset;
+      const bytesToRead = stat9.size - this.offset;
       const buffer = Buffer.alloc(bytesToRead);
       const { bytesRead } = await handle.read(buffer, 0, bytesToRead, this.offset);
       this.offset += bytesRead;
@@ -36088,7 +36092,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
   try {
     const path = await transcriptPath(baseDir, conversationId);
     if (path === void 0) return void 0;
-    const stat8 = await fs3.stat(path);
+    const stat9 = await fs3.stat(path);
     const handle = await fs3.open(path, "r");
     try {
       const buffer = Buffer.alloc(4096);
@@ -36099,7 +36103,7 @@ async function readTranscriptSummary(baseDir, conversationId) {
       if (record9.type !== "USER_INPUT") return void 0;
       const title = cleanUserPrompt(record9.content).split("\n")[0]?.trim().slice(0, 40) || (agyImageReferences(record9.content ?? "").length > 0 ? "Image" : void 0);
       if (!title) return void 0;
-      return { conversationId, title, createdAt: record9.created_at ? new Date(record9.created_at).getTime() : stat8.mtimeMs, updatedAt: stat8.mtimeMs };
+      return { conversationId, title, createdAt: record9.created_at ? new Date(record9.created_at).getTime() : stat9.mtimeMs, updatedAt: stat9.mtimeMs };
     } finally {
       await handle.close();
     }
@@ -37119,6 +37123,18 @@ var AcpRemoteGateway = class {
     if (!tools) throw new RpcError("ACP_CONNECTION_CLOSED", "The ACP workspace connection is closed.");
     return tools;
   }
+  /** Trusted, connection-scoped authority for the dedicated workspace uploader. */
+  resolveUploadWorkspace(connectionId, publicId) {
+    const match = /^(acp|cursor|pi|opencode|claude):(.+)$/.exec(publicId);
+    const backend = match?.[1] === "acp" ? "antigravity" : match?.[1];
+    const session = match ? this.sessionCwds.get(match[2]) : void 0;
+    if (!this.peers.has(connectionId) || !session || session.backend !== backend || this.closed) {
+      throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
+    }
+    this.requireAcp(backend);
+    this.requireSessionOwner(connectionId, match[2]);
+    return session.cwd;
+  }
   async openToolStream(connectionId, sessionId, backend, endpoint, args, signal) {
     const session = this.sessionCwds.get(sessionId);
     if (!session || session.backend !== backend) throw new RpcError("ACP_WORKSPACE_UNAVAILABLE", "The ACP session has no trusted workspace.");
@@ -37263,8 +37279,8 @@ var AcpRemoteGateway = class {
       this.restartAttempt = 0;
       return;
     }
-    const failure3 = results.find((result) => result.status === "rejected");
-    throw failure3?.status === "rejected" ? failure3.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
+    const failure4 = results.find((result) => result.status === "rejected");
+    throw failure4?.status === "rejected" ? failure4.reason : new CursorAcpError("CURSOR_BINARY_UNAVAILABLE", "No ACP backend is available.");
   }
   backendCurrent(backend) {
     return this.config.enabled && backend.enabled && !this.pendingReconfiguration.has(backend.id) && JSON.stringify(this.config.backends.find((item) => item.id === backend.id)) === JSON.stringify(backend);
@@ -38160,8 +38176,223 @@ function redact(value, key = "") {
   return Object.fromEntries(Object.entries(value).map(([childKey, child]) => [childKey, redact(child, childKey)]));
 }
 
-// src/service.ts
+// src/workspace-upload.ts
 import { randomUUID as randomUUID5 } from "node:crypto";
+import { constants as constants4 } from "node:fs";
+import { link, lstat as lstat2, open as open2, realpath as realpath6, stat as stat6, unlink } from "node:fs/promises";
+import { extname, isAbsolute as isAbsolute7, join as join12 } from "node:path";
+var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
+var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
+var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
+var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(WORKSPACE_UPLOAD_BYTES) }).strict();
+var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
+var WorkspaceUploadHost = class {
+  constructor(resolveRoot, ttlMs = 12e4) {
+    this.resolveRoot = resolveRoot;
+    this.ttlMs = ttlMs;
+    this.timer = setInterval(() => {
+      void this.serialize(() => this.expire()).catch(() => void 0);
+    }, Math.min(ttlMs, 3e4));
+    this.timer.unref();
+  }
+  uploads = /* @__PURE__ */ new Map();
+  completed = /* @__PURE__ */ new Map();
+  queue = Promise.resolve();
+  lifetime = new AbortController();
+  timer;
+  closed = false;
+  call(method, input3) {
+    return this.serialize(async () => {
+      if (this.closed) throw failure3("UPLOAD_CLOSED");
+      await this.expire();
+      try {
+        switch (method) {
+          case "workspace.upload.open":
+            return await this.begin(input3);
+          case "workspace.upload.chunk":
+            return await this.append(input3);
+          case "workspace.upload.commit":
+            return await this.commit(input3);
+          case "workspace.upload.abort": {
+            const p = scope.parse(input3);
+            const upload = this.uploads.get(p.uploadId);
+            if (upload && upload.sessionId !== p.sessionId) throw failure3("UPLOAD_NOT_FOUND");
+            if (upload) await this.discard(p.uploadId, upload);
+            return { aborted: true };
+          }
+          default:
+            throw failure3("METHOD_NOT_FOUND");
+        }
+      } catch (error) {
+        const p = scope.safeParse(input3 && typeof input3 === "object" ? { sessionId: input3.sessionId, uploadId: input3.uploadId } : input3);
+        const upload = p.success ? this.uploads.get(p.data.uploadId) : void 0;
+        if (p.success && upload?.sessionId === p.data.sessionId) await this.discard(p.data.uploadId, upload);
+        if (error instanceof external_exports.ZodError || error instanceof RpcError) throw error;
+        throw failure3("UPLOAD_FAILED");
+      }
+    });
+  }
+  closeAll() {
+    this.closed = true;
+    this.lifetime.abort();
+    clearInterval(this.timer);
+    return this.serialize(async () => {
+      await Promise.all([...this.uploads].map(([id5, upload]) => this.discard(id5, upload)));
+      this.completed.clear();
+    });
+  }
+  serialize(operation) {
+    const next = this.queue.then(operation);
+    this.queue = next.catch(() => void 0);
+    return next;
+  }
+  async begin(input3) {
+    const p = openParams.parse(input3);
+    if (!validName(p.name)) throw failure3("UPLOAD_INVALID_NAME");
+    if (this.uploads.has(p.uploadId) || this.completed.has(p.uploadId)) throw failure3("UPLOAD_ID_IN_USE");
+    if (this.uploads.size >= 2) throw failure3("UPLOAD_LIMIT");
+    const sourceRoot = await this.sessionRoot(p.sessionId);
+    this.assertLive();
+    if (!sourceRoot || !isAbsolute7(sourceRoot)) throw failure3("UPLOAD_WORKSPACE_UNAVAILABLE");
+    const root = await realpath6(sourceRoot);
+    const directory = await stat6(root);
+    if (!directory.isDirectory()) throw failure3("UPLOAD_WORKSPACE_UNAVAILABLE");
+    const temp = join12(root, `.dsh-upload-${randomUUID5()}.part`);
+    const handle = await open2(temp, constants4.O_CREAT | constants4.O_EXCL | constants4.O_RDWR | (constants4.O_NOFOLLOW ?? 0), 384);
+    const upload = { ...p, received: 0, touched: Date.now(), root, sourceRoot, dev: directory.dev, ino: directory.ino, temp, handle };
+    this.uploads.set(p.uploadId, upload);
+    await this.validateRoot(upload);
+    return { uploadId: p.uploadId, chunkBytes: WORKSPACE_UPLOAD_CHUNK };
+  }
+  async append(input3) {
+    const p = chunkParams.parse(input3);
+    const upload = this.requireUpload(p);
+    const data2 = Buffer.from(p.data, "base64");
+    if (!data2.length || data2.length > WORKSPACE_UPLOAD_CHUNK || data2.toString("base64") !== p.data || p.offset !== upload.received || upload.received + data2.length > upload.totalBytes) throw failure3("UPLOAD_INVALID_CHUNK");
+    await this.validateRoot(upload);
+    let written = 0;
+    while (written < data2.length) {
+      const result = await upload.handle.write(data2, written, data2.length - written, upload.received + written);
+      if (!result.bytesWritten) throw failure3("UPLOAD_FAILED");
+      written += result.bytesWritten;
+    }
+    this.assertLive();
+    upload.received += data2.length;
+    upload.touched = Date.now();
+    return { uploadId: p.uploadId, receivedBytes: upload.received };
+  }
+  async commit(input3) {
+    const p = scope.parse(input3);
+    const prior = this.completed.get(p.uploadId);
+    if (prior) {
+      if (prior.sessionId !== p.sessionId) throw failure3("UPLOAD_NOT_FOUND");
+      return prior.result;
+    }
+    const upload = this.requireUpload(p);
+    if (upload.received !== upload.totalBytes) throw failure3("UPLOAD_INCOMPLETE");
+    await this.validateRoot(upload);
+    await upload.handle.sync();
+    const original = await upload.handle.stat();
+    const temp = await lstat2(upload.temp);
+    if (!temp.isFile() || temp.dev !== original.dev || temp.ino !== original.ino || temp.size !== upload.totalBytes) throw failure3("UPLOAD_WORKSPACE_CHANGED");
+    const extension = extname(upload.name);
+    const stem = upload.name.slice(0, upload.name.length - extension.length);
+    for (let suffix = 0; suffix < 1e4; suffix++) {
+      await this.validateRoot(upload);
+      const name2 = suffix === 0 ? upload.name : `${stem} (${suffix})${extension}`;
+      try {
+        await link(upload.temp, join12(upload.root, name2));
+      } catch (error) {
+        if (error.code === "EEXIST") continue;
+        throw error;
+      }
+      const result = { name: name2, path: `./${name2}`, bytes: upload.totalBytes };
+      this.completed.set(p.uploadId, { sessionId: p.sessionId, result, touched: Date.now() });
+      if (this.completed.size > 64) this.completed.delete(this.completed.keys().next().value);
+      await this.discard(p.uploadId, upload);
+      return result;
+    }
+    throw failure3("UPLOAD_NAME_CONFLICT");
+  }
+  requireUpload(p) {
+    const upload = this.uploads.get(p.uploadId);
+    if (!upload || upload.sessionId !== p.sessionId) throw failure3("UPLOAD_NOT_FOUND");
+    return upload;
+  }
+  assertLive() {
+    if (this.closed) throw failure3("UPLOAD_CLOSED");
+  }
+  async sessionRoot(sessionId) {
+    const signal = AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(15e3)]);
+    let onAbort;
+    try {
+      signal.throwIfAborted();
+      return await Promise.race([
+        this.resolveRoot(sessionId, signal),
+        new Promise((_, reject) => {
+          onAbort = () => reject(failure3(this.closed ? "UPLOAD_CLOSED" : "UPLOAD_TIMEOUT"));
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) onAbort();
+        })
+      ]);
+    } finally {
+      if (onAbort) signal.removeEventListener("abort", onAbort);
+    }
+  }
+  async validateRoot(upload) {
+    const current = await this.sessionRoot(upload.sessionId);
+    this.assertLive();
+    if (current !== upload.sourceRoot || await realpath6(current) !== upload.root || await realpath6(upload.root) !== upload.root) throw failure3("UPLOAD_WORKSPACE_CHANGED");
+    const directory = await stat6(upload.root);
+    if (!directory.isDirectory() || directory.dev !== upload.dev || directory.ino !== upload.ino) throw failure3("UPLOAD_WORKSPACE_CHANGED");
+  }
+  async discard(id5, upload) {
+    this.uploads.delete(id5);
+    const original = await upload.handle.stat().catch(() => void 0);
+    await upload.handle.close().catch(() => void 0);
+    try {
+      const root = await lstat2(upload.root);
+      const temp = await lstat2(upload.temp);
+      if (original && root.isDirectory() && root.dev === upload.dev && root.ino === upload.ino && temp.isFile() && temp.dev === original.dev && temp.ino === original.ino) await unlink(upload.temp);
+    } catch {
+    }
+  }
+  async expire() {
+    const cutoff = Date.now() - this.ttlMs;
+    await Promise.all([...this.uploads].filter(([, u]) => u.touched <= cutoff).map(([id5, u]) => this.discard(id5, u)));
+    for (const [id5, entry] of this.completed) if (entry.touched <= cutoff) this.completed.delete(id5);
+  }
+};
+function failure3(code) {
+  return new RpcError(code, "The workspace upload could not be completed.");
+}
+function validName(name2) {
+  return Buffer.byteLength(name2, "utf8") <= 220 && name2 !== "." && name2 !== ".." && !/[/\\\x00-\x1f\x7f<>:"|?*]/u.test(name2) && !/[. ]$/u.test(name2) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name2) && !name2.startsWith(".dsh-upload-");
+}
+
+// src/workspace-upload-authority.ts
+function workspaceUploadRootResolver(gateway, supportsHarnessSessions, codex, acp) {
+  return async (sessionId, signal) => {
+    signal.throwIfAborted();
+    if (sessionId.startsWith("codex:")) {
+      const parsed = parseCodexSessionId(sessionId);
+      if (!parsed) throw unavailable2();
+      return codex(parsed.threadId);
+    }
+    if (/^(acp|cursor|pi|opencode|claude):/.test(sessionId)) return acp(sessionId);
+    if (!gateway?.supportsCarrier || !supportsHarnessSessions()) throw unavailable2();
+    const result = await gateway.dispatch("session/list", { args: { _request: {} } }, signal);
+    signal.throwIfAborted();
+    const value = result.ok ? result.value : void 0;
+    return value?.items?.find((item) => item.sessionId === sessionId)?.cwd;
+  };
+}
+function unavailable2() {
+  return new RpcError("UPLOAD_WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.");
+}
+
+// src/service.ts
+import { randomUUID as randomUUID6 } from "node:crypto";
 
 // src/connection-controller.ts
 var ConnectionController = class {
@@ -38392,7 +38623,11 @@ var apiMethods = /* @__PURE__ */ new Set([
   "agent.acp.transfer.commit",
   "agent.acp.transfer.read",
   "agent.acp.transfer.close",
-  "plugin.route.call"
+  "plugin.route.call",
+  "workspace.upload.open",
+  "workspace.upload.chunk",
+  "workspace.upload.commit",
+  "workspace.upload.abort"
 ]);
 var HOST_CAPABILITIES = [
   "harness.api.v1",
@@ -38400,13 +38635,14 @@ var HOST_CAPABILITIES = [
   "harness.remote.v1",
   "harness.remote.transfer.v1",
   "fileviewer.read.v1",
+  "workspace.upload.v1",
   "codex.appserver.v1",
   "codex.appserver.transfer.v1",
   "agent.acp.v1",
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute) {
+  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload) {
     this.harnessApi = harnessApi;
     this.maxPending = maxPending;
     this.logger = logger;
@@ -38418,6 +38654,7 @@ var RpcRouter = class {
     this.loopback = loopback;
     this.workspaceTypes = workspaceTypes;
     this.pluginRoute = pluginRoute;
+    this.workspaceUpload = workspaceUpload;
   }
   active = 0;
   async closePeerStreams() {
@@ -38426,7 +38663,8 @@ var RpcRouter = class {
       this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
-      this.acp?.closeAll()
+      this.acp?.closeAll(),
+      this.workspaceUpload?.closeAll()
     ]);
   }
   async handle(message) {
@@ -38455,7 +38693,7 @@ var RpcRouter = class {
       return createRpcResponse(request.id, result);
     } catch (error) {
       const response = errorResponse2(request.id, error);
-      const failedEndpoint = typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
+      const failedEndpoint = !request.payload.method.startsWith("workspace.upload.") && typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
       this.logger?.warn("host rpc failed", {
         method: request.payload.method,
         ...failedEndpoint ? { endpoint: failedEndpoint } : {},
@@ -38566,6 +38804,13 @@ var RpcRouter = class {
         return this.requireAcp().readTransfer(params);
       case "agent.acp.transfer.close":
         return this.requireAcp().closeTransfer(params);
+      case "workspace.upload.open":
+      case "workspace.upload.chunk":
+      case "workspace.upload.commit":
+      case "workspace.upload.abort": {
+        if (!this.workspaceUpload) throw new RpcError("FEATURE_NOT_SUPPORTED", "Workspace upload is unavailable on this Host.");
+        return this.workspaceUpload.call(method, params);
+      }
       case "plugin.route.call":
         return this.requirePluginRoute().call(params);
       default:
@@ -39651,22 +39896,22 @@ function closeCode(code) {
 }
 
 // src/remote-directory-browser.ts
-import { readdir as readdir4, stat as stat6 } from "node:fs/promises";
+import { readdir as readdir4, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir6, platform as platform2 } from "node:os";
-import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute7, parse, resolve as resolve5 } from "node:path";
+import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute8, parse, resolve as resolve5 } from "node:path";
 var MAX_ENTRIES = 500;
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
   const home = resolve5(homedir6());
   const target2 = path === void 0 || path.trim() === "" ? home : resolve5(path);
-  if (!isAbsolute7(target2)) throw new Error("The remote directory path must be absolute.");
+  if (!isAbsolute8(target2)) throw new Error("The remote directory path must be absolute.");
   const rows = await readdir4(target2, { withFileTypes: true });
   const directories = [];
   for (const row of rows) {
     signal?.throwIfAborted();
     const child = resolve5(target2, row.name);
     let directory = row.isDirectory();
-    if (!directory && row.isSymbolicLink()) directory = await stat6(child).then((value) => value.isDirectory()).catch(() => false);
+    if (!directory && row.isSymbolicLink()) directory = await stat7(child).then((value) => value.isDirectory()).catch(() => false);
     if (!directory) continue;
     directories.push({ name: row.name, path: child, hidden: platform2() !== "win32" && row.name.startsWith(".") });
   }
@@ -40878,7 +41123,7 @@ var HarnessRemoteBridge = class {
   }
   async pump(streamId, source, signal) {
     let reason = "completed";
-    let failure3;
+    let failure4;
     try {
       for await (const value of source) {
         if (signal.aborted) break;
@@ -40895,13 +41140,13 @@ var HarnessRemoteBridge = class {
       if (signal.aborted) reason = "cancelled";
     } catch (error) {
       reason = signal.aborted ? "cancelled" : "failed";
-      if (!signal.aborted) failure3 = this.gateway.failure(error);
+      if (!signal.aborted) failure4 = this.gateway.failure(error);
     } finally {
       this.streams.delete(streamId);
       await this.publish("harness.remote.stream.closed", {
         streamId,
         reason,
-        ...failure3 === void 0 ? {} : { failure: failure3 }
+        ...failure4 === void 0 ? {} : { failure: failure4 }
       }).catch(() => void 0);
     }
   }
@@ -41110,7 +41355,13 @@ var HostPluginRuntime = class {
         // Handles and their lifetime belong to this connection; only policy is shared.
         this.createLoopbackHost(),
         () => this.hostWorkspaceTypes(),
-        pluginRoute
+        pluginRoute,
+        new WorkspaceUploadHost(workspaceUploadRootResolver(
+          peerGateway,
+          () => harnessSessionGeneration(this.harnessVersion) === "v3",
+          (threadId) => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
+          (sessionId) => this.acp.resolveUploadWorkspace(context.connectionId, sessionId)
+        ))
       );
     }, this.logger);
     if (config.serverUrl !== void 0) {
@@ -41411,7 +41662,7 @@ var HostPluginRuntime = class {
     let reportedVersion;
     let errorCode6;
     try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID5(), payload: {} });
+      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID6(), payload: {} });
       if (response === void 0) throw new Error("ApiProxy is unavailable");
       if (!response.result.ok) {
         errorCode6 = response.result.error.code;
@@ -41427,7 +41678,7 @@ var HostPluginRuntime = class {
     return void 0;
   }
   hostCapabilities() {
-    const capabilities = [];
+    const capabilities = ["workspace.upload.v1"];
     if (this.loopbackPorts.length > 0) capabilities.push("loopback.http-ws.v1");
     if (this.localGateway?.supportsCarrier === true) {
       capabilities.push(
@@ -41584,9 +41835,9 @@ function withSignal(pending, signal) {
 }
 
 // src/cli.ts
-import { stat as stat7 } from "node:fs/promises";
+import { stat as stat8 } from "node:fs/promises";
 import { hostname as hostname3 } from "node:os";
-import { join as join12 } from "node:path";
+import { join as join13 } from "node:path";
 var QR_POLL_INTERVAL_MS = 2e3;
 var TERMINAL_QR_MARGIN = 4;
 async function runCli(args = process.argv.slice(2), dependencies = {}) {
@@ -41677,7 +41928,7 @@ async function status(args, runtime) {
     `Server: ${serverUrl}`,
     "Host control: enabled (dsh-TUI default)"
   ];
-  if (!await exists3(join12(directory, "device.json"))) {
+  if (!await exists3(join13(directory, "device.json"))) {
     lines.push("Device: not initialized", "Authorization: logged out", "Credential: unavailable");
     write(runtime.stdout, `${lines.join("\n")}
 
@@ -41722,7 +41973,7 @@ async function logout(args, runtime) {
   const serverUrl = selectedServer();
   const root = new IdentityStore({ env: runtime.env }).directory;
   const directory = serverStorageDirectory(root, serverUrl, "host");
-  if (!await exists3(join12(directory, "device.json"))) {
+  if (!await exists3(join13(directory, "device.json"))) {
     await new ServerCredentialStore(directory).clear();
     write(runtime.stdout, "This Host is already logged out.\n");
     return 0;
@@ -41848,7 +42099,7 @@ function terminalLink(url, target2) {
 }
 async function exists3(path) {
   try {
-    await stat7(path);
+    await stat8(path);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
@@ -42567,18 +42818,18 @@ async function createSettingsBinding(ctx, settings, readConfig, entryId) {
       }
     };
   }
-  const scope = settings.register(pluginSettingsNamespace, Config, {
+  const scope2 = settings.register(pluginSettingsNamespace, Config, {
     base: readConfig(),
     applies: "restart",
     validate: (value) => {
       resolveConfig(value);
     }
   });
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope));
+  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope2));
   return {
-    get: () => scope.get(),
+    get: () => scope2.get(),
     replace: async (section) => {
-      await scope.replace(section);
+      await scope2.replace(section);
     }
   };
 }

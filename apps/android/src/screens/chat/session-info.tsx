@@ -30,7 +30,7 @@ export function SessionInfo({ session, workspace, onClose, onOpenWorkspace }: {
         <Text accessibilityRole="header" style={styles.title}>{strings.sessionInfo.title}</Text>
         <IconButton label={strings.common.close} icon={X} onPress={onClose} />
       </View>
-      <ScrollView style={{ maxHeight }} contentContainerStyle={{ paddingBottom: insets.bottom }}>
+      <ScrollView style={{ flexShrink: 1, maxHeight }} contentContainerStyle={{ paddingBottom: insets.bottom }}>
         <Text selectable style={styles.sessionTitle}>{sessionTitle(session)}</Text>
         <SectionTitle>{strings.sessionInfo.workspaceInfo}</SectionTitle>
         <KeyValue label={strings.workspaces.title} value={workspace?.title ?? strings.chat.workspaceNone} onPress={onOpenWorkspace} />

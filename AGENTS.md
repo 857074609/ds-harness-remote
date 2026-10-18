@@ -468,3 +468,26 @@ APK/真机、跨设备和独立 Remote Web 尚未验收。详细边界见 `docs/
 本次 Plugin check/build、359 个测试、client-core 41 个测试、Protocol 78 个测试、Android
 check/132 个测试及 Hermes export、DSH bundle 校验通过；Metro 的 noble/hashes exports
 fallback 警告仍存在。
+
+## Android screen rotation (2026-10-18)
+
+Android 不再锁定竖屏：`apps/android/app.json` 的 `orientation` 改为 `default`（Expo 对
+Android 生成 `android:screenOrientation="unspecified"`，跟随系统自动旋转；不引入
+`expo-screen-orientation` 运行时锁定）。`apps/android/src/ui/responsive.ts` 统一提供
+`useResponsiveLayout()`（`landscape`、`compactHeight`、`contentMaxWidth`、
+`sheetMaxHeight`）与 `modalSheetMaxHeight()`。
+
+布局适配：聊天消息、输入栏和轨迹页在宽窗口使用居中的 760 dp 可读列；底部弹层最大高度按
+当前窗口计算（窗口高度低于 520 dp 时为约 92%，否则 70%），picker/侧栏列表的
+`flexShrink` 与最大高度一起保证页脚按钮可见；「+」菜单、工作区新建/重命名/操作对话框、
+设备重命名、Home 菜单和目录浏览器改为可滚动 body；横屏/短窗口压缩输入栏、隐藏隐私提示，
+IME inset 在窗口尺寸变化后重新读取 `Keyboard.metrics()`，避免沿用旧朝向的键盘坐标。
+工具面板（Files/Terminal/PDF）与 xterm/PDF renderer 依赖 WebView 自身 resize 回调，未改协议。
+
+验证：`pnpm --filter @dsh-remote/android check`（renderer 生成 + workspace data-plane 校验 +
+`tsc --noEmit`）、23 文件 / 132 测试、`git diff --check` 通过。使用本机 Android 15
+（Mi MIX 3，1080×2340）安装 arm64 release APK 后真机烟测：设备列表、工作区、Chat 欢迎页、
+「+」菜单、工作区选择器、会话信息、设备详情/重命名、Home 菜单、设置、会话侧栏、轨迹、Files
+面板在竖屏与横屏往返切换后均可用；横屏 Gboard 走系统全屏输入编辑界面，未验证普通内联 IME
+布局。未验证平板、折叠屏/分屏、大字体、TalkBack、Terminal/PDF 原生交互及 iOS 旋转布局
+（该改动同时解除 iOS 方向锁定，需另行验收）。

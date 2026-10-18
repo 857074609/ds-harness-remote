@@ -44,7 +44,8 @@ export function MentionPopover({ groups, onDismiss, emptyText }: {
   }, [onDismiss])
 
   const total = groups.reduce((sum, group) => sum + group.items.length, 0)
-  const { height } = useWindowDimensions()
+  const { width, height } = useWindowDimensions()
+  const landscape = width > height
   const [keyboardTop, setKeyboardTop] = useState<number>()
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', event => setKeyboardTop(event.endCoordinates.screenY))
@@ -52,8 +53,14 @@ export function MentionPopover({ groups, onDismiss, emptyText }: {
     setKeyboardTop(Keyboard.metrics()?.screenY)
     return () => { shown.remove(); hidden.remove() }
   }, [])
+  // Rotation moves the keyboard's top edge without necessarily emitting a new
+  // show event; re-read the live metrics so the popover does not keep the
+  // previous orientation's screenY.
+  useEffect(() => {
+    setKeyboardTop(Keyboard.isVisible() ? Keyboard.metrics()?.screenY : undefined)
+  }, [width, height])
   const availableHeight = Math.min(height, keyboardTop ?? height)
-  const maxHeight = Math.max(80, Math.min(240, availableHeight * 0.32))
+  const maxHeight = Math.max(80, Math.min(240, Math.round(availableHeight * (landscape ? 0.45 : 0.32))))
   return (
     <View style={[styles.popover, { maxHeight }]} accessibilityRole="list">
       <ScrollView

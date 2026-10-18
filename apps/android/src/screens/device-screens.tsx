@@ -20,6 +20,7 @@ import {
 } from '../ui/components'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
+import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -693,6 +694,10 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const { landscape, compactHeight } = useResponsiveLayout()
+  // The hero is the first block of a ScrollView; a compact landscape window
+  // wastes its scarce height on the old 40/32dp padding pair.
+  const compactHero = landscape || compactHeight
 
   useEffect(() => {
     const current = useAppStore.getState()
@@ -776,7 +781,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
         </View>
       )}
       <Screen>
-        <View style={styles.connectionHero}>
+        <View style={[styles.connectionHero, compactHero && styles.connectionHeroCompact]}>
           <View style={styles.connectionDeviceIcon}><Laptop size={30} color={colors.primary} /></View>
           <View style={styles.connectionHeading}>
             <Text accessibilityLiveRegion="polite" style={styles.connectionStatus}>
@@ -869,63 +874,67 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   }
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  // Read-only diagnostics stay a readable column on wide landscape displays.
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
 
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.devices.title} onBack={onBack} />}>
         <Screen>
-          <View style={styles.deviceHero}>
-            <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
-            <View style={styles.deviceHeroCopy}>
-              <Text style={styles.deviceName}>{device.name}</Text>
-              <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
-            </View>
-            <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
-          </View>
-
-          {connection.error !== undefined && isSelected && (
-            <View style={styles.connectionError}>
-              <Text style={styles.connectionErrorTitle}>{zhCN.devices.connectionInterrupted}</Text>
-              <Text style={styles.connectionErrorBody}>{connection.error}</Text>
-              <Button label={zhCN.common.retry} variant="secondary" onPress={() => void reconnect()} />
-            </View>
-          )}
-
-          {!device.trusted
-            ? <View style={styles.connectArea}>
-                <View style={styles.trustHeader}>
-                  <View style={styles.trustIcon}><ShieldCheck size={22} color={colors.primary} /></View>
-                  <View style={styles.trustCopy}>
-                    <Text style={styles.connectCopy}>{zhCN.devices.trustExplanation}</Text>
-                    {device.fingerprint !== undefined && <Text selectable style={styles.fingerprint}>{device.fingerprint}</Text>}
-                  </View>
-                </View>
-                <Button label={zhCN.devices.trust} onPress={() => void trustAndContinue()} />
+          <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <View style={styles.deviceHero}>
+              <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
+              <View style={styles.deviceHeroCopy}>
+                <Text style={styles.deviceName}>{device.name}</Text>
+                <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
               </View>
-            : !isConnected
+              <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
+            </View>
+
+            {connection.error !== undefined && isSelected && (
+              <View style={styles.connectionError}>
+                <Text style={styles.connectionErrorTitle}>{zhCN.devices.connectionInterrupted}</Text>
+                <Text style={styles.connectionErrorBody}>{connection.error}</Text>
+                <Button label={zhCN.common.retry} variant="secondary" onPress={() => void reconnect()} />
+              </View>
+            )}
+
+            {!device.trusted
               ? <View style={styles.connectArea}>
-                  <Text style={styles.connectCopy}>{device.online ? zhCN.devices.connectReady : zhCN.devices.offlineHelp}</Text>
-                  <Button label={zhCN.devices.secureConnect} onPress={onConnect} disabled={!device.online} />
-                </View>
-              : <>
-                  <SectionTitle>{zhCN.devices.info}</SectionTitle>
-                  <View style={styles.group}>
-                    <KeyValue label={zhCN.devices.harnessShort} value={descriptor?.version ?? device.harnessVersion ?? zhCN.devices.unknownVersion} />
-                    <KeyValue label={zhCN.devices.plugin} value={device.clientVersion ?? zhCN.devices.unknownVersion} />
-                    <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
-                    {descriptor?.provider !== undefined && <KeyValue label={zhCN.devices.provider} value={descriptor.provider} />}
-                    {descriptor?.model !== undefined && <KeyValue label={zhCN.devices.model} value={descriptor.model} />}
-                    <View style={styles.contentCounts}>
-                      <View style={styles.contentCount}><Text style={styles.contentCountValue}>{workspaces.length}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.workspaces}</Text></View>
-                      <View style={styles.contentCountDivider} />
-                      <View style={styles.contentCount}><Text style={styles.contentCountValue}>{descriptor?.attachedSessions ?? 0}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.conversations}</Text></View>
+                  <View style={styles.trustHeader}>
+                    <View style={styles.trustIcon}><ShieldCheck size={22} color={colors.primary} /></View>
+                    <View style={styles.trustCopy}>
+                      <Text style={styles.connectCopy}>{zhCN.devices.trustExplanation}</Text>
+                      {device.fingerprint !== undefined && <Text selectable style={styles.fingerprint}>{device.fingerprint}</Text>}
                     </View>
                   </View>
+                  <Button label={zhCN.devices.trust} onPress={() => void trustAndContinue()} />
+                </View>
+              : !isConnected
+                ? <View style={styles.connectArea}>
+                    <Text style={styles.connectCopy}>{device.online ? zhCN.devices.connectReady : zhCN.devices.offlineHelp}</Text>
+                    <Button label={zhCN.devices.secureConnect} onPress={onConnect} disabled={!device.online} />
+                  </View>
+                : <>
+                    <SectionTitle>{zhCN.devices.info}</SectionTitle>
+                    <View style={styles.group}>
+                      <KeyValue label={zhCN.devices.harnessShort} value={descriptor?.version ?? device.harnessVersion ?? zhCN.devices.unknownVersion} />
+                      <KeyValue label={zhCN.devices.plugin} value={device.clientVersion ?? zhCN.devices.unknownVersion} />
+                      <KeyValue label={zhCN.devices.directory} value={descriptor?.cwd ?? zhCN.common.unavailable} mono />
+                      {descriptor?.provider !== undefined && <KeyValue label={zhCN.devices.provider} value={descriptor.provider} />}
+                      {descriptor?.model !== undefined && <KeyValue label={zhCN.devices.model} value={descriptor.model} />}
+                      <View style={styles.contentCounts}>
+                        <View style={styles.contentCount}><Text style={styles.contentCountValue}>{workspaces.length}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.workspaces}</Text></View>
+                        <View style={styles.contentCountDivider} />
+                        <View style={styles.contentCount}><Text style={styles.contentCountValue}>{descriptor?.attachedSessions ?? 0}</Text><Text style={styles.contentCountLabel}>{zhCN.devices.conversations}</Text></View>
+                      </View>
+                    </View>
 
-                  <DeviceConnectionInfo deviceId={device.deviceId} />
+                    <DeviceConnectionInfo deviceId={device.deviceId} />
 
-                  {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
-                </>}
+                    {onWorkspaces !== undefined && <View style={styles.primaryArea}><Button label={zhCN.devices.viewWorkspaces} icon={MessageSquareText} onPress={onWorkspaces} /></View>}
+                  </>}
+          </View>
         </Screen>
       </BlurHeaderFrame>
       {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
@@ -1077,6 +1086,9 @@ function probeTransportForMode(mode: string | undefined): ConnectionProbeTranspo
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
+  // Reading cap applied by the info screens only in landscape; portrait and
+  // phone widths stay below the cap.
+  contentColumn: { width: '100%', alignSelf: 'center' },
   pageHeading: { paddingTop: spacing.xxl, paddingBottom: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   title: { ...type.title, color: colors.ink },
   subtitle: { ...type.small, color: colors.muted, marginTop: 2 },
@@ -1124,6 +1136,7 @@ function createStyles(colors: ThemeColors) {
   compactSessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
   connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
   connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
+  connectionHeroCompact: { paddingTop: spacing.lg, paddingBottom: spacing.md },
   connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
   connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xxs },
   connectionStatus: { ...type.smallStrong, color: colors.muted, textAlign: 'center' },

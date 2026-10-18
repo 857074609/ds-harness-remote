@@ -73,6 +73,7 @@ import {
   splitDraftSegments,
 } from '../ui/mention-popover'
 import { OfficialMenuIcons } from '../ui/official-menu-icons'
+import { useResponsiveLayout } from '../ui/responsive'
 import { spacing } from '../ui/theme'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
@@ -88,7 +89,7 @@ import {
   ReplyStatusDots,
   WelcomeMessage,
 } from './chat/messages'
-import { ModalSurface } from './chat/modal'
+import { ModalSurface, usePickerListMaxHeight } from './chat/modal'
 import {
   agentPresetName,
   builtinPresetName,
@@ -345,6 +346,13 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  // Landscape phones are short: keep the composer compact when the IME is up
+  // and let the list use a readable centred column on wide windows.
+  const { landscape, compactHeight, height, contentMaxWidth } = useResponsiveLayout()
+  const plusMenuListMaxHeight = usePickerListMaxHeight()
+  const compactComposer = landscape || compactHeight
+  const composerInputMaxHeight = compactComposer ? Math.max(48, Math.min(96, Math.round(height * 0.22))) : 126
+  const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
 
   const scrollToBottom = useCallback((animated: boolean) => {
     listRef.current?.scrollToEnd({ animated })
@@ -1040,7 +1048,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
         ref={listRef}
         key={session.sessionId}
-        style={styles.list}
+        style={[styles.list, readableColumn]}
         contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
         data={visibleSections}
         keyExtractor={item => item.key}
@@ -1086,6 +1094,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         />
       )}
       <View style={styles.composerWrap}>
+        <View style={[styles.composerInner, readableColumn]}>
         {queueItems.length > 0 && <QueueDock items={queueItems} />}
 
         {images.length > 0 && (
@@ -1133,7 +1142,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                   : session.backend === 'claude' ? zhCN.chat.claudeMessageLabel : session.backend === 'opencode' ? zhCN.chat.opencodeMessageLabel : session.backend === 'pi' ? zhCN.chat.piMessageLabel : session.backend === 'antigravity'
                     ? zhCN.chat.antigravityMessageLabel
                     : zhCN.chat.messageLabel}
-              style={styles.composerInput}
+              style={[styles.composerInput, compactComposer && { maxHeight: composerInputMaxHeight }]}
               onChangeText={onChangeText}
               onSelectionChange={onSelectionChange}
 
@@ -1234,20 +1243,30 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         {draft.length > LONG_DRAFT_HINT && (
           <Text style={styles.composerHint}>{zhCN.chat.draftLong(draft.length)}</Text>
         )}
-        <Text style={styles.composerHint}>
-          {session.backend === 'codex'
-            ? zhCN.chat.codexPolicyHint
-            : session.backend === 'cursor'
-              ? zhCN.chat.cursorPolicyHint
-              : session.backend === 'claude' ? zhCN.chat.claudePolicyHint : session.backend === 'opencode' ? zhCN.chat.opencodePolicyHint : session.backend === 'pi' ? zhCN.chat.piPolicyHint : session.backend === 'antigravity'
-                ? zhCN.chat.antigravityPolicyHint
-                : zhCN.chat.policyHint}
-        </Text>
+        {/* Landscape phones leave almost no space above the IME once the
+            composer is visible; keep the privacy note for roomier windows. */}
+        {!compactComposer && (
+          <Text style={styles.composerHint}>
+            {session.backend === 'codex'
+              ? zhCN.chat.codexPolicyHint
+              : session.backend === 'cursor'
+                ? zhCN.chat.cursorPolicyHint
+                : session.backend === 'claude' ? zhCN.chat.claudePolicyHint : session.backend === 'opencode' ? zhCN.chat.opencodePolicyHint : session.backend === 'pi' ? zhCN.chat.piPolicyHint : session.backend === 'antigravity'
+                  ? zhCN.chat.antigravityPolicyHint
+                  : zhCN.chat.policyHint}
+          </Text>
+        )}
+        </View>
       </View>
 
       <Modal visible={plusMenuOpen} transparent animationType="fade" onRequestClose={closePlusMenu} statusBarTranslucent>
         <ModalSurface onClose={closePlusMenu}>
             <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.moreActions}</Text><IconButton label={zhCN.common.close} icon={X} onPress={closePlusMenu} /></View>
+            <ScrollView
+              style={{ maxHeight: plusMenuListMaxHeight }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
             {sessionImageLimits(session) !== undefined && (
               <View style={styles.plusCardRow}>
                 <Pressable
@@ -1337,6 +1356,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
                 </View>
               </Pressable>
             )}
+            </ScrollView>
         </ModalSurface>
       </Modal>
 

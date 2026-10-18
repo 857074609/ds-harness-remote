@@ -6,6 +6,7 @@ import { strings } from '../locales/i18n'
 import { IconButton } from '../ui/components'
 import { NativeMarkdown } from '../ui/markdown'
 import { radius, spacing, type, type ThemeColors } from '../ui/theme'
+import { useResponsiveLayout } from '../ui/responsive'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { MessageActions, messageClock } from './message-actions'
@@ -35,6 +36,7 @@ export function ChatTrajectory({ items, renderItem, renderImages, hasMore, loadi
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const { contentMaxWidth } = useResponsiveLayout()
   const [filter, setFilter] = useState<Category>('all')
   const [query, setQuery] = useState('')
   const rows = useMemo(() => {
@@ -42,7 +44,7 @@ export function ChatTrajectory({ items, renderItem, renderImages, hasMore, loadi
     return items.filter(item => (filter === 'all' || category(item) === filter)
       && `${content(item)}\n${item.turn ?? ''}`.toLocaleLowerCase().includes(search))
   }, [items, filter, query])
-  return <View style={styles.root}>
+  return <View style={[styles.root, { width: '100%', maxWidth: contentMaxWidth, alignSelf: 'center' }]}>
     <View style={styles.search}>
       <Search size={18} color={colors.muted} />
       <TextInput accessibilityLabel={strings.trajectory.search} placeholder={strings.trajectory.search}

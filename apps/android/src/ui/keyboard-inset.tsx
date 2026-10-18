@@ -18,14 +18,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
  *    the system navigation bar / gesture navigation handle (insets.bottom).
  * 4. When the keyboard is open, the IME physically covers the bottom system bar,
  *    so insets.bottom is replaced by the keyboard cover instead of being added twice.
- * 5. Window height growth (when IME releases the window under adjustResize)
- *    and AppState transitions automatically clear any stale state from dropped events.
+ * 5. Window height growth (when IME releases the window under adjustResize),
+ *    window resizes (rotation/split screen) and AppState transitions
+ *    automatically re-sync or clear any stale state from dropped events.
  */
 export function KeyboardInset({ children }: { children: ReactNode }) {
   const insets = useSafeAreaInsets()
-  const { height: windowHeight } = useWindowDimensions()
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions()
   const [keyboardScreenY, setKeyboardScreenY] = useState<number | null>(null)
-  const heightRef = useRef(windowHeight)
+  const windowRef = useRef({ width: windowWidth, height: windowHeight })
 
   const measure = useCallback((screenY: number) => {
     setKeyboardScreenY(screenY)
@@ -41,10 +42,20 @@ export function KeyboardInset({ children }: { children: ReactNode }) {
   }, [measure])
 
   useEffect(() => {
-    const previous = heightRef.current
-    heightRef.current = windowHeight
-    if (windowHeight > previous && !Keyboard.isVisible()) setKeyboardScreenY(null)
-  }, [windowHeight])
+    const previous = windowRef.current
+    windowRef.current = { width: windowWidth, height: windowHeight }
+    if (previous.width === windowWidth && previous.height === windowHeight) return
+    // Rotation (or a window resize) moves the IME's top edge too, and Android
+    // does not guarantee another keyboardDidShow for the kept-open keyboard.
+    // Re-sync from live metrics so padding is not computed from the old
+    // orientation; fall back to the safe-area inset when metrics are gone.
+    if (Keyboard.isVisible()) {
+      const metrics = Keyboard.metrics()
+      setKeyboardScreenY(metrics && typeof metrics.screenY === 'number' ? metrics.screenY : null)
+    } else {
+      setKeyboardScreenY(null)
+    }
+  }, [windowWidth, windowHeight])
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', state => {

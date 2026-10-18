@@ -33,7 +33,7 @@ export function ModePicker({ visible, options, current, loading, selecting, onCl
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
-          style={{ maxHeight: listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -87,7 +87,7 @@ export function PermissionPicker({ visible, permissions, onClose, onPick, loadin
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.approvalMode}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
-          style={{ maxHeight: listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -129,7 +129,7 @@ export function WorkspacePicker({ visible, workspaces, currentSessionId, session
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.selectWorkspace}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <Text style={styles.pickerHint}>{zhCN.chat.moveSessionHint}</Text>
         <ScrollView
-          style={{ maxHeight: listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -182,7 +182,7 @@ export function ToolAccessPicker({ visible, onClose, onPick }: {
       <ModalSurface onClose={onClose}>
         <View style={styles.modalHeader}><Text style={styles.modalTitle}>{zhCN.chat.toolAccess}</Text><IconButton label={zhCN.common.close} icon={X} onPress={onClose} /></View>
         <ScrollView
-          style={{ maxHeight: listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -229,7 +229,7 @@ export function PromptsPicker({ visible, prompts, onClose, onPick, onManage }: {
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView
-          style={{ maxHeight: Math.max(140, listMaxHeight - 56) }}
+          style={{ flexShrink: 1, maxHeight: Math.max(140, listMaxHeight - 56) }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -298,7 +298,7 @@ export function PromptsManager({ visible, prompts, promptsLoading, onBack, onClo
           </View>
         </View>
         <ScrollView
-          style={{ maxHeight: listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -355,7 +355,7 @@ export function PromptEditor({ visible, prompt, promptsLoading, onBack, onClose,
           </View>
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
-        <ScrollView style={{ maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">
+        <ScrollView style={{ flexShrink: 1, maxHeight: listMaxHeight }} keyboardShouldPersistTaps="handled">
           <Text style={styles.promptInputLabel}>{zhCN.chat.toolPromptTitlePlaceholder}</Text>
           <TextInput
             accessibilityLabel={zhCN.chat.toolPromptTitlePlaceholder}
@@ -426,7 +426,7 @@ export function ModelPicker({ visible, models, onClose, onPick }: {
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
         <ScrollView
-          style={{ maxHeight: showEffortRow ? Math.max(140, listMaxHeight - 56) : listMaxHeight }}
+          style={{ flexShrink: 1, maxHeight: showEffortRow ? Math.max(140, listMaxHeight - 56) : listMaxHeight }}
           contentContainerStyle={styles.modalListContent}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled

@@ -16,6 +16,7 @@ import {
   type NetworkRoute,
 } from './src/lib/network-route'
 import { Button, ErrorBanner } from './src/ui/components'
+import { useResponsiveLayout } from './src/ui/responsive'
 import { radius, spacing, type } from './src/ui/theme'
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/theme-context'
 import { useThemedStyles } from './src/ui/use-themed-styles'
@@ -346,12 +347,16 @@ function LoadingScreen() {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  // The splash-like boot view must fit in landscape phones (~360dp tall)
+  // without clipping; keep its portrait composition otherwise.
+  const { landscape } = useResponsiveLayout()
+  const padding = landscape ? spacing.lg : spacing.xxxl
   return (
-    <View style={[styles.loadingScreen, { paddingTop: spacing.xxxl + insets.top, paddingBottom: spacing.xxxl + insets.bottom }]}>
+    <View style={[styles.loadingScreen, { paddingTop: padding + insets.top, paddingBottom: padding + insets.bottom }]}>
       <View style={styles.loadingBrand}>
         <Image
           source={require('./assets/android-icon-foreground-adaptive.png')}
-          style={styles.logo}
+          style={[styles.logo, landscape && { width: 72, height: 72 }]}
           resizeMode="contain"
           accessible={false}
         />
@@ -370,10 +375,11 @@ function LoadingScreen() {
 }
 
 function BootError({ message, onRetry }: { message?: string; onRetry: () => void }) {
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <View style={styles.center}>
+    <View style={[styles.center, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <Text style={styles.loadingTitle}>{zhCN.app.bootFailed}</Text>
       <Text style={styles.loadingBody}>{message ?? zhCN.app.secureStorageUnavailable}</Text>
       <View style={styles.retry}><Button label={zhCN.common.retry} onPress={onRetry} /></View>
@@ -382,10 +388,11 @@ function BootError({ message, onRetry }: { message?: string; onRetry: () => void
 }
 
 function MissingRoute({ onBack }: { onBack: () => void }) {
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
-    <View style={styles.center}>
+    <View style={[styles.center, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
       <Text style={styles.loadingTitle}>{zhCN.app.deviceUnavailable}</Text>
       <Text style={styles.loadingBody}>{zhCN.app.deviceNoLongerTrusted}</Text>
       <View style={styles.retry}><Button label={zhCN.app.backToDevices} onPress={onBack} /></View>

@@ -39,6 +39,10 @@ CodeX App Server domain advertised by the Host.
   Android because the Host's `project/list` is authoritative.
 - Reconnect after Android network/app lifecycle changes. The connection transport can be
   pinned in Settings (Auto / TURN first / Relay only) and is applied on reconnect.
+- Follow the system rotation setting (the app is not locked to portrait). Portrait and landscape
+  reuse the same route/connection state; chat content and the composer stay in a readable centred
+  column on wide windows, bottom sheets and workspace dialogs are capped by the live window height
+  and scroll their bodies on short landscape windows, and the IME inset is re-synced after rotation.
 - Show the interface in English or Simplified Chinese, follow Android's current locale by default,
   and persist an explicit in-app language choice across launches.
 - Show the installed app/build version and the complete open-source repository and latest-release

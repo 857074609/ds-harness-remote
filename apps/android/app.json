@@ -4,7 +4,7 @@
     "slug": "dsh-remote",
     "scheme": "dshremote",
     "version": "0.5.11",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {

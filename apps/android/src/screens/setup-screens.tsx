@@ -3,7 +3,7 @@ import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, Linking, Pressable, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { SOURCE_CODE_URL } from '../lib/links'
@@ -13,6 +13,7 @@ import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, LoginMethod } from '../types'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
+import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ThemePreference } from '../ui/theme'
@@ -134,6 +135,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const signOut = useAppStore(state => state.signOut)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  // Cap the read-only info column on wide landscape tablets; phone portrait
+  // already fits inside contentMaxWidth, so nothing changes there.
+  const { contentMaxWidth, landscape } = useResponsiveLayout()
 
   const pickDefaultPermission = (preset: DefaultPermissionPreset) => {
     if (permissionSaving || preset === defaultPermission) return
@@ -177,121 +181,123 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
         <Screen>
-          <View style={styles.settingsHeader}>
-            <View style={styles.settingsIcon}><Settings size={25} color={colors.primary} /></View>
-            <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
-          </View>
+          <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
+            <View style={styles.settingsHeader}>
+              <View style={styles.settingsIcon}><Settings size={25} color={colors.primary} /></View>
+              <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
-          <View style={styles.preferenceList}>
-            {languageOptions().map(option => {
-              const chosen = option.value === languagePreference
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: chosen }}
-                  onPress={() => void setLanguagePreference(option.value)}
-                  style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
-                >
-                  <Text style={[styles.preferenceName, styles.languageName]}>{option.name}</Text>
-                  {chosen && <Check size={17} color={colors.primary} />}
-                </Pressable>
-              )
-            })}
-            <Text style={styles.preferenceNote}>{zhCN.settings.languageNote}</Text>
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
+            <View style={styles.preferenceList}>
+              {languageOptions().map(option => {
+                const chosen = option.value === languagePreference
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: chosen }}
+                    onPress={() => void setLanguagePreference(option.value)}
+                    style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
+                  >
+                    <Text style={[styles.preferenceName, styles.languageName]}>{option.name}</Text>
+                    {chosen && <Check size={17} color={colors.primary} />}
+                  </Pressable>
+                )
+              })}
+              <Text style={styles.preferenceNote}>{zhCN.settings.languageNote}</Text>
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.theme}</Text>
-          <View style={styles.segmentRow} accessibilityRole="tablist">
-            {themeOptions().map(option => {
-              const chosen = option.value === themePreference
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: chosen }}
-                  onPress={() => void setThemePreference(option.value)}
-                  style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
-                >
-                  <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>
-                    {option.name}
-                  </Text>
-                </Pressable>
-              )
-            })}
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.theme}</Text>
+            <View style={styles.segmentRow} accessibilityRole="tablist">
+              {themeOptions().map(option => {
+                const chosen = option.value === themePreference
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: chosen }}
+                    onPress={() => void setThemePreference(option.value)}
+                    style={[styles.segmentButton, chosen && styles.segmentButtonActive]}
+                  >
+                    <Text style={[styles.segmentButtonText, chosen && styles.segmentButtonTextActive]} numberOfLines={1}>
+                      {option.name}
+                    </Text>
+                  </Pressable>
+                )
+              })}
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>
-          <View style={styles.preferenceList} accessibilityRole="radiogroup">
-            {([
-              { value: 'default', name: zhCN.settings.defaultPermissionHost, description: zhCN.settings.defaultPermissionHostDescription },
-              { value: 'workspace-write', name: zhCN.chat.permissionWorkspaceWrite, description: zhCN.chat.permissionWorkspaceWriteDescription },
-              { value: 'danger-full-access', name: zhCN.chat.permissionFullAccess, description: zhCN.chat.permissionFullAccessDescription },
-            ] satisfies Array<{ value: DefaultPermissionPreset; name: string; description: string }>).map(option => {
-              const chosen = option.value === defaultPermission
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="radio"
-                  accessibilityState={{ checked: chosen, disabled: permissionSaving }}
-                  disabled={permissionSaving}
-                  onPress={() => pickDefaultPermission(option.value)}
-                  style={[styles.preferenceOption, styles.permissionOption, chosen && styles.preferenceOptionChosen]}
-                >
-                  <View style={styles.preferenceCopy}>
-                    <Text style={styles.preferenceName}>{option.name}</Text>
-                    <Text style={styles.preferenceDescription}>{option.description}</Text>
-                  </View>
-                  {chosen && <Check size={17} color={colors.primary} />}
-                </Pressable>
-              )
-            })}
-            <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>
+            <View style={styles.preferenceList} accessibilityRole="radiogroup">
+              {([
+                { value: 'default', name: zhCN.settings.defaultPermissionHost, description: zhCN.settings.defaultPermissionHostDescription },
+                { value: 'workspace-write', name: zhCN.chat.permissionWorkspaceWrite, description: zhCN.chat.permissionWorkspaceWriteDescription },
+                { value: 'danger-full-access', name: zhCN.chat.permissionFullAccess, description: zhCN.chat.permissionFullAccessDescription },
+              ] satisfies Array<{ value: DefaultPermissionPreset; name: string; description: string }>).map(option => {
+                const chosen = option.value === defaultPermission
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: chosen, disabled: permissionSaving }}
+                    disabled={permissionSaving}
+                    onPress={() => pickDefaultPermission(option.value)}
+                    style={[styles.preferenceOption, styles.permissionOption, chosen && styles.preferenceOptionChosen]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={styles.preferenceName}>{option.name}</Text>
+                      <Text style={styles.preferenceDescription}>{option.description}</Text>
+                    </View>
+                    {chosen && <Check size={17} color={colors.primary} />}
+                  </Pressable>
+                )
+              })}
+              <Text style={styles.preferenceNote}>{zhCN.settings.defaultPermissionNote}</Text>
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>
-          <View style={styles.group}>
-            <KeyValue label={zhCN.settings.server} value={config?.baseUrl ?? zhCN.settings.notConfigured} />
-            <KeyValue label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
-            <KeyValue label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
-            <KeyValue label={zhCN.settings.protocol} value="DSH Remote v1" />
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.connection}</Text>
+            <View style={styles.group}>
+              <KeyValue label={zhCN.settings.server} value={config?.baseUrl ?? zhCN.settings.notConfigured} />
+              <KeyValue label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
+              <KeyValue label={zhCN.settings.loginMethod} value={loginMethodLabel(config?.loginMethod)} />
+              <KeyValue label={zhCN.settings.protocol} value="DSH Remote v1" />
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.transport}</Text>
-          <View style={styles.preferenceList}>
-            {transportPreferenceOptions().map(option => {
-              const chosen = option.value === preference
-              return (
-                <Pressable
-                  key={option.value}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: chosen }}
-                  onPress={() => void setPreference(option.value)}
-                  style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
-                >
-                  <View style={styles.preferenceCopy}>
-                    <Text style={styles.preferenceName}>{option.name}</Text>
-                    <Text style={styles.preferenceDescription}>{option.description}</Text>
-                  </View>
-                  {chosen && <Check size={17} color={colors.primary} />}
-                </Pressable>
-              )
-            })}
-            <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.transport}</Text>
+            <View style={styles.preferenceList}>
+              {transportPreferenceOptions().map(option => {
+                const chosen = option.value === preference
+                return (
+                  <Pressable
+                    key={option.value}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: chosen }}
+                    onPress={() => void setPreference(option.value)}
+                    style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
+                  >
+                    <View style={styles.preferenceCopy}>
+                      <Text style={styles.preferenceName}>{option.name}</Text>
+                      <Text style={styles.preferenceDescription}>{option.description}</Text>
+                    </View>
+                    {chosen && <Check size={17} color={colors.primary} />}
+                  </Pressable>
+                )
+              })}
+              <Text style={styles.preferenceNote}>{zhCN.settings.transportNote}</Text>
+            </View>
 
-          <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
-          <View style={styles.group}>
-            <KeyValue label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} mono />
-            <KeyValue label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} mono />
-            <View style={styles.keyNote}><KeyRound size={17} color={colors.muted} /><Text style={styles.keyNoteText}>{zhCN.settings.keyNote}</Text></View>
-          </View>
+            <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
+            <View style={styles.group}>
+              <KeyValue label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} mono />
+              <KeyValue label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} mono />
+              <View style={styles.keyNote}><KeyRound size={17} color={colors.muted} /><Text style={styles.keyNoteText}>{zhCN.settings.keyNote}</Text></View>
+            </View>
 
-          <View style={styles.resetArea}>
-            <Button label={zhCN.settings.signOut} variant="secondary" onPress={confirmSignOut} />
-            <View style={styles.resetGap} />
-            <Button label={zhCN.settings.resetLocal} icon={RotateCcw} variant="danger" onPress={confirmReset} />
+            <View style={styles.resetArea}>
+              <Button label={zhCN.settings.signOut} variant="secondary" onPress={confirmSignOut} />
+              <View style={styles.resetGap} />
+              <Button label={zhCN.settings.resetLocal} icon={RotateCcw} variant="danger" onPress={confirmReset} />
+            </View>
           </View>
         </Screen>
       </BlurHeaderFrame>
@@ -310,8 +316,15 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   const { phase, progress, checkForUpdates } = useUpdateCheck()
+  const { height: windowHeight, landscape, compactHeight } = useResponsiveLayout()
 
   if (!visible) return null
+
+  // Landscape phones are short: keep the fixed-position menu below the bar but
+  // inside the window, and let its rows scroll if they still cannot all fit.
+  const shortWindow = landscape || compactHeight
+  const menuTop = insets.top + (shortWindow ? 48 : 56)
+  const menuMaxHeight = Math.max(120, windowHeight - menuTop - insets.bottom - spacing.xs)
 
   return (
     <View style={styles.homeMenuLayer} pointerEvents="box-none">
@@ -322,24 +335,26 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
         pointerEvents="box-only"
         style={styles.homeMenuDismiss}
       />
-      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: insets.top + 56 }]} pointerEvents="box-none">
-        {onDevices !== undefined && (
-          <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
-        )}
-        <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
-        <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
-        <HomeMenuRow
-          icon={Download}
-          label={zhCN.settings.checkUpdates}
-          subtitle={phase === 'checking'
-            ? zhCN.settings.checkingUpdates
-            : phase === 'downloading'
-              ? progress === null ? zhCN.settings.downloadingUpdate : `${zhCN.settings.downloadingUpdate} ${progress}%`
-              : undefined}
-          onPress={() => void checkForUpdates()}
-          disabled={phase !== 'idle'}
-          last
-        />
+      <View accessibilityRole="menu" style={[styles.homeMenuCard, { top: menuTop, maxHeight: menuMaxHeight }]} pointerEvents="box-none">
+        <ScrollView style={styles.homeMenuScroll} bounces={false} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+          {onDevices !== undefined && (
+            <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
+          )}
+          <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
+          <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
+          <HomeMenuRow
+            icon={Download}
+            label={zhCN.settings.checkUpdates}
+            subtitle={phase === 'checking'
+              ? zhCN.settings.checkingUpdates
+              : phase === 'downloading'
+                ? progress === null ? zhCN.settings.downloadingUpdate : `${zhCN.settings.downloadingUpdate} ${progress}%`
+                : undefined}
+            onPress={() => void checkForUpdates()}
+            disabled={phase !== 'idle'}
+            last
+          />
+        </ScrollView>
       </View>
     </View>
   )
@@ -569,6 +584,9 @@ function themeOptions(): Array<{ value: ThemePreference; name: string }> {
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   flex: { flex: 1, backgroundColor: colors.background },
+  // Reading cap for wide landscape tablets; the live width style is applied by
+  // the screens that opt in (portrait phones never exceed the cap).
+  contentColumn: { width: '100%', alignSelf: 'center' },
   productName: { ...type.smallStrong, color: colors.primary, marginTop: spacing.xxl, marginBottom: spacing.md },
   title: { ...type.hero, color: colors.ink, maxWidth: 340 },
   lead: { ...type.body, color: colors.muted, marginTop: spacing.sm, maxWidth: 520 },
@@ -614,7 +632,10 @@ function createStyles(colors: ThemeColors) {
   settingsLinkUrl: { ...type.caption, color: colors.primary },
   homeMenuLayer: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, zIndex: 20, elevation: 20 },
   homeMenuDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: colors.menuDismiss },
-  homeMenuCard: { position: 'absolute', top: 56, right: spacing.sm, width: 236, paddingHorizontal: spacing.xs, borderRadius: radius.lg, backgroundColor: colors.surface, zIndex: 1, elevation: 8, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.14, shadowRadius: 14 },
+  homeMenuCard: { position: 'absolute', right: spacing.sm, width: 236, paddingHorizontal: spacing.xs, borderRadius: radius.lg, backgroundColor: colors.surface, zIndex: 1, elevation: 8, shadowColor: colors.shadow, shadowOffset: { width: 0, height: 5 }, shadowOpacity: 0.14, shadowRadius: 14 },
+  // flexGrow 0 keeps the card content-sized in portrait; flexShrink lets the
+  // capped landscape card scroll instead of clipping its last row.
+  homeMenuScroll: { flexGrow: 0, flexShrink: 1 },
   homeMenuRow: { minHeight: 56, paddingHorizontal: spacing.xs, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   homeMenuRowBorder: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   homeMenuRowPressed: { opacity: 0.68 },

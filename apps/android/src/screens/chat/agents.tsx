@@ -6,7 +6,7 @@ import { IconButton } from '../../ui/components'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { resolveSessionDisplayTitle } from '../session-title'
-import { ModalSurface } from './modal'
+import { ModalSurface, usePickerListMaxHeight } from './modal'
 import { createStyles } from './styles'
 
 /** Popover listing the session's subagent (child) conversations (title-bar entry). */
@@ -18,6 +18,7 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
       <ModalSurface onClose={onClose}>
@@ -25,7 +26,7 @@ export function ChildAgentPanel({ visible, sessions, onClose, onOpen }: {
           <Text style={styles.modalTitle}>{zhCN.chat.subagentsTitle(sessions.length)}</Text>
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
-        <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
+        <ScrollView style={[styles.subagentList, { maxHeight: listMaxHeight }]} keyboardShouldPersistTaps="handled">
           {sessions.map(item => {
             const parsed = parseAgentLabel(resolveSessionDisplayTitle(item) ?? item.title)
             const role = parsed.role ?? item.title ?? zhCN.sessions.child
@@ -79,6 +80,7 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
 }) {
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+  const listMaxHeight = usePickerListMaxHeight()
   const taskStatusLabel = (status: TeamTaskSnapshot['status']) => status === 'completed'
     ? zhCN.chat.teamTaskCompleted
     : status === 'in_progress'
@@ -91,7 +93,7 @@ export function TeamAgentPanel({ visible, members, tasks, sessions, onClose, onO
           <Text style={styles.modalTitle}>{zhCN.chat.teamTitle(members.length)}</Text>
           <IconButton label={zhCN.common.close} icon={X} onPress={onClose} />
         </View>
-        <ScrollView style={styles.subagentList} keyboardShouldPersistTaps="handled">
+        <ScrollView style={[styles.subagentList, { maxHeight: listMaxHeight }]} keyboardShouldPersistTaps="handled">
           {members.map(member => {
             const session = sessions.find(item => item.sessionId === member.id)
             // Role is the member's description; its open tasks are the board

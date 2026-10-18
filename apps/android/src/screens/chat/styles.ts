@@ -15,7 +15,8 @@ export function createStyles(colors: ThemeColors) {
     // Keep the sheet above the full-screen dismiss target on Android. Without an
     // explicit stacking order, the transparent backdrop can win hit testing on
     // some RN/Android combinations even though it is rendered first.
-    modalSheet: { zIndex: 1, elevation: 1, maxHeight: '70%', backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
+    // maxHeight is applied by ModalSurface from the live window size (landscape phones get ~92%).
+    modalSheet: { zIndex: 1, elevation: 1, backgroundColor: colors.background, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, paddingBottom: spacing.xxl },
     modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
     modalHeaderCopy: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     modalTitle: { ...type.heading, color: colors.ink, flexShrink: 1 },
@@ -115,7 +116,8 @@ export function createStyles(colors: ThemeColors) {
     resendRowPressed: { opacity: 0.6 },
     resendText: { ...type.small, color: colors.primary },
     canceledText: { ...type.small, color: colors.muted, paddingHorizontal: spacing.xs, minHeight: 44, textAlignVertical: 'center' },
-    subagentList: { maxHeight: 460 },
+    // maxHeight comes from usePickerListMaxHeight so landscape sheets fit.
+    subagentList: { flexShrink: 1 },
     teamRowCopy: { flex: 1, gap: spacing.xxs },
     teamRowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
     teamRowRole: { ...type.smallStrong, color: colors.ink, flexShrink: 1 },
@@ -143,6 +145,7 @@ export function createStyles(colors: ThemeColors) {
     welcomeBadgeText: { fontSize: 11, fontWeight: '600', color: colors.muted },
     mentionBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: colors.menuDismiss },
     composerWrap: { backgroundColor: colors.background, paddingHorizontal: spacing.sm, paddingTop: spacing.sm, paddingBottom: spacing.xs },
+    composerInner: { width: '100%' },
 
     replyStatus: { minHeight: 32, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: spacing.xs, paddingVertical: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
     replyStatusText: { ...type.small, color: colors.accent },

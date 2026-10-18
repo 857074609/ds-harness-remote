@@ -27,6 +27,14 @@ ACP Client
 
 对于 `opencode`，Host 运行 `opencode acp` 子进程接入标准 ACP 协议，采用标准 `initialize` 握手（避免发送 Cursor 私有 `cursor_login` 鉴权方法）。默认优先探测官方安装位置的 `~/.opencode/bin/opencode`、`~/.local/bin/opencode` 及系统 PATH。独立 capability 声明为 `agent.acp.opencode.v1`。工作区目录来自标准 `session/list` 返回的 cwd，历史通过独立临时进程的 `session/load` 回放生成，不写入 Harness SessionStore。
 
+启动前通过同一命令的 `--help` 检测参数能力，不硬编码主版本号。仅当 CLI 同时声明
+`--hostname`、`--port`、`--mdns` 时追加私有 loopback 参数并启用原生归档；三者均不支持时
+移除这些旧网络参数，仅通过 stdio ACP 工作。检测失败、输出超限或仅支持部分参数时显式
+返回 `OPENCODE_CLI_PROBE_FAILED`，不猜测监听地址或盲目重试另一套参数；关闭后端会取消检测。
+官方 v1 使用 npm `opencode-ai`，v2 使用 `@opencode/cli`。已分别以真实 `1.19.3` / `2.0.32`
+验证 Host 本地 ACP 主流程；v2 的内部私有服务不开放网络端口，详见
+[官方 ACP 文档](https://opencode.ai/v2/docs/cli/acp/)。这不等同于跨设备或 Prompt 验收。
+
 Cursor/Claude 的 Desktop/Android 模型选择读取真实会话 catalog，并等待上游确认。Cursor 为避免进程级模型设置串会话，每个活动会话使用独立进程。Claude 显示名统一为 Claude，工作区与历史投影见 [接入说明](acp-integration.md)。
 
 ACP 在后台启动，各后端独立初始化，不阻塞 Harness Remote 注册和 Client 初始化。
@@ -69,6 +77,8 @@ Desktop/Android 的 OpenCode 归档经 `dsh/sessionArchive` 直接调用同一�
 Host 声明 `agent.acp.opencode.archive.v1`，成功后以 `agent.acp.catalog.changed` 同步其他连接。
 归档状态由 OpenCode 持久保存，Host 重启后仍隐藏；历史保留可读。活动回复、加载、模型写入和
 待审批时拒绝归档，不隐式停止或删除会话。其他 ACP 后端尚无原生归档，不返回本地伪成功。
+纯 stdio ACP 构建没有可用的私有 HTTP API 时返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，
+会话列表与历史直接使用标准 ACP，不尝试访问未启动的 HTTP 端口。
 当前不提供恢复或已归档列表；实现和上游版本边界见[原生归档设计](design/acp-session-archive.md)。
 
 ## Web 兼容边界

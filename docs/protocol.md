@@ -1232,6 +1232,9 @@ adapter 的启用、command、args 与 cwd；旧 `cursor.enabled` / `cursor.bina
 
 OpenCode 原生归档要求 `agent.acp.opencode.archive.v1`。`dsh/sessionArchive` 的严格参数
 为 `{ backend: "opencode", sessionId: nativeId }`，不接受 Client cwd、URL 或附加 payload。
+Host 按 CLI 帮助中的参数能力决定是否启动私有 HTTP listener；不支持网络参数的 ACP
+构建仍可通过 stdio 提供会话列表、历史和对话。此时归档返回 `OPENCODE_ARCHIVE_UNAVAILABLE`，
+目录使用原生 ACP 列表，不请求不存在的 HTTP listener，也不伪造归档状态。
 Host 以可信 catalog / realpath 和原生返回的 ID/目录确认会话归属，只调用同一 ACP 进程的
 认证 loopback 原生 HTTP GET / PATCH，将 `time.archived` 设为当前时间。原生确认后返回
 `{ backend: "opencode", sessionId: nativeId, archived: true }`，并向当前认证 ACP peers 发布

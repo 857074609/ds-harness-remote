@@ -517,3 +517,21 @@ token 与二维码内容不写日志。
 返回按钮回到工作区。窄屏和横屏手机仍为单栏，`HostSessionsDrawer` 的 Modal 模式不变。
 模拟 800×1280 dp 窗口的真机烟测通过：进入会话、左栏切换“新对话”、恢复窄屏后回到单栏；
 真实平板/折叠屏、分屏、大字体与 TalkBack 尚未验收。
+
+## OpenCode ACP CLI option compatibility (2026-10-18)
+
+OpenCode 启动先读取同一配置命令的 `--help`，按参数能力分流，不按主版本号猜测。
+同时支持 hostname/port/mdns 时保留强制 127.0.0.1、临时端口、关闭 mDNS 和随机认证；
+三者均不支持时移除旧网络参数，以纯 stdio ACP 提供目录、历史和对话，原生归档明确返回
+`OPENCODE_ARCHIVE_UNAVAILABLE`，不访问未启动的 HTTP listener。部分支持、检测失败或
+输出超限时拒绝启动；检测有超时且后端关闭时立即取消，不记录 CLI 输出。
+
+验证：Plugin check、53 文件 / 373 测试（串行）、共享包及 Plugin build、DSH bundle 校验、
+`git diff --check` 通过。隔离进程契约覆盖两种 CLI、私有监听/认证、失败/超限与关闭清理；
+真实官方 OpenCode 1.19.3 的初始化、新建、目录、原生归档、归档目录与独立历史读取通过，
+未发送 Prompt。随后依据官方 `https://opencode.ai/v2/docs` 确认 v2 使用 `@opencode/cli`，
+不是 v1 的 `opencode-ai`；补齐 v2 `--help, -h` 格式解析后，Plugin check/build、相关 9 个
+核心测试和 bundle 校验再次通过。真实官方 `@opencode/cli-darwin-arm64@2.0.32` 已校验
+npm integrity 并在临时目录通过初始化、新建、目录、42 个模型与模型切换、独立历史及重启
+列表/加载；归档明确不可用。v2 ACP 内部私有服务不开放网络端口，不接入共享后台服务。
+两版均未发送 Prompt，不代表 Windows、APK/真机或加密跨设备验收。修复尚未发布。

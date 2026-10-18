@@ -1,3 +1,10 @@
+## Unreleased
+
+- Detect OpenCode ACP network options before startup, retaining the authenticated private listener on compatible CLIs and using stdio-only ACP when those options are absent. Unsupported native archiving fails explicitly without blocking session discovery or history; failed/partial probes fail closed and are cancelled on shutdown.
+- 启动前检测 OpenCode ACP 网络参数能力：兼容 CLI 保留认证私有监听器，缺少这些参数时使用纯 stdio ACP。原生归档不可用会明确失败，不阻塞会话发现或历史；检测失败或参数不完整时拒绝启动，关闭后端取消检测。
+- Verified with official OpenCode `1.19.3` (`opencode-ai`) and `2.0.32` (`@opencode/cli`), including both help formats, session discovery/recovery and v2 model selection; v1 native archive remains available. No Prompt or encrypted cross-device acceptance was performed.
+- 已用官方 OpenCode `1.19.3`（`opencode-ai`）与 `2.0.32`（`@opencode/cli`）验证两种帮助格式、会话发现/恢复和 v2 模型切换；保留 v1 原生归档。未执行 Prompt 或加密跨设备验收。
+
 ## 0.5.13 - 2026-10-18
 
 - Unifies all first-party package/client versions at `0.5.13`; Android `versionCode` and Expo iOS `buildNumber` are both `51`.

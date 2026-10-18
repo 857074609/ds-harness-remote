@@ -171,7 +171,7 @@ Desktop 与 Android 在内存中将工作区和会话映射到现有界面，不
 - **Antigravity（AGY）**：将 CLI 的 stream-json 接口适配到 ACP gateway。
 - **Pi Agent（实验性）**：在 Host 安装 `@earendil-works/pi-coding-agent` 与 `pi-acp`，配置 Pi 本机模型服务后，Remote 默认自动检测并初始化，ACP 初始化成功才开放工作区；可在 Remote 设置中明确关闭，使用独立 ACP 数据面。工具按 Host 用户权限执行，逐工具确认需要 Pi 扩展，默认不会自动启用。
 
-- **OpenCode** — 通过 `opencode acp` 接入，支持工作区发现、历史恢复和 Desktop/Android 原生会话归档。归档状态由 OpenCode 保存，历史保留；暂不提供恢复归档入口。
+- **OpenCode** — 通过 `opencode acp` 接入，支持工作区发现和历史恢复。Host 启动时检查 CLI 支持的参数，兼容带原生监听器与纯 stdio 的 ACP 构建。Desktop/Android 原生会话归档要求认证 loopback API；不提供该接口的版本会明确报告归档不可用。归档状态由 OpenCode 保存，历史保留；暂不提供恢复归档入口。
 - **Claude** — 使用 Host 本机已授权的 `claude-agent-acp`，需在 Remote 设置中开启；Desktop/Android 支持工作区、历史、文字消息及审批，暂不开放图片输入与直接 Files/Terminal 访问。
 
 Desktop/Android 的 Cursor、Claude、Pi、OpenCode、AGY 模型选择使用 Host 实际模型目录，并等待后端确认。思考强度选项以上游实际提供为准。Cursor 每个会话使用独立进程，切换模型不会影响其他会话。

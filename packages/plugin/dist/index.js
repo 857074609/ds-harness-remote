@@ -35156,7 +35156,32 @@ import { realpath as realpath4 } from "node:fs/promises";
 import { randomBytes as randomBytes8 } from "node:crypto";
 import { createServer as createServer2 } from "node:net";
 import { realpath as realpath3 } from "node:fs/promises";
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2, stripVTControlCharacters } from "node:util";
 var MAX_RESPONSE_BYTES = 64 * 1024;
+var execFileAsync = promisify2(execFile2);
+async function opencodeHasNativeApi(binary, args, cwd2, signal) {
+  try {
+    const { stdout, stderr } = await execFileAsync(binary, [...opencodePrivateArgs(args), "--help"], {
+      cwd: cwd2,
+      signal,
+      timeout: 2e4,
+      maxBuffer: MAX_RESPONSE_BYTES,
+      windowsHide: true,
+      killSignal: "SIGKILL"
+    });
+    const help = stripVTControlCharacters(`${stdout}
+${stderr}`);
+    const hasFlag = (name2) => new RegExp(`^\\s*(?:-[A-Za-z],?\\s+)?--${name2}(?=[\\s=,\\[]|$)`, "m").test(help);
+    const network = ["hostname", "port", "mdns"].map(hasFlag);
+    if (!/\bacp\b/i.test(help) || !hasFlag("help") || network.some(Boolean) && !network.every(Boolean)) throw new Error("Invalid ACP help");
+    return network.every(Boolean);
+  } catch (error) {
+    if (signal.aborted) throw new RpcError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
+    if (error?.code === "ENOENT") throw new RpcError("OPENCODE_BINARY_UNAVAILABLE", "The Host OpenCode executable is unavailable.");
+    throw new RpcError("OPENCODE_CLI_PROBE_FAILED", "Could not inspect OpenCode ACP options. Check opencode acp --help on the Host.");
+  }
+}
 var OpencodeNativeApi = class {
   constructor(origin, request = fetch) {
     this.origin = origin;
@@ -35233,10 +35258,10 @@ function opencodePrivateArgs(args, port) {
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (/^--(?:port|hostname|mdns|no-mdns)(?:=|$)/.test(arg)) {
-      if (arg === "--port" || arg === "--hostname" || arg === "--mdns" && /^(true|false)$/.test(args[i + 1] ?? "")) i++;
+      if (arg === "--port" || arg === "--hostname" || (arg === "--mdns" || arg === "--no-mdns") && /^(true|false)$/.test(args[i + 1] ?? "")) i++;
     } else kept.push(arg);
   }
-  return [...kept, `--hostname=127.0.0.1`, `--port=${port}`, "--mdns=false"];
+  return port === void 0 ? kept : [...kept, `--hostname=127.0.0.1`, `--port=${port}`, "--mdns=false"];
 }
 function unavailable() {
   return new RpcError("OPENCODE_ARCHIVE_UNAVAILABLE", "OpenCode did not confirm the archive operation. Check the Host OpenCode version and retry after refreshing its session list.");
@@ -35275,6 +35300,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   startPromise;
   historyBusy = false;
   historyStop;
+  startupAbort = new AbortController();
   nativeApi;
   archivedSessions = /* @__PURE__ */ new Set();
   archivingSessions = /* @__PURE__ */ new Set();
@@ -35464,6 +35490,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   async close() {
     if (this.closed) return;
     this.closed = true;
+    this.startupAbort.abort();
     this.ready = false;
     this.models.clear();
     this.nativeApi?.close();
@@ -35495,14 +35522,16 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     let child;
     if (this.spawnAcp) child = this.spawnAcp(this.binary);
     else {
-      const port = await opencodeLoopbackPort();
+      const args = this.options.args ?? ["acp"];
+      const nativeApiSupported = await opencodeHasNativeApi(this.binary, args, this.options.cwd, this.startupAbort.signal);
+      const port = nativeApiSupported ? await opencodeLoopbackPort() : void 0;
       if (this.closed) throw new OpencodeAcpError("OPENCODE_CLOSED", "OpenCode ACP was closed.");
-      this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`);
-      child = spawn6(this.binary, opencodePrivateArgs(this.options.args ?? ["acp"], port), {
+      if (port !== void 0) this.nativeApi = new OpencodeNativeApi(`http://127.0.0.1:${port}`);
+      child = spawn6(this.binary, opencodePrivateArgs(args, port), {
         cwd: this.options.cwd,
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
-        env: { ...process.env, OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: this.nativeApi.password }
+        env: { ...process.env, ...this.nativeApi ? { OPENCODE_SERVER_USERNAME: "opencode", OPENCODE_SERVER_PASSWORD: this.nativeApi.password } : {} }
       });
     }
     this.process = child;
@@ -35914,15 +35943,15 @@ async function querySqliteJson(dbPath, sql, params = []) {
   } catch {
   }
   try {
-    const { execFile: execFile2 } = await import("node:child_process");
-    const { promisify: promisify2 } = await import("node:util");
-    const execFileAsync = promisify2(execFile2);
+    const { execFile: execFile3 } = await import("node:child_process");
+    const { promisify: promisify3 } = await import("node:util");
+    const execFileAsync2 = promisify3(execFile3);
     let formattedSql = sql;
     for (const p of params) {
       const val = typeof p === "number" ? String(p) : `'${String(p).replace(/'/g, "''")}'`;
       formattedSql = formattedSql.replace("?", val);
     }
-    const { stdout } = await execFileAsync("sqlite3", [dbPath, "-json", formattedSql]);
+    const { stdout } = await execFileAsync2("sqlite3", [dbPath, "-json", formattedSql]);
     return JSON.parse(stdout || "[]");
   } catch {
     return [];

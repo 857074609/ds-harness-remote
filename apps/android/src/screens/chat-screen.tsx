@@ -1031,9 +1031,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         title={sessionTitle(session)}
         onTitlePress={() => { Keyboard.dismiss(); setMentionType(null); setSessionInfoOpen(true) }}
         titleLines={1}
-        onBack={trajectory ? handleBack : tabletSplit ? backFromChat : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
-        backIcon={trajectory || tabletSplit ? ArrowLeft : Menu}
-        backLabel={trajectory || tabletSplit ? zhCN.common.back : zhCN.chat.openHostSessions}
+        onBack={tabletSplit ? undefined : trajectory ? handleBack : () => { Keyboard.dismiss(); setMentionType(null); setSessionsOpen(true) }}
+        backIcon={trajectory ? ArrowLeft : Menu}
+        backLabel={trajectory ? zhCN.common.back : zhCN.chat.openHostSessions}
         action={<>
           <IconButton label={trajectory ? zhCN.trajectory.close : zhCN.trajectory.open}
             icon={trajectory ? MessageSquare : ListTree} dense tint={trajectory ? colors.primary : undefined}
@@ -1069,7 +1069,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
           <View style={styles.splitSidebar}>
             <HostSessionsDrawer
               inline
-              onBack={() => Keyboard.dismiss()}
+              onBack={onBack}
+              backLabel={zhCN.chat.backToWorkspaces}
               onClose={() => Keyboard.dismiss()}
               onSelect={async next => {
                 if (await openSession(next)) {

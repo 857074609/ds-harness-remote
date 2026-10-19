@@ -63,7 +63,7 @@ export function MessageActions({ item }: { item: ChatMessage }) {
     {!user && !pending && <>
     {supportsBranch && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>}
     {backend !== 'codex' && item.usage !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage.totalTokens === undefined ? strings.messageActions.usage : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>}
-    {time !== undefined && <Text numberOfLines={1} style={[styles.clock, { color: colors.muted }]}>{messageClock(time)}</Text>}
+    {time !== undefined && <View style={styles.clockContainer}><Text style={[styles.clock, { color: colors.muted }]}>{messageClock(time)}</Text></View>}
     </>}
   </View>
 }
@@ -71,6 +71,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 2, minHeight: 44 },
   userRow: { justifyContent: 'flex-end', gap: 8 },
   icon: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
-  clock: { fontSize: 11, flexShrink: 0, marginLeft: 'auto' },
+  clockContainer: { flexGrow: 1, flexShrink: 0, alignItems: 'flex-end' },
+  clock: { fontSize: 11 },
   usage: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
 })

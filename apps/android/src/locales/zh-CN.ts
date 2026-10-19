@@ -1,5 +1,10 @@
 const zhCN = {
   tools: {
+    download: '保存到手机',
+    downloading: '保存中…',
+    downloaded: '文件已保存',
+    downloadHint: '选择保存位置，单个文件最大 100 MiB。',
+    downloadTooLarge: '此文件超过 100 MiB，暂不支持保存到手机。',
     "files": "文件",
     "terminal": "终端",
     "root": "工作区",
@@ -15,7 +20,7 @@ const zhCN = {
     "controlDenied": "当前终端输入权已被其他连接接管，请重新打开终端。",
     "notText": "此文件不是 UTF-8 文本，暂不支持预览。",
     "tooLarge": "文件或页面超过 Host 读取限制。",
-    previewUnsupported: '暂不支持此文件类型的预览。不会将未知二进制文件作为文本打开。',
+    previewUnsupported: '此文件暂不支持预览。',
     previewTooLarge: '超过手机预览限制：8 MiB、图片边长 8192 像素及 1600 万像素；Office 源文件最多 50 MiB。',
     accessDenied: 'Host 拒绝了此会话的访问，请检查电脑端的授权。',
     previewChanged: '文件在读取期间发生变化，请刷新后重试。',

@@ -1117,6 +1117,8 @@ Host 固定 allowlist 仅增加该只读 endpoint；预设切换继续使用官�
 ### Native sidebar: read-only files and Host-configurable terminal
 
 Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传输；不新增 Harness wire format。
+Android 用户可显式下载工作区原文件到系统目录选择器授权的手机目录（每文件最多 100 MiB，包含恰好 100 MiB；独立于 8 MiB 预览上限）。复用下述 `stat` / `readBytes` 分块读取及路径、版本、大小和取消校验，不新增 download RPC，不写 Host 文件；Office 下载保存原文件，转换后的 PDF 仅用于预览。
+
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
 `officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
 注意：上游 `list` / `changes` 限于工作区；文件读取遵循 Session 文件系统权限，允许工作区外的已授权文件，

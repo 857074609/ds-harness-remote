@@ -2,6 +2,11 @@ import type { Messages } from './types'
 
 const enUS = {
   tools: {
+    download: 'Save to phone',
+    downloading: 'Saving…',
+    downloaded: 'File saved',
+    downloadHint: 'Choose a folder. Up to 100 MiB per file.',
+    downloadTooLarge: 'This file exceeds the 100 MiB limit for saving to your phone.',
     "files": "Files",
     "terminal": "Terminal",
     "root": "Workspace",
@@ -17,7 +22,7 @@ const enUS = {
     "controlDenied": "Another connection controls this terminal. Reopen it to attach again.",
     "notText": "This file is not UTF-8 text and cannot be previewed.",
     "tooLarge": "The file or page exceeds the Host read limit.",
-    previewUnsupported: 'Preview is not available for this file type. Unknown binary files are not opened as text.',
+    previewUnsupported: 'Preview isn’t available for this file type.',
     previewTooLarge: 'Mobile limits: 8 MiB, image dimensions of 8192 pixels and 16 million pixels total; Office sources: 50 MiB.',
     accessDenied: 'The Host denied access for this session. Check authorization on the computer.',
     previewChanged: 'The file changed while being read. Refresh and try again.',

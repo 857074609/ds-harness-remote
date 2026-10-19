@@ -1,0 +1,98 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
+import { ForegroundConnectionRecovery } from '../src/services/connection-recovery'
+
+type RecoveryState = ReturnType<ConstructorParameters<typeof ForegroundConnectionRecovery>[0]>
+
+let state: RecoveryState
+let recovery: ForegroundConnectionRecovery
+let reconnect: ReturnType<typeof vi.fn<(options: { forceRelay?: boolean }) => Promise<boolean>>>
+
+function prepare() {
+  vi.clearAllTimers()
+  vi.useFakeTimers()
+  state = {
+    connection: { phase: 'connected', stats: { mode: 'P2P' } },
+    selectedDevice: { deviceId: 'host-1' }, reauthRequired: false, transportPreference: 'auto',
+  }
+  reconnect = vi.fn(async () => false)
+  recovery = new ForegroundConnectionRecovery(() => state, reconnect)
+  recovery.setActive(true)
+}
+
+function offline() {
+  state = { ...state, connection: { phase: 'offline', stats: { mode: 'Disconnected' } } }
+  recovery.update()
+}
+
+beforeEach(prepare)
+afterEach(() => { recovery.setActive(false); vi.useRealTimers() })
+
+describe('foreground carrier recovery', () => {
+  it('bounds retries and preserves explicit transport choices', async () => {
+    await runScenarios(['auto', 'turn', 'relay'].map(preference => ({ name: preference, run: async () => {
+      state.transportPreference = preference as RecoveryState['transportPreference']
+      offline()
+      recovery.update()
+      await vi.advanceTimersByTimeAsync(999)
+      expect(reconnect).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1)
+      expect(reconnect).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(3_000)
+      expect(reconnect).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(8_000)
+      expect(reconnect).toHaveBeenCalledTimes(3)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(reconnect).toHaveBeenCalledTimes(3)
+      expect(reconnect.mock.calls.map(([options]) => options)).toEqual(
+        Array.from({ length: 3 }, () => preference === 'auto' ? { forceRelay: true } : {}),
+      )
+    } })), prepare)
+  })
+
+  it('cancels stale retries on lifecycle, identity and security transitions', async () => {
+    await runScenarios(['background', 'disconnect', 'switch-host', 'reauth', 'refused', 'manual-connect', 'never-connected']
+      .map(action => ({ name: action, run: async () => {
+        if (action === 'never-connected') {
+          state.connection.phase = 'disconnected'
+          recovery.update()
+        }
+        offline()
+        if (action === 'background') recovery.setActive(false)
+        if (action === 'disconnect') state.connection.phase = 'disconnected'
+        if (action === 'switch-host') state.selectedDevice = { deviceId: 'host-2' }
+        if (action === 'reauth') state.reauthRequired = true
+        if (action === 'refused') state.connection.retryable = false
+        if (action === 'manual-connect') state.connection.phase = 'connecting'
+        recovery.update()
+        await vi.advanceTimersByTimeAsync(30_000)
+        expect(reconnect).not.toHaveBeenCalled()
+      } })), prepare)
+  })
+
+  it('allows only one recovery flight and rearms after a healthy connection', async () => {
+    let finish!: (value: boolean) => void
+    reconnect.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    offline()
+    await vi.advanceTimersByTimeAsync(1_000)
+    recovery.update()
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(reconnect).toHaveBeenCalledOnce()
+    state.connection = { phase: 'connected', stats: { mode: 'Relay' } }
+    recovery.update()
+    finish(true)
+    await vi.advanceTimersByTimeAsync(0)
+    offline()
+    reconnect.mockImplementationOnce(async () => { throw new Error('unavailable') })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(reconnect).toHaveBeenLastCalledWith({})
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(reconnect).toHaveBeenLastCalledWith({ forceRelay: true })
+    recovery.setActive(false)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(reconnect).toHaveBeenCalledTimes(3)
+    recovery.setActive(true)
+    await vi.advanceTimersByTimeAsync(8_000)
+    expect(reconnect).toHaveBeenCalledTimes(4)
+  })
+})

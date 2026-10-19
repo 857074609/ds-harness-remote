@@ -8,7 +8,7 @@ import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './sessi
 import { SecureTransport } from './secure-transport'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
-export type CloseHandler = () => void
+export type CloseHandler = (options?: { retryable: boolean }) => void
 type RemoteHarnessClient = RemoteApiProxy | HarnessAlphaClient
 
 export interface AndroidConnectionOptions {
@@ -51,6 +51,7 @@ export class AndroidRemoteConnection {
     this.muxHandler = onFrame
     let webRtcFallback = false
     let replacingFallback = false
+    let retryableClose = true
     const createTransport = (relayOnly: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
       role: 'client',
       deviceId: identity.deviceId,
@@ -61,6 +62,14 @@ export class AndroidRemoteConnection {
         ? ['relay']
         : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
       fetchIceServers: options.fetchIceServers,
+      onDisconnect: event => {
+        // Refused/replaced credentials, protocol errors and malformed frames
+        // need manual recovery; do not automatically compete for ownership.
+        retryableClose = event.reason !== 'invalid-control-frame'
+          && !(event.closeCode !== undefined && (event.closeCode >= 4000
+            || [1002, 1003, 1007, 1008, 1009].includes(event.closeCode)))
+        console.warn('[dsh-remote] Carrier closed:', JSON.stringify(event))
+      },
       onWebRtcFallback: error => {
         webRtcFallback = true
         // Do not include credentials, SDP, prompts, or tunnel payloads.
@@ -103,7 +112,7 @@ export class AndroidRemoteConnection {
         this.cursor = undefined
         this.acpBackends.clear()
         this.sessionTools = undefined
-        if (!replacingFallback) options.onClose?.()
+        if (!replacingFallback) options.onClose?.({ retryable: retryableClose })
       })
       await core.connect()
       if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
@@ -130,6 +139,7 @@ export class AndroidRemoteConnection {
       const emitFrame = (frame: MuxStreamFrame) => {
         if (this.core !== core) return
         if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'failed') {
+          console.warn('[dsh-remote] Harness stream failed; closing carrier')
           // A live carrier failure is an offline channel, even if its socket
           // still answers. Reconnect will create a fresh follow subscription.
           void this.close()

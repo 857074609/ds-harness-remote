@@ -12,12 +12,12 @@ import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
 import { inboxRpcIds } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
-import { isHarnessPromptStarted, isRecord, record } from './session-state'
+import { isHarnessPromptStarted, isRecord } from './session-state'
 import type { AppState } from './store-state'
 
 /** SessionEvent actions use the store's single connection/session runtime. */
 export function createSessionEventActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'handleMuxFrame' | 'handleCodexFrame' | 'handleCursorFrame'> {
+  'handleMuxFrame' | 'handleCodexFrame' | 'handleCodexFrames' | 'handleCursorFrame'> {
   return {
     handleMuxFrame(frame) {
       set(state => {
@@ -139,12 +139,24 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
     },
 
     handleCodexFrame(frame) {
+      get().handleCodexFrames([frame])
+    },
+
+    handleCodexFrames(frames) {
       const timeline = runtime.activeCodexTimeline
       if (timeline === undefined) return
-      const framePermission = codexPermissionPresetFromResponse(record(frame).params)
-      const next = reduceCodexTimelineFrame(timeline, frame)
+      let next = timeline
+      let framePermission: ReturnType<typeof codexPermissionPresetFromResponse>
+      for (const frame of frames) {
+        framePermission = codexPermissionPresetFromResponse(frame.params) ?? framePermission
+        next = reduceCodexTimelineFrame(next, frame)
+      }
+      // Unknown notifications (usage, heartbeats, etc.) do not invalidate the
+      // list. Publish an ordered burst once rather than synchronously per delta.
+      if (next === timeline && framePermission === undefined) return
       runtime.activeCodexTimeline = next
-      const live = codexItemsToChat(next.items)
+      const previousItems = new Map(timeline.items.map(item => [item.id, item]))
+      const live = codexItemsToChat(next.items.filter(item => previousItems.get(item.id) !== item))
       set(state => {
         const current = state.sessions.find(item => item.sessionId === next.session.id)
           ?? state.selectedSession
@@ -155,10 +167,10 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
         return {
           sessions: state.sessions.map(item => item.sessionId === session.sessionId ? session : item),
           selectedSession: state.selectedSession?.sessionId === session.sessionId ? session : state.selectedSession,
-          messages: {
+          ...(live.length === 0 ? {} : { messages: {
             ...state.messages,
             [session.sessionId]: mergeCodexLive(state.messages[session.sessionId] ?? [], live),
-          },
+          } }),
         }
       })
     },

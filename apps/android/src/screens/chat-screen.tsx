@@ -113,6 +113,9 @@ import { resolveSessionDisplayTitle } from './session-title'
 import { SessionToolsPanel } from './session-tools-panel'
 
 const EMPTY_CHAT_ITEMS: ChatItem[] = []
+const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
+const EMPTY_UI_BY_SECTION = new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
+const EMPTY_UI_IDS = new Set<string>()
 
 /** Soft hint threshold; the composer accepts longer input instead of silently truncating. */
 const LONG_DRAFT_HINT = 12_000
@@ -296,10 +299,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
   const uiBySection = useMemo(() => {
     if (hostId === undefined || session === undefined
-      || (session.backend !== undefined && session.backend !== 'harness')) return new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
+      || (session.backend !== undefined && session.backend !== 'harness')) return EMPTY_UI_BY_SECTION
     return placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
   }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
-  const visibleUiIds = useMemo(() => new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
+  const visibleUiIds = useMemo(() => uiBySection.size === 0 ? EMPTY_UI_IDS
+    : new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
   // Queued prompts: the Host `inbox` projection is authoritative (includes
   // items queued from other devices); local `queued` rows are the fallback for
   // Hosts without projections. Rows in this state are hidden from the timeline.
@@ -463,7 +467,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? []} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? []} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
   [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
 
@@ -768,7 +772,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const hasActiveChatItem = visibleMessages.some(isActiveChatItem)
   const canStop = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const stopping = busy === 'stop-session'
-  const replyActive = busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem
+  const replyActive = connected && (busy === 'send-message' || busy === 'stop-session' || session.running || hasActiveChatItem)
   const projectedPermissions = sessionPermissions(session)
   const permissions = projectedPermissions === undefined ? undefined : { ...projectedPermissions, options: permissionOptions ?? projectedPermissions.options }
   const currentPermission = permissions?.options.find(option => option.value === permissions.currentValue)

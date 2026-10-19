@@ -268,6 +268,8 @@ interrupt 与单次审批，不恢复旧 Android RPC。剩余工作：
 - [x] 真机/模拟器 UI E2E：账号登录、设备列表、连接、会话与聊天
 - [x] 真机验证 Android Photo Picker 多选、超限提示与大图片 transfer
 - [x] 重连后 mux/Gateway stream 重开与 history baseline 重建的真机验证
+- [x] Android 前台断线有界恢复：最多三次重试、Auto WebRTC 掉线改走新 Relay、当前 CodeX 会话历史/订阅恢复且不重发 Prompt；连接替换与协议拒绝停止自动恢复
+- [ ] 本轮前台恢复真机验证，并用不含消息内容的 carrier/secure-receive、网络切换和 Harness stream 诊断确认断线触发原因。2026-10-19 arm64 release APK 构建及同签名覆盖安装通过；13:35 的 Control 1012 已由用户确认是 Server 重启，14:04 再次记录 1012，其后三次自动恢复未成功。13:40:36 捕获到解密/重组后的 `message-handler` 异常并主动关闭通道；14:06:20 又捕获到进程退出，Hermes sourcemap 确认为 `Maximum update depth exceeded`，堆栈落在 VirtualizedList 更新调度。14:11:42 旧诊断版再次捕获 `message-handler` 错误，sourcemap 映射至相同 React 更新深度检查，经 Zustand listener 和 `session-event-actions.ts` 的 CodeX 状态发布抛出，解释了消息处理器关连接与列表定时器致进程退出两条路径。已合并 CodeX 流更新、跳过未变化投影、保留未变化消息引用并隔离旧订阅；事件顺序/完成前刷新/旧订阅隔离等 40 项相关测试与 Android 类型检查通过，修复 APK 已覆盖安装。14:13–14:17 真机回归由用户确认完整回复与操作正常，同一进程无渲染/接收异常；期间另有网络不可用和 Control 1011 关闭，随后均建立新连接。该轮通过不等于长期稳定性验收，Server 关闭原因与长时间/后台/网络切换仍待验证。
 - [x] WebRTC P2P/TURN 路径真机验证（react-native-webrtc 与 Host werift 互操作）
 - [x] 共享 Protocol 包统一执行协议 conformance fixtures；Android 保留自身授权、加密连接与恢复测试
 - [ ] 在 Android 原生 runtime 执行跨端 conformance（Node 中共享协议测试不作为原生验收）

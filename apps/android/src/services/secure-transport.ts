@@ -64,6 +64,7 @@ export class SecureTransport implements RemoteTransport {
         await this.inner.send(this.requireNoise().encrypt(plaintext))
       }
     } catch (error) {
+      console.warn('[dsh-remote] Secure send failed; closing carrier')
       await this.close().catch(() => undefined)
       throw error
     }
@@ -74,10 +75,25 @@ export class SecureTransport implements RemoteTransport {
     this.unsubscribeInner = this.inner.onMessage(data => {
       const noise = this.noise
       if (noise === undefined || !noise.complete || this.closed) return
+      let stage = 'decrypt'
       try {
-        const message = this.incoming.decode(noise.decrypt(data))
-        if (message !== undefined) cb(message)
-      } catch {
+        const plaintext = noise.decrypt(data)
+        stage = 'reassembly'
+        const message = this.incoming.decode(plaintext)
+        if (message !== undefined) {
+          stage = 'message-handler'
+          cb(message)
+        }
+      } catch (error) {
+        // Only known error classes and numeric bundle positions. Error messages
+        // and arbitrary stack lines can contain decrypted application content.
+        const name = error instanceof Error
+          && ['Error', 'TypeError', 'RangeError', 'SyntaxError', 'ReferenceError', 'ZodError'].includes(error.name)
+          ? error.name : 'unknown'
+        const positions = error instanceof Error && typeof error.stack === 'string'
+          ? [...error.stack.matchAll(/index\.android\.bundle:(\d+):(\d+)/g)]
+            .slice(0, 12).map(match => `${match[1]}:${match[2]}`) : []
+        console.warn('[dsh-remote] Secure receive failed:', stage, name, JSON.stringify(positions))
         void this.close()
       }
     })

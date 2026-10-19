@@ -1,5 +1,6 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AdaptiveTransportOptions } from '@dsh-remote/webrtc'
 
 class FakeCore {
   private readonly closeHandlers = new Set<() => void>()
@@ -52,6 +53,7 @@ const testState = vi.hoisted(() => ({
   workspaceTypes: undefined as unknown,
   cores: [] as FakeCore[],
   connectGate: undefined as undefined | (() => Promise<void>),
+  transportOptions: [] as AdaptiveTransportOptions[],
 }))
 
 vi.mock('@dsh-remote/client-core', async () => {
@@ -68,7 +70,9 @@ vi.mock('@dsh-remote/client-core', async () => {
   }
 })
 
-vi.mock('@dsh-remote/webrtc', () => ({ AdaptiveTransport: class {} }))
+vi.mock('@dsh-remote/webrtc', () => ({ AdaptiveTransport: class {
+  constructor(_url: string, options: AdaptiveTransportOptions) { testState.transportOptions.push(options) }
+} }))
 vi.mock('../src/services/secure-transport', () => ({ SecureTransport: class {} }))
 
 import { AndroidRemoteConnection } from '../src/services/connection'
@@ -98,8 +102,33 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
     testState.workspaceTypes = undefined
     testState.cores.length = 0
     testState.connectGate = undefined
+    testState.transportOptions.length = 0
   }
 beforeEach(prepareScenario1)
+
+  it('preserves transient versus refused carrier failures through the close callback', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      await runScenarios([
+        { reason: 'webrtc-closed' as const, retryable: true },
+        { reason: 'control-error' as const, retryable: true },
+        { reason: 'control-closed' as const, closeCode: 1006, retryable: true },
+        { reason: 'control-closed' as const, closeCode: 4003, retryable: false },
+        { reason: 'control-closed' as const, closeCode: 1008, retryable: false },
+        { reason: 'invalid-control-frame' as const, retryable: false },
+      ].map(({ retryable, ...event }) => ({ name: `${event.reason}:${event.closeCode ?? ''}`, run: async () => {
+        const connection = new AndroidRemoteConnection()
+        const closed = vi.fn()
+        await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+        testState.transportOptions[0]!.onDisconnect?.(event)
+        await testState.cores[0]!.close()
+        expect(closed).toHaveBeenCalledOnce()
+        expect(closed).toHaveBeenCalledWith({ retryable })
+        expect(() => connection.requireProxy()).toThrow()
+        await connection.close()
+      } })), prepareScenario1)
+    } finally { warn.mockRestore() }
+  })
 
   it('checks an encrypted round trip after resume and rejects stale or failed health replies', async () => {
     await runScenarios([

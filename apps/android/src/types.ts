@@ -462,6 +462,8 @@ export interface ConnectionSnapshot {
   phase: ConnectionPhase
   stats: TransportStats
   error?: string
+  /** False for protocol/security refusals or a replaced connection. */
+  retryable?: boolean
 }
 
 /** Diagnostics for the currently selected network path. Kept in memory only. */

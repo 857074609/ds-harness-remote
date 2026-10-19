@@ -44,6 +44,13 @@ export interface AdaptiveTransportOptions {
   fetchIceServers?: (connectionId: string, signal?: AbortSignal) => Promise<RtcIceServer[]>
   onWebRtcFallback?: (error: Error, diagnostics?: RtcConnectionDiagnostics) => void
   onWebRtcDiagnostic?: (event: RtcDiagnosticEvent) => void
+  /** Payload-free diagnostics for an established carrier closing. */
+  onDisconnect?: (event: AdaptiveDisconnectDiagnostic) => void
+}
+
+export interface AdaptiveDisconnectDiagnostic {
+  reason: 'control-closed' | 'control-error' | 'invalid-control-frame' | 'webrtc-closed'
+  closeCode?: number
 }
 
 export interface AdaptiveConnectionDetails {
@@ -142,10 +149,10 @@ export class AdaptiveTransport extends BaseTransport {
         })
       }
       socket.onerror = () => {
-        if (this.lifetime === lifetime) this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`))
+        if (this.lifetime === lifetime) this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`), { reason: 'control-error' })
       }
       socket.onclose = event => {
-        if (this.lifetime === lifetime) this.failConnection(adaptiveControlCloseError(event))
+        if (this.lifetime === lifetime) this.failConnection(adaptiveControlCloseError(event), { reason: 'control-closed', closeCode: event.code })
       }
     })
   }
@@ -317,7 +324,7 @@ export class AdaptiveTransport extends BaseTransport {
       if (frame.type === 'signal.offer' || frame.type === 'transport.selected') return
       if (frame.type === 'ping') this.sendControl('pong', frame.payload)
     } catch (error) {
-      this.failConnection(error instanceof Error ? error : new Error('Invalid adaptive control frame'))
+      this.failConnection(error instanceof Error ? error : new Error('Invalid adaptive control frame'), { reason: 'invalid-control-frame' })
     }
   }
 
@@ -435,7 +442,9 @@ export class AdaptiveTransport extends BaseTransport {
       // A negotiation failure closes the provisional data channel before this
       // transport switches to Relay. That is not a loss of the established
       // Adaptive transport, so only surface closes from an active WebRTC path.
-      if (this.rtc === rtc && this.dataMode === 'webrtc') this.emitClose()
+      if (this.rtc === rtc && this.dataMode === 'webrtc') {
+        this.failConnection(new Error('Active WebRTC channel closed'), { reason: 'webrtc-closed' })
+      }
     })
     try {
       await rtc.connect(signal)
@@ -524,7 +533,8 @@ export class AdaptiveTransport extends BaseTransport {
     this.readyReject = undefined
   }
 
-  private failConnection(error: Error): void {
+  private failConnection(error: Error, diagnostic?: AdaptiveDisconnectDiagnostic): void {
+    const established = this.connectedAt !== undefined
     this.clearHandshake()
     const reject = this.readyReject
     this.readyResolve = undefined
@@ -543,6 +553,9 @@ export class AdaptiveTransport extends BaseTransport {
     reject?.(error)
     void rtc?.close()
     socket?.close()
+    if (established && diagnostic !== undefined) {
+      try { this.options.onDisconnect?.(diagnostic) } catch { /* diagnostics must not prevent close */ }
+    }
     if (socket !== undefined) this.emitClose()
   }
 

@@ -31,10 +31,10 @@ export class AndroidRemoteRuntime {
       if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
       await this.client.connect(baseUrl, identity, host, accessToken, onFrame, {
         ...options,
-        onClose: () => {
+        onClose: closeOptions => {
           if (generation !== this.generation) return
           void this.updateForeground(generation, false).catch(() => undefined)
-          options.onClose?.()
+          options.onClose?.(closeOptions)
         },
       })
     } catch (error) {

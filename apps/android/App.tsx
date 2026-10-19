@@ -9,6 +9,7 @@ import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/scree
 import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
 import { useAppStore } from './src/state/store'
+import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import type { WorkspaceShortcut } from './src/types'
 import {
   networkRouteForNativeType,
@@ -222,6 +223,21 @@ function AppNavigator() {
     return () => subscription.remove()
   }, [homeMenuOpen, route.name, routes.length])
 
+  useEffect(() => {
+    const recovery = new ForegroundConnectionRecovery(
+      useAppStore.getState,
+      options => useAppStore.getState().reconnect(options),
+    )
+    const unsubscribe = useAppStore.subscribe(() => recovery.update())
+    recovery.setActive(AppState.currentState === 'active')
+    const subscription = AppState.addEventListener('change', state => recovery.setActive(state === 'active'))
+    return () => {
+      recovery.setActive(false)
+      unsubscribe()
+      subscription.remove()
+    }
+  }, [])
+
   useEffect(() => NetInfo.addEventListener(state => {
     const nextRoute = networkRouteForNativeType(state.type)
     const previousRoute = networkRoute.current
@@ -229,11 +245,12 @@ function AppNavigator() {
     // states so a later real local/remote move is still detected.
     if (nextRoute !== 'unknown') networkRoute.current = nextRoute
     if (state.isConnected === false) {
+      console.info('[dsh-remote] Network reported unavailable')
       setOffline()
       return
     }
     const app = useAppStore.getState()
-    if (app.connection.phase === 'offline' && app.selectedDevice !== undefined) {
+    if (app.connection.phase === 'offline' && app.connection.retryable !== false && app.selectedDevice !== undefined) {
       void reconnect()
       return
     }
@@ -241,6 +258,7 @@ function AppNavigator() {
     // it an existing Relay channel remains selected even after Wi-Fi is ready.
     if (shouldReconnectForNetworkRoute(previousRoute, nextRoute)
       && app.connection.phase === 'connected' && app.selectedDevice !== undefined) {
+      console.info('[dsh-remote] Network route changed:', previousRoute, nextRoute)
       void reconnect()
     }
   }), [reconnect, setOffline])

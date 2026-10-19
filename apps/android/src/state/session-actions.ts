@@ -93,6 +93,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async openSession(session) {
       runtime.flushPendingMuxFrames()
+      runtime.flushPendingCodexFrames()
       let loadGeneration = ++runtime.sessionLoadGeneration
       const current = () => loadGeneration === runtime.sessionLoadGeneration
       const finishOpen = async () => {
@@ -137,12 +138,15 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           const timeline = createCodexTimelineState({ ...read.thread, turns: [] })
           if (timeline === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
           runtime.activeCodexTimeline = withActiveCodexTurn(timeline, history.activeTurnId)
+          const streamGeneration = loadGeneration
           const stream = await client.subscribe(
             threadId,
-            frame => get().handleCodexFrame(frame),
+            frame => runtime.enqueueCodexFrame(streamGeneration, frame),
             undefined,
             reason => {
+              if (streamGeneration !== runtime.sessionLoadGeneration) return
               if (runtime.activeCodexTimeline?.session.nativeId !== threadId) return
+              runtime.flushPendingCodexFrames()
               runtime.activeCodexStream = undefined
               runtime.activeCodexTimeline = undefined
               set(state => ({

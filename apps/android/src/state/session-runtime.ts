@@ -37,10 +37,40 @@ export class SessionRuntime {
   readonly vanishingQueueRpcIds = new Map<string, Set<string>>()
   pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
+  private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
+  private codexFlushTimer: ReturnType<typeof setTimeout> | undefined
   sessionLoadGeneration = 0
   reconnectFlight: Promise<boolean> | undefined
 
   constructor(private readonly store: StoreAccess) {}
+
+  /** Keep native list scheduling outside the synchronous encrypted receive path. */
+  enqueueCodexFrame(generation: number, frame: { method: string; params: unknown }): void {
+    if (generation !== this.sessionLoadGeneration) return
+    this.pendingCodexFrames.push({ generation, frame })
+    // Completion and approvals observe every preceding delta before publishing.
+    if (this.pendingCodexFrames.length >= MUX_FLUSH_MAX || frame.method === 'turn/completed'
+      || frame.method.endsWith('/requestApproval')) {
+      this.flushPendingCodexFrames()
+    } else if (this.codexFlushTimer === undefined) {
+      this.codexFlushTimer = setTimeout(() => this.flushPendingCodexFrames(), MUX_FLUSH_MS)
+    }
+  }
+
+  flushPendingCodexFrames(): void {
+    if (this.codexFlushTimer !== undefined) clearTimeout(this.codexFlushTimer)
+    this.codexFlushTimer = undefined
+    const pending = this.pendingCodexFrames
+    this.pendingCodexFrames = []
+    const frames = pending.filter(item => item.generation === this.sessionLoadGeneration).map(item => item.frame)
+    if (frames.length > 0) this.store.get().handleCodexFrames(frames)
+  }
+
+  private clearPendingCodexFrames(): void {
+    if (this.codexFlushTimer !== undefined) clearTimeout(this.codexFlushTimer)
+    this.codexFlushTimer = undefined
+    this.pendingCodexFrames = []
+  }
 
   /**
    * Coalesce transport frames in one synchronous turn per 100 ms so React can
@@ -175,6 +205,7 @@ export class SessionRuntime {
   }
 
   async closeActiveCodexStream(notifyRemote = true): Promise<void> {
+    this.clearPendingCodexFrames()
     const stream = this.activeCodexStream
     this.activeCodexStream = undefined
     this.activeCodexTimeline = undefined

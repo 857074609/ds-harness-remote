@@ -5,14 +5,15 @@ import { applyMuxFrame, foldHistory } from '../src/state/event-reducer'
 import { mergeAcpHistoryAndLive } from '../src/services/cursor'
 import { mergeHistoryAndLive, prependHistory, reconcileDeliveryStates } from '../src/state/message-helpers'
 import { workspaceStableKey } from '../src/lib/workspace-key'
+import { ForegroundConnectionRecovery } from '../src/services/connection-recovery'
 
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
     sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
-  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
+  transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
-  codex: { request: vi.fn() },
+  codex: { request: vi.fn(), subscribe: vi.fn() },
   authenticate: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
@@ -23,7 +24,7 @@ vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   close = transport.close
   checkHealth = transport.checkHealth
   refreshBackends = transport.refreshBackends
-  hasCodex() { return false }
+  hasCodex = transport.hasCodex
   requireCodex() { return codex }
   hasCursor = transport.hasCursor
   hasPi = transport.hasPi
@@ -56,6 +57,7 @@ const page = (events: HistoryEntry[], throughSeq = 10) => ({ events, throughSeq,
 const prepareScenario1 = () => {
   vi.resetAllMocks()
   transport.checkHealth.mockResolvedValue(true)
+  transport.hasCodex.mockReturnValue(false)
   transport.hasCursor.mockReturnValue(false)
   transport.hasAntigravity.mockReturnValue(false)
   transport.hasPi.mockReturnValue(false)
@@ -449,8 +451,93 @@ describe('session restore state machine', () => {
     expect(proxy.sessionHistory).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().selectedSession?.sessionId).toBe('s1')
   })
+  it('recovers the selected CodeX history and live stream after a foreground carrier close without replaying prompts', async () => {
+    vi.useFakeTimers()
+    const recovery = new ForegroundConnectionRecovery(useAppStore.getState, options => useAppStore.getState().reconnect(options))
+    const unsubscribe = useAppStore.subscribe(() => recovery.update())
+    try {
+      const thread = { id: 'thread-1', cwd: '/project', status: { type: 'active', activeFlags: [] }, createdAt: 1, updatedAt: 2 }
+      transport.hasCodex.mockReturnValue(true)
+      codex.request.mockImplementation(async (method: string) => {
+        if (method === 'thread/list') return { data: [thread] }
+        if (method === 'project/list') return { data: [] }
+        if (method === 'thread/read') return { thread }
+        if (method === 'dsh/sessionHistory') return { header: { id: 'codex:thread-1' }, records: [], hasMore: false, activeTurnId: 'turn-1' }
+        if (method === 'model/list') return { data: [{ model: 'model-1' }] }
+        throw new Error(`Unexpected recovery mutation: ${method}`)
+      })
+      codex.subscribe.mockImplementation(async () => ({ streamId: `stream-${codex.subscribe.mock.calls.length}`, close: async () => undefined }))
+      useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
+      expect(await useAppStore.getState().connectDevice({ deviceId: 'host' } as never)).toBe(true)
+      const selected = useAppStore.getState().sessions.find(item => item.backend === 'codex')!
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      recovery.setActive(true)
+      const options = transport.connect.mock.calls[0]![5] as { onClose: (options: { retryable: boolean }) => void }
+      options.onClose({ retryable: true })
+      expect(useAppStore.getState().connection.phase).toBe('offline')
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(transport.connect).toHaveBeenCalledTimes(2)
+      expect(codex.subscribe).toHaveBeenCalledTimes(2)
+      expect(codex.request.mock.calls.filter(([method]) => method === 'dsh/sessionHistory')).toHaveLength(2)
+      expect(codex.request.mock.calls.every(([method]) => ['thread/list', 'project/list', 'thread/read', 'dsh/sessionHistory', 'model/list'].includes(method))).toBe(true)
+      expect(useAppStore.getState().selectedSession).toMatchObject({ sessionId: 'codex:thread-1', running: true })
+      // The restored stream still drives completion; recovery did not create a turn.
+      const onFrame = codex.subscribe.mock.calls[1]![1] as (frame: unknown) => void
+      const beforeBurst = useAppStore.getState().messages
+      let publishes = 0
+      const stopCounting = useAppStore.subscribe((state, previous) => {
+        if (state.messages !== previous.messages) publishes += 1
+      })
+      try {
+        for (let index = 0; index < 100; index += 1) {
+          onFrame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reply', delta: String(index % 10) } })
+        }
+        expect(useAppStore.getState().messages).toBe(beforeBurst)
+        await vi.advanceTimersByTimeAsync(100)
+        expect(publishes).toBe(1)
+        expect(useAppStore.getState().messages['codex:thread-1']).toEqual(expect.arrayContaining([
+          expect.objectContaining({ text: '0123456789'.repeat(10) }),
+        ]))
+        const afterBurst = useAppStore.getState().messages
+        onFrame({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1' } })
+        await vi.advanceTimersByTimeAsync(100)
+        expect(useAppStore.getState().messages).toBe(afterBurst)
+        expect(publishes).toBe(1)
+      } finally { stopCounting() }
+      // Completion must drain a final pending delta without waiting for a timer.
+      onFrame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', turnId: 'turn-1', itemId: 'reply', delta: 'final' } })
+      onFrame({ method: 'turn/completed', params: { threadId: 'thread-1', turn: { id: 'turn-1', status: 'completed', items: [] } } })
+      expect(useAppStore.getState().selectedSession?.running).toBe(false)
+      expect(useAppStore.getState().messages['codex:thread-1']).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: `${'0123456789'.repeat(10)}final` }),
+      ]))
+      // Reopening retires the old callback and its queued work, even on one Host.
+      expect(await useAppStore.getState().openSession(selected)).toBe(true)
+      const reopened = useAppStore.getState().messages
+      onFrame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-1', itemId: 'stale', delta: 'late old stream' } })
+      await vi.advanceTimersByTimeAsync(100)
+      expect(useAppStore.getState().messages).toBe(reopened)
+    } finally {
+      recovery.setActive(false)
+      unsubscribe()
+      await useAppStore.getState().disconnect()
+      vi.useRealTimers()
+    }
+  })
   it('retains healthy carriers on resume and restores half-open connections without reviving a disconnected Host', async () => {
     await runScenarios([
+      {
+        name: 'a replaced or refused carrier stays offline across resume and network notifications',
+        run: async () => {
+          useAppStore.setState({ selectedDevice: { deviceId: 'host' } as never,
+            connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, retryable: false } })
+          await useAppStore.getState().resumeConnection()
+          useAppStore.getState().setOffline()
+          await useAppStore.getState().resumeConnection()
+          expect(useAppStore.getState().connection.retryable).toBe(false)
+          expect(transport.connect).not.toHaveBeenCalled()
+        },
+      },
       ...[true, false].map(healthy => ({
         name: healthy ? 'keeps a healthy carrier' : 'reconnects a half-open carrier and restores the session',
         run: async () => {

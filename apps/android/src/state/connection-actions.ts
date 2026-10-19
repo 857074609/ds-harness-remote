@@ -101,7 +101,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 }
               }))
             },
-            onClose: () => {
+            onClose: closeOptions => {
               if (generation !== runtime.connectionGeneration) return
               // Drop local stream handles so reconnect opens a fresh stream.
               void runtime.closeActiveCodexStream(false)
@@ -110,7 +110,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 ++runtime.connectionGeneration
                 ++runtime.sessionLoadGeneration
                 set({
-                  connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed },
+                  connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed,
+                    retryable: closeOptions?.retryable !== false },
                   codexAvailable: false,
                   cursorAvailable: false,
                   antigravityAvailable: false,
@@ -217,6 +218,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
+        console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage)
         await runtime.connection.close()
         if (isSessionAuthError(error)) {
           await get().requireReauth(friendlyError(error))
@@ -258,6 +260,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       const { selectedDevice, connection } = get()
       if (selectedDevice === undefined) return
       if (connection.phase === 'offline') {
+        if (connection.retryable === false) return
         await get().reconnect()
         return
       }
@@ -269,11 +272,15 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       // onClose may have invalidated the generation while the probe was in
       // flight. Resume must still recover that newly confirmed offline state.
       if (current.connection.phase === 'offline') {
+        if (current.connection.retryable === false) return
         await get().reconnect()
         return
       }
       if (generation !== runtime.connectionGeneration || current.connection.phase !== 'connected') return
-      if (!healthy) await get().reconnect()
+      if (!healthy) {
+        console.info('[dsh-remote] Resume health check failed; reconnecting')
+        await get().reconnect()
+      }
       else await get().refreshConnectionNetworkDetails()
     },
 
@@ -333,7 +340,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         runtime.clearPendingMuxFrames()
         runtime.clearQueueAdoption()
         set({
-          connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable },
+          connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable,
+            ...(get().connection.retryable === false ? { retryable: false } : {}) },
           codexAvailable: false,
           busyAction: undefined,
           cursorAvailable: false,

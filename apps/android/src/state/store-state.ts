@@ -165,6 +165,7 @@ export interface AppState {
   clearError(): void
   handleMuxFrame(frame: MuxStreamFrame): void
   handleCodexFrame(frame: { method: string; params: unknown }): void
+  handleCodexFrames(frames: { method: string; params: unknown }[]): void
   handleCursorFrame(frame: AgentAcpFrameData): void
 }
 

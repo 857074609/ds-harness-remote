@@ -121,6 +121,17 @@ not disable the service, but Android hides its notification from the drawer.
 Returning to the app verifies the existing encrypted channel with a bounded, five-second
 capability request and reconnects/restores the selected session if that check fails or the
 connection is already offline. Healthy carriers are retained.
+While the app is visible, an established carrier closing also triggers up to three recovery
+attempts (after 1, 3 and 8 seconds). Auto transport retries a lost WebRTC path over a fresh
+Relay connection; explicit TURN/Relay preferences are preserved. Recovery reloads the selected
+session and history without resending prompts, answers or terminal input. Replaced connections,
+protocol refusals and reauthentication stop automatic retries. Offline chat hides the thinking
+indicator until the channel is restored. Device validation of this foreground recovery is pending.
+CodeX stream updates are coalesced in order over a bounded 100 ms window. Completion and
+approval notifications drain preceding deltas, while unchanged projections retain list data
+and retired subscriptions are fenced from reopened sessions. After rebuilding, one complete
+live reply passed on the attached Android phone without the observed VirtualizedList
+update-depth error. Long-running and background validation remains pending.
 The service is stopped when the user disconnects, the carrier closes, or connection setup fails. This does not
 make a force-stopped process reconnect by itself; that remains an explicit recovery path.
 These native changes require rebuilding and reinstalling the APK. Device/OEM battery restrictions

@@ -181,6 +181,42 @@ describe('RelayTransport control handshake', () => {
 })
 
 describe('AdaptiveTransport capability negotiation', () => {
+  it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
+    await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
+      name: reason, run: async () => {
+        vi.stubGlobal('WebSocket', FakeWebSocket)
+        const diagnostic = vi.fn()
+        const closed = vi.fn()
+        const rtc = reason === 'webrtc-closed' ? stalledRtc() : undefined
+        const transport = createAdaptiveTransport({ onDisconnect: diagnostic, ...(rtc === undefined ? {} : { rtcFactory: rtc.factory }) })
+        transport.onClose(closed)
+        const connecting = transport.connect()
+        const socket = FakeWebSocket.latest!
+        socket.open()
+        socket.receive(helloAck({ capabilities: rtc === undefined ? ['transport.relay'] : ['transport.p2p', 'transport.relay'] }))
+        socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+        if (rtc !== undefined) {
+          await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+          rtc.channel.readyState = 'open'
+          rtc.channel.onopen?.()
+        }
+        await connecting
+        if (reason === 'control-closed') socket.onclose?.({ code: 4003, reason: 'private upstream detail' })
+        if (reason === 'control-error') socket.onerror?.()
+        if (reason === 'invalid-control-frame') socket.receiveRaw('invalid private content')
+        if (rtc !== undefined) (rtc.channel as unknown as { onclose: () => void }).onclose()
+        if (reason === 'local-close') await transport.close()
+        expect(closed).toHaveBeenCalledOnce()
+        expect(transport.getStats().connected).toBe(false)
+        if (reason === 'local-close') expect(diagnostic).not.toHaveBeenCalled()
+        else expect(diagnostic.mock.calls).toEqual([[{
+          reason, ...(reason === 'control-closed' ? { closeCode: 4003 } : {}),
+        }]])
+        socket.onclose?.({ code: 1006, reason: '' })
+        expect(closed).toHaveBeenCalledOnce()
+      },
+    })), cleanupScenario1)
+  })
   it('separates authorization from RTC timeout while preserving old and new Server budgets', async () => {
     await runScenarios([
       { name: 'old Server without timeout', server: undefined, local: undefined, budget: 8000 },

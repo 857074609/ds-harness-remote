@@ -14309,11 +14309,11 @@ var AdaptiveTransport = class extends BaseTransport {
       };
       socket.onerror = () => {
         if (this.lifetime === lifetime)
-          this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`));
+          this.failConnection(new Error(`AdaptiveTransport failed to connect to ${this.url}`), { reason: "control-error" });
       };
       socket.onclose = (event) => {
         if (this.lifetime === lifetime)
-          this.failConnection(adaptiveControlCloseError(event));
+          this.failConnection(adaptiveControlCloseError(event), { reason: "control-closed", closeCode: event.code });
       };
     });
   }
@@ -14483,7 +14483,7 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "ping")
         this.sendControl("pong", frame.payload);
     } catch (error) {
-      this.failConnection(error instanceof Error ? error : new Error("Invalid adaptive control frame"));
+      this.failConnection(error instanceof Error ? error : new Error("Invalid adaptive control frame"), { reason: "invalid-control-frame" });
     }
   }
   handleRelay(payload) {
@@ -14596,8 +14596,9 @@ var AdaptiveTransport = class extends BaseTransport {
       this.emit(data2);
     });
     rtc.onClose(() => {
-      if (this.rtc === rtc && this.dataMode === "webrtc")
-        this.emitClose();
+      if (this.rtc === rtc && this.dataMode === "webrtc") {
+        this.failConnection(new Error("Active WebRTC channel closed"), { reason: "webrtc-closed" });
+      }
     });
     try {
       await rtc.connect(signal);
@@ -14688,7 +14689,8 @@ var AdaptiveTransport = class extends BaseTransport {
     this.readyResolve = void 0;
     this.readyReject = void 0;
   }
-  failConnection(error) {
+  failConnection(error, diagnostic) {
+    const established = this.connectedAt !== void 0;
     this.clearHandshake();
     const reject = this.readyReject;
     this.readyResolve = void 0;
@@ -14707,6 +14709,12 @@ var AdaptiveTransport = class extends BaseTransport {
     reject?.(error);
     void rtc?.close();
     socket?.close();
+    if (established && diagnostic !== void 0) {
+      try {
+        this.options.onDisconnect?.(diagnostic);
+      } catch {
+      }
+    }
     if (socket !== void 0)
       this.emitClose();
   }

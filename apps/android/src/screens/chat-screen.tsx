@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react-native'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -276,10 +276,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const [reconnectingSession, setReconnectingSession] = useState(false)
   const [newSessionPending, setNewSessionPending] = useState(false)
   const listRef = useRef<FlatList<ChatSection>>(null)
-  const lastStreamingScrollAt = useRef(0)
+  const lastAutoScrollAt = useRef(0)
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scrollFrameRef = useRef<number | null>(null)
-  const scrollAnimatedRef = useRef(false)
-  const laidOutSessionRef = useRef<string | undefined>(undefined)
+  const listViewportRef = useRef({ width: 0, height: 0 })
+  const listContentRef = useRef({ width: 0, height: 0 })
+  const userScrollingRef = useRef(false)
   /** Keep the viewport on the latest turn until the user scrolls away. */
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
@@ -339,14 +341,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       typeof entry === 'object' && entry !== null && typeof (entry as Record<string, unknown>).id === 'string') : []
     return { members, tasks } satisfies { members: TeamMemberSnapshot[]; tasks: TeamTaskSnapshot[] }
   }, [session?.projections?.values])
-  const lastItem = visibleMessages.at(-1)
-  const lastContentVersion = lastItem?.kind === 'message'
-    ? `${lastItem.id}:${lastItem.text.length}:${lastItem.reasoning?.length ?? 0}`
-    : undefined
   const sessionId = session?.sessionId
   const panelOpen = plusMenuOpen || modelPickerOpen || modePickerOpen || permissionPickerOpen
     || workspacePickerOpen || toolPickerOpen || toolsMode !== undefined || trajectory || mentionType !== null
     || promptsPickerOpen || promptsManagerOpen || promptEditing !== null || subagentsOpen || teamOpen || sessionInfoOpen
+  const autoScrollAllowedRef = useRef(false)
+  autoScrollAllowedRef.current = !panelOpen && !historyLoadingOlder && sessionId !== undefined && visibleMessages.length > 0
 
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
@@ -365,47 +365,51 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   }, [tabletSplit])
   const readableColumn = { width: '100%' as const, maxWidth: contentMaxWidth, alignSelf: 'center' as const }
 
-  const scrollToBottom = useCallback((animated: boolean) => {
-    listRef.current?.scrollToEnd({ animated })
+  const cancelPendingScroll = useCallback(() => {
+    if (scrollTimerRef.current !== null) clearTimeout(scrollTimerRef.current)
+    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
+    scrollTimerRef.current = null
+    scrollFrameRef.current = null
   }, [])
 
-  // FlatList can report several content-size changes while markdown rows are
-  // measuring. Coalesce those reports into one native scroll command so the
-  // initial render does not monopolize the JS responder queue.
-  const scheduleScrollToBottom = useCallback((animated: boolean) => {
-    scrollAnimatedRef.current = scrollAnimatedRef.current || animated
-    if (scrollFrameRef.current !== null) return
-    scrollFrameRef.current = requestAnimationFrame(() => {
-      scrollFrameRef.current = null
-      const shouldAnimate = scrollAnimatedRef.current
-      scrollAnimatedRef.current = false
-      scrollToBottom(shouldAnimate)
-    })
-  }, [scrollToBottom])
+  // Follow measured content and viewport changes (including the keyboard).
+  // Keep a trailing command so the last streaming measurement is never lost,
+  // while limiting native scrolls to ~10 Hz with no React state updates.
+  const scheduleScrollToBottom = useCallback(() => {
+    if (scrollTimerRef.current !== null || scrollFrameRef.current !== null) return
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null
+      scrollFrameRef.current = requestAnimationFrame(() => {
+        scrollFrameRef.current = null
+        if (!autoScrollAllowedRef.current || userScrollingRef.current
+          || (!pinToBottomRef.current && !initialPinRef.current)) return
+        lastAutoScrollAt.current = Date.now()
+        // Nonanimated commands also keep native momentum callbacks reserved
+        // for user flings, so they cannot disable following during a reply.
+        listRef.current?.scrollToEnd({ animated: false })
+      })
+    }, Math.max(0, 100 - (Date.now() - lastAutoScrollAt.current)))
+  }, [])
 
   // Entering a session (or switching sessions) should land on the latest turn.
   useEffect(() => {
+    cancelPendingScroll()
     setTrajectory(false)
     pinToBottomRef.current = true
     initialPinRef.current = true
-    laidOutSessionRef.current = undefined
-  }, [sessionId])
+    userScrollingRef.current = false
+    listViewportRef.current = { width: 0, height: 0 }
+    listContentRef.current = { width: 0, height: 0 }
+  }, [sessionId, cancelPendingScroll])
 
-  useEffect(() => () => {
-    if (scrollFrameRef.current !== null) cancelAnimationFrame(scrollFrameRef.current)
-    scrollFrameRef.current = null
-    scrollAnimatedRef.current = false
-  }, [])
+  useEffect(() => cancelPendingScroll, [cancelPendingScroll])
 
   // A sheet or picker owns the user's next touch. Cancel a queued list jump
   // as soon as it opens so a streaming update cannot move the responder under
   // the panel.
   useEffect(() => {
-    if (!panelOpen || scrollFrameRef.current === null) return
-    cancelAnimationFrame(scrollFrameRef.current)
-    scrollFrameRef.current = null
-    scrollAnimatedRef.current = false
-  }, [panelOpen])
+    if (panelOpen) cancelPendingScroll()
+  }, [panelOpen, cancelPendingScroll])
 
   // Let the first layout frame finish before jumping to the end. This keeps
   // the top bar and Android back dispatch responsive while a large history
@@ -414,7 +418,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
     const timer = setTimeout(() => {
-      if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom(false)
+      if (pinToBottomRef.current || initialPinRef.current) scheduleScrollToBottom()
     }, 32)
     return () => clearTimeout(timer)
   }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
@@ -431,38 +435,40 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   useEffect(() => {
     if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
     if (!pinToBottomRef.current && !initialPinRef.current) return
-    scheduleScrollToBottom(initialPinRef.current ? false : true)
+    scheduleScrollToBottom()
   }, [visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId])
 
-  // While an assistant message is streaming, its text grows on every chunk.
-  // Following it with animated scrolls piles up animation frames on the JS
-  // thread (freezing back navigation and the keyboard). Snap to the end at
-  // most ~10 Hz instead, without animation.
-  useEffect(() => {
-    if (panelOpen || visibleMessages.length === 0 || lastContentVersion === undefined || historyLoadingOlder) return
-    if (!pinToBottomRef.current) return
-    const now = Date.now()
-    if (now - lastStreamingScrollAt.current < 100) return
-    lastStreamingScrollAt.current = now
-    scheduleScrollToBottom(false)
-  }, [lastContentVersion, visibleMessages.length, historyLoadingOlder, panelOpen, scheduleScrollToBottom])
+  const onListLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width, height } = event.nativeEvent.layout
+    const previous = listViewportRef.current
+    if (previous.width === width && previous.height === height) return
+    listViewportRef.current = { width, height }
+    if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
+    scheduleScrollToBottom()
+  }, [scheduleScrollToBottom])
 
-  const onListLayout = useCallback(() => {
-    // A session switch can render the list before its viewport and markdown
-    // rows have measured. Defer one extra frame so the initial jump reaches
-    // the actual end rather than the pre-layout content height.
-    if (panelOpen || visibleMessages.length === 0 || historyLoadingOlder || sessionId === undefined) return
-    if (laidOutSessionRef.current === sessionId) return
-    laidOutSessionRef.current = sessionId
-    scheduleScrollToBottom(false)
-  }, [historyLoadingOlder, panelOpen, scheduleScrollToBottom, sessionId, visibleMessages.length])
+  const onListContentSizeChange = useCallback((width: number, height: number) => {
+    const previous = listContentRef.current
+    if (previous.width === width && previous.height === height) return
+    listContentRef.current = { width, height }
+    if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
+    scheduleScrollToBottom()
+  }, [scheduleScrollToBottom])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    // Content growth and IME resizing can also emit scroll events. Only a
+    // user's drag/fling changes the intent to follow the latest response.
+    if (!userScrollingRef.current) return
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     const atBottom = distanceFromEnd <= 80
     pinToBottomRef.current = atBottom
   }, [])
+
+  const onListScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    onListScroll(event)
+    userScrollingRef.current = false
+  }, [onListScroll])
 
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
@@ -1089,12 +1095,19 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         onLayout={onListLayout}
+        onContentSizeChange={onListContentSizeChange}
         onScroll={onListScroll}
         scrollEventThrottle={16}
         onScrollBeginDrag={() => {
+          cancelPendingScroll()
+          userScrollingRef.current = true
+          pinToBottomRef.current = false
           initialPinRef.current = false
           Keyboard.dismiss()
         }}
+        onScrollEndDrag={onListScrollEnd}
+        onMomentumScrollBegin={() => { userScrollingRef.current = true }}
+        onMomentumScrollEnd={onListScrollEnd}
         ListEmptyComponent={busy === `session:${session.sessionId}`
           ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
           : <WelcomeMessage />}

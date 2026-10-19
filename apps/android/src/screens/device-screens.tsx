@@ -462,14 +462,14 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
 }
 
 /** Keep visible session lists honest: refresh execution status while mounted. */
-export function useLiveSessionStatus(): void {
+export function useLiveSessionStatus(enabled = true): void {
   const phase = useAppStore(state => state.connection.phase)
   useEffect(() => {
-    if (phase !== 'connected') return
+    if (!enabled || phase !== 'connected') return
     void useAppStore.getState().refreshSessionStatus()
     const timer = setInterval(() => { void useAppStore.getState().refreshSessionStatus() }, 8_000)
     return () => clearInterval(timer)
-  }, [phase])
+  }, [phase, enabled])
 }
 
 export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, title, meta, onOpenChange, onPress, onArchive }: {

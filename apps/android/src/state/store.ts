@@ -41,6 +41,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   piAvailable: false,
   opencodeAvailable: false,
   claudeAvailable: false,
+  workspaceCatalog: undefined,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],

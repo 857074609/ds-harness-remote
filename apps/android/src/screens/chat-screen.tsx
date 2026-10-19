@@ -126,8 +126,8 @@ const LONG_DRAFT_MAX = 256_000
 export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
   // New subagent children and running-state changes must reach `sessions`
   // without leaving the chat (the list screens unmount here).
-  useLiveSessionStatus()
   const session = useAppStore(state => state.selectedSession)
+  useLiveSessionStatus(session !== undefined && (session.backend ?? 'harness') === 'harness')
   const hostId = useAppStore(state => state.selectedDevice?.deviceId)
   const hostPlatform = useAppStore(state => state.selectedDevice?.platform)
   const messages = useAppStore(state => session === undefined ? EMPTY_CHAT_ITEMS : state.messages[session.sessionId] ?? EMPTY_CHAT_ITEMS)

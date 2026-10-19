@@ -1,20 +1,9 @@
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import { strings as zhCN } from '../locales/i18n'
-import type { AntigravityCatalog } from '../services/antigravity'
-import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
-import { loadCodexCatalog } from '../services/codex'
 import { resolveAutomaticPreferredTransports } from '../services/network-route'
-import type { OpencodeCatalog } from '../services/opencode'
-import type { ClaudeCatalog } from '../services/claude'
-import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
-import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
-import type { PiCatalog } from '../services/pi'
-import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import { serverSession } from '../services/server-session'
 import { saveLastConnectedDeviceId } from '../services/storage'
-import type { RemoteSession, WorkspaceView } from '../types'
-import { loadSavedCodexPermissions, withBestCodexPermission } from './codex-session-state'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
@@ -32,7 +21,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       // reconnect() marks recovery before delegating here. A direct connect starts
       // a new usage lifecycle even when choosing the same Host again.
       const recovering = sameHost && get().connection.phase === 'reconnecting'
-      // In-memory ACP sessions belong to one Host; keep them only across its reconnect.
+      // In-memory catalogs belong to one Host; keep them only across its reconnect.
       set(state => ({
         ...(!recovering ? { currentWorkSessionIds: [] } : {}),
         ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
@@ -53,9 +42,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
-        workspaces: sameHost ? state.workspaces.filter(workspace => workspace.backend === 'cursor' || workspace.backend === 'antigravity' || workspace.backend === 'pi' || workspace.backend === 'opencode' || workspace.backend === 'claude') : [],
-        sessions: sameHost ? state.sessions.filter(session => session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') : [],
-        archivedSessionIds: [],
+        workspaceCatalog: undefined,
+        workspaces: sameHost ? state.workspaces : [],
+        sessions: sameHost ? state.sessions : [],
+        archivedSessionIds: sameHost ? state.archivedSessionIds : [],
         sessionModels: undefined,
         error: undefined,
       }))
@@ -91,7 +81,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 sessions: state.sessions.filter(item => item.sessionId !== sessionId),
                 workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),
               }))
-              void get().refreshWorkspaces()
+              if (get().workspaceCatalog?.backend === 'opencode') void get().refreshWorkspaces('opencode')
             },
             onSecureHandshake: () => {
               if (generation !== runtime.connectionGeneration) return
@@ -127,91 +117,23 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         if (generation !== runtime.connectionGeneration) return false
         set({ connectionStage: 'loading' })
         const proxy = runtime.connection.requireProxy()
-        const [hostDescriptor, workspaceList, sessions] = await Promise.all([
-          proxy.hostDescribe(),
-          proxy.workspaceList(),
-          proxy.sessionList(),
-        ])
-        let codexCatalog = { workspaces: [] as WorkspaceView[], sessions: [] as RemoteSession[] }
-        let codexError: string | undefined
-        if (runtime.connection.hasCodex()) {
-          try {
-            codexCatalog = await loadCodexCatalog(runtime.connection.requireCodex())
-          } catch (error) {
-            codexError = friendlyError(error)
-          }
-        }
-        let agyCatalog: AntigravityCatalog | undefined
-        let agyError: string | undefined
-        if (runtime.connection.hasAntigravity()) {
-          try { agyCatalog = await loadAntigravityCatalog(runtime.connection.requireAntigravity(), get().workspaces) }
-          catch (error) { agyError = friendlyError(error) }
-        }
-        let piCatalog: PiCatalog | undefined
-        let piError: string | undefined
-        if (runtime.connection.hasPi()) {
-          try { piCatalog = await loadPiCatalog(runtime.connection.requirePi(), get().workspaces) }
-          catch (error) { piError = friendlyError(error) }
-        }
-        let opencodeCatalog: OpencodeCatalog | undefined
-        let opencodeError: string | undefined
-        if (runtime.connection.hasOpencode()) {
-          try { opencodeCatalog = await loadOpencodeCatalog(runtime.connection.requireOpencode(), get().workspaces) }
-          catch (error) { opencodeError = friendlyError(error) }
-        }
-        let claudeCatalog: ClaudeCatalog | undefined
-        let claudeError: string | undefined
-        if (runtime.connection.hasClaude()) {
-          try { claudeCatalog = await loadClaudeCatalog(runtime.connection.requireClaude(), get().workspaces) }
-          catch (error) { claudeError = friendlyError(error) }
-        }
-        const savedCodexPermissions = await loadSavedCodexPermissions(device.deviceId)
+        // Catalogs belong to the category the user opens, not connection setup.
+        const hostDescriptor = await proxy.hostDescribe()
         const connectionNetworkDetails = await runtime.connection.getNetworkDetails().catch(() => undefined)
         if (generation !== runtime.connectionGeneration) return false
-        set(state => {
-          const codexSessions = codexCatalog.sessions.map(session => {
-            const previous = state.sessions.find(item => item.sessionId === session.sessionId)
-              ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
-            return withBestCodexPermission(session, previous, savedCodexPermissions)
-          })
-          const cursorWorkspaces = state.workspaces.filter(workspace => workspace.backend === 'cursor')
-          const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const antigravityWorkspaces = agy.workspaces
-          const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const claudeData = mergeClaudeCatalog(claudeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const opencodeWorkspaces = opc.workspaces
-          const claudeWorkspaces = claudeData.workspaces
-          const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
-          const antigravitySessions = agy.sessions
-          const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const piWorkspaces = runtime.connection.hasPi() ? pi.workspaces : []
-          const piSessions = pi.sessions
-          const opencodeSessions = opc.sessions
-          const claudeSessions = claudeData.sessions
-          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions, ...claudeSessions]
-          const selectedSession = state.selectedSession === undefined
-            ? undefined
-            : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId)
-            ?? state.selectedSession
-          return {
-            hostDescriptor,
-            codexAvailable: runtime.connection.hasCodex(),
-            cursorAvailable: runtime.connection.hasCursor(),
-            antigravityAvailable: runtime.connection.hasAntigravity(),
-            piAvailable: runtime.connection.hasPi(),
-            opencodeAvailable: runtime.connection.hasOpencode(),
-            claudeAvailable: runtime.connection.hasClaude(),
-            workspaces: [...workspaceList.items, ...codexCatalog.workspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces, ...claudeWorkspaces],
-            archivedSessionIds: workspaceList.archivedSessionIds,
-            sessions: combinedSessions,
-            selectedSession,
-            connectionStage: 'ready',
-            connectionNetworkDetails,
-            lastConnectedDeviceId: device.deviceId,
-            pendingAutoConnectDeviceId: undefined,
-            connection: { phase: 'connected', stats: runtime.connection.getStats() ?? { mode: 'Relay', connected: true } },
-            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined && claudeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError ?? claudeError }),
-          }
+        set({
+          hostDescriptor,
+          codexAvailable: runtime.connection.hasCodex(),
+          cursorAvailable: runtime.connection.hasCursor(),
+          antigravityAvailable: runtime.connection.hasAntigravity(),
+          piAvailable: runtime.connection.hasPi(),
+          opencodeAvailable: runtime.connection.hasOpencode(),
+          claudeAvailable: runtime.connection.hasClaude(),
+          connectionStage: 'ready',
+          connectionNetworkDetails,
+          lastConnectedDeviceId: device.deviceId,
+          pendingAutoConnectDeviceId: undefined,
+          connection: { phase: 'connected', stats: runtime.connection.getStats() ?? { mode: 'Relay', connected: true } },
         })
         runtime.connectionStartedAt = Date.now()
         await saveLastConnectedDeviceId(device.deviceId)
@@ -319,6 +241,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
+        workspaceCatalog: undefined,
         workspaces: [],
         archivedSessionIds: [],
         sessions: [],

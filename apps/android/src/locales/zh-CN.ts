@@ -112,6 +112,7 @@ const zhCN = {
   time: { unavailable: '更新时间不可用', lastSeenUnavailable: '活跃时间不可用', lastActive: (value: string) => `${value}活跃`, now: '刚刚', justNow: '刚刚更新', minutesAgo: (n: number) => `${n} 分钟前`, hoursAgo: (n: number) => `${n} 小时前`, updatedSuffix: '更新', locale: 'zh-CN' },
   transport: { auto: '自动（推荐）', autoDescription: '优先尝试 P2P 直连，必要时自动改用 TURN 或服务器转发', turn: 'TURN 优先', turnDescription: '网络受限时，优先使用 TURN 转发以提高稳定性', relay: '仅服务器转发', relayDescription: '所有数据都通过 DSH Remote 服务器转发' },
   workspaces: {
+    loadFailed: '工作区加载失败',
     offlineBody: '重新连接电脑后，即可查看工作区和对话。',
     reconnectingBody: '正在恢复连接并读取工作区和对话，请稍候。',
     title: '工作区', create: '新建工作区', type: '工作区类型', dsh: 'DSH', deviceTitle: (name: string) => name, deviceInfo: '设备与连接信息',

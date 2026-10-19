@@ -3,7 +3,6 @@ import { friendlyError } from '../lib/errors'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { strings as zhCN } from '../locales/i18n'
-import type { AntigravityCatalog } from '../services/antigravity'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
 import { createNativeRpcId } from '../services/api-proxy'
 import { createCodexWorkspace, loadCodexCatalog } from '../services/codex'
@@ -14,11 +13,8 @@ import {
   createClaudeWorkspace,
   createPiWorkspace,
 } from '../services/cursor'
-import type { OpencodeCatalog } from '../services/opencode'
-import type { ClaudeCatalog } from '../services/claude'
 import { loadOpencodeCatalog, mergeOpencodeCatalog } from '../services/opencode'
 import { loadClaudeCatalog, mergeClaudeCatalog } from '../services/claude'
-import type { PiCatalog } from '../services/pi'
 import { loadPiCatalog, mergePiCatalog } from '../services/pi'
 import type { AndroidRemoteRuntime } from '../services/remote-runtime'
 import { saveFavoriteWorkspaces } from '../services/storage'
@@ -69,7 +65,7 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
   }
 
   return {
-    async refreshWorkspaces() {
+    async refreshWorkspaces(backend = get().workspaceCatalog?.backend ?? 'harness') {
       if (get().connection.phase !== 'connected') return
       const scope = captureConnection()
       const refresh = ++refreshGeneration
@@ -77,102 +73,66 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
       const busyAction = get().busyAction
       const current = () => scope.current() && refresh === refreshGeneration
         && mutation === mutationGeneration && get().busyAction === busyAction
+      set({ workspaceCatalog: { backend, loading: true } })
       try {
         await connection.refreshBackends()
         if (!current()) return
-        const proxy = scope.bind(() => connection.requireProxy())
-        const [workspaceList, sessions] = await Promise.all([
-          proxy.workspaceList(),
-          proxy.sessionList(),
-        ])
-        if (!current()) return
-        let codexCatalog = { workspaces: [] as WorkspaceView[], sessions: [] as RemoteSession[] }
-        let codexError: string | undefined
-        if (connection.hasCodex()) {
-          try {
-            codexCatalog = await loadCodexCatalog(scope.bind(() => connection.requireCodex()))
-          } catch (error) {
-            if (!current()) return
-            codexError = friendlyError(error)
+        let catalog: { workspaces: WorkspaceView[]; sessions: RemoteSession[] }
+        let archivedSessionIds: string[] | undefined
+        switch (backend) {
+          case 'harness': {
+            const proxy = scope.bind(() => connection.requireProxy())
+            const [workspaces, sessions] = await Promise.all([proxy.workspaceList(), proxy.sessionList()])
+            catalog = { workspaces: workspaces.items, sessions }
+            archivedSessionIds = workspaces.archivedSessionIds
+            break
           }
-        }
-        if (!current()) return
-        let agyCatalog: AntigravityCatalog | undefined
-        let agyError: string | undefined
-        if (connection.hasAntigravity()) {
-          try { agyCatalog = await loadAntigravityCatalog(scope.bind(() => connection.requireAntigravity()), get().workspaces) }
-          catch (error) { agyError = friendlyError(error) }
-        }
-        if (!current()) return
-        let piCatalog: PiCatalog | undefined
-        let piError: string | undefined
-        if (connection.hasPi()) {
-          try { piCatalog = await loadPiCatalog(scope.bind(() => connection.requirePi()), get().workspaces) }
-          catch (error) { piError = friendlyError(error) }
-        }
-        if (!current()) return
-        let opencodeCatalog: OpencodeCatalog | undefined
-        let opencodeError: string | undefined
-        if (connection.hasOpencode()) {
-          try { opencodeCatalog = await loadOpencodeCatalog(scope.bind(() => connection.requireOpencode()), get().workspaces) }
-          catch (error) { opencodeError = friendlyError(error) }
-        }
-        if (!current()) return
-        let claudeCatalog: ClaudeCatalog | undefined
-        let claudeError: string | undefined
-        if (connection.hasClaude()) {
-          try { claudeCatalog = await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces) }
-          catch (error) { claudeError = friendlyError(error) }
-        }
-        if (!current()) return
-        const savedCodexPermissions = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
-        if (!current()) return
-        set(state => {
-          const codexWorkspaces = codexError === undefined
-            ? codexCatalog.workspaces
-            : state.workspaces.filter(workspace => workspace.backend === 'codex')
-          const catalogSessions = codexError === undefined
-            ? codexCatalog.sessions
-            : state.sessions.filter(session => session.backend === 'codex')
-          const codexSessions = catalogSessions.map(session => {
-            const previous = state.sessions.find(item => item.sessionId === session.sessionId)
-              ?? (state.selectedSession?.sessionId === session.sessionId ? state.selectedSession : undefined)
-            return withBestCodexPermission(session, previous, savedCodexPermissions)
-          })
-          const cursorWorkspaces = connection.hasCursor() ? state.workspaces.filter(workspace => workspace.backend === 'cursor') : []
-          const agy = mergeAntigravityCatalog(agyCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const antigravityWorkspaces = connection.hasAntigravity() ? agy.workspaces : []
-          const opc = mergeOpencodeCatalog(opencodeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const claudeData = mergeClaudeCatalog(claudeCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const opencodeWorkspaces = connection.hasOpencode() ? opc.workspaces : []
-          const claudeWorkspaces = connection.hasClaude() ? claudeData.workspaces : []
-          const cursorSessions = state.sessions.filter(session => session.backend === 'cursor')
-          const antigravitySessions = agy.sessions
-          const pi = mergePiCatalog(piCatalog ?? { workspaces: [], sessions: [] }, state.workspaces, state.sessions)
-          const piWorkspaces = connection.hasPi() ? pi.workspaces : []
-          const piSessions = pi.sessions
-          const opencodeSessions = opc.sessions
-          const claudeSessions = claudeData.sessions
-          const combinedSessions = [...sessions, ...codexSessions, ...cursorSessions, ...antigravitySessions, ...piSessions, ...opencodeSessions, ...claudeSessions]
-          return {
-            codexAvailable: connection.hasCodex(),
-            cursorAvailable: connection.hasCursor(),
-            antigravityAvailable: connection.hasAntigravity(),
-            piAvailable: connection.hasPi(),
-            opencodeAvailable: connection.hasOpencode(),
-            claudeAvailable: connection.hasClaude(),
-            workspaces: [...workspaceList.items, ...codexWorkspaces, ...cursorWorkspaces, ...antigravityWorkspaces, ...piWorkspaces, ...opencodeWorkspaces, ...claudeWorkspaces],
-            archivedSessionIds: workspaceList.archivedSessionIds,
-            sessions: combinedSessions,
-            selectedSession: state.selectedSession === undefined
-              ? undefined
-              : combinedSessions.find(session => session.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
-            ...(codexError === undefined && agyError === undefined && piError === undefined && opencodeError === undefined && claudeError === undefined ? {} : { error: codexError ?? agyError ?? piError ?? opencodeError ?? claudeError }),
+          case 'codex': {
+            catalog = await loadCodexCatalog(scope.bind(() => connection.requireCodex()))
+            const saved = await loadSavedCodexPermissions(get().selectedDevice?.deviceId)
+            catalog.sessions = catalog.sessions.map(session => withBestCodexPermission(session,
+              get().sessions.find(item => item.sessionId === session.sessionId)
+                ?? (get().selectedSession?.sessionId === session.sessionId ? get().selectedSession : undefined), saved))
+            break
           }
-        })
+          case 'antigravity':
+            catalog = mergeAntigravityCatalog(await loadAntigravityCatalog(scope.bind(() => connection.requireAntigravity()), get().workspaces), get().workspaces, get().sessions)
+            break
+          case 'pi':
+            catalog = mergePiCatalog(await loadPiCatalog(scope.bind(() => connection.requirePi()), get().workspaces), get().workspaces, get().sessions)
+            break
+          case 'opencode':
+            catalog = mergeOpencodeCatalog(await loadOpencodeCatalog(scope.bind(() => connection.requireOpencode()), get().workspaces), get().workspaces, get().sessions)
+            break
+          case 'claude':
+            catalog = mergeClaudeCatalog(await loadClaudeCatalog(scope.bind(() => connection.requireClaude()), get().workspaces), get().workspaces, get().sessions)
+            break
+          case 'cursor':
+            catalog = { workspaces: get().workspaces.filter(item => item.backend === 'cursor'), sessions: get().sessions.filter(item => item.backend === 'cursor') }
+            break
+        }
+        if (!current()) return
+        set(state => ({
+          codexAvailable: connection.hasCodex(),
+          cursorAvailable: connection.hasCursor(),
+          antigravityAvailable: connection.hasAntigravity(),
+          piAvailable: connection.hasPi(),
+          opencodeAvailable: connection.hasOpencode(),
+          claudeAvailable: connection.hasClaude(),
+          workspaces: [...state.workspaces.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.workspaces],
+          sessions: [...state.sessions.filter(item => (item.backend ?? 'harness') !== backend), ...catalog.sessions],
+          ...(archivedSessionIds === undefined ? {} : { archivedSessionIds }),
+          selectedSession: catalog.sessions.find(item => item.sessionId === state.selectedSession?.sessionId) ?? state.selectedSession,
+          workspaceCatalog: { backend, loading: false },
+        }))
       } catch (error) {
         if (!current()) return
-        set({ error: friendlyError(error) })
+        // A category failure stays with that category, including late tab switches.
+        set({ workspaceCatalog: { backend, loading: false, error: friendlyError(error) } })
+      } finally {
+        if (scope.current() && refresh === refreshGeneration && get().workspaceCatalog?.loading) {
+          set({ workspaceCatalog: { backend, loading: false } })
+        }
       }
     },
 
@@ -352,8 +312,16 @@ export function createWorkspaceActions({ set, get, connection, getConnectionGene
     },
 
     async openFavoriteWorkspaceSession(key) {
-      const state = get()
+      let state = get()
       if (state.connection.phase !== 'connected') return undefined
+      const scope = captureConnection()
+      const shortcut = [...state.favoriteWorkspaces, ...state.recentWorkspaces]
+        .find(item => item.deviceId === state.selectedDevice?.deviceId && item.key === key)
+      const remembered = state.workspaces.find(item => workspaceStableKey(item, state.selectedDevice?.platform) === key)
+      const backend = shortcut?.backend ?? remembered?.backend ?? 'harness'
+      await state.refreshWorkspaces(backend)
+      state = get()
+      if (!scope.current() || state.workspaceCatalog?.backend !== backend || state.workspaceCatalog.error) return undefined
       const workspace = state.workspaces.find(item => workspaceStableKey(item, state.selectedDevice?.platform) === key)
       if (workspace === undefined) return undefined
       const session = latestWorkspaceSession(state.sessions, workspace, state.archivedSessionIds)

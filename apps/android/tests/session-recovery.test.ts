@@ -108,6 +108,7 @@ describe('Host-confirmed Harness archive recovery', () => {
     expect(await useAppStore.getState().openFavoriteWorkspaceSession(workspaceStableKey(workspace, 'linux'))).toEqual(other)
     await useAppStore.getState().disconnect()
     expect(await useAppStore.getState().connectDevice(device)).toBe(true)
+    await useAppStore.getState().refreshWorkspaces('harness')
     expect(useAppStore.getState().archivedSessionIds).toEqual(['s1'])
     expect(await useAppStore.getState().openFavoriteWorkspaceSession(workspaceStableKey(workspace, 'linux'))).toEqual(other)
     expect(openSession.mock.calls.every(([item]) => item.sessionId === 's2')).toBe(true)
@@ -469,6 +470,11 @@ describe('session restore state machine', () => {
       codex.subscribe.mockImplementation(async () => ({ streamId: `stream-${codex.subscribe.mock.calls.length}`, close: async () => undefined }))
       useAppStore.setState({ config: { baseUrl: 'https://example.invalid' } as never, identity: {} as never })
       expect(await useAppStore.getState().connectDevice({ deviceId: 'host' } as never)).toBe(true)
+      // Connecting probes availability; only opening CodeX loads its catalog.
+      expect(codex.request).not.toHaveBeenCalled()
+      expect(proxy.workspaceList).not.toHaveBeenCalled()
+      expect(proxy.sessionList).not.toHaveBeenCalled()
+      await useAppStore.getState().refreshWorkspaces('codex')
       const selected = useAppStore.getState().sessions.find(item => item.backend === 'codex')!
       expect(await useAppStore.getState().openSession(selected)).toBe(true)
       recovery.setActive(true)

@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
     'saveThemePreference', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
     'saveRecentWorkspaces', 'loadCodexPermissionPresets',
   ].map(name => [name, vi.fn()])),
-  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(),
+  createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(),
 }))
 vi.mock('expo-haptics', () => ({ notificationAsync: vi.fn(), NotificationFeedbackType: { Success: 'success' } }))
 vi.mock('../src/services/storage', () => mocks.storage)
@@ -29,6 +29,9 @@ vi.mock('../src/services/codex', async importOriginal => ({
 }))
 vi.mock('../src/services/antigravity', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/antigravity')>(), loadAntigravityCatalog: mocks.loadAgy,
+}))
+vi.mock('../src/services/claude', async importOriginal => ({
+  ...await importOriginal<typeof import('../src/services/claude')>(), loadClaudeCatalog: mocks.loadClaude,
 }))
 vi.mock('../src/services/pi', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/pi')>(), loadPiCatalog: mocks.loadPi,
@@ -186,8 +189,8 @@ function workspaceFixture() {
   }
   const runtime = {
     refreshBackends: vi.fn(), requireProxy: () => backend === proxy ? proxy : backend,
-    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true,
-    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend,
+    hasCodex: () => false, hasCursor: () => true, hasAntigravity: () => true, hasPi: () => true, hasOpencode: () => true, hasClaude: () => true,
+    requireCodex: () => backend, requireAntigravity: () => backend, requirePi: () => backend, requireOpencode: () => backend, requireClaude: () => backend,
   }
   backend = proxy
   const close = vi.fn(async () => undefined)
@@ -208,6 +211,46 @@ function createResponse(backend: typeof backendCases[number], id: string) {
 }
 
 describe('workspace operation isolation', () => {
+  it('loads only the requested backend and keeps other catalogs and failures isolated', async () => {
+    const loaders = { codex: mocks.loadCodex, antigravity: mocks.loadAgy, pi: mocks.loadPi, opencode: mocks.loadOpencode, claude: mocks.loadClaude }
+    await runScenarios((['harness', 'codex', 'cursor', 'antigravity', 'pi', 'opencode', 'claude'] as const).flatMap(backend =>
+      ['success', 'error'].map(outcome => ({ name: `${backend}/${outcome}`, run: async () => {
+        const fixture = workspaceFixture()
+        const other = workspace('other', backend === 'codex' ? 'harness' : 'codex')
+        fixture.set({ workspaces: [other], error: 'unrelated error' })
+        const loader = backend === 'harness' ? fixture.proxy.workspaceList : backend === 'cursor' ? undefined : loaders[backend]
+        if (outcome === 'error') loader?.mockRejectedValueOnce(new Error('category unavailable'))
+        else loader?.mockResolvedValueOnce(backend === 'harness'
+          ? { items: [workspace('loaded')], archivedSessionIds: [] }
+          : { workspaces: [workspace('loaded', backend)], sessions: [] })
+        await fixture.get().refreshWorkspaces(backend)
+        expect(fixture.proxy.workspaceList).toHaveBeenCalledTimes(backend === 'harness' ? 1 : 0)
+        for (const [name, load] of Object.entries(loaders)) expect(load).toHaveBeenCalledTimes(backend === name ? 1 : 0)
+        expect(fixture.get().workspaces).toContainEqual(other)
+        expect(fixture.get().error).toBe('unrelated error')
+        expect(fixture.get().workspaceCatalog).toEqual({ backend, loading: false,
+          ...(outcome === 'error' && backend !== 'cursor' ? { error: 'category unavailable' } : {}) })
+      } }))), prepare)
+  })
+
+  it('ignores catalog results and failures after another category opens', async () => {
+    await runScenarios(['success', 'error'].map(outcome => ({ name: outcome, run: async () => {
+      const fixture = workspaceFixture()
+      const old = deferred<any>()
+      mocks.loadOpencode.mockReturnValueOnce(old.promise)
+      const pending = fixture.get().refreshWorkspaces('opencode')
+      await vi.waitFor(() => expect(mocks.loadOpencode).toHaveBeenCalledOnce())
+      mocks.loadCodex.mockResolvedValueOnce({ workspaces: [workspace('selected', 'codex')], sessions: [] })
+      await fixture.get().refreshWorkspaces('codex')
+      const expected = fixture.get()
+      if (outcome === 'success') old.resolve({ workspaces: [workspace('retired', 'opencode')], sessions: [] })
+      else old.reject(new Error('retired category failure'))
+      await pending
+      expect(fixture.get()).toEqual(expected)
+      expect(fixture.get().workspaceCatalog).toEqual({ backend: 'codex', loading: false })
+    } })), prepare)
+  })
+
   it('rejects stale creation success/errors for every asynchronous backend and preserves successor state', async () => {
     await runScenarios(backendCases.flatMap(backend => ['host', 'backend', 'account', 'new-operation', 'busy', 'offline'].flatMap(change => ['success', 'error'].map(outcome => ({
       name: `${backend}/${change}/${outcome}`, run: async () => {

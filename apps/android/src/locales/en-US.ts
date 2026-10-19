@@ -114,6 +114,7 @@ const enUS = {
   time: { unavailable: 'Update time unavailable', lastSeenUnavailable: 'Active time unavailable', lastActive: (value: string) => `Active ${value}`, now: 'just now', justNow: 'Updated just now', minutesAgo: (n: number) => `${n} min ago`, hoursAgo: (n: number) => `${n} hr ago`, updatedSuffix: '', locale: 'en-US' },
   transport: { auto: 'Automatic (recommended)', autoDescription: 'Tries direct P2P first, then TURN or the server relay when needed', turn: 'Prefer TURN', turnDescription: 'Prioritizes TURN relay for stability on restricted networks', relay: 'Server relay only', relayDescription: 'Routes all data through the DSH Remote server relay' },
   workspaces: {
+    loadFailed: 'Could not load workspaces',
     offlineBody: 'Reconnect to your computer to view workspaces and conversations.',
     reconnectingBody: 'Restoring the connection and loading workspaces and conversations. Please wait.',
     title: 'Workspaces', create: 'New workspace', type: 'Workspace type', dsh: 'DSH', deviceTitle: (name: string) => name, deviceInfo: 'Device and connection information',

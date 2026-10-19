@@ -98,7 +98,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false }
   const refresh = async () => {
     if (refreshing || busy !== undefined || !connected) return
     setRefreshing(true)
-    try { await refreshWorkspaces() } finally { setRefreshing(false) }
+    try { await refreshWorkspaces(selected?.backend ?? 'harness') } finally { setRefreshing(false) }
   }
 
   const pane = <>

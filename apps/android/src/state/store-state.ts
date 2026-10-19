@@ -2,6 +2,7 @@ import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
 import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
+  AgentBackend,
   AgentPresetOption,
   ChatItem,
   ChatMessage,
@@ -62,6 +63,7 @@ export interface AppState {
   piAvailable: boolean
   opencodeAvailable: boolean
   claudeAvailable: boolean
+  workspaceCatalog?: { backend: AgentBackend; loading: boolean; error?: string }
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
   /** Newest first; the home screen falls back to these when Favorites is empty. */
@@ -118,7 +120,7 @@ export interface AppState {
   pollQrLogin(baseUrl: string, qrId: string): Promise<OAuthQrPollResult | undefined>
   completeQrLogin(baseUrl: string, token: string, method: RedirectLoginMethod): Promise<boolean>
   refreshDevices(): Promise<void>
-  refreshWorkspaces(): Promise<void>
+  refreshWorkspaces(backend?: AgentBackend): Promise<void>
   refreshSessionStatus(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   resumeConnection(): Promise<void>
@@ -175,7 +177,7 @@ export const disconnected: ConnectionSnapshot = {
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaces' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
@@ -194,6 +196,7 @@ export function initialData(): Pick<AppState,
     piAvailable: false,
     opencodeAvailable: false,
     claudeAvailable: false,
+    workspaceCatalog: undefined,
     workspaces: [],
     favoriteWorkspaces: [],
     recentWorkspaces: [],

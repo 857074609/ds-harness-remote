@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
+import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -34,7 +34,6 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
-  useLiveSessionStatus()
   const connection = useAppStore(state => state.connection)
   const reconnect = useAppStore(state => state.reconnect)
   const connected = connection.phase === 'connected'
@@ -47,6 +46,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const opencodeAvailable = useAppStore(state => state.opencodeAvailable)
   const claudeAvailable = useAppStore(state => state.claudeAvailable)
   const workspaces = useAppStore(state => state.workspaces)
+  const workspaceCatalog = useAppStore(state => state.workspaceCatalog)
   const sessions = useAppStore(state => state.sessions)
   const archivedSessionIds = useAppStore(state => state.archivedSessionIds)
   const busy = useAppStore(state => state.busyAction)
@@ -56,13 +56,17 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const workspaceMove = useAppStore(state => state.workspaceMove)
   const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
   const toggleFavoriteWorkspace = useAppStore(state => state.toggleFavoriteWorkspace)
+  const recentWorkspaces = useAppStore(state => state.recentWorkspaces)
+  const shortcutBackend = [...favoriteWorkspaces, ...recentWorkspaces].find(item =>
+    item.deviceId === selectedDevice?.deviceId && item.key === focusWorkspaceKey)?.backend
   const refreshWorkspaces = useAppStore(state => state.refreshWorkspaces)
   const createSession = useAppStore(state => state.createSession)
   const openSession = useAppStore(state => state.openSession)
   const archiveSession = useAppStore(state => state.archiveSession)
+  const [backendReady, setBackendReady] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const [activeBackend, setActiveBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'>(() => initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable))
+  const [activeBackend, setActiveBackend] = useState<'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'>(() => shortcutBackend ?? initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable))
   const [searchQuery, setSearchQuery] = useState('')
   const [renameTarget, setRenameTarget] = useState<WorkspaceView | undefined>(undefined)
   const [actionsTarget, setActionsTarget] = useState<WorkspaceView | undefined>(undefined)
@@ -70,6 +74,8 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const [allSessionsWorkspaceKeys, setAllSessionsWorkspaceKeys] = useState<ReadonlySet<string>>(() => new Set())
   const [focusedWorkspaceKey, setFocusedWorkspaceKey] = useState<string | undefined>(undefined)
   const [openSessionId, setOpenSessionId] = useState<string>()
+  const backendSelectionVersion = useRef(0)
+  useLiveSessionStatus(backendReady && activeBackend === 'harness')
   const scrollRef = useRef<ScrollView>(null)
   const workspaceOffsets = useRef(new Map<string, number>())
   const pendingScrollKey = useRef<string | undefined>(undefined)
@@ -95,7 +101,9 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   useEffect(() => {
     const deviceId = selectedDevice?.deviceId
     let cancelled = false
-    setActiveBackend(initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable))
+    const selectionVersion = backendSelectionVersion.current
+    setBackendReady(false)
+    setActiveBackend(shortcutBackend ?? initialWorkspaceBackend(workspaces, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable))
     setSearchQuery('')
     setCollapsedWorkspaceIds(new Set())
     setAllSessionsWorkspaceKeys(new Set())
@@ -105,6 +113,8 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
       // A home-screen shortcut owns the visible tab on the first render.
       if (
         !cancelled
+        && focusWorkspaceKey === undefined
+        && selectionVersion === backendSelectionVersion.current
         && !focusApplied.current
         && backend !== undefined
         && (backend !== 'codex' || codexAvailable)
@@ -114,7 +124,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
         && (backend !== 'opencode' || opencodeAvailable)
         && (backend !== 'claude' || claudeAvailable)
       ) setActiveBackend(backend)
-    })
+    }).catch(() => {}).finally(() => { if (!cancelled) setBackendReady(true) })
     void loadCollapsedWorkspaceIds(deviceId).then(workspaceIds => {
       if (cancelled) return
       const next = new Set(workspaceIds)
@@ -127,11 +137,16 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     return () => { cancelled = true }
   }, [selectedDevice?.deviceId, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable])
 
+  useEffect(() => {
+    if (connected && backendReady) void refreshWorkspaces(activeBackend)
+  }, [connected, backendReady, activeBackend, selectedDevice?.deviceId, refreshWorkspaces])
+
   const favoriteKeys = new Set(favoriteWorkspaces
     .filter(favorite => favorite.deviceId === selectedDevice?.deviceId)
     .map(favorite => favorite.key))
 
   const selectBackend = (backend: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude') => {
+    ++backendSelectionVersion.current
     setActiveBackend(backend)
     const deviceId = selectedDevice?.deviceId
     if (deviceId !== undefined) void saveWorkspaceBackend(deviceId, backend)
@@ -151,7 +166,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     if (focusWorkspaceKey === undefined || focusApplied.current) return
     const workspace = workspaces.find(item => workspaceStableKey(item, selectedDevice?.platform) === focusWorkspaceKey)
     if (workspace === undefined) {
-      if (workspaces.length === 0) return
+      if (!backendReady || workspaceCatalog?.backend !== activeBackend || workspaceCatalog.loading || workspaceCatalog.error) return
       focusApplied.current = true
       useAppStore.setState({ error: zhCN.workspaces.favoriteUnavailable })
       return
@@ -181,7 +196,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     })
     setFocusedWorkspaceKey(focusWorkspaceKey)
     scrollToWorkspace(focusWorkspaceKey)
-  }, [activeBackend, focusWorkspaceKey, selectedDevice?.deviceId, selectedDevice?.platform, workspaces])
+  }, [activeBackend, backendReady, workspaceCatalog, focusWorkspaceKey, selectedDevice?.deviceId, selectedDevice?.platform, workspaces])
 
   useEffect(() => {
     if (focusedWorkspaceKey === undefined) return
@@ -234,7 +249,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     if (refreshing) return
     setRefreshing(true)
     try {
-      await refreshWorkspaces()
+      await refreshWorkspaces(activeBackend)
     } finally {
       setRefreshing(false)
     }
@@ -255,6 +270,8 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     ],
   )
 
+  const catalogLoading = !backendReady || workspaceCatalog?.backend !== activeBackend || workspaceCatalog.loading
+  const catalogError = workspaceCatalog?.backend === activeBackend ? workspaceCatalog.error : undefined
   const backendWorkspaces = workspaces.filter(workspace => matchesWorkspaceBackend(workspace, activeBackend))
   const manageableWorkspaces = activeBackend === 'codex' ? [] : backendWorkspaces
   const showBackendTabs = codexAvailable || cursorAvailable || antigravityAvailable || piAvailable || opencodeAvailable || claudeAvailable
@@ -436,8 +453,16 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
               )}
             </View>
           )}
+          {catalogError !== undefined && <EmptyState
+            icon={CircleAlert}
+            title={zhCN.workspaces.loadFailed}
+            body={catalogError}
+            action={<Button label={zhCN.common.retry} icon={RefreshCw} onPress={() => void refresh()} />}
+          />}
           {backendWorkspaces.length === 0
-            ? <View style={!showBackendTabs ? styles.contentTop : undefined}>
+            ? catalogLoading
+              ? <ActivityIndicator style={{ margin: spacing.lg }} color={colors.primary} accessibilityLabel={zhCN.workspaces.loading} />
+              : catalogError !== undefined ? null : <View style={!showBackendTabs ? styles.contentTop : undefined}>
                 <EmptyState
                   icon={FolderOpen}
                   title={zhCN.workspaces.emptyTitle}

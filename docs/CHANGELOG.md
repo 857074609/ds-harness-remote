@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Load Android workspace/session catalogs only for the opened backend category; connection setup now probes availability without loading every backend. Refresh stays within the current category, category failures stay inline, and retired category requests cannot replace the current list or error. Home shortcuts load only their target backend. Type checking, 147 Android tests and APK build passed; the attached phone verified CodeX/OpenCode category switching and CodeX refresh without the OpenCode failure banner. OpenCode still returns its existing upstream internal error when opened.
+- Android 工作区/会话目录改为点击顶部分类后按需加载；连接设备仅探测可用能力，不再预加载所有后端。下拉仅刷新当前分类，错误显示在对应分类内，切换后忽略旧分类迟到结果；首页快捷入口仅加载目标后端。类型检查、147 个 Android 测试和 APK 构建通过；已连接手机验证 CodeX/OpenCode 分类切换及 CodeX 下拉刷新，OpenCode 错误不再跨分类显示。打开 OpenCode 后，其既有上游内部错误仍存在。
+
 - Place Android's global error banner below the system safe-area inset with its own overlay layer; expand close/retry targets to at least 44 dp so status-bar gestures and screen headers cannot block dismissal. Native device acceptance remains pending.
 - Android 全局错误条按系统安全区移到状态栏下方，以独立浮层显示；关闭/重试按钮点击区域至少 44 dp，避免系统状态栏和页面标题栏遮挡点击。原生真机验收待完成。
 - Keep the Android chat at the latest reply when keyboard/composer layout or measured message content changes. Only user scrolling changes follow intent; coalesce scroll commands with a trailing update so the final reply measurement is retained. Type checking and APK build passed; after an in-place install, the user confirmed on the attached phone that opening the keyboard keeps the reply bottom visible and scrolling up preserves the reading position.

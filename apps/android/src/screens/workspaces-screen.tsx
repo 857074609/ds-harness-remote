@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, Search, Sparkles, Star, Trash2, X } from 'lucide-react-native'
+import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -26,14 +26,19 @@ const FAVORITE_HIGHLIGHT_MS = 2400
 const DIRECTORY_SHEET_COMPACT_RATIO = 0.92
 const DIRECTORY_SHEET_RATIO = 0.75
 
-export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspaceKey }: {
+export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInfo, focusWorkspaceKey }: {
   onBack?: () => void
+  onOpenDevices: () => void
   onSession: (session: RemoteSession) => void
   onDeviceInfo: () => void
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
   useLiveSessionStatus()
+  const connection = useAppStore(state => state.connection)
+  const reconnect = useAppStore(state => state.reconnect)
+  const connected = connection.phase === 'connected'
+  const reconnecting = connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const selectedDevice = useAppStore(state => state.selectedDevice)
   const codexAvailable = useAppStore(state => state.codexAvailable)
   const cursorAvailable = useAppStore(state => state.cursorAvailable)
@@ -78,6 +83,14 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
   const collapsedLoaded = useRef(false)
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+
+  useEffect(() => {
+    if (connected) return
+    setCreateOpen(false)
+    setRenameTarget(undefined)
+    setActionsTarget(undefined)
+    setOpenSessionId(undefined)
+  }, [connected])
 
   useEffect(() => {
     const deviceId = selectedDevice?.deviceId
@@ -267,6 +280,38 @@ export function WorkspacesScreen({ onBack, onSession, onDeviceInfo, focusWorkspa
     void workspaceMove(actionsTarget.workspaceId, beforeWorkspaceId)
   }
 
+
+  // Capability flags and catalogs may be cleared while recovering. Only an
+  // authenticated, loaded connection can establish that a workspace list is empty.
+  if (!connected) return (
+    <View style={styles.flex}>
+      <BlurHeaderFrame header={<TopBar
+        title={selectedDevice?.name ?? zhCN.workspaces.noDevice}
+        titleLines={2}
+        onTitlePress={selectedDevice === undefined ? undefined : onDeviceInfo}
+        onBack={onBack}
+      />}>
+        <Screen>
+          <View style={styles.contentTop}>
+            <EmptyState
+              icon={reconnecting ? RefreshCw : WifiOff}
+              title={reconnecting ? zhCN.devices.connecting : selectedDevice === undefined ? zhCN.workspaces.noDevice : zhCN.devices.connectionInterrupted}
+              body={reconnecting ? zhCN.workspaces.reconnectingBody : connection.error ?? zhCN.workspaces.offlineBody}
+              action={<View style={{ gap: spacing.sm }}>
+                {selectedDevice !== undefined && <Button
+                  label={zhCN.devices.retryConnection}
+                  icon={RefreshCw}
+                  loading={reconnecting}
+                  onPress={() => void reconnect({ restoreSession: false })}
+                />}
+                <Button label={zhCN.app.backToDevices} variant="secondary" onPress={onOpenDevices} />
+              </View>}
+            />
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
+    </View>
+  )
 
   return (
     <View style={styles.flex}>

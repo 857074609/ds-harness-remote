@@ -339,8 +339,8 @@ export function ErrorBanner({ message, onDismiss, onRetry }: { message: string; 
     <View accessibilityRole="alert" style={styles.errorBanner}>
       <AlertCircle size={20} color={colors.danger} />
       <Text style={styles.errorBannerText}>{message}</Text>
-      {onRetry !== undefined && <Pressable accessibilityRole="button" onPress={onRetry}><Text style={styles.errorAction}>{zhCN.common.retry}</Text></Pressable>}
-      {onDismiss !== undefined && <Pressable accessibilityRole="button" onPress={onDismiss}><Text style={styles.errorAction}>{zhCN.common.close}</Text></Pressable>}
+      {onRetry !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={zhCN.common.retry} style={styles.errorButton} onPress={onRetry}><Text style={styles.errorAction}>{zhCN.common.retry}</Text></Pressable>}
+      {onDismiss !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={zhCN.common.close} style={styles.errorButton} onPress={onDismiss}><Text style={styles.errorAction}>{zhCN.common.close}</Text></Pressable>}
     </View>
   )
 }
@@ -496,8 +496,9 @@ function createStyles(colors: ThemeColors) {
     badge: { height: 28, paddingHorizontal: 10, borderRadius: radius.pill, flexDirection: 'row', alignItems: 'center', gap: 6 },
     badgeDot: { width: 7, height: 7, borderRadius: radius.pill },
     badgeText: { ...type.caption },
-    errorBanner: { marginHorizontal: spacing.lg, marginTop: spacing.sm, borderRadius: radius.md, padding: spacing.sm, backgroundColor: colors.dangerSoft, flexDirection: 'row', alignItems: 'flex-start', gap: spacing.xs },
-    errorBannerText: { ...type.small, color: colors.ink, flex: 1 },
+    errorBanner: { marginHorizontal: spacing.lg, marginTop: spacing.sm, borderRadius: radius.md, padding: spacing.sm, backgroundColor: colors.dangerSoft, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+    errorBannerText: { ...type.small, color: colors.ink, flex: 1, minWidth: 0 },
+    errorButton: { minWidth: 44, minHeight: 44, flexShrink: 0, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xs },
     errorAction: { ...type.smallStrong, color: colors.danger, paddingVertical: 2 },
     emptyState: { paddingVertical: 56, alignItems: 'center', paddingHorizontal: spacing.xl },
     emptyIcon: { width: 52, height: 52, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },

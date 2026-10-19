@@ -9,7 +9,7 @@ import { radius, spacing, type, type ThemeColors } from '../ui/theme'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
-import { MessageActions, messageClock } from './message-actions'
+import { MessageActions, messageClock, messageTime } from './message-actions'
 
 type Category = 'all' | 'system' | 'user' | 'context' | 'assistant' | 'tool'
 const CATEGORIES = ['all', 'system', 'user', 'context', 'assistant', 'tool'] as const
@@ -84,6 +84,7 @@ const TrajectoryEntry = memo(function TrajectoryEntry({ item, renderItem, render
   const kind = category(item)
   const Icon = CATEGORY_ICONS[kind]
   const message = item.kind === 'message' ? item : undefined
+  const time = messageTime(item)
   const label = strings.trajectory[kind]
   const preview = message === undefined ? '' : (message.text.trim() || message.reasoning?.trim()
     || ((message.images?.length ?? 0) > 0 ? strings.chat.unnamedImage : strings.trajectory.noText))
@@ -92,7 +93,7 @@ const TrajectoryEntry = memo(function TrajectoryEntry({ item, renderItem, render
     <Icon size={14} color={colors.muted} />
     <Text style={styles.role}>{label}</Text>
     {item.turn !== undefined && <Text numberOfLines={1} style={styles.turn}>{strings.trajectory.turn} {item.turn}</Text>}
-    <Text style={styles.time}>{messageClock(item.nativeTime)}</Text>
+    {time !== undefined && <Text style={styles.time}>{messageClock(time)}</Text>}
     {message !== undefined && (expanded ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />)}
   </View>
   return <View style={styles.entry}>

@@ -369,12 +369,13 @@ export function mergeAcpHistoryAndLive(history: ChatItem[], live: ChatItem[]): C
       // keep their IDs so subsequent chunks update rather than duplicate them.
       const overlap = live.slice(0, count).map((item, index) => {
         const previous = suffix[index]!
+        const nativeTime = item.nativeTime ?? previous.nativeTime
         return item.kind === 'tool' && previous.kind === 'tool'
           ? { ...previous, ...item,
               state: item.state === 'running' && previous.state !== 'running' ? previous.state : item.state,
               arguments: item.arguments ?? previous.arguments,
               callDetail: item.callDetail ?? previous.callDetail, resultDetail: item.resultDetail ?? previous.resultDetail }
-          : item
+          : nativeTime === undefined ? item : { ...item, nativeTime }
       })
       return [...history.slice(0, history.length - count), ...overlap, ...live.slice(count)]
     }
@@ -392,7 +393,7 @@ export function foldAcpHistory(events: unknown[], sessionId: string): ChatItem[]
     const event: NativeSessionEvent = {
       type: raw.type,
       seq: typeof raw.seq === 'number' && Number.isSafeInteger(raw.seq) && raw.seq >= 0 ? raw.seq : index,
-      time: typeof raw.time === 'number' && Number.isFinite(raw.time) ? raw.time : Date.now(),
+      time: typeof raw.time === 'number' && Number.isFinite(raw.time) && raw.time > 0 ? raw.time : 0,
       data: raw.data,
     }
     entries.push({ event })

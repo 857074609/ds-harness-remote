@@ -286,8 +286,12 @@ export function codexThreadId(session: RemoteSession): string {
 
 export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
   const output: ChatItem[] = []
-  items.forEach((item, index) => {
-    const createdAt = item.createdAt ?? index
+  items.forEach(item => {
+    // Missing upstream time stays unknown until a live row is first received.
+    // Array positions are ordering hints, never wall-clock timestamps.
+    const createdAt = typeof item.createdAt === 'number' && Number.isFinite(item.createdAt) && item.createdAt > 0
+      ? item.createdAt : 0
+    const nativeTime = createdAt > 0 ? { nativeTime: createdAt } : {}
     if (item.kind === 'message' && item.role !== undefined) {
       output.push({
         kind: 'message',
@@ -300,6 +304,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         ...(item.images === undefined || item.images.length === 0 ? {} : { images: item.images }),
         ...(item.role === 'assistant' && item.status === 'running' ? { streaming: true as const } : {}),
         createdAt,
+        ...nativeTime,
       })
       return
     }
@@ -311,13 +316,14 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         reasoning: item.text ?? '',
         ...(item.status === 'running' ? { streaming: true as const, streamingPhase: 'reasoning' as const } : {}),
         createdAt,
+        ...nativeTime,
       })
       return
     }
     if (item.kind === 'error') {
       output.push({
         kind: 'message', id: item.id, sessionId: item.sessionId, role: 'assistant',
-        text: item.text ?? strings.chat.codexError, createdAt,
+        text: item.text ?? strings.chat.codexError, createdAt, ...nativeTime,
       })
       return
     }
@@ -332,6 +338,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         ...(typeof item.details?.reason === 'string' ? { reason: item.details.reason } : {}),
         ...(item.status === 'running' ? {} : { outcome: 'unavailable' as const }),
         createdAt,
+        ...nativeTime,
       })
       return
     }
@@ -354,6 +361,7 @@ export function codexItemsToChat(items: DisplayHistoryItem[]): ChatItem[] {
         ? 'failed'
         : item.status === 'running' ? 'running' : 'finished',
       createdAt,
+      ...nativeTime,
     })
   })
   return output
@@ -384,12 +392,22 @@ export function mergeCodexLive(current: ChatItem[], live: ChatItem[]): ChatItem[
       if (optimistic >= 0) {
         const local = next[optimistic]
         if (local?.kind === 'message' && local.images !== undefined) item = { ...item, images: local.images }
+        if (local !== undefined && item.createdAt <= 0) item = { ...item, createdAt: local.createdAt }
         next.splice(optimistic, 1)
       }
     }
     const index = next.findIndex(value => value.id === item.id)
-    if (index < 0) next.push(item)
-    else next[index] = preserveLocalOutcome(next[index]!, item)
+    if (index < 0) next.push(item.createdAt > 0 ? item : { ...item, createdAt: Date.now() })
+    else {
+      const previous = next[index]!
+      // Re-projecting the live timeline must retain both the first receipt time
+      // and any authoritative time already supplied by the history baseline.
+      next[index] = preserveLocalOutcome(previous, {
+        ...item,
+        createdAt: item.createdAt > 0 ? item.createdAt : previous.createdAt,
+        ...(item.nativeTime !== undefined || previous.nativeTime === undefined ? {} : { nativeTime: previous.nativeTime }),
+      })
+    }
   }
   return next
 }

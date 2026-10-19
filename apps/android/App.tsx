@@ -90,6 +90,7 @@ function AppNavigator() {
   const route = routes[routes.length - 1]!
   const routeRef = useRef(route)
   routeRef.current = route
+  const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
@@ -289,7 +290,6 @@ function AppNavigator() {
 
   return (
     <View style={styles.flex}>
-      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && <ErrorBanner message={error} onDismiss={clearError} />}
       {route.name === 'server' && <ServerSetupScreen onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
       {route.name === 'devices' && (
         <DevicesScreen
@@ -322,6 +322,7 @@ function AppNavigator() {
       {route.name === 'device' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'devices' })} />}
       {route.name === 'workspaces' && <WorkspacesScreen
         onBack={backFromWorkspaces}
+        onOpenDevices={() => reset({ name: 'devices' })}
         onSession={() => push({ name: 'chat' })}
         focusWorkspaceKey={route.focusWorkspaceKey}
         onDeviceInfo={() => {
@@ -331,6 +332,11 @@ function AppNavigator() {
       {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
       {route.name === 'about' && <AboutScreen onBack={pop} />}
+      {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
+        <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
+          <ErrorBanner message={error} onDismiss={clearError} />
+        </View>
+      )}
       <HomeActionsMenu
         visible={homeMenuVisible}
         onClose={() => setHomeMenuOpen(false)}
@@ -414,6 +420,7 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
+  globalError: { position: 'absolute', left: 0, right: 0, zIndex: 10 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, backgroundColor: colors.background },
   loadingScreen: { flex: 1, width: '100%', maxWidth: 420, alignSelf: 'center', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.xxxl, paddingBottom: spacing.xxxl, backgroundColor: colors.background },
   loadingBrand: { alignItems: 'center' },

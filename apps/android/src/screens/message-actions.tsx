@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { AccessibilityInfo, Alert, Pressable, StyleSheet, Text, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
-import { Copy, GitBranch, ThumbsDown, ThumbsUp } from 'lucide-react-native'
-import type { ChatMessage } from '../types'
+import { Copy, GitBranch } from 'lucide-react-native'
+import type { ChatItemBase, ChatMessage } from '../types'
 import { useAppStore } from '../state/store'
 import { strings } from '../locales/i18n'
 import { useTheme } from '../ui/theme-context'
@@ -12,29 +12,34 @@ export function messageClock(time?: number): string {
   return new Date(time).toLocaleTimeString(strings.time.locale, { hour: '2-digit', minute: '2-digit', hour12: false })
 }
 
+/** History without an upstream timestamp must not inherit the time it was loaded. */
+export function messageTime(item: ChatItemBase): number | undefined {
+  if (item.nativeTime !== undefined && Number.isFinite(item.nativeTime) && item.nativeTime > 0) return item.nativeTime
+  if (item.nativeSeq === undefined && Number.isFinite(item.createdAt) && item.createdAt > 0) return item.createdAt
+  return undefined
+}
+
 /** Mutating icons only change after the official Host write has been read back. */
 export function MessageActions({ item }: { item: ChatMessage }) {
   const { colors } = useTheme()
   const connected = useAppStore(state => state.connection.phase === 'connected')
   const busy = useAppStore(state => state.busyAction !== undefined)
   // The row's own session, not whatever happens to be selected afterwards.
-  const backend = useAppStore(state =>
-    state.sessions.find(row => row.sessionId === item.sessionId)?.backend ?? state.selectedSession?.backend)
-  // Undelivered rows never entered the Host log: fork/rate would only ever
-  // answer "unavailable". Keep copy and the clock, drop the noise.
+  const harness = useAppStore(state => {
+    const session = state.sessions.find(row => row.sessionId === item.sessionId)
+      ?? (state.selectedSession?.sessionId === item.sessionId ? state.selectedSession : undefined)
+    return session !== undefined && (session.backend === undefined || session.backend === 'harness')
+  })
+  // Only delivered Harness messages have an official event prefix to fork.
   const pending = item.sendState !== undefined
-  const rate = useAppStore(state => state.rateMessage)
+  const supportsBranch = harness && item.nativeSeq !== undefined && Number.isSafeInteger(item.nativeSeq) && item.nativeSeq >= 0
+  const time = messageTime(item)
   const fork = useAppStore(state => state.forkChatMessage)
   const [copied, setCopied] = useState(false)
   const disabled = !connected || busy || item.streaming === true
   const report = () => Alert.alert(strings.messageActions.failed, useAppStore.getState().error ?? strings.messageActions.unavailable)
-  const rateReply = async (rating: 'positive' | 'negative') => {
-    if (backend === 'codex' || item.nativeSeq === undefined) { Alert.alert(strings.messageActions.unavailable); return }
-    if (!await rate(item, rating)) report()
-    else AccessibilityInfo.announceForAccessibility(strings.messageActions.feedbackSaved)
-  }
   const branch = async () => {
-    if (backend === 'codex' || item.nativeSeq === undefined) { Alert.alert(strings.messageActions.unavailable); return }
+    if (!supportsBranch) return
     Alert.alert(strings.messageActions.branch, undefined, [
       { text: strings.common.cancel, style: 'cancel' },
       { text: strings.messageActions.branch, onPress: () => { void fork(item).then(ok => { if (!ok) report() }) } },
@@ -48,20 +53,18 @@ export function MessageActions({ item }: { item: ChatMessage }) {
       [strings.messageActions.cacheRead, u.cacheReadTokens], [strings.messageActions.cacheWrite, u.cacheWriteTokens],
       [strings.messageActions.reasoning, u.reasoningTokens], [strings.messageActions.total, u.totalTokens],
     ] as const
-    Alert.alert(strings.messageActions.usage, rows.map(([label, value]) => `${label}: ${value ?? strings.messageActions.usageUnavailable}`).join('\n'))
+    Alert.alert(strings.messageActions.usage, rows.filter(([, value]) => value !== undefined).map(([label, value]) => `${label}: ${value}`).join('\n'))
   }
   const user = item.role === 'user'
   return <View style={[styles.row, user && styles.userRow]}>
-    {user && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(item.nativeTime)}</Text>}
+    {user && time !== undefined && <Text style={{ color: colors.muted, fontSize: 12 }}>{messageClock(time)}</Text>}
     <Pressable accessibilityRole="button" accessibilityLabel={copied ? strings.messageActions.copied : strings.messageActions.copy} disabled={item.text.length === 0} style={styles.icon} onPress={() => {
       void Clipboard.setStringAsync(item.text).then(() => { setCopied(true); AccessibilityInfo.announceForAccessibility(strings.messageActions.copied) }).catch(report)
     }}><Copy size={16} color={copied ? colors.primary : colors.muted} /></Pressable>
     {!user && !pending && <>
-    <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.good} accessibilityState={{ selected: item.feedback === 'positive', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('positive')}><ThumbsUp size={16} color={item.feedback === 'positive' ? colors.primary : colors.muted} /></Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.bad} accessibilityState={{ selected: item.feedback === 'negative', disabled }} disabled={disabled} style={styles.icon} onPress={() => void rateReply('negative')}><ThumbsDown size={16} color={item.feedback === 'negative' ? colors.primary : colors.muted} /></Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>
-    <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage?.totalTokens === undefined ? strings.messageActions.usageUnavailable : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>
-    <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, flexShrink: 1 }}>{messageClock(item.nativeTime)}</Text>
+    {supportsBranch && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.branch} accessibilityState={{ disabled }} disabled={disabled} style={styles.icon} onPress={() => void branch()}><GitBranch size={16} color={colors.muted} /></Pressable>}
+    {item.usage !== undefined && <Pressable accessibilityRole="button" accessibilityLabel={strings.messageActions.usage} style={styles.usage} onPress={showUsage}><Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11 }}>{item.usage.totalTokens === undefined ? strings.messageActions.usage : `${item.usage.totalTokens.toLocaleString()} tokens`}</Text></Pressable>}
+    {time !== undefined && <Text numberOfLines={1} style={{ color: colors.muted, fontSize: 11, flexShrink: 1 }}>{messageClock(time)}</Text>}
     </>}
   </View>
 }

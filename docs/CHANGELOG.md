@@ -1,5 +1,10 @@
 ## Unreleased
 
+- Repairs Android background connection service ownership: request Android 13+ notification permission, start before authentication awaits, keep RN timers eligible through a service-owned Headless JS task, and hold/release a partial CPU wake lock with the active carrier. Native startup failures reach the connection UI; retired connection callbacks cannot stop a replacement service.
+- 修复 Android 后台连接保活：补齐 Android 13+ 通知权限，在异步鉴权前启动服务，通过服务归属的 Headless JS task 保持 RN 定时器运行，并按连接生命周期持有/释放 CPU 部分唤醒锁。原生启动失败传回连接界面；旧连接的迟到回调不能停止新连接的服务。
+- On resume, verify a bounded encrypted capability round trip before retaining a locally open socket; restore the selected session through existing reconnect when unhealthy. Requires a rebuilt APK; screen-off/Doze/OEM device acceptance remains pending.
+- 返回应用时通过有界加密 capability 请求确认链路，半开连接走既有重连并恢复会话。需重建 APK；息屏、Doze 与厂商省电策略的真机验收待完成。
+
 ## 0.5.13 - 2026-10-19
 
 - Unifies all first-party package/client versions at `0.5.13`, matching tag `v0.5.13`; Android `versionCode` advances from `51` to `57`, skipping `52`–`56`, and Expo iOS `buildNumber` is `57`.

@@ -546,3 +546,21 @@ Host 验证工作区根目录。四个固定 RPC 为 open/chunk/commit/abort；�
 分块与每连接限额、空闲过期、取消/断线清理、排他临时文件和原子无覆盖发布属于该领域。
 聊天仍用普通文本路径引用，不新增消息 attachments。协议见 docs/protocol.md 对应章节。
 该例外覆盖本文件此前的通用文件写入禁止；不代表发布、部署或跨设备验收完成。
+
+## Android foreground connection service audit (2026-10-19)
+
+Android 在异步鉴权前启动连接服务；Expo config plugin 显式声明前台服务、通知与 WAKE_LOCK
+权限，Android 13+ 在前台连接时请求通知权限（拒绝不禁止服务，但通知栏隐藏通知）。原生服务
+绑定现有 ReactHost 的 Headless JS task，并仅在连接生命周期内持有 PARTIAL_WAKE_LOCK；
+断开、启动失败、原生销毁和 React instance invalidate 时释放。原生启动通过 Promise 确认，
+服务操作串行且按连接代次隔离，旧失败/关闭回调不能停止替换后的服务。任务等待按原生服务
+lifetime 隔离；不重启已被杀死的进程或创建无连接的常驻服务。
+
+回前台使用既有加密 `harness.transport.describe` 做最多五秒的健康检查；旧 Host 的
+METHOD_NOT_FOUND 回包同样证明链路可用。半开或检查中关闭的链路走既有重连/会话恢复，
+明确断开后的迟到检查不能恢复设备。需安装重新构建的 APK；该实现不绕过深度 Doze 或厂商
+省电限制。验证结果与真机待验收项见 apps/android/README.md 和 docs/TODO.md。
+
+本次 Android check、25 个测试文件 / 140 个测试、arm64 Release APK（含 Kotlin/Hermes）构建
+与 `git diff --check` 通过；Metro noble/hashes exports fallback 警告仍存在。本机无已连接设备，
+尚未验证通知授权 UI、后台/息屏心跳、Doze/厂商省电与真实跨设备恢复；未发布新版本。

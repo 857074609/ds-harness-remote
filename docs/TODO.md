@@ -13,6 +13,7 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 
 ## 2026-10-18 版本审查后续
 
+- [ ] Android 保活修复真机验收：安装重建 APK，确认通知权限与常驻通知、后台/息屏 1/5/15 分钟的 Relay/WebRTC 心跳与消息更新、回前台半开连接恢复、断开后通知与唤醒锁释放；覆盖默认/不受限制省电、Doze 与 Wi-Fi/蜂窝切换。本机类型/契约测试与原生编译不等于这些场景已通过。
 - [x] 修复 ACP/CodeX 异步结果隔离、归属回滚、旧 Prompt、OpenCode history reader、Pi 模型确认及文件预览内存限额；全仓 check、689 个测试及生产 build 通过。修复尚未发布。
 - [ ] 消除剩余 5 项依赖公告（4 high / 1 moderate）：Expo/xcode 的 uuid、Metro 的 image-size（2 项）及 braces、Expo CLI 的 node-forge。image-size/uuid 需要兼容升级；node-forge/braces 本轮 audit 尚无修复版本。不得直接覆盖不兼容大版本或将构建链依赖视为无风险。
 - [ ] 在 Windows、Android APK/真机、独立 Remote Web 与加密跨设备环境回归本轮断线/后端替换修复；本机 check/test/Hermes 构建不替代目标平台验收。

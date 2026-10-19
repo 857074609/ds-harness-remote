@@ -121,6 +121,7 @@ export interface AppState {
   refreshWorkspaces(): Promise<void>
   refreshSessionStatus(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
+  resumeConnection(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
   renameDevice(deviceId: string, name: string): Promise<boolean>

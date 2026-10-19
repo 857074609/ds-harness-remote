@@ -5,6 +5,8 @@ import { Context } from '@deepseek-ai/cordis'
 import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as remotePlugin from '../src/index.js'
+import type { Config } from '../src/config.js'
+import type { ControlRouteHandler } from '../src/control-route.js'
 
 const directories: string[] = []
 const disabledAgentDomains = { codex: { enabled: false }, acp: { enabled: false } }
@@ -16,6 +18,69 @@ afterEach(async () => {
 })
 
 describe('Cordis plugin lifecycle', () => {
+  it('switches Server authority live and cancels discovery belonging to the old Server', async () => {
+    const dshHome = await mkdtemp(join(tmpdir(), 'dsh-remote-server-switch-'))
+    directories.push(dshHome)
+    vi.stubEnv('DSH_HOME', dshHome)
+    let config: Config = { ...disabledAgentDomains, serverUrl: 'https://old.example.com' }
+    let handler!: ControlRouteHandler
+    let oldRequestSignal: AbortSignal | null | undefined
+    const requests: string[] = []
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (input, init) => {
+      const url = String(input)
+      requests.push(url)
+      if (url === 'https://old.example.com/api/v1/auth/oauth/providers') {
+        oldRequestSignal = init?.signal
+        return new Promise<Response>((_resolve, reject) => {
+          oldRequestSignal!.addEventListener('abort', () => reject(oldRequestSignal!.reason), { once: true })
+        })
+      }
+      if (url === 'https://new.example.com/api/v1/auth/oauth/providers') {
+        return Response.json({ items: [{ id: 'github', displayName: 'GitHub',
+          startUrl: '/api/v1/auth/oauth/github/start', qrStartUrl: '/api/v1/auth/oauth/qr/start?provider=github' }] })
+      }
+      return Response.json({ error: { code: 'AUTHORIZATION_REQUIRED', message: 'Sign in required' } }, { status: 401 })
+    }))
+    const ctx = new Context()
+    ctx.provide('settings', { register: () => ({
+      get: () => config, replace: async (value: Config) => { config = value },
+    }) } as never)
+    ctx.provide('apiProxy', apiProxy())
+    ctx.provide('typertGateway', typertGateway())
+    ctx.provide('connection', { rpc: { handle: (_channel: string, value: ControlRouteHandler) => {
+      handler = value
+      return async () => undefined
+    } } } as never)
+    const fiber = await ctx.plugin(remotePlugin, config)
+    const call = (endpoint: string, payload: unknown = {}) => handler(endpoint, payload, new AbortController().signal)
+    try {
+      await vi.waitFor(() => { expect(ctx.dshRemoteClient.status().serverUrl).toBe(config.serverUrl) })
+      const oldHost = ctx.dshRemote, oldClient = ctx.dshRemoteClient
+      const hostClose = vi.spyOn(oldHost, 'close'), clientClose = vi.spyOn(oldClient, 'close')
+      const pending = call('client.account.providers')
+      await vi.waitFor(() => { expect(oldRequestSignal).toBeDefined() })
+      await expect(call('settings.server.set', { serverUrl: 'https://new.example.com/' })).resolves.toMatchObject({
+        ok: true, value: { config: { serverUrl: 'https://new.example.com' }, applies: 'live', associations: {} },
+      })
+      expect(oldRequestSignal?.aborted).toBe(true)
+      await expect(pending).resolves.toMatchObject({ ok: false })
+      expect(hostClose).toHaveBeenCalledOnce()
+      expect(clientClose).toHaveBeenCalledOnce()
+      expect(ctx.dshRemote).not.toBe(oldHost)
+      expect(ctx.dshRemoteClient).not.toBe(oldClient)
+      expect(ctx.dshRemote.currentIdentity().deviceId).not.toBe(oldHost.currentIdentity().deviceId)
+      await expect(call('status')).resolves.toMatchObject({ ok: true, value: { serverUrl: 'https://new.example.com' } })
+      await expect(call('client.account.providers')).resolves.toMatchObject({ ok: true, value: [{ id: 'github' }] })
+      const newHost = ctx.dshRemote
+      await call('settings.server.set', { serverUrl: 'https://new.example.com' })
+      expect(ctx.dshRemote).toBe(newHost)
+      expect(requests.filter(url => url === 'https://new.example.com/api/v1/auth/oauth/providers')).toHaveLength(1)
+    } finally {
+      await fiber.dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
   it('does not block Harness startup while runtime services are unavailable', async () => {
     const ctx = new Context()
     const fiber = await ctx.plugin(remotePlugin, { ...disabledAgentDomains, deviceName: 'Cordis pending host' })

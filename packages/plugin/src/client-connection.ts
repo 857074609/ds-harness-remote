@@ -60,16 +60,24 @@ export class ClientConnection {
     this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: 'checking-host' }
     const identity = this.context.requireIdentity()
     let client: RemoteClientCore | undefined
+    // Keep cancellation attached through capability discovery as well as the
+    // handshake: the candidate is not yet owned by context.connected there.
+    const onAbort = () => { void client?.close().catch(() => undefined) }
+    signal?.addEventListener('abort', onAbort, { once: true })
     try {
       const serverDevice = (await this.context.server.listDevices()).find(device => device.deviceId === targetDeviceId)
+      signal?.throwIfAborted()
       if (serverDevice === undefined) {
         throw new ClientModeError('MEMBERSHIP_REQUIRED', 'The selected Host is not authorized for this account.')
       }
       this.updateConnectionProgress(progressRunId, 'authorizing-peer')
       const target = await this.authorizeHostPeer(serverDevice)
+      signal?.throwIfAborted()
       const presence = await this.context.server.presenceFor(targetDeviceId)
+      signal?.throwIfAborted()
       if (!presence.online) throw new ClientModeError('HOST_OFFLINE', 'The selected Host is offline.', true)
       const credentials = await this.context.server.authenticate(identity)
+      signal?.throwIfAborted()
       const rtcFactory = this.context.config.forceRelay
         ? undefined
         : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => undefined)
@@ -121,14 +129,8 @@ export class ClientConnection {
           transport = createTransport(attempt)
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity, target), 60_000)
           const attemptClient = client
-          const onAbort = () => { void attemptClient.close() }
-          signal?.addEventListener('abort', onAbort, { once: true })
-          try {
-            signal?.throwIfAborted()
-            await attemptClient.connect()
-          } finally {
-            signal?.removeEventListener('abort', onAbort)
-          }
+          signal?.throwIfAborted()
+          await attemptClient.connect()
           signal?.throwIfAborted()
         } finally {
           stopProgressTimer()
@@ -186,6 +188,7 @@ export class ClientConnection {
         })
       }
       const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion)
+      signal?.throwIfAborted()
       return {
         client: connectedClient,
         target,
@@ -199,6 +202,8 @@ export class ClientConnection {
       this.clearConnectionProgress(progressRunId)
       await client?.close().catch(() => undefined)
       throw error
+    } finally {
+      signal?.removeEventListener('abort', onAbort)
     }
   }
 

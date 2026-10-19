@@ -22268,16 +22268,24 @@ var ClientConnection = class {
     this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
     const identity2 = this.context.requireIdentity();
     let client;
+    const onAbort = () => {
+      void client?.close().catch(() => void 0);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     try {
       const serverDevice = (await this.context.server.listDevices()).find((device) => device.deviceId === targetDeviceId);
+      signal?.throwIfAborted();
       if (serverDevice === void 0) {
         throw new ClientModeError("MEMBERSHIP_REQUIRED", "The selected Host is not authorized for this account.");
       }
       this.updateConnectionProgress(progressRunId, "authorizing-peer");
       const target2 = await this.authorizeHostPeer(serverDevice);
+      signal?.throwIfAborted();
       const presence = await this.context.server.presenceFor(targetDeviceId);
+      signal?.throwIfAborted();
       if (!presence.online) throw new ClientModeError("HOST_OFFLINE", "The selected Host is offline.", true);
       const credentials = await this.context.server.authenticate(identity2);
+      signal?.throwIfAborted();
       const rtcFactory = this.context.config.forceRelay ? void 0 : await this.context.rtcFactoryProvider({ routeTargets: [this.context.server.baseUrl] }).catch(() => void 0);
       if (!this.context.config.forceRelay && rtcFactory === void 0) {
         this.context.logger.warn("remote Harness WebRTC backend unavailable; using relay", {
@@ -22323,16 +22331,8 @@ var ClientConnection = class {
           transport = createTransport(attempt);
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity2, target2), 6e4);
           const attemptClient = client;
-          const onAbort = () => {
-            void attemptClient.close();
-          };
-          signal?.addEventListener("abort", onAbort, { once: true });
-          try {
-            signal?.throwIfAborted();
-            await attemptClient.connect();
-          } finally {
-            signal?.removeEventListener("abort", onAbort);
-          }
+          signal?.throwIfAborted();
+          await attemptClient.connect();
           signal?.throwIfAborted();
         } finally {
           stopProgressTimer();
@@ -22390,6 +22390,7 @@ var ClientConnection = class {
         });
       }
       const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion);
+      signal?.throwIfAborted();
       return {
         client: connectedClient,
         target: target2,
@@ -22403,6 +22404,8 @@ var ClientConnection = class {
       this.clearConnectionProgress(progressRunId);
       await client?.close().catch(() => void 0);
       throw error;
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
   }
   beginAttemptProgress(runId, attempt) {
@@ -29538,8 +29541,16 @@ var ClientModeRuntime = class {
     this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
   }
-  connect(targetDeviceId, signal) {
-    return this.connection.connect(targetDeviceId, signal);
+  async connect(targetDeviceId, signal) {
+    const lifetime = this.remoteLifetime.signal;
+    const connectionSignal = signal === void 0 ? lifetime : AbortSignal.any([lifetime, signal]);
+    connectionSignal.throwIfAborted();
+    const remote = await this.connection.connect(targetDeviceId, connectionSignal);
+    if (connectionSignal.aborted || this.closed) {
+      await remote.client.close().catch(() => void 0);
+      throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
+    }
+    return remote;
   }
   handleControl(endpoint, payload, signal) {
     return this.control.handleControl(endpoint, payload, signal);
@@ -29563,6 +29574,7 @@ var ClientModeRuntime = class {
   connectionProgress;
   connectionProgressRun = 0;
   closed = false;
+  remoteLifetime = new AbortController();
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
@@ -29706,21 +29718,13 @@ var ClientModeRuntime = class {
     return result;
   }
   async clearClientAuthorization() {
-    const previous = this.connected;
-    this.connected = void 0;
-    this.connectionProgress = void 0;
-    this.pendingWorkspaceSelection = void 0;
-    await this.closeCodexVirtual();
+    const cleanup = this.leaveRemote();
     this.codexOpenedSessions.clear();
-    await this.closeCursorVirtual();
-    this.proxySwitch?.selectLocal();
-    await this.closePreview();
-    this.gatewaySwitch.selectLocal();
-    await this.codexStreamBridge.closeCodexStreams(previous?.client);
-    await previous?.client.close().catch(() => void 0);
-    await this.server.revokeCurrentDevice();
+    const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()]);
     this.identity = await this.identities.reset(this.config.deviceName);
     this.server.bindIdentity(this.identity);
+    const failure4 = results.find((result) => result.status === "rejected");
+    if (failure4?.status === "rejected") throw failure4.reason;
   }
   async setHostAuthorization(enabled) {
     if (this.host === void 0) throw new ClientModeError("METHOD_NOT_ALLOWED", "This plugin is not running as a Host.");
@@ -29734,23 +29738,14 @@ var ClientModeRuntime = class {
   }
   async setMode(mode2, targetDeviceId, signal) {
     if (mode2 === "local") {
-      await this.closeCodexVirtual();
-      await this.closeCursorVirtual();
-      this.proxySwitch?.selectLocal();
-      await this.closePreview();
-      this.gatewaySwitch.selectLocal();
-      const previous2 = this.connected;
-      this.connected = void 0;
-      this.connectionProgress = void 0;
-      this.pendingWorkspaceSelection = void 0;
-      await this.codexStreamBridge.closeCodexStreams(previous2?.client);
-      await previous2?.client.close().catch(() => void 0);
+      await this.leaveRemote();
       this.logger.info("Harness target switched", { mode: "local" });
       return this.status();
     }
     if (targetDeviceId === void 0 || targetDeviceId.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "A targetDeviceId is required for remote mode.");
     }
+    const lifetime = this.remoteLifetime.signal;
     const next = await this.connect(targetDeviceId, signal);
     try {
       this.assertRemoteCompatible(next);
@@ -29761,11 +29756,17 @@ var ClientModeRuntime = class {
     }
     const previous = this.connected;
     await this.closePreview();
+    if (lifetime.aborted || this.closed) {
+      await next.client.close().catch(() => void 0);
+      throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
+    }
     this.connected = next;
     this.connection.clearConnectionProgress(next.progressRunId);
     this.pendingWorkspaceSelection = void 0;
     await this.closeCodexVirtual();
+    this.assertRemoteCurrent(next, signal);
     await this.closeCursorVirtual();
+    this.assertRemoteCurrent(next, signal);
     this.selectRemoteTarget(next);
     await this.codexStreamBridge.closeCodexStreams(previous?.client);
     await previous?.client.close().catch(() => void 0);
@@ -29823,8 +29824,11 @@ var ClientModeRuntime = class {
       });
       workspace = unwrapNativeResult(response);
     }
+    this.assertRemoteCurrent(remote, signal);
     await this.closeCodexVirtual();
+    this.assertRemoteCurrent(remote, signal);
     await this.closeCursorVirtual();
+    this.assertRemoteCurrent(remote, signal);
     this.selectRemoteTarget(remote, transport);
     const workspaceId = workspaceRecordId(workspace.workspace);
     this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
@@ -29906,6 +29910,7 @@ var ClientModeRuntime = class {
       idempotencyKey: uuidV7()
     }, signal));
     const project = record2(result.project);
+    this.assertRemoteCurrent(remote, signal);
     if (typeof project.id !== "string" || project.id.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "The Host returned an invalid CodeX project.");
     }
@@ -29937,23 +29942,32 @@ var ClientModeRuntime = class {
     }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [], new RemoteTypertGateway2(remote.client));
     let workspace;
     try {
-      workspace = await virtual.selectWorkspace(workspaceId);
-    } catch {
+      try {
+        workspace = await virtual.selectWorkspace(workspaceId);
+      } catch {
+        this.assertRemoteCurrent(remote, signal);
+        throw new ClientModeError("WORKSPACE_NOT_FOUND", `The selected ${backend} workspace is no longer available.`);
+      }
+      this.assertRemoteCurrent(remote, signal);
+      await this.closeCodexVirtual();
+      this.assertRemoteCurrent(remote, signal);
+      await this.closeCursorVirtual();
+      this.assertRemoteCurrent(remote, signal);
+      const preferredSessionId = await virtual.preferredSessionId();
+      this.assertRemoteCurrent(remote, signal);
+      this.cursorVirtual = virtual;
+      this.acpVirtualBackend = backend;
+      this.selectCursorTarget(virtual, remote);
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId: workspace.workspaceId,
+        backend,
+        ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
+      };
+    } catch (error) {
       await virtual.close();
-      throw new ClientModeError("WORKSPACE_NOT_FOUND", `The selected ${backend} workspace is no longer available.`);
+      throw error;
     }
-    await this.closeCodexVirtual();
-    await this.closeCursorVirtual();
-    this.cursorVirtual = virtual;
-    this.acpVirtualBackend = backend;
-    this.selectCursorTarget(virtual, remote);
-    const preferredSessionId = await virtual.preferredSessionId();
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId: workspace.workspaceId,
-      backend,
-      ...preferredSessionId === void 0 ? {} : { sessionId: preferredSessionId }
-    };
     this.logger.info(`${backend} virtual workspace opened`, { targetDeviceId: shortId(remote.target.deviceId) });
     return { ...this.status(), workspace };
   }
@@ -29970,19 +29984,27 @@ var ClientModeRuntime = class {
       deviceId: remote.target.deviceId,
       name: remote.target.name
     }, backend, remote.features.acpModelLoadsSession ? ["agent.acp.antigravity.model-load.v1"] : [], new RemoteTypertGateway2(remote.client));
-    const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
-    await this.closeCodexVirtual();
-    await this.closeCursorVirtual();
-    this.cursorVirtual = virtual;
-    this.acpVirtualBackend = backend;
-    this.selectCursorTarget(virtual, remote);
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId: workspace.workspaceId,
-      backend
-    };
-    this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) });
-    return { ...this.status(), workspace };
+    try {
+      const workspace = await virtual.selectOrCreateWorkspace(trimmedPath);
+      this.assertRemoteCurrent(remote, signal);
+      await this.closeCodexVirtual();
+      this.assertRemoteCurrent(remote, signal);
+      await this.closeCursorVirtual();
+      this.assertRemoteCurrent(remote, signal);
+      this.cursorVirtual = virtual;
+      this.acpVirtualBackend = backend;
+      this.selectCursorTarget(virtual, remote);
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId: workspace.workspaceId,
+        backend
+      };
+      this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) });
+      return { ...this.status(), workspace };
+    } catch (error) {
+      await virtual.close();
+      throw error;
+    }
   }
   consumeWorkspaceSelection(selection) {
     const pending = this.pendingWorkspaceSelection;
@@ -29992,21 +30014,34 @@ var ClientModeRuntime = class {
     return this.status();
   }
   async close() {
-    await this.closePreview();
     if (this.closed) return;
     this.closed = true;
-    this.proxySwitch?.selectLocal();
-    await this.closePreview();
-    this.gatewaySwitch.selectLocal();
-    this.pendingWorkspaceSelection = void 0;
-    await this.closeCodexVirtual();
-    await this.closeCursorVirtual();
-    await this.codexStreamBridge.closeCodexStreams(this.connected?.client);
-    await this.connected?.client.close().catch(() => void 0);
+    this.server.close?.();
+    try {
+      await this.leaveRemote();
+    } finally {
+      this.proxySwitch?.restore();
+      this.gatewaySwitch.restore();
+    }
+  }
+  async leaveRemote() {
+    this.remoteLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection was closed."));
+    this.remoteLifetime = new AbortController();
+    const previous = this.connected;
     this.connected = void 0;
     this.connectionProgress = void 0;
-    this.proxySwitch?.restore();
-    this.gatewaySwitch.restore();
+    this.pendingWorkspaceSelection = void 0;
+    this.proxySwitch?.selectLocal();
+    this.gatewaySwitch.selectLocal();
+    const results = await Promise.allSettled([
+      this.closeCodexVirtual(),
+      this.closeCursorVirtual(),
+      this.closePreview(),
+      this.codexStreamBridge.closeCodexStreams(previous?.client),
+      previous?.client.close()
+    ]);
+    const failure4 = results.find((result) => result.status === "rejected");
+    if (failure4?.status === "rejected") throw failure4.reason;
   }
   async callRemoteFileViewer(endpoint, payload, signal) {
     const remote = this.connected;
@@ -30119,11 +30154,12 @@ var ClientModeRuntime = class {
     );
   }
   async ensureConnected(targetDeviceId, signal, isCurrent) {
+    const lifetime = this.remoteLifetime.signal;
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
     const next = await this.connect(targetDeviceId, signal);
     const assertCurrent = () => {
       signal?.throwIfAborted();
-      if (this.closed || isCurrent?.() === false) {
+      if (this.closed || lifetime.aborted || isCurrent?.() === false) {
         throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
       }
     };
@@ -30141,6 +30177,12 @@ var ClientModeRuntime = class {
     this.connection.clearConnectionProgress(next.progressRunId);
     await previous?.client.close().catch(() => void 0);
     return next;
+  }
+  assertRemoteCurrent(remote, signal) {
+    signal?.throwIfAborted();
+    if (this.closed || this.connected !== remote) {
+      throw new ClientModeError("CANCELLED", "The Remote workspace request was superseded or closed.");
+    }
   }
   requireIdentity() {
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
@@ -37773,13 +37815,16 @@ function isRecord19(value) {
 
 // src/control-runtime.ts
 var PluginControlRuntime = class {
-  constructor(config, identityDirectory, settings, client, host) {
+  constructor(config, identityDirectory, settings, client, host, switchServer) {
     this.config = config;
     this.identityDirectory = identityDirectory;
     this.settings = settings;
     this.client = client;
     this.host = host;
+    this.switchServer = switchServer;
   }
+  logoutFlight;
+  serverSwitchFlight;
   register(connection, webServer) {
     const statusStream = new ControlStatusStream(() => this.streamStatus());
     return registerControlRoute(
@@ -37801,6 +37846,7 @@ var PluginControlRuntime = class {
   }
   async handle(endpoint, payload, signal) {
     try {
+      if (endpoint !== "settings.server.set") await this.serverSwitchFlight;
       if (endpoint === "settings.development.set") return ok3(await this.setDevelopment(payload));
       if (endpoint === "settings.get") return ok3(await this.settingsView());
       if (endpoint === "settings.configure") return ok3(await this.configure(payload));
@@ -37894,6 +37940,19 @@ var PluginControlRuntime = class {
     };
   }
   async setServer(payload) {
+    if (this.serverSwitchFlight !== void 0) {
+      throw new ClientModeError("SERVER_SWITCH_BUSY", "A Server switch is already in progress.");
+    }
+    const flight = this.applyServer(payload);
+    this.serverSwitchFlight = flight;
+    try {
+      return await flight;
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = void 0;
+    }
+  }
+  async applyServer(payload) {
+    await this.logoutFlight;
     if (this.settings === void 0) {
       throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
     }
@@ -37904,6 +37963,15 @@ var PluginControlRuntime = class {
     const current = editableConfig(resolveConfig(this.settings.get()));
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl });
     await this.settings.replace(editableConfig(next));
+    if (this.switchServer !== void 0) {
+      if (next.serverUrl !== this.config.serverUrl) {
+        const runtimes = await this.switchServer(next);
+        this.client = runtimes.client;
+        this.host = runtimes.host;
+      }
+      this.config = next;
+      return { ...await this.settingsView(), applies: "live" };
+    }
     return this.settingsView();
   }
   async setRole(payload) {
@@ -38025,20 +38093,28 @@ var PluginControlRuntime = class {
     const targetApi = targetRole === "host" ? new HostServerApi(serverUrl, new ServerCredentialStore(targetDirectory)) : new ClientServerApi(serverUrl, new ServerCredentialStore(targetDirectory));
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account);
   }
-  async logout() {
-    if (this.settings === void 0) {
-      throw new ClientModeError("SETTINGS_UNAVAILABLE", "DSH user settings are unavailable in this profile.");
-    }
-    const config = resolveConfig(this.settings.get());
+  logout() {
+    if (this.logoutFlight !== void 0) return this.logoutFlight;
+    const task = this.clearAuthorization();
+    this.logoutFlight = task;
+    void task.finally(() => {
+      if (this.logoutFlight === task) this.logoutFlight = void 0;
+    }).catch(() => void 0);
+    return task;
+  }
+  async clearAuthorization() {
+    const config = this.settings === void 0 ? this.config : resolveConfig(this.settings.get());
     if (config.serverUrl !== void 0) {
-      await Promise.all([
+      const runtimes = await Promise.allSettled([
         this.client?.clearClientAuthorization(),
         this.host?.clearHostAuthorization()
       ]);
-      await Promise.all(["host", "client"].map(async (role) => {
+      const stores = await Promise.allSettled(["host", "client"].map(async (role) => {
         const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl, role);
         await new ServerCredentialStore(directory).clear();
       }));
+      const failure4 = [...runtimes, ...stores].find((result) => result.status === "rejected");
+      if (failure4?.status === "rejected") throw failure4.reason;
     }
     return this.settingsView();
   }
@@ -42712,9 +42788,6 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       console.error(message);
     }
   }, config.logLevel);
-  const hostIdentities = new IdentityStore({
-    directory: config.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, "host")
-  });
   const apiProxy = ctx.get("apiProxy");
   const nativeTypertGateway = ctx.get("typertGateway");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway);
@@ -42733,56 +42806,103 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     };
   }
   const subprocess = ctx.get("subprocess", false);
-  const runtime = new HostPluginRuntime(
-    config,
-    hostIdentities,
-    apiProxy,
-    logger,
-    localTypertGateway,
-    () => ctx.get("fileViewerHost"),
-    subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
-    (peer) => createPluginRouteDispatcher(
-      () => ctx.get("connection"),
-      () => ctx.get("webServer")?.port,
-      peer
-    )
-  );
-  let clientRuntime;
-  const hostControl = runtime;
-  if (config.serverUrl !== void 0 && connection !== void 0) {
-    const clientIdentities = new IdentityStore({
-      directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, "client")
+  const createRuntimes = (config2) => {
+    const hostIdentities = new IdentityStore({
+      directory: config2.serverUrl === void 0 ? defaultIdentityDirectory : serverStorageDirectory(defaultIdentityDirectory, config2.serverUrl, "host")
     });
-    clientRuntime = new ClientModeRuntime(
-      config,
-      clientIdentities,
-      new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+    const runtime2 = new HostPluginRuntime(
+      config2,
+      hostIdentities,
       apiProxy,
-      nativeTypertGateway,
       logger,
-      hostControl
+      localTypertGateway,
+      () => ctx.get("fileViewerHost"),
+      subprocess === void 0 ? void 0 : subprocessTerminalSpawner(subprocess),
+      (peer) => createPluginRouteDispatcher(
+        () => ctx.get("connection"),
+        () => ctx.get("webServer")?.port,
+        peer
+      )
     );
-  }
-  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl);
+    let clientRuntime2;
+    if (config2.serverUrl !== void 0 && connection !== void 0) {
+      const clientIdentities = new IdentityStore({
+        directory: serverStorageDirectory(defaultIdentityDirectory, config2.serverUrl, "client")
+      });
+      clientRuntime2 = new ClientModeRuntime(
+        config2,
+        clientIdentities,
+        new ClientServerApi(config2.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+        apiProxy,
+        nativeTypertGateway,
+        logger,
+        runtime2
+      );
+    }
+    return { runtime: runtime2, clientRuntime: clientRuntime2 };
+  };
+  let { runtime, clientRuntime } = createRuntimes(config);
+  let closed = false;
+  let clientServiceProvided = clientRuntime !== void 0;
+  let startup;
+  let replacement;
+  const replaceServer = (next) => {
+    const operation = async () => {
+      await startup;
+      if (closed) throw new Error("Remote plugin is closed");
+      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()]);
+      const failure4 = shutdown.find((result) => result.status === "rejected");
+      if (failure4?.status === "rejected") throw failure4.reason;
+      if (closed) throw new Error("Remote plugin is closed");
+      const fresh = createRuntimes(next);
+      try {
+        await fresh.runtime.start();
+        await fresh.clientRuntime?.start();
+        if (closed) throw new Error("Remote plugin is closed");
+      } catch (error) {
+        await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()]);
+        throw error;
+      }
+      runtime = fresh.runtime;
+      clientRuntime = fresh.clientRuntime;
+      ctx.dshRemote = runtime;
+      if (clientRuntime !== void 0) {
+        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime;
+        else {
+          ctx.provide("dshRemoteClient", clientRuntime);
+          clientServiceProvided = true;
+        }
+      }
+      tuiTarget = { runtime, config: next };
+      if (tuiBinding !== void 0) tuiBinding.target = tuiTarget;
+      return { client: clientRuntime, host: runtime };
+    };
+    replacement = operation();
+    return replacement;
+  };
+  const controlRuntime = connection === void 0 ? void 0 : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer);
   ctx.provide("dshRemote", runtime);
   if (clientRuntime !== void 0) ctx.provide("dshRemoteClient", clientRuntime);
-  const tuiTarget = { runtime, config };
+  let tuiTarget = { runtime, config };
   if (tuiBinding !== void 0) tuiBinding.target = tuiTarget;
   await disableLegacyLoaderEntries(ctx, logger);
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection, webServer);
     try {
-      await runtime.start();
-      if (clientRuntime !== void 0) {
-        await clientRuntime.start();
-      } else {
-        logger.warn("client remote mode is unavailable", {
-          serverConfigured: config.serverUrl !== void 0,
-          apiProxyAvailable: apiProxy !== void 0,
-          remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-          connectionAvailable: connection !== void 0
-        });
-      }
+      startup = (async () => {
+        await runtime.start();
+        if (clientRuntime !== void 0) {
+          await clientRuntime.start();
+        } else {
+          logger.warn("client remote mode is unavailable", {
+            serverConfigured: config.serverUrl !== void 0,
+            apiProxyAvailable: apiProxy !== void 0,
+            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
+            connectionAvailable: connection !== void 0
+          });
+        }
+      })();
+      await startup;
     } catch (error) {
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = void 0;
       await disposeControl?.();
@@ -42791,6 +42911,8 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       throw error;
     }
     return async () => {
+      closed = true;
+      await replacement?.catch(() => void 0);
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = void 0;
       await disposeControl?.();
       await clientRuntime?.close();

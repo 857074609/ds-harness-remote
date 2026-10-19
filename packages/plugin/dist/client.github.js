@@ -1680,7 +1680,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     enterRegistrationCode: "Enter the device authorization code.",
     enterAccountPassword: "Enter the Server account and password.",
     associationSaved: "Associated. Restart Harness to apply.",
-    signedOut: "Signed out. Restart Harness to disconnect this mode.",
+    signedOut: "Signed out and disconnected from Remote.",
     remoteRequestFailed: "Remote mode request failed.",
     remoteControlUnavailable: "Remote plugin control is still starting. Restart DSH if it stays unavailable.",
     switchTarget: "Switch Local / Remote Harness target",
@@ -1873,6 +1873,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     scanWithProvider: "Scan to continue with {provider}",
     loadingLoginProviders: "Loading sign-in methods\u2026",
     retryLoginProviders: "Retry loading sign-in methods",
+    serverApplied: "Server address applied.",
     noLoginProviders: "QR sign-in is unavailable. Use email and password.",
     zhihuLogin: "Zhihu QR",
     scanWithGitHub: "Scan to continue with GitHub",
@@ -1950,7 +1951,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     enterRegistrationCode: "\u8BF7\u8F93\u5165\u8BBE\u5907\u6388\u6743\u7801\u3002",
     enterAccountPassword: "\u8BF7\u8F93\u5165 Server \u8D26\u53F7\u548C\u5BC6\u7801\u3002",
     associationSaved: "\u5173\u8054\u6210\u529F\u3002\u91CD\u542F Harness \u540E\u751F\u6548\u3002",
-    signedOut: "\u5DF2\u9000\u51FA\u6388\u6743\u3002\u91CD\u542F Harness \u540E\u5C06\u65AD\u5F00\u6B64\u6A21\u5F0F\u3002",
+    signedOut: "\u5DF2\u9000\u51FA\u8D26\u53F7\u5E76\u65AD\u5F00 Remote \u8FDE\u63A5\u3002",
     remoteRequestFailed: "\u8FDC\u7A0B\u6A21\u5F0F\u8BF7\u6C42\u5931\u8D25\u3002",
     remoteControlUnavailable: "Remote \u63D2\u4EF6\u63A7\u5236\u901A\u9053\u4ECD\u5728\u542F\u52A8\uFF1B\u5982\u679C\u4E00\u76F4\u4E0D\u53EF\u7528\uFF0C\u8BF7\u91CD\u542F DSH\u3002",
     switchTarget: "\u5207\u6362\u672C\u5730\u6216\u8FDC\u7A0B Harness",
@@ -2143,6 +2144,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
     scanWithProvider: "\u4F7F\u7528 {provider} \u626B\u7801\u767B\u5F55",
     loadingLoginProviders: "\u6B63\u5728\u83B7\u53D6\u767B\u5F55\u65B9\u5F0F\u2026",
     retryLoginProviders: "\u91CD\u65B0\u83B7\u53D6\u767B\u5F55\u65B9\u5F0F",
+    serverApplied: "Server \u5730\u5740\u5DF2\u751F\u6548\u3002",
     noLoginProviders: "\u6682\u65E0\u53EF\u7528\u7684\u626B\u7801\u767B\u5F55\u65B9\u5F0F\uFF0C\u8BF7\u4F7F\u7528\u90AE\u7BB1\u548C\u5BC6\u7801\u3002",
     zhihuLogin: "\u77E5\u4E4E\u626B\u7801",
     scanWithGitHub: "\u4F7F\u7528 GitHub \u626B\u7801\u767B\u5F55",
@@ -2558,24 +2560,42 @@ Minimum version required to store current data is: ` + bestVersion + `.
   // src/client/settings.ts
   function createRemotePluginOptions(React) {
     function RemotePluginOptions(props) {
-      let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyView = (view) => {
-        setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association })), setWritable(view.writable), setLoaded(!0);
+      let { t } = props, [open, setOpen] = React.useState(props.view === "page"), [serverUrl, setServerUrl] = React.useState(""), [portsBusy, setPortsBusy] = React.useState(!1), [previewPorts, setPreviewPorts] = React.useState(""), role = "host", [registrationCode, setRegistrationCode] = React.useState(""), [associations, setAssociations] = React.useState({}), [loaded, setLoaded] = React.useState(!1), [writable, setWritable] = React.useState(!1), [busy, setBusy] = React.useState(!1), [terminalEnabled, setTerminalEnabled] = React.useState(!1), [terminalBusy, setTerminalBusy] = React.useState(!1), [acpBackends, setAcpBackends] = React.useState([]), [acpAvailability, setAcpAvailability] = React.useState({}), [acpChecking, setAcpChecking] = React.useState({}), [acpCheckResults, setAcpCheckResults] = React.useState({}), [addingAcp, setAddingAcp] = React.useState(!1), [acpName, setAcpName] = React.useState(""), [acpCommand, setAcpCommand] = React.useState(""), [acpArguments, setAcpArguments] = React.useState("acp"), [reconnectBusy, setReconnectBusy] = React.useState(!1), [hostStatus, setHostStatus] = React.useState(void 0), [hostName, setHostName] = React.useState(""), [hostDeviceId, setHostDeviceId] = React.useState(""), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0), [settingsView, setSettingsView] = React.useState(void 0), associationReadRun = React.useRef(0), persistedServerUrl = settingsView?.config.serverUrl ?? "https://dsh.r2049.cn", association = associations.client ?? associations.host, serverDirty = settingsView !== void 0 && serverUrl !== persistedServerUrl, draftDirty = serverDirty, applyAssociations = (view) => {
+        setAssociations(view.associations ?? (view.association === void 0 ? {} : { host: view.association }));
+      }, applyView = (view, updateAssociations = !0) => {
+        setSettingsView(view), setServerUrl(view.config.serverUrl ?? "https://dsh.r2049.cn"), setTerminalEnabled(view.config.terminal?.enabled ?? !0), setPreviewPorts((view.config.loopback?.ports ?? []).join(", ")), setAcpBackends((view.config.acp?.backends ?? []).map((item) => ({ id: item.id, enabled: item.enabled !== !1 }))), setAcpAvailability(view.acpAvailability ?? {}), updateAssociations && applyAssociations(view), setWritable(view.writable), setLoaded(!0);
       }, load = async () => {
-        let [view, status] = await Promise.all([
+        let run = ++associationReadRun.current, [view, status] = await Promise.all([
           props.control("settings.get"),
           props.control("status").catch(() => {
           })
         ]);
-        applyView(view), setHostStatus(status?.host), setHostName(status?.deviceName ?? ""), setHostDeviceId(status?.host?.deviceId ?? "");
+        applyView(view, run === associationReadRun.current), setHostStatus(status?.host), setHostName(status?.deviceName ?? ""), setHostDeviceId(status?.host?.deviceId ?? "");
       };
       React.useEffect(() => {
         load().catch((reason) => setError(messageOf(reason)));
       }, []), React.useEffect(() => {
-        if (association !== void 0)
-          return props.statusFeed.subscribe((status) => {
-            setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "");
+        let active = !0, authorizationKey, unsubscribe = props.statusFeed.subscribe((status) => {
+          setHostStatus(status.host), setHostName(status.deviceName ?? ""), setHostDeviceId(status.host?.deviceId ?? "");
+          let key = JSON.stringify([
+            status.serverUrl,
+            status.deviceId,
+            status.host?.deviceId,
+            status.host?.authorized,
+            status.host?.account
+          ]);
+          if (key === authorizationKey) return;
+          authorizationKey = key;
+          let run = ++associationReadRun.current;
+          props.control("settings.get").then((view) => {
+            active && run === associationReadRun.current && applyAssociations(view);
+          }).catch(() => {
           });
-      }, [association !== void 0]);
+        });
+        return () => {
+          active = !1, unsubscribe();
+        };
+      }, [props.statusFeed]);
       let save = async (event) => {
         if (event?.preventDefault(), !(!writable || !serverDirty)) {
           setBusy(!0), setNotice(void 0), setError(void 0);
@@ -2583,7 +2603,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             let view = await props.control("settings.server.set", {
               serverUrl
             });
-            applyView(view), setNotice({ key: "serverSaved" });
+            applyView(view), setNotice({ key: view.applies === "live" ? "serverApplied" : "serverSaved" });
           } catch (reason) {
             setError(messageOf(reason));
           } finally {
@@ -2591,10 +2611,11 @@ Minimum version required to store current data is: ` + bestVersion + `.
           }
         }
       }, logout = async () => {
+        let run = ++associationReadRun.current;
         setBusy(!0), setError(void 0), setNotice(void 0);
         try {
           let view = await props.control("settings.logout");
-          applyView(view), setRegistrationCode(""), setNotice({ key: "signedOut" });
+          applyView(view, run === associationReadRun.current), setRegistrationCode(""), setNotice({ key: "signedOut" });
         } catch (reason) {
           setError(messageOf(reason));
         } finally {
@@ -3054,6 +3075,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
       ".dshRemoteOpenBar{position:sticky;bottom:-96px;display:flex;align-items:center;justify-content:space-between;gap:20px;margin-top:20px;padding:14px 0;background:var(--dsw-alias-bg-layer-1);border-top:1px solid var(--dsw-alias-border-l2)}.dshRemoteOpenBar>div{min-width:0;display:flex;flex-direction:column;gap:3px}.dshRemoteOpenBar span{color:var(--dsw-alias-label-secondary);font-size:12px}.dshRemoteOpenBar strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}.dshRemoteOpenBar>button,.dshRemoteEnable>button{min-height:40px;flex:0 0 auto;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}.dshRemoteOpenBar>button:disabled,.dshRemoteEnable>button:disabled{opacity:.5;cursor:default}",
       ".dshRemoteEnable{box-sizing:border-box;width:min(440px,100%);max-width:100%;min-height:388px;margin:0 auto;display:flex;flex-direction:column;align-items:stretch;gap:10px}.dshRemoteEnable p{margin:0;color:var(--dsw-alias-label-secondary);line-height:1.5}",
       '.dshRemoteLoginTabs{width:min(440px,100%);display:flex;border-bottom:1px solid var(--dsw-alias-border-l2)}.dshRemoteLoginTabs>button{position:relative;min-height:38px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:6px 14px;font:inherit;font-size:13px;cursor:pointer}.dshRemoteLoginTabs>button:hover:not(:disabled){color:var(--dsw-alias-label-primary)}.dshRemoteLoginTabs>button.isActive{color:var(--dsw-alias-label-primary);font-weight:600}.dshRemoteLoginTabs>button.isActive::after{content:"";position:absolute;right:12px;bottom:-1px;left:12px;height:2px;border-radius:2px 2px 0 0;background:var(--dsw-alias-brand-primary)}.dshRemoteLoginTabs>button:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px;border-radius:6px}',
+      ".dshRemoteLoginServer{width:100%;display:flex;flex-direction:column;gap:6px;margin:12px 0}.dshRemoteLoginServer>label{font-size:12px;color:var(--dsw-alias-label-secondary)}.dshRemoteLoginServer>div{display:flex;flex-wrap:wrap;gap:8px}.dshRemoteLoginServer input{box-sizing:border-box;flex:1 1 220px;min-width:0;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteLoginServer button{flex:0 0 auto;min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:8px 12px;font:inherit;cursor:pointer}",
       ".dshRemoteClientLogin{width:min(440px,100%);display:flex;flex-direction:column;gap:8px}.dshRemoteClientLogin input{min-height:40px;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;background:var(--dsw-alias-bg-layer-3);color:inherit;padding:0 12px;font:inherit}.dshRemoteClientLogin button{align-self:flex-start;min-height:40px;border:0;border-radius:8px;background:var(--dsw-alias-label-primary);color:var(--dsw-alias-bg-layer-1);padding:8px 16px;cursor:pointer}",
       ".dshRemoteQrLogin{width:min(440px,100%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:6px 0 2px;text-align:center}.dshRemoteQrLogin img,.dshRemoteQrPlaceholder{box-sizing:border-box;width:200px;height:200px;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:#fff;padding:8px}.dshRemoteQrOpen{display:flex;flex-direction:column;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);font-size:12px;text-decoration:none}.dshRemoteQrOpen:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrOpen:hover img{border-color:var(--dsw-alias-label-dimmed)}.dshRemoteQrOpen:focus-visible{border-radius:12px;outline:2px solid var(--dsw-alias-brand-primary);outline-offset:3px}.dshRemoteQrPlaceholder{display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-secondary)}.dshRemoteQrLogin>strong{font-size:14px}.dshRemoteQrLogin>p{max-width:48ch;margin:0;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}.dshRemoteQrLogin>.dshRemoteServiceAddress{margin-top:2px;color:var(--dsw-alias-label-tertiary)}.dshRemoteServiceAddress>a{color:var(--dsw-alias-label-secondary);text-decoration:none}.dshRemoteServiceAddress>a:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteQrLogin>button,.dshRemoteClientLogin>.dshRemoteLoginSwitch{min-height:32px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);padding:4px 8px;font:inherit;font-size:12px;cursor:pointer}.dshRemoteQrLogin>button:hover,.dshRemoteClientLogin>.dshRemoteLoginSwitch:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.dshRemoteClientLogin>.dshRemoteLoginSwitch{align-self:flex-start;background:transparent;color:var(--dsw-alias-label-secondary);padding-left:0}",
       ".dshRemoteLoginHeading{box-sizing:border-box;width:100%;display:flex;align-items:baseline;gap:10px;overflow:hidden;white-space:nowrap}.dshRemoteLoginTitle{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dshRemoteLoginHeading>span{flex:0 0 auto;color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:400}.dshRemoteLoginTabs{box-sizing:border-box;width:100%;flex-wrap:nowrap;overflow-x:auto}.dshRemoteLoginTabs>button{min-width:max-content;flex:1 0 auto;display:flex;align-items:center;justify-content:center;padding:6px 10px;white-space:nowrap;text-align:center}.dshRemoteLoginTabs>button.isActive::after{right:0;left:0;bottom:0;border-radius:0}.dshRemoteClientLogin,.dshRemoteQrLogin{box-sizing:border-box;width:100%;height:300px;min-height:300px}.dshRemoteClientLogin{align-items:stretch;padding-top:16px}.dshRemoteClientLogin>button{align-self:stretch;width:100%}.dshRemoteQrLogin{padding-top:12px}",
@@ -3116,7 +3138,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
   function createRemoteWorkspaceAction(React) {
     let RemoteProgressView = createRemoteProgressView(React);
     function RemoteWorkspaceAction(props) {
-      let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
+      let { t } = props, [open, setOpen] = React.useState(!1), [status, setStatus] = React.useState(void 0), [devices, setDevices] = React.useState([]), [selectedHost, setSelectedHost] = React.useState(void 0), [connectingHost, setConnectingHost] = React.useState(void 0), [workspaces, setWorkspaces] = React.useState([]), [codexWorkspaces, setCodexWorkspaces] = React.useState([]), [cursorWorkspaces, setCursorWorkspaces] = React.useState([]), [antigravityWorkspaces, setAntigravityWorkspaces] = React.useState([]), [piWorkspaces, setPiWorkspaces] = React.useState([]), [opencodeWorkspaces, setOpencodeWorkspaces] = React.useState([]), [claudeWorkspaces, setClaudeWorkspaces] = React.useState([]), [workspaceBackend, setWorkspaceBackend] = React.useState("harness"), [codexWorkspaceId, setCodexWorkspaceId] = React.useState(void 0), [cursorWorkspaceId, setCursorWorkspaceId] = React.useState(void 0), [antigravityWorkspaceId, setAntigravityWorkspaceId] = React.useState(void 0), [piWorkspaceId, setPiWorkspaceId] = React.useState(void 0), [opencodeWorkspaceId, setOpencodeWorkspaceId] = React.useState(void 0), [claudeWorkspaceId, setClaudeWorkspaceId] = React.useState(void 0), [directory, setDirectory] = React.useState(void 0), [path, setPath] = React.useState(""), [addingWorkspace, setAddingWorkspace] = React.useState(!1), [showAllWorkspaces, setShowAllWorkspaces] = React.useState(!1), [showAllCodexWorkspaces, setShowAllCodexWorkspaces] = React.useState(!1), [devicesOpen, setDevicesOpen] = React.useState(!1), [showAllCursorWorkspaces, setShowAllCursorWorkspaces] = React.useState(!1), [showAllAntigravityWorkspaces, setShowAllAntigravityWorkspaces] = React.useState(!1), [showAllPiWorkspaces, setShowAllPiWorkspaces] = React.useState(!1), [showAllOpencodeWorkspaces, setShowAllOpencodeWorkspaces] = React.useState(!1), [showAllClaudeWorkspaces, setShowAllClaudeWorkspaces] = React.useState(!1), workspaceListId = "dsh-remote-workspace-list", codexWorkspaceHeadingId = "dsh-remote-codex-workspace-heading", codexWorkspaceListId = "dsh-remote-codex-workspace-list", cursorWorkspaceHeadingId = "dsh-remote-cursor-workspace-heading", cursorWorkspaceListId = "dsh-remote-cursor-workspace-list", antigravityWorkspaceHeadingId = "dsh-remote-antigravity-workspace-heading", piWorkspaceHeadingId = "dsh-remote-pi-workspace-heading", opencodeWorkspaceHeadingId = "dsh-remote-opencode-workspace-heading", claudeWorkspaceHeadingId = "dsh-remote-claude-workspace-heading", antigravityWorkspaceListId = "dsh-remote-antigravity-workspace-list", piWorkspaceListId = "dsh-remote-pi-workspace-list", opencodeWorkspaceListId = "dsh-remote-opencode-workspace-list", claudeWorkspaceListId = "dsh-remote-claude-workspace-list", [busy, setBusy] = React.useState(!1), [needsAuthorization, setNeedsAuthorization] = React.useState(!1), [email, setEmail] = React.useState(""), [password, setPassword] = React.useState(""), [loginServerUrl, setLoginServerUrl] = React.useState("https://dsh.r2049.cn"), [savingServer, setSavingServer] = React.useState(!1), serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? ""), [loginMethod, setLoginMethod] = React.useState("password"), loginMethodManuallySelected = React.useRef(!1), [oauthProviders, setOAuthProviders] = React.useState([]), [providersLoading, setProvidersLoading] = React.useState(!1), [providersFailed, setProvidersFailed] = React.useState(!1), [providerReload, setProviderReload] = React.useState(0), providerRequestRun = React.useRef(0), [qrSession, setQrSession] = React.useState(void 0), [qrImage, setQrImage] = React.useState(void 0), [qrExpired, setQrExpired] = React.useState(!1), [progress, setProgress] = React.useState(void 0), progressRun = React.useRef(0), qrFlowRun = React.useRef(0), [notice, setNotice] = React.useState(void 0), [error, setError] = React.useState(void 0);
       React.useEffect(() => {
         open || (setDevicesOpen(!1), qrFlowRun.current += 1, setBusy(!1));
       }, [open]), React.useEffect(() => {
@@ -3144,7 +3166,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         props.control("status").then(setStatus).catch(() => {
         });
       }, []), React.useEffect(() => {
-        status?.serverUrl !== void 0 && loginServerUrl === "https://dsh.r2049.cn" && setLoginServerUrl(status.serverUrl);
+        status?.serverUrl !== void 0 && setLoginServerUrl(status.serverUrl);
       }, [status?.serverUrl]), React.useEffect(() => {
         let remoteActive = status?.mode === "remote";
         return document.documentElement.classList.toggle("dshRemoteTargetActive", remoteActive), () => {
@@ -3169,10 +3191,10 @@ Minimum version required to store current data is: ` + bestVersion + `.
         }
       };
       React.useEffect(() => {
-        if (!open || !needsAuthorization) return;
-        let active = !0;
+        if (!open || !needsAuthorization || savingServer || serverDirty) return;
+        let active = !0, run = ++providerRequestRun.current;
         return qrFlowRun.current += 1, setBusy(!1), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setOAuthProviders([]), setProvidersLoading(!0), setProvidersFailed(!1), props.control("client.account.providers").then((items) => {
-          if (!active) return;
+          if (!active || run !== providerRequestRun.current) return;
           let available = items.filter((item) => item.qrStartUrl != null);
           setOAuthProviders(available), setLoginMethod((current) => {
             if (loginMethodManuallySelected.current && (current === "password" || available.some((item) => `oauth:${item.id}` === current))) return current;
@@ -3180,16 +3202,16 @@ Minimum version required to store current data is: ` + bestVersion + `.
             return preferred === void 0 ? "password" : `oauth:${preferred.id}`;
           });
         }).catch((reason) => {
-          active && (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason)));
+          !active || run !== providerRequestRun.current || (setProvidersFailed(!0), setLoginMethod("password"), setError(messageOf(reason)));
         }).finally(() => {
-          active && setProvidersLoading(!1);
+          active && run === providerRequestRun.current && setProvidersLoading(!1);
         }), () => {
           active = !1;
         };
-      }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload]), React.useEffect(() => {
-        !open || !needsAuthorization || providersLoading || loginMethod === "password" || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod.slice(6));
-      }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired]), React.useEffect(() => {
-        if (!open || loginMethod === "password" || qrSession === void 0) return;
+      }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload, savingServer, serverDirty]), React.useEffect(() => {
+        !open || !needsAuthorization || savingServer || serverDirty || providersLoading || loginMethod === "password" || !oauthProviders.some((item) => `oauth:${item.id}` === loginMethod) || qrSession !== void 0 || qrExpired || startQrLogin(loginMethod.slice(6));
+      }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, savingServer, serverDirty]), React.useEffect(() => {
+        if (!open || savingServer || serverDirty || loginMethod === "password" || qrSession === void 0) return;
         let active = !0, polling = !1, settled = !1, run = qrFlowRun.current, timer, poll = () => {
           polling || settled || (polling = !0, props.control("client.account.qr.poll", { qrId: qrSession.qrId }).then(async (result) => {
             if (!(!active || settled || run !== qrFlowRun.current))
@@ -3216,7 +3238,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
         return poll(), timer = window.setInterval(poll, 1500), () => {
           active = !1, timer !== void 0 && window.clearInterval(timer);
         };
-      }, [open, loginMethod, qrSession]);
+      }, [open, loginMethod, qrSession, savingServer, serverDirty]);
       let selectLoginMethod = (method) => {
         loginMethodManuallySelected.current = !0, method !== loginMethod && (qrFlowRun.current += 1, setLoginMethod(method), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setError(void 0));
       }, orderedQrProviders = [...oauthProviders].sort((a, b) => +(b.id === props.preferredQrProvider) - +(a.id === props.preferredQrProvider)), selectedProvider = oauthProviders.find((item) => `oauth:${item.id}` === loginMethod), scanLabel = t("scanWithProvider", { provider: selectedProvider?.displayName ?? "" }), qrLoginTab = (provider) => React.createElement("button", {
@@ -3332,8 +3354,26 @@ Minimum version required to store current data is: ` + bestVersion + `.
       }, [open, selectedHost]);
       let chooseAnotherHost = () => {
         setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setDirectory(void 0), setPath(""), setAddingWorkspace(!1), setError(void 0);
+      }, resetLoginFlow = () => {
+        providerRequestRun.current += 1, qrFlowRun.current += 1, setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setOAuthProviders([]), setProvidersFailed(!1), setProvidersLoading(!1), setLoginMethod("password"), loginMethodManuallySelected.current = !1, setPassword(""), setError(void 0), setNotice(void 0);
+      }, saveLoginServer = async () => {
+        if (!(loginServerUrl.trim() === "" || savingServer)) {
+          resetLoginFlow(), setSavingServer(!0), setBusy(!0);
+          try {
+            if ((await props.control("settings.server.set", { serverUrl: loginServerUrl.trim() })).applies !== "live") {
+              setNotice(t("serverSaved"));
+              return;
+            }
+            let nextStatus = await props.control("status");
+            setStatus(nextStatus), setLoginServerUrl(nextStatus.serverUrl ?? loginServerUrl.trim()), setProviderReload((value) => value + 1);
+          } catch (reason) {
+            setError(messageOf(reason));
+          } finally {
+            setSavingServer(!1), setBusy(!1);
+          }
+        }
       }, signInClient = async () => {
-        if (!(email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
+        if (!(serverDirty || savingServer || email.trim() === "" || password === "" || loginServerUrl.trim() === "")) {
           setBusy(!0), setError(void 0);
           try {
             await props.control("settings.configure", {
@@ -3365,9 +3405,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
           setBusy(!1);
         }
       }, logoutRemote = async () => {
-        setBusy(!0), setError(void 0);
+        qrFlowRun.current += 1, progressRun.current += 1, setBusy(!0), setError(void 0);
         try {
-          await props.control("settings.logout"), setDevices([]), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
+          await props.control("settings.logout"), setDevices([]), setSelectedHost(void 0), setConnectingHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setDirectory(void 0), setPath(""), setPassword(""), setProgress(void 0), setNeedsAuthorization(!0), setQrSession(void 0), setQrImage(void 0), setQrExpired(!1), setStatus(await props.control("status"));
         } catch (reason) {
           setError(messageOf(reason));
         } finally {
@@ -3567,6 +3607,36 @@ Minimum version required to store current data is: ` + bestVersion + `.
                   React.createElement("span", null, t("signInClientDescription"))
                 ),
                 React.createElement(
+                  "form",
+                  {
+                    className: "dshRemoteLoginServer",
+                    onSubmit: (event) => {
+                      event.preventDefault(), saveLoginServer();
+                    }
+                  },
+                  React.createElement("label", { htmlFor: "dsh-remote-login-server" }, t("serverUrl")),
+                  React.createElement(
+                    "div",
+                    null,
+                    React.createElement("input", {
+                      id: "dsh-remote-login-server",
+                      type: "url",
+                      required: !0,
+                      value: loginServerUrl,
+                      disabled: busy || savingServer,
+                      autoComplete: "url",
+                      placeholder: t("serverUrl"),
+                      onChange: (event) => {
+                        resetLoginFlow(), setLoginServerUrl(event.target.value);
+                      }
+                    }),
+                    React.createElement("button", {
+                      type: "submit",
+                      disabled: busy || savingServer || loginServerUrl.trim() === ""
+                    }, t(savingServer ? "saving" : "save"))
+                  )
+                ),
+                React.createElement(
                   "div",
                   { className: "dshRemoteLoginTabs", role: "tablist" },
                   ...orderedQrProviders.map(qrLoginTab),
@@ -3577,18 +3647,12 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     "aria-selected": loginMethod === "password",
                     "aria-controls": "dsh-remote-password-panel",
                     className: loginMethod === "password" ? "isActive" : "",
-                    disabled: busy,
+                    disabled: busy || savingServer || serverDirty,
                     onClick: () => selectLoginMethod("password")
                   }, t("accountPasswordLogin"))
                 ),
                 providersLoading ? React.createElement("p", { role: "status" }, t("loadingLoginProviders")) : null,
-                providersFailed ? React.createElement("button", {
-                  type: "button",
-                  onClick: () => {
-                    setError(void 0), setProviderReload((value) => value + 1);
-                  }
-                }, t("retryLoginProviders")) : null,
-                !providersLoading && !providersFailed && oauthProviders.length === 0 ? React.createElement("p", { role: "status" }, t("noLoginProviders")) : null,
+                !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0 ? React.createElement("p", { role: "status" }, t("noLoginProviders")) : null,
                 loginMethod !== "password" && selectedProvider !== void 0 ? React.createElement(
                   "div",
                   {
@@ -3645,15 +3709,6 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     "aria-labelledby": "dsh-remote-password-tab"
                   },
                   React.createElement("input", {
-                    type: "url",
-                    value: loginServerUrl,
-                    disabled: busy,
-                    autoComplete: "url",
-                    placeholder: t("serverUrl"),
-                    "aria-label": t("serverUrl"),
-                    onChange: (event) => setLoginServerUrl(event.target.value)
-                  }),
-                  React.createElement("input", {
                     type: "email",
                     value: email,
                     disabled: busy,
@@ -3671,7 +3726,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
                     "aria-label": t("password"),
                     onChange: (event) => setPassword(event.target.value)
                   }),
-                  React.createElement("button", { type: "button", disabled: busy || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn"))
+                  React.createElement("button", { type: "button", disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === "" || email.trim() === "" || password === "", onClick: () => void signInClient() }, t(busy ? "signingIn" : "startSignIn"))
                 )
               ) : null,
               needsAuthorization ? null : React.createElement(

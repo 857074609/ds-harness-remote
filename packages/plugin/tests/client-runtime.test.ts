@@ -31,6 +31,66 @@ const cleanupScenario1 = async () => {
 afterEach(cleanupScenario1)
 
 describe('ClientModeRuntime Host account control', () => {
+  it('retires pending connections on explicit exit, account sign-out and runtime shutdown', async () => {
+    await runScenarios((['exit', 'sign-out', 'shutdown'] as const).flatMap(action =>
+      (['mode', 'directory'] as const).map(request => ({ name: `${action}: pending ${request}`, run: async () => {
+        const directory = await mkdtemp(join(tmpdir(), 'dsh-client-exit-'))
+        directories.push(directory)
+        const runtime = new ClientModeRuntime(config(), new IdentityStore({ directory }),
+          { bindIdentity: vi.fn(), revokeCurrentDevice: vi.fn(async () => undefined) } as unknown as ClientServerApi,
+          apiProxy(), gatewayWithCarrier(), logger())
+        await runtime.start()
+        let resolve!: (remote: unknown) => void
+        const state = runtime as unknown as { connection: { connect: (id: string) => Promise<unknown> } }
+        vi.spyOn(state.connection, 'connect').mockImplementation(() => new Promise(yes => { resolve = yes }))
+        const client = { close: vi.fn(async () => undefined), getStats: () => ({ mode: 'Relay', connected: true }) }
+        const pending = request === 'mode' ? runtime.setMode('remote', 'host-1') : runtime.listRemoteDirectory('host-1')
+        const rejected = expect(pending).rejects.toMatchObject({ code: 'CANCELLED' })
+        if (action === 'exit') await runtime.setMode('local')
+        else if (action === 'sign-out') await runtime.clearClientAuthorization()
+        else await runtime.close()
+        resolve({ client, target: { deviceId: 'host-1', name: 'Host' }, features: {}, progressRunId: 1 })
+        await rejected
+        expect(client.close).toHaveBeenCalledOnce()
+        expect(runtime.status()).toMatchObject({ mode: 'local', connected: false })
+        await runtime.close()
+      } }))), cleanupScenario1)
+  })
+
+  it('completes carrier teardown and local sign-out when an independent cleanup fails', async () => {
+    await runScenarios((['stream', 'preview', 'carrier', 'revocation'] as const).map(failure => ({ name: failure, run: async () => {
+      const directory = await mkdtemp(join(tmpdir(), 'dsh-client-exit-failure-'))
+      directories.push(directory)
+      const revoke = vi.fn(async () => { if (failure === 'revocation') throw new Error('revocation failed') })
+      const runtime = new ClientModeRuntime(config(), new IdentityStore({ directory }),
+        { bindIdentity: vi.fn(), revokeCurrentDevice: revoke } as unknown as ClientServerApi,
+        apiProxy(), gatewayWithCarrier(), logger())
+      await runtime.start()
+      const previousIdentity = runtime.status().deviceId
+      const close = vi.fn(async () => { if (failure === 'carrier') throw new Error('carrier failed') })
+      const client = { close, getStats: () => ({ mode: 'Relay', connected: true }) }
+      const streamClose = vi.fn(async () => { if (failure === 'stream') throw new Error('stream failed') })
+      const previewClose = vi.fn(async () => { if (failure === 'preview') throw new Error('preview failed') })
+      const state = runtime as unknown as {
+        connected: unknown; preview: unknown; codexStreams: Map<string, unknown>
+      }
+      state.connected = { client, target: { deviceId: 'host-1', name: 'Host' }, features: {} }
+      state.preview = { close: previewClose }
+      state.codexStreams.set('stream', {
+        target: { kind: 'remote', client }, close: streamClose, unsubscribe: vi.fn(), wake: vi.fn(),
+      })
+      await expect(runtime.clearClientAuthorization()).rejects.toThrow(`${failure} failed`)
+      expect(close).toHaveBeenCalledOnce()
+      expect(streamClose).toHaveBeenCalledOnce()
+      expect(previewClose).toHaveBeenCalledOnce()
+      expect(revoke).toHaveBeenCalledOnce()
+      expect(state.codexStreams.size).toBe(0)
+      expect(runtime.status()).toMatchObject({ mode: 'local', connected: false })
+      expect(runtime.status().deviceId).not.toBe(previousIdentity)
+      await runtime.close()
+    } })), cleanupScenario1)
+  })
+
   it('completes direct then TURN then Relay startup with a twenty-second Server budget', async () => {
     vi.useFakeTimers()
     const clientKeys = generateKeyPair(new Uint8Array(32).fill(41))

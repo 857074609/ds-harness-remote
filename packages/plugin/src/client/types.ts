@@ -21,6 +21,7 @@ export interface RemoteStatus {
   available: boolean
   controlUnavailable?: boolean
   deviceName?: string
+  deviceId?: string
   serverUrl?: string
   connected?: boolean
   connectedTargetDeviceId?: string

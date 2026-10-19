@@ -56,8 +56,16 @@ import type { WeriftFactoryOptions } from './werift-rtc.js'
 import { loadNodeRtcFactory } from './werift-rtc.js'
 
 export class ClientModeRuntime {
-  private connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
-    return this.connection.connect(targetDeviceId, signal)
+  private async connect(targetDeviceId: string, signal?: AbortSignal): Promise<ConnectedRemote> {
+    const lifetime = this.remoteLifetime.signal
+    const connectionSignal = signal === undefined ? lifetime : AbortSignal.any([lifetime, signal])
+    connectionSignal.throwIfAborted()
+    const remote = await this.connection.connect(targetDeviceId, connectionSignal)
+    if (connectionSignal.aborted || this.closed) {
+      await remote.client.close().catch(() => undefined)
+      throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
+    }
+    return remote
   }
 
   handleControl(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
@@ -83,6 +91,7 @@ export class ClientModeRuntime {
   private connectionProgress?: ConnectionProgressState
   private connectionProgressRun = 0
   private closed = false
+  private remoteLifetime = new AbortController()
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -327,21 +336,14 @@ export class ClientModeRuntime {
   }
 
   async clearClientAuthorization(): Promise<void> {
-    const previous = this.connected
-    this.connected = undefined
-    this.connectionProgress = undefined
-    this.pendingWorkspaceSelection = undefined
-    await this.closeCodexVirtual()
+    const cleanup = this.leaveRemote()
     this.codexOpenedSessions.clear()
-    await this.closeCursorVirtual()
-    this.proxySwitch?.selectLocal()
-    await this.closePreview()
-    this.gatewaySwitch.selectLocal()
-    await this.codexStreamBridge.closeCodexStreams(previous?.client)
-    await previous?.client.close().catch(() => undefined)
-    await this.server.revokeCurrentDevice()
+    const results = await Promise.allSettled([cleanup, this.server.revokeCurrentDevice()])
+    // Local identity rotation also completes when Server revocation fails.
     this.identity = await this.identities.reset(this.config.deviceName)
     this.server.bindIdentity(this.identity)
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
   }
 
   async setHostAuthorization(enabled: boolean): Promise<unknown> {
@@ -357,23 +359,14 @@ export class ClientModeRuntime {
 
   async setMode(mode: HarnessMode, targetDeviceId?: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (mode === 'local') {
-      await this.closeCodexVirtual()
-      await this.closeCursorVirtual()
-      this.proxySwitch?.selectLocal()
-      await this.closePreview()
-      this.gatewaySwitch.selectLocal()
-      const previous = this.connected
-      this.connected = undefined
-      this.connectionProgress = undefined
-      this.pendingWorkspaceSelection = undefined
-      await this.codexStreamBridge.closeCodexStreams(previous?.client)
-      await previous?.client.close().catch(() => undefined)
+      await this.leaveRemote()
       this.logger.info('Harness target switched', { mode: 'local' })
       return this.status()
     }
     if (targetDeviceId === undefined || targetDeviceId.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'A targetDeviceId is required for remote mode.')
     }
+    const lifetime = this.remoteLifetime.signal
     const next = await this.connect(targetDeviceId, signal)
     try {
       this.assertRemoteCompatible(next)
@@ -384,11 +377,17 @@ export class ClientModeRuntime {
     }
     const previous = this.connected
     await this.closePreview()
+    if (lifetime.aborted || this.closed) {
+      await next.client.close().catch(() => undefined)
+      throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
+    }
     this.connected = next
     this.connection.clearConnectionProgress(next.progressRunId)
     this.pendingWorkspaceSelection = undefined
     await this.closeCodexVirtual()
+    this.assertRemoteCurrent(next, signal)
     await this.closeCursorVirtual()
+    this.assertRemoteCurrent(next, signal)
     this.selectRemoteTarget(next)
     await this.codexStreamBridge.closeCodexStreams(previous?.client)
     await previous?.client.close().catch(() => undefined)
@@ -449,8 +448,11 @@ export class ClientModeRuntime {
       })
       workspace = unwrapNativeResult<{ workspace: unknown; created: boolean }>(response)
     }
+    this.assertRemoteCurrent(remote, signal)
     await this.closeCodexVirtual()
+    this.assertRemoteCurrent(remote, signal)
     await this.closeCursorVirtual()
+    this.assertRemoteCurrent(remote, signal)
     this.selectRemoteTarget(remote, transport)
     const workspaceId = workspaceRecordId(workspace.workspace)
     this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId }
@@ -543,6 +545,7 @@ export class ClientModeRuntime {
       idempotencyKey: uuidV7(),
     }, signal))
     const project = record(result.project)
+    this.assertRemoteCurrent(remote, signal)
     if (typeof project.id !== 'string' || project.id.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'The Host returned an invalid CodeX project.')
     }
@@ -581,22 +584,31 @@ export class ClientModeRuntime {
     }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [], new RemoteTypertGateway(remote.client))
     let workspace: AcpVirtualWorkspaceView
     try {
-      workspace = await virtual.selectWorkspace(workspaceId)
-    } catch {
+      try {
+        workspace = await virtual.selectWorkspace(workspaceId)
+      } catch {
+        this.assertRemoteCurrent(remote, signal)
+        throw new ClientModeError('WORKSPACE_NOT_FOUND', `The selected ${backend} workspace is no longer available.`)
+      }
+      this.assertRemoteCurrent(remote, signal)
+      await this.closeCodexVirtual()
+      this.assertRemoteCurrent(remote, signal)
+      await this.closeCursorVirtual()
+      this.assertRemoteCurrent(remote, signal)
+      const preferredSessionId = await virtual.preferredSessionId()
+      this.assertRemoteCurrent(remote, signal)
+      this.cursorVirtual = virtual
+      this.acpVirtualBackend = backend
+      this.selectCursorTarget(virtual, remote)
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId: workspace.workspaceId,
+        backend,
+        ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
+      }
+    } catch (error) {
       await virtual.close()
-      throw new ClientModeError('WORKSPACE_NOT_FOUND', `The selected ${backend} workspace is no longer available.`)
-    }
-    await this.closeCodexVirtual()
-    await this.closeCursorVirtual()
-    this.cursorVirtual = virtual
-    this.acpVirtualBackend = backend
-    this.selectCursorTarget(virtual, remote)
-    const preferredSessionId = await virtual.preferredSessionId()
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId: workspace.workspaceId,
-      backend,
-      ...(preferredSessionId === undefined ? {} : { sessionId: preferredSessionId }),
+      throw error
     }
     this.logger.info(`${backend} virtual workspace opened`, { targetDeviceId: shortId(remote.target.deviceId) })
     return { ...this.status(), workspace }
@@ -620,19 +632,27 @@ export class ClientModeRuntime {
       deviceId: remote.target.deviceId,
       name: remote.target.name,
     }, backend, remote.features.acpModelLoadsSession ? ['agent.acp.antigravity.model-load.v1'] : [], new RemoteTypertGateway(remote.client))
-    const workspace = await virtual.selectOrCreateWorkspace(trimmedPath)
-    await this.closeCodexVirtual()
-    await this.closeCursorVirtual()
-    this.cursorVirtual = virtual
-    this.acpVirtualBackend = backend
-    this.selectCursorTarget(virtual, remote)
-    this.pendingWorkspaceSelection = {
-      targetDeviceId: remote.target.deviceId,
-      workspaceId: workspace.workspaceId,
-      backend,
+    try {
+      const workspace = await virtual.selectOrCreateWorkspace(trimmedPath)
+      this.assertRemoteCurrent(remote, signal)
+      await this.closeCodexVirtual()
+      this.assertRemoteCurrent(remote, signal)
+      await this.closeCursorVirtual()
+      this.assertRemoteCurrent(remote, signal)
+      this.cursorVirtual = virtual
+      this.acpVirtualBackend = backend
+      this.selectCursorTarget(virtual, remote)
+      this.pendingWorkspaceSelection = {
+        targetDeviceId: remote.target.deviceId,
+        workspaceId: workspace.workspaceId,
+        backend,
+      }
+      this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) })
+      return { ...this.status(), workspace }
+    } catch (error) {
+      await virtual.close()
+      throw error
     }
-    this.logger.info(`${backend} virtual workspace created`, { targetDeviceId: shortId(remote.target.deviceId) })
-    return { ...this.status(), workspace }
   }
 
   private consumeWorkspaceSelection(selection: RemoteWorkspaceSelection): Record<string, unknown> {
@@ -646,21 +666,37 @@ export class ClientModeRuntime {
   }
 
   async close(): Promise<void> {
-    await this.closePreview()
     if (this.closed) return
     this.closed = true
-    this.proxySwitch?.selectLocal()
-    await this.closePreview()
-    this.gatewaySwitch.selectLocal()
-    this.pendingWorkspaceSelection = undefined
-    await this.closeCodexVirtual()
-    await this.closeCursorVirtual()
-    await this.codexStreamBridge.closeCodexStreams(this.connected?.client)
-    await this.connected?.client.close().catch(() => undefined)
+    this.server.close?.()
+    try {
+      await this.leaveRemote()
+    } finally {
+      this.proxySwitch?.restore()
+      this.gatewaySwitch.restore()
+    }
+  }
+
+  private async leaveRemote(): Promise<void> {
+    this.remoteLifetime.abort(new ClientModeError('CANCELLED', 'The Remote connection was closed.'))
+    this.remoteLifetime = new AbortController()
+    const previous = this.connected
     this.connected = undefined
     this.connectionProgress = undefined
-    this.proxySwitch?.restore()
-    this.gatewaySwitch.restore()
+    this.pendingWorkspaceSelection = undefined
+    this.proxySwitch?.selectLocal()
+    this.gatewaySwitch.selectLocal()
+    // Detach authority synchronously. Closing the carrier also releases pending
+    // stream RPCs; one failed stream/preview must never skip carrier cleanup.
+    const results = await Promise.allSettled([
+      this.closeCodexVirtual(),
+      this.closeCursorVirtual(),
+      this.closePreview(),
+      this.codexStreamBridge.closeCodexStreams(previous?.client),
+      previous?.client.close(),
+    ])
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
   }
 
   private async callRemoteFileViewer(
@@ -798,11 +834,12 @@ export class ClientModeRuntime {
     signal?: AbortSignal,
     isCurrent?: () => boolean,
   ): Promise<ConnectedRemote> {
+    const lifetime = this.remoteLifetime.signal
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
     const next = await this.connect(targetDeviceId, signal)
     const assertCurrent = (): void => {
       signal?.throwIfAborted()
-      if (this.closed || isCurrent?.() === false) {
+      if (this.closed || lifetime.aborted || isCurrent?.() === false) {
         throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
       }
     }
@@ -822,6 +859,13 @@ export class ClientModeRuntime {
     this.connection.clearConnectionProgress(next.progressRunId)
     await previous?.client.close().catch(() => undefined)
     return next
+  }
+
+  private assertRemoteCurrent(remote: ConnectedRemote, signal?: AbortSignal): void {
+    signal?.throwIfAborted()
+    if (this.closed || this.connected !== remote) {
+      throw new ClientModeError('CANCELLED', 'The Remote workspace request was superseded or closed.')
+    }
   }
 
   private requireIdentity(): HostIdentity {

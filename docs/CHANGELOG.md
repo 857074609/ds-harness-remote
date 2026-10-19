@@ -1,9 +1,13 @@
 ## Unreleased
 
+- Add a Save button beside the Remote sign-in Server address. Saving applies the Server and refreshes its sign-in methods automatically, discarding the previous QR flow and pending discovery results.
+- Remote 登录面板的 Server 地址旁增加“保存”；保存后应用地址并自动刷新登录方式，清理旧二维码流程与迟到的登录方式结果。
 - Animate the text suffix during Android connection/recovery (`.` → `..` → `...`) on the connection page, workspace recovery state and chat banner. Reserve the suffix width and keep timer updates inside the small suffix component. Type checking and arm64 Release APK build passed; the updated APK was installed and consecutive native screenshots confirmed the changing suffix on the connection page. No presentation-only tests added.
 - Android 连接页、工作区恢复状态和聊天重连提示在原有文字后增加 `.` → `..` → `...` 动画，预留宽度防抖动，定时刷新仅作用于省略号组件。类型检查与 arm64 Release APK 构建通过，覆盖安装后连续真机截图确认连接页省略号变化；未新增纯展示测试。
 - On the attached Xiaomi phone, switching to system Settings for about 84 seconds with the screen on retained the connection, process, foreground service and wake lock; returning did not trigger reconnection. This short app-switch check does not cover long background duration or screen-off freezing. Battery settings were unchanged.
 - 已连接小米手机在亮屏状态切到系统设置约 84 秒再返回，连接、进程、前台服务与唤醒锁保留，未触发重连；保持现有省电设置。该短时切 App 验证不代表长时间后台或息屏冻结已通过。
+- Synchronize Remote account sign-out with the already mounted settings page. One sign-out waits for both Host and Client cleanup and clears both credential stores even if revocation fails; Remote teardown rejects stale connection/workspace results and still closes the carrier when stream or preview cleanup fails.
+- 修复 Remote 面板退出账号后设置页仍保留旧授权的问题：账号变化通过现有状态推送同步；一次退出等待 Host/Client 清理并清除两份凭据，单项撤销失败不跳过其他清理。退出后拒绝迟到连接/工作区结果，流或预览清理失败仍关闭底层连接。隔离浏览器烟测通过，真实 Desktop 跨设备验收待完成。
 
 - Verify Android's encrypted Host path every 25 seconds with a five-second deadline, and run bounded recovery while backgrounded. Retain the existing foreground service across recovery attempts, publish connecting/connected/reconnecting notification states, and release it after exhaustion or explicit disconnect. Type checking, 149 Android tests and arm64 Release APK build passed; long screen-off and OEM battery-policy acceptance remains pending.
 - Android 每 25 秒检查加密 Host 链路（五秒超时），后台同样执行有界重连；恢复期间复用既有前台服务与唤醒锁，通知同步连接中/已连接/断线重连状态，耗尽重试或主动断开后释放。类型检查、149 个 Android 测试及 arm64 Release APK 构建通过；长时间息屏与厂商省电策略仍待真机验收。

@@ -198,11 +198,6 @@ async function activate(
     warn: message => { ctx.logger.warn(message); console.warn(message) },
     error: message => { ctx.logger.error(message); console.error(message) },
   }, config.logLevel)
-  const hostIdentities = new IdentityStore({
-    directory: config.serverUrl === undefined
-      ? defaultIdentityDirectory
-      : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'host'),
-  })
   const apiProxy = ctx.get('apiProxy') as ApiProxy | undefined
   // The official Typert gateway (`typertGateway` from dsh-api-gateway) is the
   // dispatch path behind `/api/commands/*` on the host. It is an explicit
@@ -231,61 +226,112 @@ async function activate(
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
-  const runtime = new HostPluginRuntime(
-    config,
-    hostIdentities,
-    apiProxy,
-    logger,
-    localTypertGateway,
-    () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
-    subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
-    peer => createPluginRouteDispatcher(
-      () => ctx.get('connection') as PluginRouteConnectionLike | undefined,
-      () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
-      peer,
-    ),
-  )
-
-  let clientRuntime: ClientModeRuntime | undefined
-  const hostControl = runtime
-  if (config.serverUrl !== undefined && connection !== undefined) {
-    const clientIdentities = new IdentityStore({
-      directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'client'),
+  const createRuntimes = (config: ResolvedConfig) => {
+    const hostIdentities = new IdentityStore({
+      directory: config.serverUrl === undefined
+        ? defaultIdentityDirectory
+        : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'host'),
     })
-    clientRuntime = new ClientModeRuntime(
+    const runtime = new HostPluginRuntime(
       config,
-      clientIdentities,
-      new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+      hostIdentities,
       apiProxy,
-      nativeTypertGateway,
       logger,
-      hostControl,
+      localTypertGateway,
+      () => ctx.get('fileViewerHost') as FileViewerHostServiceLike | undefined,
+      subprocess === undefined ? undefined : subprocessTerminalSpawner(subprocess),
+      peer => createPluginRouteDispatcher(
+        () => ctx.get('connection') as PluginRouteConnectionLike | undefined,
+        () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
+        peer,
+      ),
     )
+
+    let clientRuntime: ClientModeRuntime | undefined
+    if (config.serverUrl !== undefined && connection !== undefined) {
+      const clientIdentities = new IdentityStore({
+        directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'client'),
+      })
+      clientRuntime = new ClientModeRuntime(
+        config,
+        clientIdentities,
+        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
+        apiProxy,
+        nativeTypertGateway,
+        logger,
+        runtime,
+      )
+    }
+
+    return { runtime, clientRuntime }
+  }
+  let { runtime, clientRuntime } = createRuntimes(config)
+  let closed = false
+  let clientServiceProvided = clientRuntime !== undefined
+  let startup: Promise<void> | undefined
+  let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
+  const replaceServer = (next: ResolvedConfig) => {
+    const operation = async () => {
+      await startup
+      if (closed) throw new Error('Remote plugin is closed')
+      // Stop both authorities before loading identities scoped to another Server.
+      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()])
+      const failure = shutdown.find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
+      if (closed) throw new Error('Remote plugin is closed')
+      const fresh = createRuntimes(next)
+      try {
+        await fresh.runtime.start()
+        await fresh.clientRuntime?.start()
+        if (closed) throw new Error('Remote plugin is closed')
+      } catch (error) {
+        await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()])
+        throw error
+      }
+      runtime = fresh.runtime
+      clientRuntime = fresh.clientRuntime
+      ctx.dshRemote = runtime
+      if (clientRuntime !== undefined) {
+        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
+        else {
+          ctx.provide('dshRemoteClient', clientRuntime)
+          clientServiceProvided = true
+        }
+      }
+      tuiTarget = { runtime, config: next }
+      if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
+      return { client: clientRuntime, host: runtime }
+    }
+    replacement = operation()
+    return replacement
   }
 
   const controlRuntime = connection === undefined
     ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, hostControl)
+    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer)
 
   ctx.provide('dshRemote', runtime)
   if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
-  const tuiTarget: TuiRemoteTarget = { runtime, config }
+  let tuiTarget: TuiRemoteTarget = { runtime, config }
   if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
     const disposeControl = controlRuntime?.register(connection!, webServer)
     try {
-      await runtime.start()
-      if (clientRuntime !== undefined) {
-        await clientRuntime.start()
-      } else {
-        logger.warn('client remote mode is unavailable', {
-          serverConfigured: config.serverUrl !== undefined,
-          apiProxyAvailable: apiProxy !== undefined,
-          remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-          connectionAvailable: connection !== undefined,
-        })
-      }
+      startup = (async () => {
+        await runtime.start()
+        if (clientRuntime !== undefined) {
+          await clientRuntime.start()
+        } else {
+          logger.warn('client remote mode is unavailable', {
+            serverConfigured: config.serverUrl !== undefined,
+            apiProxyAvailable: apiProxy !== undefined,
+            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
+            connectionAvailable: connection !== undefined,
+          })
+        }
+      })()
+      await startup
     } catch (error) {
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
@@ -294,6 +340,8 @@ async function activate(
       throw error
     }
     return async () => {
+      closed = true
+      await replacement?.catch(() => undefined)
       if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
       await disposeControl?.()
       await clientRuntime?.close()

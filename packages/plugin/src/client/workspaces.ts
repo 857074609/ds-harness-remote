@@ -19,6 +19,7 @@ import type {
   RemoteDirectoryListing,
   RemoteStatus,
   RemoteWorkspaceView,
+  PluginSettingsView,
 } from './types.js'
 
 export function createRemoteWorkspaceAction(React: ClientReact) {
@@ -81,12 +82,15 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     const [email, setEmail] = React.useState('')
     const [password, setPassword] = React.useState('')
     const [loginServerUrl, setLoginServerUrl] = React.useState('https://dsh.r2049.cn')
+    const [savingServer, setSavingServer] = React.useState(false)
+    const serverDirty = loginServerUrl.trim() !== (status?.serverUrl ?? '')
     const [loginMethod, setLoginMethod] = React.useState<LoginMethod>('password')
     const loginMethodManuallySelected = React.useRef(false)
     const [oauthProviders, setOAuthProviders] = React.useState<OAuthProviderInfo[]>([])
     const [providersLoading, setProvidersLoading] = React.useState(false)
     const [providersFailed, setProvidersFailed] = React.useState(false)
     const [providerReload, setProviderReload] = React.useState(0)
+    const providerRequestRun = React.useRef(0)
     const [qrSession, setQrSession] = React.useState<OAuthQrSession | undefined>(undefined)
     const [qrImage, setQrImage] = React.useState<string | undefined>(undefined)
     const [qrExpired, setQrExpired] = React.useState(false)
@@ -140,7 +144,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     }, [])
 
     React.useEffect(() => {
-      if (status?.serverUrl !== undefined && loginServerUrl === 'https://dsh.r2049.cn') {
+      if (status?.serverUrl !== undefined) {
         setLoginServerUrl(status.serverUrl)
       }
     }, [status?.serverUrl])
@@ -176,8 +180,9 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     }
 
     React.useEffect(() => {
-      if (!open || !needsAuthorization) return
+      if (!open || !needsAuthorization || savingServer || serverDirty) return
       let active = true
+      const run = ++providerRequestRun.current
       qrFlowRun.current += 1
       setBusy(false)
       setQrSession(undefined)
@@ -187,7 +192,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setProvidersLoading(true)
       setProvidersFailed(false)
       void props.control<OAuthProviderInfo[]>('client.account.providers').then(items => {
-        if (!active) return
+        if (!active || run !== providerRequestRun.current) return
         const available = items.filter(item => item.qrStartUrl != null)
         setOAuthProviders(available)
         setLoginMethod(current => {
@@ -197,24 +202,24 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
           return preferred === undefined ? 'password' : `oauth:${preferred.id}`
         })
       }).catch(reason => {
-        if (!active) return
+        if (!active || run !== providerRequestRun.current) return
         setProvidersFailed(true)
         setLoginMethod('password')
         setError(messageOf(reason))
       }).finally(() => {
-        if (active) setProvidersLoading(false)
+        if (active && run === providerRequestRun.current) setProvidersLoading(false)
       })
       return () => { active = false }
-    }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload])
+    }, [open, needsAuthorization, status?.serverUrl, props.preferredQrProvider, providerReload, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!open || !needsAuthorization || providersLoading || loginMethod === 'password'
+      if (!open || !needsAuthorization || savingServer || serverDirty || providersLoading || loginMethod === 'password'
         || !oauthProviders.some(item => `oauth:${item.id}` === loginMethod) || qrSession !== undefined || qrExpired) return
       void startQrLogin(loginMethod.slice(6))
-    }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired])
+    }, [open, needsAuthorization, providersLoading, oauthProviders, loginMethod, qrSession, qrExpired, savingServer, serverDirty])
 
     React.useEffect(() => {
-      if (!open || loginMethod === 'password' || qrSession === undefined) return
+      if (!open || savingServer || serverDirty || loginMethod === 'password' || qrSession === undefined) return
       let active = true
       let polling = false
       let settled = false
@@ -269,7 +274,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
         active = false
         if (timer !== undefined) window.clearInterval(timer)
       }
-    }, [open, loginMethod, qrSession])
+    }, [open, loginMethod, qrSession, savingServer, serverDirty])
 
     const selectLoginMethod = (method: LoginMethod): void => {
       loginMethodManuallySelected.current = true
@@ -617,8 +622,47 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
       setError(undefined)
     }
 
+    const resetLoginFlow = (): void => {
+      providerRequestRun.current += 1
+      qrFlowRun.current += 1
+      setQrSession(undefined)
+      setQrImage(undefined)
+      setQrExpired(false)
+      setOAuthProviders([])
+      setProvidersFailed(false)
+      setProvidersLoading(false)
+      setLoginMethod('password')
+      loginMethodManuallySelected.current = false
+      setPassword('')
+      setError(undefined)
+      setNotice(undefined)
+    }
+
+    const saveLoginServer = async (): Promise<void> => {
+      if (loginServerUrl.trim() === '' || savingServer) return
+      resetLoginFlow()
+      setSavingServer(true)
+      setBusy(true)
+      try {
+        const view = await props.control<PluginSettingsView>('settings.server.set', { serverUrl: loginServerUrl.trim() })
+        if (view.applies !== 'live') {
+          setNotice(t('serverSaved'))
+          return
+        }
+        const nextStatus = await props.control<RemoteStatus>('status')
+        setStatus(nextStatus)
+        setLoginServerUrl(nextStatus.serverUrl ?? loginServerUrl.trim())
+        setProviderReload(value => value + 1)
+      } catch (reason) {
+        setError(messageOf(reason))
+      } finally {
+        setSavingServer(false)
+        setBusy(false)
+      }
+    }
+
     const signInClient = async (): Promise<void> => {
-      if (email.trim() === '' || password === '' || loginServerUrl.trim() === '') return
+      if (serverDirty || savingServer || email.trim() === '' || password === '' || loginServerUrl.trim() === '') return
       setBusy(true)
       setError(undefined)
       try {
@@ -664,11 +708,26 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
     }
 
     const logoutRemote = async (): Promise<void> => {
+      qrFlowRun.current += 1
+      progressRun.current += 1
       setBusy(true)
       setError(undefined)
       try {
         await props.control('settings.logout')
         setDevices([])
+        setSelectedHost(undefined)
+        setConnectingHost(undefined)
+        setWorkspaces([])
+        setCodexWorkspaces([])
+        setCursorWorkspaces([])
+        setAntigravityWorkspaces([])
+        setPiWorkspaces([])
+        setOpencodeWorkspaces([])
+        setClaudeWorkspaces([])
+        setDirectory(undefined)
+        setPath('')
+        setPassword('')
+        setProgress(undefined)
         setNeedsAuthorization(true)
         setQrSession(undefined)
         setQrImage(undefined)
@@ -908,19 +967,33 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
               React.createElement('div', { className: 'dshRemoteLoginHeading' },
                 React.createElement('strong', { className: 'dshRemoteLoginTitle' }, t('signInClient')),
                 React.createElement('span', null, t('signInClientDescription'))),
+              React.createElement('form', {
+                className: 'dshRemoteLoginServer',
+                onSubmit: (event: Event) => { event.preventDefault(); void saveLoginServer() },
+              },
+                React.createElement('label', { htmlFor: 'dsh-remote-login-server' }, t('serverUrl')),
+                React.createElement('div', null,
+                  React.createElement('input', {
+                    id: 'dsh-remote-login-server', type: 'url', required: true,
+                    value: loginServerUrl, disabled: busy || savingServer, autoComplete: 'url',
+                    placeholder: t('serverUrl'), onChange: (event: Event) => {
+                      resetLoginFlow()
+                      setLoginServerUrl((event.target as HTMLInputElement).value)
+                    },
+                  }),
+                  React.createElement('button', {
+                    type: 'submit', disabled: busy || savingServer || loginServerUrl.trim() === '',
+                  }, t(savingServer ? 'saving' : 'save')))),
               React.createElement('div', { className: 'dshRemoteLoginTabs', role: 'tablist' },
                 ...orderedQrProviders.map(qrLoginTab),
                 React.createElement('button', {
                   type: 'button', role: 'tab', id: 'dsh-remote-password-tab',
                   'aria-selected': loginMethod === 'password', 'aria-controls': 'dsh-remote-password-panel',
-                  className: loginMethod === 'password' ? 'isActive' : '', disabled: busy,
+                  className: loginMethod === 'password' ? 'isActive' : '', disabled: busy || savingServer || serverDirty,
                   onClick: () => selectLoginMethod('password'),
                 }, t('accountPasswordLogin'))),
               providersLoading ? React.createElement('p', { role: 'status' }, t('loadingLoginProviders')) : null,
-              providersFailed ? React.createElement('button', {
-                type: 'button', onClick: () => { setError(undefined); setProviderReload(value => value + 1) },
-              }, t('retryLoginProviders')) : null,
-              !providersLoading && !providersFailed && oauthProviders.length === 0
+              !savingServer && !serverDirty && !providersLoading && !providersFailed && oauthProviders.length === 0
                 ? React.createElement('p', { role: 'status' }, t('noLoginProviders')) : null,
               loginMethod !== 'password' && selectedProvider !== undefined
                 ? React.createElement('div', {
@@ -956,10 +1029,6 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                   'aria-labelledby': 'dsh-remote-password-tab',
                 },
                   React.createElement('input', {
-                    type: 'url', value: loginServerUrl, disabled: busy, autoComplete: 'url', placeholder: t('serverUrl'),
-                    'aria-label': t('serverUrl'), onChange: (event: Event) => setLoginServerUrl((event.target as HTMLInputElement).value),
-                  }),
-                  React.createElement('input', {
                     type: 'email', value: email, disabled: busy, autoComplete: 'username', placeholder: t('account'),
                     'aria-label': t('account'), onChange: (event: Event) => setEmail((event.target as HTMLInputElement).value),
                   }),
@@ -967,7 +1036,7 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                     type: 'password', value: password, disabled: busy, autoComplete: 'current-password', placeholder: t('password'),
                     'aria-label': t('password'), onChange: (event: Event) => setPassword((event.target as HTMLInputElement).value),
                   }),
-                  React.createElement('button', { type: 'button', disabled: busy || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')))) : null,
+                  React.createElement('button', { type: 'button', disabled: busy || savingServer || serverDirty || loginServerUrl.trim() === '' || email.trim() === '' || password === '', onClick: () => void signInClient() }, t(busy ? 'signingIn' : 'startSignIn')))) : null,
             needsAuthorization ? null : React.createElement(React.Fragment, null,
               selectedHost === undefined ? React.createElement('section', { className: 'dshRemoteHosts', 'aria-label': t('chooseHost') },
                 React.createElement('div', { className: 'dshRemoteSectionHeading' },

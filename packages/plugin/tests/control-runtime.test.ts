@@ -4,10 +4,13 @@ import { join } from 'node:path'
 import type { RpcResult } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { HostAuthorizationControl, HostConnectionHandle } from '../src/client-runtime.js'
+import type { ClientModeRuntime } from '../src/client-runtime.js'
+import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { resolveConfig, type Config } from '../src/config.js'
 import { CONTROL_RPC_PREFIX } from '../src/control-route.js'
 import { PluginControlRuntime, type PluginSettingsBinding } from '../src/control-runtime.js'
 import { serverStorageDirectory } from '../src/identity-store.js'
+import { ServerCredentialStore } from '../src/server-credentials.js'
 
 const directories: string[] = []
 
@@ -17,6 +20,82 @@ afterEach(async () => {
 })
 
 describe('PluginControlRuntime settings setup', () => {
+  it('holds login discovery until Server replacement settles and rejects overlapping saves', async () => {
+    await runScenarios([false, true].map(fails => ({ name: fails ? 'replacement fails' : 'replacement succeeds', run: async () => {
+      const directory = await temporaryDirectory()
+      const settings = settingsBinding({ serverUrl: 'https://old.example.com' })
+      let release!: () => void
+      let started!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      const ready = new Promise<void>(resolve => { started = resolve })
+      const oldHandle = vi.fn(async () => ({ ok: true, value: ['old'] }))
+      const newHandle = vi.fn(async () => ({ ok: true, value: ['new'] }))
+      const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings,
+        { handleControl: oldHandle } as unknown as ClientModeRuntime, undefined, async () => {
+          started()
+          await gate
+          if (fails) throw new Error('replacement failed')
+          return { client: { handleControl: newHandle } as unknown as ClientModeRuntime, host: {} as HostAuthorizationControl }
+        }))
+      const saving = handler('settings.server.set', { serverUrl: 'https://new.example.com' }, signal())
+      await ready
+      const providers = handler('client.account.providers', {}, signal())
+      try {
+        await expect(handler('settings.server.set', { serverUrl: 'https://other.example.com' }, signal())).resolves.toMatchObject({
+          ok: false, error: { details: { remoteCode: 'SERVER_SWITCH_BUSY' } },
+        })
+        expect(oldHandle).not.toHaveBeenCalled()
+        expect(newHandle).not.toHaveBeenCalled()
+        release()
+        await expect(saving).resolves.toMatchObject({ ok: !fails })
+        await expect(providers).resolves.toMatchObject(fails ? { ok: false } : { ok: true, value: ['new'] })
+        expect(oldHandle).not.toHaveBeenCalled()
+        expect(newHandle).toHaveBeenCalledTimes(fails ? 0 : 1)
+      } finally {
+        release()
+        await Promise.allSettled([saving, providers])
+      }
+    } })))
+  })
+
+  it('finishes both roles and credential cleanup in one shared sign-out even when one revocation fails', async () => {
+    await runScenarios((['client', 'host'] as const).map(failingRole => ({ name: failingRole, run: async () => {
+      const directory = await temporaryDirectory()
+      const settings = settingsBinding({ serverUrl: 'https://dsh.r2049.cn' })
+      const stores = (['client', 'host'] as const).map(role => new ServerCredentialStore(
+        serverStorageDirectory(directory, 'https://dsh.r2049.cn', role),
+      ))
+      for (const store of stores) await store.save({
+        serverUrl: 'https://dsh.r2049.cn', deviceId: 'old-device', authorizationMethod: 'account', ...tokens(),
+      })
+      let release!: () => void
+      let started!: () => void
+      const ready = new Promise<void>(resolve => { started = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      const clear = (role: 'host' | 'client') => vi.fn(async () => {
+        if (role === failingRole) throw new Error('revocation failed')
+        started()
+        await gate
+      })
+      const client = { clearClientAuthorization: clear('client') }
+      const host = { clearHostAuthorization: clear('host') }
+      const handler = register(new PluginControlRuntime(resolveConfig(settings.get()), directory, settings,
+        client as unknown as ClientModeRuntime, host as unknown as HostAuthorizationControl))
+      let completed = false
+      const first = handler('settings.logout', {}, signal()).then(result => { completed = true; return result })
+      await ready
+      const second = handler('settings.logout', {}, signal())
+      await Promise.resolve()
+      expect(completed).toBe(false)
+      release()
+      for (const result of await Promise.all([first, second])) expect(result).toMatchObject({ ok: false })
+      expect(client.clearClientAuthorization).toHaveBeenCalledOnce()
+      expect(host.clearHostAuthorization).toHaveBeenCalledOnce()
+      for (const store of stores) await expect(store.load('https://dsh.r2049.cn', 'old-device')).resolves.toBeUndefined()
+      await expect(handler('settings.get', {}, signal())).resolves.toMatchObject({ ok: true, value: { associations: {} } })
+    } })))
+  })
+
   it('applies backend settings to the running Host after persistence', async () => {
     const directory = await temporaryDirectory()
     const settings = settingsBinding({ acp: { enabled: true, backends: [{ id: 'codex', enabled: false }] } })

@@ -49,12 +49,19 @@ export interface PluginSettingsBinding {
 
 /** Loopback-only control plane shared by Local/Remote switching and plugin setup. */
 export class PluginControlRuntime {
+  private logoutFlight?: Promise<PluginSettingsView>
+  private serverSwitchFlight?: Promise<PluginSettingsView>
+
   constructor(
-    private readonly config: ResolvedConfig,
+    private config: ResolvedConfig,
     private readonly identityDirectory: string,
     private readonly settings: PluginSettingsBinding | undefined,
-    private readonly client: ClientModeRuntime | undefined,
-    private readonly host: HostAuthorizationControl | undefined,
+    private client: ClientModeRuntime | undefined,
+    private host: HostAuthorizationControl | undefined,
+    private readonly switchServer?: (config: ResolvedConfig) => Promise<{
+      client: ClientModeRuntime | undefined
+      host: HostAuthorizationControl
+    }>,
   ) {}
 
   register(connection: HostConnectionHandle, webServer?: HostWebServerLike): () => Promise<void> {
@@ -80,6 +87,8 @@ export class PluginControlRuntime {
 
   private async handle(endpoint: string, payload: unknown, signal: AbortSignal): Promise<RpcResult<unknown>> {
     try {
+      // A request arriving during replacement must use the new Server runtime.
+      if (endpoint !== 'settings.server.set') await this.serverSwitchFlight
       if (endpoint === 'settings.development.set') return ok(await this.setDevelopment(payload))
       if (endpoint === 'settings.get') return ok(await this.settingsView())
       if (endpoint === 'settings.configure') return ok(await this.configure(payload))
@@ -179,6 +188,20 @@ export class PluginControlRuntime {
   }
 
   private async setServer(payload: unknown): Promise<PluginSettingsView> {
+    if (this.serverSwitchFlight !== undefined) {
+      throw new ClientModeError('SERVER_SWITCH_BUSY', 'A Server switch is already in progress.')
+    }
+    const flight = this.applyServer(payload)
+    this.serverSwitchFlight = flight
+    try {
+      return await flight
+    } finally {
+      if (this.serverSwitchFlight === flight) this.serverSwitchFlight = undefined
+    }
+  }
+
+  private async applyServer(payload: unknown): Promise<PluginSettingsView> {
+    await this.logoutFlight
     if (this.settings === undefined) {
       throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
     }
@@ -189,6 +212,15 @@ export class PluginControlRuntime {
     const current = editableConfig(resolveConfig(this.settings.get()))
     const next = resolveConfig({ ...current, serverUrl: value.serverUrl })
     await this.settings.replace(editableConfig(next))
+    if (this.switchServer !== undefined) {
+      if (next.serverUrl !== this.config.serverUrl) {
+        const runtimes = await this.switchServer(next)
+        this.client = runtimes.client
+        this.host = runtimes.host
+      }
+      this.config = next
+      return { ...await this.settingsView(), applies: 'live' }
+    }
     return this.settingsView()
   }
 
@@ -327,20 +359,31 @@ export class PluginControlRuntime {
     await targetApi.authorizeOwnedRole(targetIdentity, sourceCredentials.accessToken, sourceCredentials.account)
   }
 
-  private async logout(): Promise<PluginSettingsView> {
-    if (this.settings === undefined) {
-      throw new ClientModeError('SETTINGS_UNAVAILABLE', 'DSH user settings are unavailable in this profile.')
-    }
-    const config = resolveConfig(this.settings.get())
+  private logout(): Promise<PluginSettingsView> {
+    if (this.logoutFlight !== undefined) return this.logoutFlight
+    const task = this.clearAuthorization()
+    this.logoutFlight = task
+    void task.finally(() => {
+      if (this.logoutFlight === task) this.logoutFlight = undefined
+    }).catch(() => undefined)
+    return task
+  }
+
+  private async clearAuthorization(): Promise<PluginSettingsView> {
+    const config = this.settings === undefined ? this.config : resolveConfig(this.settings.get())
     if (config.serverUrl !== undefined) {
-      await Promise.all([
+      const runtimes = await Promise.allSettled([
         this.client?.clearClientAuthorization(),
         this.host?.clearHostAuthorization(),
       ])
-      await Promise.all((['host', 'client'] as const).map(async role => {
+      const stores = await Promise.allSettled((['host', 'client'] as const).map(async role => {
         const directory = serverStorageDirectory(this.identityDirectory, config.serverUrl!, role)
         await new ServerCredentialStore(directory).clear()
       }))
+      // A failed revocation must not skip the other role or leave its local
+      // credential behind. Report failure only after every cleanup settles.
+      const failure = [...runtimes, ...stores].find(result => result.status === 'rejected')
+      if (failure?.status === 'rejected') throw failure.reason
     }
     return this.settingsView()
   }

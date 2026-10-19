@@ -44,29 +44,35 @@ export function createRemotePluginOptions(React: ClientReact) {
     const [notice, setNotice] = React.useState<LocalizedMessage | undefined>(undefined)
     const [error, setError] = React.useState<string | undefined>(undefined)
     const [settingsView, setSettingsView] = React.useState<PluginSettingsView | undefined>(undefined)
+    const associationReadRun = React.useRef(0)
     const persistedServerUrl = settingsView?.config.serverUrl ?? 'https://dsh.r2049.cn'
     const association = associations.client ?? associations.host
     const serverDirty = settingsView !== undefined && serverUrl !== persistedServerUrl
     const draftDirty = serverDirty
 
-    const applyView = (view: PluginSettingsView): void => {
+    const applyAssociations = (view: PluginSettingsView): void => {
+      setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
+    }
+
+    const applyView = (view: PluginSettingsView, updateAssociations = true): void => {
       setSettingsView(view)
       setServerUrl(view.config.serverUrl ?? 'https://dsh.r2049.cn')
       setTerminalEnabled(view.config.terminal?.enabled ?? true)
       setPreviewPorts((view.config.loopback?.ports ?? []).join(', '))
       setAcpBackends((view.config.acp?.backends ?? []).map(item => ({ id: item.id, enabled: item.enabled !== false })))
       setAcpAvailability(view.acpAvailability ?? {})
-      setAssociations(view.associations ?? (view.association === undefined ? {} : { host: view.association }))
+      if (updateAssociations) applyAssociations(view)
       setWritable(view.writable)
       setLoaded(true)
     }
 
     const load = async (): Promise<void> => {
+      const run = ++associationReadRun.current
       const [view, status] = await Promise.all([
         props.control<PluginSettingsView>('settings.get'),
         props.control<RemoteStatus>('status').catch(() => undefined),
       ])
-      applyView(view)
+      applyView(view, run === associationReadRun.current)
       setHostStatus(status?.host)
       setHostName(status?.deviceName ?? '')
       setHostDeviceId(status?.host?.deviceId ?? '')
@@ -77,15 +83,26 @@ export function createRemotePluginOptions(React: ClientReact) {
     }, [])
 
     React.useEffect(() => {
-      // The pushed status keeps this Host account line current; it replaces
-      // the periodic unary status read this card used to perform.
-      if (association === undefined) return
-      return props.statusFeed.subscribe(status => {
+      let active = true
+      let authorizationKey: string | undefined
+      const unsubscribe = props.statusFeed.subscribe(status => {
         setHostStatus(status.host)
         setHostName(status.deviceName ?? '')
         setHostDeviceId(status.host?.deviceId ?? '')
+        // Either account entry point rotates these identities on sign-out.
+        // Refresh both associations on that change, without resetting drafts
+        // or fetching settings for ordinary connection/statistics updates.
+        const key = JSON.stringify([status.serverUrl, status.deviceId, status.host?.deviceId,
+          status.host?.authorized, status.host?.account])
+        if (key === authorizationKey) return
+        authorizationKey = key
+        const run = ++associationReadRun.current
+        void props.control<PluginSettingsView>('settings.get').then(view => {
+          if (active && run === associationReadRun.current) applyAssociations(view)
+        }).catch(() => undefined)
       })
-    }, [association !== undefined])
+      return () => { active = false; unsubscribe() }
+    }, [props.statusFeed])
 
     const save = async (event?: Event): Promise<void> => {
       event?.preventDefault()
@@ -98,7 +115,7 @@ export function createRemotePluginOptions(React: ClientReact) {
           serverUrl,
         })
         applyView(view)
-        setNotice({ key: 'serverSaved' })
+        setNotice({ key: view.applies === 'live' ? 'serverApplied' : 'serverSaved' })
       } catch (reason) {
         setError(messageOf(reason))
       } finally {
@@ -107,12 +124,13 @@ export function createRemotePluginOptions(React: ClientReact) {
     }
 
     const logout = async (): Promise<void> => {
+      const run = ++associationReadRun.current
       setBusy(true)
       setError(undefined)
       setNotice(undefined)
       try {
         const view = await props.control<PluginSettingsView>('settings.logout')
-        applyView(view)
+        applyView(view, run === associationReadRun.current)
         setRegistrationCode('')
         setNotice({ key: 'signedOut' })
       } catch (reason) {

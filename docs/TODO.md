@@ -14,6 +14,10 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 ## 2026-10-18 版本审查后续
 
 - [ ] Android 保活修复真机验收：安装重建 APK，确认通知权限与常驻通知、后台/息屏 1/5/15 分钟的 Relay/WebRTC 心跳与消息更新、回前台半开连接恢复、断开后通知与唤醒锁释放；覆盖默认/不受限制省电、Doze 与 Wi-Fi/蜂窝切换。本机类型/契约测试与原生编译不等于这些场景已通过。
+  - 同日亮屏切 App 烟测：16:46:11 切入系统设置，16:47:35 返回 Remote；相同进程、FGS 与 wake lock 保持，未出现 carrier error、重新建连或恢复失败。约 84 秒短时切换通过；没有修改省电设置，不替代长时间后台与息屏验收。
+  - 2026-10-19 追加修复：每 25 秒通过既有加密 capability RPC 探活（五秒超时），后台沿用最多三次恢复，并在恢复期间保留既有 FGS/Headless task/wake lock；通知显示真实连接阶段，耗尽重试释放服务。Android check、149 tests 与 arm64 Release APK 构建通过。已连接小米手机 16:12 记录 Control error 与网络不可用；息屏快照中服务仍 foreground，但 remote-connection wake lock 被标记 DISABLED，不能把通知存在当作链路存活或认定仅由标准 Doze 导致。长时间/OEM 省电及跨设备验收仍待完成。
+  - 同日 16:20 覆盖安装后，保持现有省电设置；16:21 建立 P2P，约四分钟息屏后唤醒于 16:25:47 收到 control-error，16:25:50 已完成新加密连接并更新 connected 通知，聊天恢复，同一进程未退出。约 2.3 秒恢复通过；未修改电池优化白名单，息屏期间 wake lock 仍被禁用，不能将其记为持续联网或 15 分钟稳定性通过。
+  - 同日后续系统日志确认小米息屏冻结：16:40:33.987 `Going to sleep`，16:40:39.696 以 `reason: greeze` 禁用本 App wake lock，16:40:39.699 同时记录 `Destroyed live tcp sockets for uids={10440}` 与 `frozen uid = 10440 reason=screen off`。约 5.7 秒即主动断开 TCP；16:40:40.981 唤醒、16:40:41.142 才向 JS 投递 control-error，16:40:44.332 重建 P2P。此前 16:21 与 16:35 两次息屏也在约 5.7 秒后以 greeze 禁用锁。该手机在 FGS/procState 4 下仍受厂商冻结，不能靠 JS 心跳/重连或普通部分唤醒锁保证息屏持续联网；用户要求保持省电设置，未修改白名单或厂商策略。尚需在用户选择的省电策略下验收，不能将唤醒重连成功记作后台保活成功。
 - [x] 修复 ACP/CodeX 异步结果隔离、归属回滚、旧 Prompt、OpenCode history reader、Pi 模型确认及文件预览内存限额；全仓 check、689 个测试及生产 build 通过。修复尚未发布。
 - [ ] 消除剩余 5 项依赖公告（4 high / 1 moderate）：Expo/xcode 的 uuid、Metro 的 image-size（2 项）及 braces、Expo CLI 的 node-forge。image-size/uuid 需要兼容升级；node-forge/braces 本轮 audit 尚无修复版本。不得直接覆盖不兼容大版本或将构建链依赖视为无风险。
 - [ ] 在 Windows、Android APK/真机、独立 Remote Web 与加密跨设备环境回归本轮断线/后端替换修复；本机 check/test/Hermes 构建不替代目标平台验收。

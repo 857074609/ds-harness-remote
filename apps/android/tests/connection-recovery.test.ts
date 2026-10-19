@@ -7,6 +7,7 @@ type RecoveryState = ReturnType<ConstructorParameters<typeof ForegroundConnectio
 let state: RecoveryState
 let recovery: ForegroundConnectionRecovery
 let reconnect: ReturnType<typeof vi.fn<(options: { forceRelay?: boolean }) => Promise<boolean>>>
+let exhausted: ReturnType<typeof vi.fn>
 
 function prepare() {
   vi.clearAllTimers()
@@ -16,7 +17,8 @@ function prepare() {
     selectedDevice: { deviceId: 'host-1' }, reauthRequired: false, transportPreference: 'auto',
   }
   reconnect = vi.fn(async () => false)
-  recovery = new ForegroundConnectionRecovery(() => state, reconnect)
+  exhausted = vi.fn()
+  recovery = new ForegroundConnectionRecovery(() => state, reconnect, exhausted)
   recovery.setActive(true)
 }
 
@@ -42,6 +44,9 @@ describe('foreground carrier recovery', () => {
       expect(reconnect).toHaveBeenCalledTimes(2)
       await vi.advanceTimersByTimeAsync(8_000)
       expect(reconnect).toHaveBeenCalledTimes(3)
+      expect(exhausted).toHaveBeenCalledOnce()
+      recovery.update()
+      expect(exhausted).toHaveBeenCalledOnce()
       await vi.advanceTimersByTimeAsync(60_000)
       expect(reconnect).toHaveBeenCalledTimes(3)
       expect(reconnect.mock.calls.map(([options]) => options)).toEqual(
@@ -67,6 +72,7 @@ describe('foreground carrier recovery', () => {
         recovery.update()
         await vi.advanceTimersByTimeAsync(30_000)
         expect(reconnect).not.toHaveBeenCalled()
+        if (action === 'never-connected' || action === 'refused') expect(exhausted).toHaveBeenCalledOnce()
       } })), prepare)
   })
 

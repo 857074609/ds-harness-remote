@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker'
+import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import {
   ArrowLeft,
   ArrowUp,
@@ -1055,7 +1056,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       {!connected && (
         <View style={styles.connectionBanner} accessibilityRole="alert">
           <View style={styles.connectionDot} />
-          <Text style={styles.connectionBannerText}>{connectionRetrying ? zhCN.chat.reconnecting : zhCN.chat.offline}</Text>
+          <Text style={styles.connectionBannerText}>
+            {connectionRetrying ? <>{zhCN.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : zhCN.chat.offline}
+          </Text>
         </View>
       )}
     </>

@@ -32,6 +32,7 @@ class RemoteForegroundService : Service() {
   private var taskContext: ReactContext? = null
   private var lifetimeId: String? = null
   private val stopWaiters = mutableListOf<Promise>()
+  private var connectionStatus = "connecting"
 
   @Suppress("DEPRECATION")
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,7 +107,11 @@ class RemoteForegroundService : Service() {
   private fun notification(): Notification = NotificationCompat.Builder(this, CHANNEL_ID)
     .setSmallIcon(applicationInfo.icon)
     .setContentTitle(getString(R.string.app_name))
-    .setContentText("Remote connection is active")
+    .setContentText(when (connectionStatus) {
+      "connected" -> "Remote connected"
+      "reconnecting" -> "Remote disconnected · reconnecting"
+      else -> "Connecting to remote Host"
+    })
     .setCategory(NotificationCompat.CATEGORY_SERVICE)
     .setOngoing(true)
     .setOnlyAlertOnce(true)
@@ -157,6 +162,14 @@ class RemoteForegroundService : Service() {
     fun stop(context: Context) {
       running?.releaseRuntime()
       context.stopService(Intent(context, RemoteForegroundService::class.java))
+    }
+
+    fun setStatus(status: String) {
+      if (status !in setOf("connecting", "connected", "reconnecting")) return
+      val service = running ?: return
+      service.connectionStatus = status
+      service.getSystemService(NotificationManager::class.java)
+        .notify(NOTIFICATION_ID, service.notification())
     }
 
     fun waitUntilStopped(lifetimeId: String, promise: Promise) {

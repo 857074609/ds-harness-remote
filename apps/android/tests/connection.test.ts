@@ -1,5 +1,5 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AdaptiveTransportOptions } from '@dsh-remote/webrtc'
 
 class FakeCore {
@@ -105,6 +105,61 @@ describe('AndroidRemoteConnection Harness transport selection', () => {
     testState.transportOptions.length = 0
   }
 beforeEach(prepareScenario1)
+afterEach(async () => {
+  await Promise.all(testState.cores.map(core => core.close()))
+  vi.useRealTimers()
+})
+
+  it('periodically verifies the encrypted Host path and retires silent carriers without touching replacements', async () => {
+    await runScenarios(['healthy', 'silent', 'shared-probe', 'replaced', 'disconnected'].map(outcome => ({ name: outcome, run: async () => {
+      vi.useFakeTimers()
+      const connection = new AndroidRemoteConnection()
+      const closed = vi.fn()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined, { onClose: closed })
+      const core = testState.cores[0]!
+      const rpc = vi.spyOn(core, 'rpc')
+      let finish!: (value: unknown) => void
+      if (outcome === 'silent') rpc.mockImplementationOnce(() => new Promise((_resolve, reject) => {
+        setTimeout(() => reject(new Error('RPC_TIMEOUT')), 5_000)
+      }))
+      if (outcome === 'shared-probe' || outcome === 'replaced') {
+        rpc.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      }
+      if (outcome === 'disconnected') await connection.close()
+      await vi.advanceTimersByTimeAsync(25_000)
+      if (outcome === 'silent') {
+        expect(closed).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(5_000)
+        expect(closed).toHaveBeenCalledOnce()
+        expect(() => connection.requireProxy()).toThrow()
+      } else if (outcome === 'shared-probe') {
+        const resumed = connection.checkHealth()
+        expect(rpc).toHaveBeenCalledTimes(1)
+        finish({})
+        expect(await resumed).toBe(true)
+      } else if (outcome === 'replaced') {
+        await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+        finish({})
+        await vi.advanceTimersByTimeAsync(0)
+        expect(closed).not.toHaveBeenCalled()
+        expect(connection.requireProxy()).toBeDefined()
+      } else if (outcome === 'healthy') {
+        expect(rpc).toHaveBeenCalledTimes(1)
+        await vi.advanceTimersByTimeAsync(25_000)
+        expect(rpc).toHaveBeenCalledTimes(2)
+        expect(closed).not.toHaveBeenCalled()
+      } else expect(rpc).not.toHaveBeenCalled()
+      await connection.close()
+      const calls = rpc.mock.calls.length
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(rpc).toHaveBeenCalledTimes(calls)
+      vi.useRealTimers()
+    } })), async () => {
+      await Promise.all(testState.cores.map(core => core.close()))
+      vi.clearAllTimers()
+      prepareScenario1()
+    })
+  })
 
   it('preserves transient versus refused carrier failures through the close callback', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)

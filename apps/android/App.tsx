@@ -8,7 +8,7 @@ import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
 import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
-import { useAppStore } from './src/state/store'
+import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
 import type { WorkspaceShortcut } from './src/types'
 import {
@@ -228,14 +228,16 @@ function AppNavigator() {
     const recovery = new ForegroundConnectionRecovery(
       useAppStore.getState,
       options => useAppStore.getState().reconnect(options),
+      () => { void stopConnectionRecovery() },
     )
     const unsubscribe = useAppStore.subscribe(() => recovery.update())
-    recovery.setActive(AppState.currentState === 'active')
-    const subscription = AppState.addEventListener('change', state => recovery.setActive(state === 'active'))
+    // The native service retains RN timers across Activity pause. Keep bounded
+    // recovery enabled while asleep, using the already running service.
+    recovery.setActive(true)
     return () => {
       recovery.setActive(false)
       unsubscribe()
-      subscription.remove()
+      void stopConnectionRecovery()
     }
   }, [])
 

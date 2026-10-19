@@ -347,7 +347,7 @@ export function ErrorBanner({ message, onDismiss, onRetry }: { message: string; 
 
 export function EmptyState({ icon: Icon = WifiOff, title, body, action }: {
   icon?: LucideIcon
-  title: string
+  title: ReactNode
   body: string
   action?: ReactNode
 }) {

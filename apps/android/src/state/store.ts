@@ -19,6 +19,8 @@ const runtime: SessionRuntime = new SessionRuntime({
 /** Only exposes the authenticated native carrier of the current connection. */
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
 
+export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
+
 export const useAppStore = create<AppState>((set, get) => ({
   ...createConnectionActions({ set, get, runtime }),
   ...createSessionActions({ set, get, runtime }),

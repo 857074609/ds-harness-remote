@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
 import { Archive, ArrowLeft, ChevronRight, CircleCheck, Code2, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
@@ -786,6 +787,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
           <View style={styles.connectionHeading}>
             <Text accessibilityLiveRegion="polite" style={styles.connectionStatus}>
               {currentStage === 'ready' ? zhCN.devices.connectionReady : zhCN.devices.connecting}
+              {currentStage !== 'ready' && !failed && <AnimatedEllipsis />}
             </Text>
             <Text style={styles.connectionDeviceName} numberOfLines={2}>{device.name}</Text>
             <Text style={styles.connectionVersions} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>

@@ -1,6 +1,7 @@
 interface ForegroundServiceModule {
   start(): Promise<void>
   stop(): Promise<void>
+  setStatus(status: string): Promise<void>
   waitUntilStopped(lifetimeId: string): Promise<void>
 }
 
@@ -38,6 +39,11 @@ export const foregroundService = {
     const rn = reactNative()
     if (rn?.Platform.OS !== 'android') return
     await nativeModule(rn).stop()
+  },
+  async setStatus(status: 'connecting' | 'connected' | 'reconnecting'): Promise<void> {
+    const rn = reactNative()
+    if (rn?.Platform.OS !== 'android') return
+    await nativeModule(rn).setStatus(status)
   },
   async waitUntilStopped(lifetimeId: string): Promise<void> {
     const rn = reactNative()

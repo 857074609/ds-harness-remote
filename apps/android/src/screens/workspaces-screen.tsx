@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleAlert, CirclePlus,
 import { useAppStore } from '../state/store'
 import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
+import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import { radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
@@ -312,7 +313,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
           <View style={styles.contentTop}>
             <EmptyState
               icon={reconnecting ? RefreshCw : WifiOff}
-              title={reconnecting ? zhCN.devices.connecting : selectedDevice === undefined ? zhCN.workspaces.noDevice : zhCN.devices.connectionInterrupted}
+              title={reconnecting ? <>{zhCN.devices.connecting}<AnimatedEllipsis /></> : selectedDevice === undefined ? zhCN.workspaces.noDevice : zhCN.devices.connectionInterrupted}
               body={reconnecting ? zhCN.workspaces.reconnectingBody : connection.error ?? zhCN.workspaces.offlineBody}
               action={<View style={{ gap: spacing.sm }}>
                 {selectedDevice !== undefined && <Button

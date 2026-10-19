@@ -1,5 +1,17 @@
 ## Unreleased
 
+- Animate the text suffix during Android connection/recovery (`.` → `..` → `...`) on the connection page, workspace recovery state and chat banner. Reserve the suffix width and keep timer updates inside the small suffix component. Type checking and arm64 Release APK build passed; the updated APK was installed and consecutive native screenshots confirmed the changing suffix on the connection page. No presentation-only tests added.
+- Android 连接页、工作区恢复状态和聊天重连提示在原有文字后增加 `.` → `..` → `...` 动画，预留宽度防抖动，定时刷新仅作用于省略号组件。类型检查与 arm64 Release APK 构建通过，覆盖安装后连续真机截图确认连接页省略号变化；未新增纯展示测试。
+- On the attached Xiaomi phone, switching to system Settings for about 84 seconds with the screen on retained the connection, process, foreground service and wake lock; returning did not trigger reconnection. This short app-switch check does not cover long background duration or screen-off freezing. Battery settings were unchanged.
+- 已连接小米手机在亮屏状态切到系统设置约 84 秒再返回，连接、进程、前台服务与唤醒锁保留，未触发重连；保持现有省电设置。该短时切 App 验证不代表长时间后台或息屏冻结已通过。
+
+- Verify Android's encrypted Host path every 25 seconds with a five-second deadline, and run bounded recovery while backgrounded. Retain the existing foreground service across recovery attempts, publish connecting/connected/reconnecting notification states, and release it after exhaustion or explicit disconnect. Type checking, 149 Android tests and arm64 Release APK build passed; long screen-off and OEM battery-policy acceptance remains pending.
+- Android 每 25 秒检查加密 Host 链路（五秒超时），后台同样执行有界重连；恢复期间复用既有前台服务与唤醒锁，通知同步连接中/已连接/断线重连状态，耗尽重试或主动断开后释放。类型检查、149 个 Android 测试及 arm64 Release APK 构建通过；长时间息屏与厂商省电策略仍待真机验收。
+- After an in-place install on the attached Xiaomi phone with battery settings unchanged, a roughly four-minute screen-off/wake cycle delivered a carrier error and recovered the connection / chat in about 2.3 seconds without restarting the process. The wake lock was disabled by the system while asleep; this verifies that recovery only, not continuous screen-off networking or long-term stability.
+- 保持小米手机现有省电设置，覆盖安装后约四分钟息屏/唤醒复测捕获 carrier error，约 2.3 秒后自动恢复连接、通知和聊天，进程未重启。息屏时系统仍将唤醒锁标记为 DISABLED；该结果只验证本次恢复，不代表息屏网络持续可用或长期稳定性通过。
+- Follow-up Xiaomi system logs confirmed `greeze` froze the app and destroyed its live TCP sockets about 5.7 seconds after screen-off, despite its foreground service. Errors arrived after waking; continuous screen-off connectivity remains unresolved under that device's unchanged power policy.
+- 后续小米系统日志确认 `greeze` 在息屏约 5.7 秒后冻结 App，并直接销毁其 TCP sockets，前台服务仍存在；错误在唤醒后投递。在现有省电策略下，息屏持续联网仍未解决。
+
 - Load Android workspace/session catalogs only for the opened backend category; connection setup now probes availability without loading every backend. Refresh stays within the current category, category failures stay inline, and retired category requests cannot replace the current list or error. Home shortcuts load only their target backend. Type checking, 147 Android tests and APK build passed; the attached phone verified CodeX/OpenCode category switching and CodeX refresh without the OpenCode failure banner. OpenCode still returns its existing upstream internal error when opened.
 - Android 工作区/会话目录改为点击顶部分类后按需加载；连接设备仅探测可用能力，不再预加载所有后端。下拉仅刷新当前分类，错误显示在对应分类内，切换后忽略旧分类迟到结果；首页快捷入口仅加载目标后端。类型检查、147 个 Android 测试和 APK 构建通过；已连接手机验证 CodeX/OpenCode 分类切换及 CodeX 下拉刷新，OpenCode 错误不再跨分类显示。打开 OpenCode 后，其既有上游内部错误仍存在。
 

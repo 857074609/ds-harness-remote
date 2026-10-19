@@ -564,3 +564,27 @@ METHOD_NOT_FOUND 回包同样证明链路可用。半开或检查中关闭的链
 本次 Android check、25 个测试文件 / 140 个测试、arm64 Release APK（含 Kotlin/Hermes）构建
 与 `git diff --check` 通过；Metro noble/hashes exports fallback 警告仍存在。本机无已连接设备，
 尚未验证通知授权 UI、后台/息屏心跳、Doze/厂商省电与真实跨设备恢复；未发布新版本。
+
+
+## Android background recovery follow-up (2026-10-19)
+
+加密 Host 链路每 25 秒执行既有 `harness.transport.describe`（五秒超时）；与回前台检查
+共享进行中的请求。静默链路按既有 carrier close 转为 offline，后台也启用最多三次恢复。
+恢复期间保留既有 FGS/Headless task/wake lock，避免后台重新启动服务受限；失败尝试
+只清理 carrier，重试耗尽、初次连接失败、安全拒绝或主动断开才释放服务。通知同步
+connecting/connected/reconnecting，不把服务运行等同于 Host 可达。旧连接检查/回调不得
+关闭新连接，也不重放 Prompt/审批/终端输入。Android check、26 文件 / 149 tests 与
+arm64 Release APK（Kotlin/Hermes）构建通过，Metro noble/hashes exports fallback 警告保留。
+已连接小米手机的息屏快照出现 FGS 仍运行而 wake lock 为 DISABLED，厂商省电与长期
+息屏恢复仍待验收；不得把该快照直接归因于标准 Doze，或宣称通知代表真实链路存活。
+
+同日已在连接的小米手机覆盖安装；按用户要求保持现有省电设置。约四分钟息屏后
+唤醒收到 control-error，约 2.3 秒后恢复新加密连接、connected 通知和聊天，同一进程
+存活。息屏期间 wake lock 仍被系统禁用；该轮只验收本次唤醒恢复，不宣称持续联网、
+长时间后台稳定性或 Doze/OEM 豁免通过。
+
+后续小米系统日志已明确定位（同日 16:40）：息屏约 5.7 秒后，`greeze` 禁用该 App
+wake lock，记录 `Destroyed live tcp sockets for uids={10440}` 与
+`frozen uid = 10440 reason=screen off`，唤醒后才向 JS 投递 control-error。FGS/procState 4
+仍被厂商冻结；JS 心跳/恢复不等于息屏持续保活，也不能阻止系统主动销毁 sockets。
+用户明确要求保持现有省电设置，不修改白名单或厂商策略；厂商无限制策略的效果尚未验证。

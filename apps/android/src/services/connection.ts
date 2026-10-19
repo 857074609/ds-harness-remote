@@ -34,6 +34,8 @@ export class AndroidRemoteConnection {
   private muxHandler?: MuxFrameHandler
   private transport?: AdaptiveTransport
   private connectionAttempt = 0
+  private healthTimer?: ReturnType<typeof setTimeout>
+  private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
 
   async connect(
     baseUrl: string,
@@ -103,6 +105,7 @@ export class AndroidRemoteConnection {
         // A late close from a replaced connection must not tear down the new
         // connection that may already be stored on this instance.
         if (this.core !== core) return
+        this.clearHealthTimer()
         void this.closeMux?.(false)
         this.closeMux = undefined
         this.core = undefined
@@ -178,6 +181,7 @@ export class AndroidRemoteConnection {
       } else {
         throw new Error('The remote Host exposes no supported Harness transport.')
       }
+      this.scheduleHealthCheck(core)
     } catch (error) {
       if (attempt === this.connectionAttempt) await this.clearConnection()
       throw error
@@ -285,9 +289,19 @@ export class AndroidRemoteConnection {
   }
 
   /** A locally open socket can be half-open after Android suspends networking. */
-  async checkHealth(): Promise<boolean> {
+  checkHealth(): Promise<boolean> {
     const core = this.core
-    if (core === undefined || !core.getStats().connected) return false
+    if (core === undefined || !core.getStats().connected) return Promise.resolve(false)
+    if (this.healthFlight?.core === core) return this.healthFlight.result
+    const result = this.probeHealth(core)
+    this.healthFlight = { core, result }
+    void result.finally(() => {
+      if (this.healthFlight?.result === result) this.healthFlight = undefined
+    })
+    return result
+  }
+
+  private async probeHealth(core: RemoteClientCore): Promise<boolean> {
     try {
       // Existing authenticated, encrypted capability RPC; no new wire heartbeat.
       await core.rpc('harness.transport.describe', {}, undefined, { timeoutMs: 5_000 })
@@ -300,6 +314,29 @@ export class AndroidRemoteConnection {
     }
   }
 
+  private scheduleHealthCheck(core: RemoteClientCore): void {
+    this.clearHealthTimer()
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = undefined
+      if (this.core !== core) return
+      void this.checkHealth().then(healthy => {
+        if (this.core !== core) return
+        if (healthy) this.scheduleHealthCheck(core)
+        else {
+          console.info('[dsh-remote] Carrier health check failed; closing carrier')
+          // close() on the core publishes the same offline/recovery transition
+          // as a socket close, including when the OS never delivered onclose.
+          void core.close().catch(() => undefined)
+        }
+      })
+    }, 25_000)
+  }
+
+  private clearHealthTimer(): void {
+    if (this.healthTimer !== undefined) clearTimeout(this.healthTimer)
+    this.healthTimer = undefined
+  }
+
   async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
     return await this.transport?.connectionDetails()
   }
@@ -310,6 +347,7 @@ export class AndroidRemoteConnection {
   }
 
   private async clearConnection(): Promise<void> {
+    this.clearHealthTimer()
     this.muxHandler = undefined
     const mux = this.closeMux
     this.closeMux = undefined

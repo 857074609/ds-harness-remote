@@ -50,7 +50,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         error: undefined,
       }))
       try {
-        await runtime.connection.prepareConnection()
+        await runtime.connection.prepareConnection(recovering)
         if (generation !== runtime.connectionGeneration) return false
         await runtime.closeActiveCodexStream(false)
         await runtime.closeActiveCursorStream(false)
@@ -141,7 +141,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
         console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage)
-        await runtime.connection.close()
+        await runtime.connection.close({ preserveRecovery: recovering && !isSessionAuthError(error) })
         if (isSessionAuthError(error)) {
           await get().requireReauth(friendlyError(error))
           return false

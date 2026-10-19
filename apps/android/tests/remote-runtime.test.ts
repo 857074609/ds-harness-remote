@@ -5,7 +5,7 @@ import type { DeviceIdentity, RemoteDevice } from '../src/types'
 
 const { client, service } = vi.hoisted(() => ({
   client: { connect: vi.fn(), close: vi.fn() },
-  service: { start: vi.fn(), stop: vi.fn() },
+  service: { start: vi.fn(), stop: vi.fn(), setStatus: vi.fn() },
 }))
 vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
   connect = client.connect
@@ -33,6 +33,42 @@ const prepare = () => {
 beforeEach(prepare)
 
 describe('Android carrier foreground service ownership', () => {
+  it('retains the existing service only for bounded retryable recovery, including failed attempts', async () => {
+    await runScenarios(['exhausted', 'recovered', 'refused', 'manual-disconnect'].map(outcome => ({ name: outcome, run: async () => {
+      const runtime = new AndroidRemoteRuntime()
+      const closed = vi.fn()
+      await connect(runtime, { onClose: closed })
+      expect(service.setStatus).toHaveBeenLastCalledWith('connected')
+      const options = client.connect.mock.calls[0]![5] as AndroidConnectionOptions
+      options.onClose?.({ retryable: outcome !== 'refused' })
+      await Promise.resolve()
+      if (outcome === 'refused') {
+        await runtime.stopRecovery()
+        expect(service.stop).toHaveBeenCalledTimes(1)
+      } else {
+        expect(service.stop).not.toHaveBeenCalled()
+        await runtime.prepareConnection(true)
+        expect(service.setStatus).toHaveBeenLastCalledWith('reconnecting')
+        client.connect.mockRejectedValueOnce(new Error('network still down'))
+        await expect(connect(runtime)).rejects.toThrow('network still down')
+        await runtime.close({ preserveRecovery: true })
+        expect(service.start).toHaveBeenCalledTimes(1)
+        expect(service.stop).not.toHaveBeenCalled()
+        if (outcome === 'recovered') {
+          await connect(runtime)
+          await runtime.stopRecovery()
+          expect(service.setStatus).toHaveBeenLastCalledWith('connected')
+          expect(service.stop).not.toHaveBeenCalled()
+        } else if (outcome === 'exhausted') {
+          await runtime.stopRecovery()
+          expect(service.stop).toHaveBeenCalledTimes(1)
+        }
+      }
+      await runtime.close()
+      expect(service.stop).toHaveBeenCalledTimes(1)
+    } })), prepare)
+  })
+
   it('serializes native start/stop and fences retired connection lifetimes', async () => {
     await runScenarios([
       {

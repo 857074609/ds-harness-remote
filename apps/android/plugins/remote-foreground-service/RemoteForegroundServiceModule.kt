@@ -24,6 +24,14 @@ class RemoteForegroundServiceModule(
   }
 
   @ReactMethod
+  fun setStatus(status: String, promise: Promise) {
+    context.runOnUiQueueThread {
+      RemoteForegroundService.setStatus(status)
+      promise.resolve(null)
+    }
+  }
+
+  @ReactMethod
   fun waitUntilStopped(lifetimeId: String, promise: Promise) {
     context.runOnUiQueueThread { RemoteForegroundService.waitUntilStopped(lifetimeId, promise) }
   }

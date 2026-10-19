@@ -7,13 +7,17 @@ import { foregroundService } from './foreground-service'
 export class AndroidRemoteRuntime {
   private readonly client = new AndroidRemoteConnection()
   private foreground = false
+  private connected = false
+  private recovering = false
   private generation = 0
   private foregroundTail: Promise<void> = Promise.resolve()
 
   /** Start while the Activity is visible, before credential/network awaits. */
-  async prepareConnection(): Promise<void> {
+  async prepareConnection(recovering = false): Promise<void> {
     const generation = ++this.generation
-    await this.updateForeground(generation, true)
+    this.connected = false
+    this.recovering = recovering && this.foreground
+    await this.updateForeground(generation, true, this.recovering ? 'reconnecting' : 'connecting')
     if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
   }
 
@@ -26,19 +30,28 @@ export class AndroidRemoteRuntime {
     options: AndroidConnectionOptions = {},
   ): Promise<void> {
     const generation = ++this.generation
+    this.connected = false
     try {
-      await this.updateForeground(generation, true)
+      await this.updateForeground(generation, true, this.recovering ? 'reconnecting' : 'connecting')
       if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
       await this.client.connect(baseUrl, identity, host, accessToken, onFrame, {
         ...options,
         onClose: closeOptions => {
           if (generation !== this.generation) return
-          void this.updateForeground(generation, false).catch(() => undefined)
+          this.recovering = closeOptions?.retryable !== false && (this.connected || this.recovering)
+          this.connected = false
+          void this.updateForeground(generation, this.recovering, 'reconnecting').catch(() => undefined)
           options.onClose?.(closeOptions)
         },
       })
+      if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
+      this.connected = true
+      this.recovering = false
+      await this.updateForeground(generation, true, 'connected')
     } catch (error) {
-      await this.updateForeground(generation, false).catch(() => undefined)
+      if (generation === this.generation && !this.recovering) {
+        await this.updateForeground(generation, false).catch(() => undefined)
+      }
       throw error
     }
   }
@@ -62,23 +75,35 @@ export class AndroidRemoteRuntime {
   getNetworkDetails() { return this.client.getNetworkDetails() }
   checkHealth() { return this.client.checkHealth() }
 
-  async close(): Promise<void> {
+  async close(options: { preserveRecovery?: boolean } = {}): Promise<void> {
     const generation = ++this.generation
+    this.connected = false
+    this.recovering = options.preserveRecovery === true && this.foreground
     try {
       await this.client.close()
     } finally {
-      await this.updateForeground(generation, false)
+      await this.updateForeground(generation, this.recovering, 'reconnecting')
     }
   }
 
-  private updateForeground(generation: number, active: boolean): Promise<void> {
+  /** The bounded retry owner releases the existing service after its final failure. */
+  async stopRecovery(): Promise<void> {
+    if (!this.recovering || this.connected) return
+    this.recovering = false
+    await this.updateForeground(this.generation, false)
+  }
+
+  private updateForeground(generation: number, active: boolean, status: 'connecting' | 'connected' | 'reconnecting' = 'connecting'): Promise<void> {
     // A native start/permission prompt is asynchronous. Serialize it with stop
     // and fence retired connection callbacks before touching the shared service.
     const task = this.foregroundTail.then(async () => {
-      if (generation !== this.generation || active === this.foreground) return
-      if (active) await foregroundService.start()
-      else await foregroundService.stop()
-      this.foreground = active
+      if (generation !== this.generation) return
+      if (active !== this.foreground) {
+        if (active) await foregroundService.start()
+        else await foregroundService.stop()
+        this.foreground = active
+      }
+      if (active) await foregroundService.setStatus(status)
     })
     this.foregroundTail = task.catch(() => undefined)
     return task

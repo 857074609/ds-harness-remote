@@ -126,7 +126,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.13`。
+凭据或迁移旧 service。Desktop npm 包当前版本为 `ds-harness-remote@0.5.14`。
 
 ## Validation Baseline
 
@@ -588,3 +588,12 @@ wake lock，记录 `Destroyed live tcp sockets for uids={10440}` 与
 `frozen uid = 10440 reason=screen off`，唤醒后才向 JS 投递 control-error。FGS/procState 4
 仍被厂商冻结；JS 心跳/恢复不等于息屏持续保活，也不能阻止系统主动销毁 sockets。
 用户明确要求保持现有省电设置，不修改白名单或厂商策略；厂商无限制策略的效果尚未验证。
+
+## 0.5.14 release validation (2026-10-19)
+
+版本统一为 `0.5.14`，Android `versionCode` 与 Expo iOS `buildNumber` 为 `58`。本地全仓
+check、732 tests（Plugin 55 文件 / 393、Android 26 文件 / 149）、生产 build/Hermes、
+DSH bundle 与版本一致性校验通过。此前本机测试的 Peer/createPeer 兼容错误来自旧 isolated
+安装残留的 workspace node_modules 链接遮蔽当前 hoisted 依赖；移走旧链接并按锁文件安装后
+恢复通过，未修改或跳过测试。用户确认本机 Desktop 退出/保存 Server 修复版本可用；新的
+APK 与 npm/GitHub Release 发布以工作流实际结果为准，长期后台与跨设备边界仍见 TODO。

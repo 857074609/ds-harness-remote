@@ -1,31 +1,35 @@
 ## 中文
 
-**0.5.13** 新增 Android 扫码登录与平板双栏，修复 OpenCode v1/v2 接入和异步标题恢复，并提供 Host 加密工作区文件上传能力。所有自有包与客户端版本均为 **0.5.13**，发布 Tag 为 **v0.5.13**。Android `versionCode` 从 **51** 升至 **57**，跳过 **52–56**；Expo iOS `buildNumber` 同步为 **57**。
+**0.5.14** 修复 Remote 退出登录与 Server 地址保存流程，并集中改进 Android 连接恢复、流式聊天与页面操作。自有包和客户端版本统一为 **0.5.14**，Tag 为 **v0.5.14**；Android `versionCode` 与 Expo iOS `buildNumber` 均为 **58**。
 
-- **Android 扫码登录**：点击「扫码登录」后才请求 Server provider 并本地渲染同源二维码，大屏显示更大的二维码；保留知乎/GitHub 浏览器 OAuth 与邮箱密码登录。领取一次性 token 后立即停止轮询，避免成功登录被后续“二维码过期”状态覆盖；离开扫码页或更换 Server 时作废旧会话。
-- **平板双栏**：聊天页在宽度 ≥760 dp 且高度 ≥520 dp，或宽度 ≥1000 dp 时，左侧常驻分组会话列表，右侧展示消息与输入栏；切换会话只更新右侧内容。窄屏与较短的手机横屏窗口保持单栏。
-- **OpenCode v1/v2 兼容**：启动前检测 CLI 支持的网络参数；支持时保留认证私有监听器，否则使用纯 stdio ACP。v1 保留原生归档；v2 归档明确提示不可用，会话发现、历史与模型选择保持可用。参数检测失败或不完整时拒绝启动。
-- **OpenCode 标题恢复**：接收 ACP 标题更新，回复完成后最多二十秒重读列表；原生标题尚未生成时临时使用首条提问。历史恢复该临时标题，旧读取和占位标题不能覆盖新标题或手动改名。
-- **Host 工作区上传**：新增独立加密 `workspace.upload.v1`，单文件最大 20 MiB，只能写入当前会话经 Host 验证的工作区根目录。同名文件自动改名、不覆盖已有文件；分块、连接/会话隔离、取消与断线清理均受限。不接受客户端目标路径；独立 Remote Web 的上传界面与部署需单独同步。
+- **Remote 一次退出**：Remote 面板退出后，已打开的设置页同步清除账号显示；等待 Host/Client 清理并清除两份本地凭据。单项撤销或预览/流清理失败不跳过其他清理，迟到连接和工作区结果不能恢复已退出状态。
+- **Server 地址保存**：登录面板的地址旁新增“保存”。保存后应用 Server 地址并自动重新加载登录方式，清理旧二维码、轮询与迟到结果；扫码和密码登录使用相同的已保存地址。
+- **Android 连接恢复**：连接服务在鉴权前启动，通知与 CPU 唤醒锁跟随连接生命周期；定期验证加密 Host 链路，断线后最多尝试三次恢复，并保留当前会话与历史。恢复期间保留已有前台服务，不重放 Prompt、审批或终端输入。
+- **Android 流式聊天**：合并 CodeX 增量事件、保留未变化消息引用并隔离旧订阅，修复连续回复中 React 更新深度异常与相关断线。键盘和输入区域变化时保持最新回复可见，手动上翻后保留阅读位置。
+- **Android 页面体验**：工作区按选中类别加载；断线时显示连接中断/恢复操作，移除误导性的空列表和不可用消息操作。错误提示适配安全区，连接与恢复文字增加动态省略号。
 
-### 验证与待验收范围
+### 验证与边界
 
-本地全仓类型检查、**713 个测试**、生产构建（含 Android Hermes export）、DSH bundle 校验与版本一致性核对通过。发布工作流再次执行检查与构建，并生成 Android Release APK。已有本机验证覆盖 Android QR 合约、模拟 800×1280 dp 真机窗口的双栏切换，以及官方 OpenCode `1.19.3`（`opencode-ai`）和 `2.0.32`（`@opencode/cli`）的会话发现/恢复与 v2 模型切换；两版 CLI 未发送 Prompt。真实平板/折叠屏、扫码端到端、文件上传跨设备与独立 Remote Web 部署仍待验收。Metro 的 `@noble/hashes/crypto.js` package exports fallback 已知警告仍存在。
+本地全仓类型检查、**732 项测试**、生产构建（含 Android Hermes export）、DSH bundle 校验与版本一致性检查通过。发布流程再次检查与构建，并生成 npm 包、浏览器扩展和 Android APK。用户已确认本机 Desktop 的退出登录及保存 Server 修复版本可用；Android 此前已验证一次完整流式回复、键盘跟随、短时亮屏切 App 保持连接，以及小米手机唤醒后的重连恢复。
+
+小米系统息屏冻结会禁用唤醒锁并销毁 sockets，本版本不能保证厂商省电限制下持续联网；现有省电设置保持不变。长期后台、跨设备/跨网络、Windows、真实平板/折叠屏仍需回归。Metro 的 `@noble/hashes/crypto.js` package exports fallback 已知警告保留。
 
 ## English
 
-**0.5.13** adds Android QR sign-in and tablet split view, fixes OpenCode v1/v2 startup and asynchronous titles, and adds encrypted workspace file uploads on the Host. All first-party package and client versions are **0.5.13**, matching tag **v0.5.13**. Android `versionCode` advances from **51** to **57**, skipping **52–56**; Expo iOS `buildNumber` is also **57**.
+**0.5.14** fixes Remote sign-out and Server address saving, and improves Android connection recovery, streaming chat and navigation. All first-party packages and clients use **0.5.14**, matching tag **v0.5.14**; Android `versionCode` and Expo iOS `buildNumber` are **58**.
 
-- **Android QR sign-in:** tapping **Sign in with QR code** requests Server providers and locally renders a same-origin QR code, enlarged on large screens. Zhihu/GitHub browser OAuth and email/password remain available. Polling stops when the one-time token is claimed so a later expired state cannot overwrite successful sign-in; leaving the view or changing Servers invalidates the old session.
-- **Tablet split view:** at ≥760 dp wide and ≥520 dp high, or ≥1000 dp wide, the grouped session list stays on the left while messages and the composer occupy the right. Selecting a conversation updates the right pane. Narrow screens and shorter phone landscape windows keep one pane.
-- **OpenCode v1/v2 compatibility:** startup probes supported CLI network options, keeping the authenticated private listener where supported and using stdio-only ACP otherwise. Native archive remains available on v1 and fails explicitly on v2; session discovery, history and model selection remain available. Failed or partial probes fail closed.
-- **OpenCode title recovery:** ACP title updates and bounded catalog retries for up to twenty seconds after completion recover asynchronous native titles. The first user message supplies a temporary title, including after history restoration; stale reads and placeholders cannot overwrite newer or manually renamed titles.
-- **Host workspace uploads:** independent encrypted `workspace.upload.v1` accepts files up to 20 MiB only within the current session's Host-verified workspace root. Publication renames conflicts without overwriting; chunks, connection/session ownership, cancellation and disconnect cleanup are bounded. Clients cannot choose destination paths. The independent Remote Web upload UI and deployment require a separate update.
+- **One Remote sign-out:** an already mounted settings page clears its account display when signing out from Remote. Both Host and Client cleanup and credential removal finish even when one revocation or stream/preview cleanup fails. Late connection and workspace results cannot restore signed-out state.
+- **Save Server address:** a **Save** button beside the sign-in address applies the Server and automatically reloads its sign-in methods. Old QR sessions, polling and late results are discarded; QR and password sign-in use the same saved Server.
+- **Android connection recovery:** start the connection service before authentication, scope notifications and CPU wake locks to the active connection, and verify the encrypted Host path periodically. Up to three recovery attempts retain the selected session and history, without replaying prompts, approvals or terminal input.
+- **Android streaming chat:** coalesce CodeX deltas, retain unchanged message references and isolate retired subscriptions to fix React update-depth failures and associated disconnects. Keyboard/composer changes keep the latest reply visible, while manual scrolling preserves reading position.
+- **Android navigation:** load workspace catalogs for the selected category, show recovery actions when disconnected, remove misleading empty states and unavailable message actions, place error messages inside safe areas, and animate connection/recovery text suffixes.
 
-### Validation and acceptance limits
+### Validation and limits
 
-Local workspace type checks, **713 tests**, production builds (including Android Hermes export), DSH bundle validation and version consistency checks pass. The release workflow repeats checks and builds, then generates the Android Release APK. Existing local validation covers Android QR contracts, split-view switching on a real device at a simulated 800×1280 dp window, and session discovery/recovery plus v2 model selection with official OpenCode `1.19.3` (`opencode-ai`) and `2.0.32` (`@opencode/cli`); neither CLI validation sent a Prompt. Real tablets/foldables, end-to-end QR scanning, cross-device uploads and the independent Remote Web deployment still require acceptance. The known Metro `@noble/hashes/crypto.js` package exports fallback warning remains.
+Local workspace type checks, **732 tests**, production builds (including Android Hermes export), DSH bundle validation and version consistency checks pass. The release workflow repeats checks and builds, then produces the npm plugin, browser extension and Android APK. The user confirmed the local Desktop build containing the sign-out and Server-saving fixes. Earlier Android device checks covered a complete streamed reply, keyboard following, a short screen-on app switch, and reconnection after waking a Xiaomi phone.
+
+Xiaomi screen-off freezing can disable wake locks and destroy sockets. This version does not guarantee continuous connectivity under OEM battery restrictions; existing battery settings were unchanged. Long background runs, cross-device/network behavior, Windows and real tablets/foldables still require regression testing. The known Metro `@noble/hashes/crypto.js` package exports fallback warning remains.
 
 ---
 
-[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.13/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.12...v0.5.13)
+[安装说明](https://github.com/liguobao/ds-harness-remote/blob/v0.5.14/README.zh.md#安装) · [Installation](https://github.com/liguobao/ds-harness-remote/blob/v0.5.14/README.md#install) · [完整改动 / Full changelog](https://github.com/liguobao/ds-harness-remote/compare/v0.5.13...v0.5.14)

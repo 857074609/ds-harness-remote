@@ -1,5 +1,12 @@
 ## Unreleased
 
+## 0.5.14 - 2026-10-19
+
+- Unifies first-party package/client versions at `0.5.14` (tag `v0.5.14`); Android `versionCode` and Expo iOS `buildNumber` advance to `58`.
+- 自有包与客户端版本统一为 `0.5.14`（Tag `v0.5.14`）；Android `versionCode` 与 Expo iOS `buildNumber` 升至 `58`。
+- Release validation: workspace type checks, 732 tests, production builds including Android Hermes export, version consistency and DSH bundle checks pass. The local Desktop build was confirmed by the user; APK generation and publication run in the release workflow.
+- 发布前全仓类型检查、732 项测试、生产构建（含 Android Hermes export）、版本一致性与 DSH bundle 校验通过；本机 Desktop 修复版本已由用户确认。APK 生成与发布由 Release 工作流执行。
+
 - Add a Save button beside the Remote sign-in Server address. Saving applies the Server and refreshes its sign-in methods automatically, discarding the previous QR flow and pending discovery results.
 - Remote 登录面板的 Server 地址旁增加“保存”；保存后应用地址并自动刷新登录方式，清理旧二维码流程与迟到的登录方式结果。
 - Animate the text suffix during Android connection/recovery (`.` → `..` → `...`) on the connection page, workspace recovery state and chat banner. Reserve the suffix width and keep timer updates inside the small suffix component. Type checking and arm64 Release APK build passed; the updated APK was installed and consecutive native screenshots confirmed the changing suffix on the connection page. No presentation-only tests added.

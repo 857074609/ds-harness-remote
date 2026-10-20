@@ -2,6 +2,8 @@
 
 - Fix sidebar footer layout corruption on Harness 0.2.x: Remote styles only its own official footer-slot entry, without overriding host CSS Modules classes or legacy better-sidebar account/connection rows. Expanded entries can shrink beside other actions; collapsed entries keep a 36 px icon seat. The active entry keeps Exit in normal flow so long host names can shrink without overlapping it.
 - 修复 Harness 0.2.x 侧栏 footer 布局错乱：Remote 仅设置官方 footer slot 内自身入口的样式，移除对宿主 CSS Modules 类名及旧 better-sidebar 账号/连接条的覆盖；展开入口可与其他按钮并排收缩，折叠入口保持 36 px 图标区域；远程状态下退出按钮参与正常布局，长主机名收缩时不会与其重叠。
+- Add a jump-to-latest button to the Android chat: once the user scrolls away from the newest turn, a floating down-arrow appears above the composer and returns the list to the end in one tap. The tap re-enables follow mode before scrolling, so a reply that is still streaming keeps following, and the button is hidden while the viewport already shows the latest turn. No new tests (presentation-only); type checking, 152 Android tests and the Android Hermes export pass. Real-device scrolling, TalkBack, landscape and streaming behaviour were not verified locally.
+- Android 聊天新增「回到最新消息」按钮：向上翻离最新消息后，输入栏上方出现悬浮的向下箭头，点一下回到列表底部；点击先恢复自动跟随再滚动，仍在流式输出的回复会继续跟随最新一条，视口已在最新消息时不显示。本次不新增纯展示测试；类型检查、152 个 Android 测试与 Android Hermes 导出通过，真机滚动、TalkBack、横屏与流式表现未在本机验证。
 
 ## 0.5.14 - 2026-10-19
 

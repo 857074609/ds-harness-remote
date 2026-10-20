@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowUp,
   Camera,
@@ -123,6 +124,13 @@ const LONG_DRAFT_HINT = 12_000
 
 /** Hard cap mirroring the largest backend prompt budget (ACP/CodeX 256 KiB). */
 const LONG_DRAFT_MAX = 256_000
+
+/**
+ * Distance from the newest row that still counts as "at the latest message".
+ * Follow mode and the jump-to-latest button share this edge, so the button
+ * appears exactly when the viewport has left the turn streaming appends to.
+ */
+const LATEST_EDGE_PX = 80
 
 export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspaces }: { onBack: () => void; onOpenDevices: () => void; onNewSession?: () => void; onOpenWorkspaces?: (focusWorkspaceKey?: string) => void }) {
   // New subagent children and running-state changes must reach `sessions`
@@ -287,6 +295,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const pinToBottomRef = useRef(true)
   /** Re-pin while the first session layout (markdown / images) is still settling. */
   const initialPinRef = useRef(true)
+  /** Last reported scroll offset; content and viewport changes re-check the latest turn from it. */
+  const listOffsetRef = useRef(0)
+  /** Mirrors the floating jump button so scroll events only re-render on a crossing. */
+  const awayFromLatestRef = useRef(false)
+  const [awayFromLatest, setAwayFromLatest] = useState(false)
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
     item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued'
       // An adopted row is in the Host queue regardless of the local sendState
@@ -392,6 +405,32 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     }, Math.max(0, 100 - (Date.now() - lastAutoScrollAt.current)))
   }, [])
 
+  // Following the latest turn is suspended once the user scrolls away, so the
+  // floating button is the only way back without a manual fling. It follows
+  // measured metrics rather than a gesture, so an older history page loading
+  // above, a window resize or a running reply also re-check it.
+  const syncLatestTurnIndicator = useCallback((distanceFromEnd: number) => {
+    const away = !pinToBottomRef.current && !initialPinRef.current && distanceFromEnd > LATEST_EDGE_PX
+    if (awayFromLatestRef.current === away) return
+    awayFromLatestRef.current = away
+    setAwayFromLatest(away)
+  }, [])
+
+  // Re-enable follow mode before jumping, so a reply that streams in right
+  // after the tap keeps appending at the end. The queued follow pass also
+  // re-asserts the end once the rows below finish re-measuring, which a single
+  // scroll command cannot guarantee on a virtualized list.
+  const jumpToLatest = useCallback(() => {
+    cancelPendingScroll()
+    userScrollingRef.current = false
+    pinToBottomRef.current = true
+    initialPinRef.current = true
+    awayFromLatestRef.current = false
+    setAwayFromLatest(false)
+    listRef.current?.scrollToEnd({ animated: false })
+    scheduleScrollToBottom()
+  }, [cancelPendingScroll, scheduleScrollToBottom])
+
   // Entering a session (or switching sessions) should land on the latest turn.
   useEffect(() => {
     cancelPendingScroll()
@@ -401,6 +440,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     userScrollingRef.current = false
     listViewportRef.current = { width: 0, height: 0 }
     listContentRef.current = { width: 0, height: 0 }
+    listOffsetRef.current = 0
+    awayFromLatestRef.current = false
+    setAwayFromLatest(false)
   }, [sessionId, cancelPendingScroll])
 
   useEffect(() => cancelPendingScroll, [cancelPendingScroll])
@@ -444,27 +486,31 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     const previous = listViewportRef.current
     if (previous.width === width && previous.height === height) return
     listViewportRef.current = { width, height }
+    // The viewport can change while the content stays put (keyboard, rotation,
+    // tablet split), which is exactly when the newest turn may leave the screen.
+    syncLatestTurnIndicator(listContentRef.current.height - height - listOffsetRef.current)
     if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [scheduleScrollToBottom])
+  }, [scheduleScrollToBottom, syncLatestTurnIndicator])
 
   const onListContentSizeChange = useCallback((width: number, height: number) => {
     const previous = listContentRef.current
     if (previous.width === width && previous.height === height) return
     listContentRef.current = { width, height }
+    syncLatestTurnIndicator(height - listViewportRef.current.height - listOffsetRef.current)
     if (!autoScrollAllowedRef.current || (!pinToBottomRef.current && !initialPinRef.current)) return
     scheduleScrollToBottom()
-  }, [scheduleScrollToBottom])
+  }, [scheduleScrollToBottom, syncLatestTurnIndicator])
 
   const onListScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    listOffsetRef.current = contentOffset.y
+    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
     // Content growth and IME resizing can also emit scroll events. Only a
     // user's drag/fling changes the intent to follow the latest response.
-    if (!userScrollingRef.current) return
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-    const distanceFromEnd = contentSize.height - layoutMeasurement.height - contentOffset.y
-    const atBottom = distanceFromEnd <= 80
-    pinToBottomRef.current = atBottom
-  }, [])
+    if (userScrollingRef.current) pinToBottomRef.current = distanceFromEnd <= LATEST_EDGE_PX
+    syncLatestTurnIndicator(distanceFromEnd)
+  }, [syncLatestTurnIndicator])
 
   const onListScrollEnd = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     onListScroll(event)
@@ -1083,52 +1129,70 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         <View style={styles.splitMain}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <FlatList
-        ref={listRef}
-        key={session.sessionId}
-        style={[styles.list, readableColumn]}
-        contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
-        data={visibleSections}
-        keyExtractor={item => item.key}
-        renderItem={renderChatItem}
-        initialNumToRender={6}
-        maxToRenderPerBatch={6}
-        updateCellsBatchingPeriod={16}
-        windowSize={7}
-        removeClippedSubviews
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        onLayout={onListLayout}
-        onContentSizeChange={onListContentSizeChange}
-        onScroll={onListScroll}
-        scrollEventThrottle={16}
-        onScrollBeginDrag={() => {
-          cancelPendingScroll()
-          userScrollingRef.current = true
-          pinToBottomRef.current = false
-          initialPinRef.current = false
-          Keyboard.dismiss()
-        }}
-        onScrollEndDrag={onListScrollEnd}
-        onMomentumScrollBegin={() => { userScrollingRef.current = true }}
-        onMomentumScrollEnd={onListScrollEnd}
-        ListEmptyComponent={busy === `session:${session.sessionId}`
-          ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
-          : <WelcomeMessage />}
-        ListHeaderComponent={historyHasMore ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={zhCN.chat.older}
-            disabled={historyLoadingOlder}
-            onPress={() => void loadOlderHistory()}
-            style={styles.olderButton}
-          >
-            {historyLoadingOlder
-              ? <ActivityIndicator size="small" color={colors.primary} />
-              : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
-          </Pressable>
-        ) : undefined}
-      />}</BlurHeaderFrame>
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+        <FlatList
+          ref={listRef}
+          key={session.sessionId}
+          style={[styles.list, readableColumn]}
+          contentContainerStyle={[styles.listContent, { paddingTop: headerHeight + spacing.xl }, visibleMessages.length === 0 && styles.emptyList]}
+          data={visibleSections}
+          keyExtractor={item => item.key}
+          renderItem={renderChatItem}
+          initialNumToRender={6}
+          maxToRenderPerBatch={6}
+          updateCellsBatchingPeriod={16}
+          windowSize={7}
+          removeClippedSubviews
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          onLayout={onListLayout}
+          onContentSizeChange={onListContentSizeChange}
+          onScroll={onListScroll}
+          scrollEventThrottle={16}
+          onScrollBeginDrag={() => {
+            cancelPendingScroll()
+            userScrollingRef.current = true
+            pinToBottomRef.current = false
+            initialPinRef.current = false
+            Keyboard.dismiss()
+          }}
+          onScrollEndDrag={onListScrollEnd}
+          onMomentumScrollBegin={() => { userScrollingRef.current = true }}
+          onMomentumScrollEnd={onListScrollEnd}
+          ListEmptyComponent={busy === `session:${session.sessionId}`
+            ? <View style={{ padding: spacing.xl }}><ActivityIndicator size="large" color={colors.primary} /></View>
+            : <WelcomeMessage />}
+          ListHeaderComponent={historyHasMore ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={zhCN.chat.older}
+              disabled={historyLoadingOlder}
+              onPress={() => void loadOlderHistory()}
+              style={styles.olderButton}
+            >
+              {historyLoadingOlder
+                ? <ActivityIndicator size="small" color={colors.primary} />
+                : <Text style={styles.olderText}>{zhCN.chat.older}</Text>}
+            </Pressable>
+          ) : undefined}
+        />
+        {/* Floats over the last row only while an older turn owns the viewport. */}
+        {awayFromLatest && (
+          <View pointerEvents="box-none" style={styles.latestTurnLayer}>
+            <View pointerEvents="box-none" style={[readableColumn, styles.latestTurnColumn]}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={zhCN.chat.jumpToLatest}
+                onPress={jumpToLatest}
+                hitSlop={6}
+                style={({ pressed }) => [styles.latestTurnButton, pressed && styles.latestTurnButtonPressed]}
+              >
+                <ArrowDown size={20} color={colors.primary} strokeWidth={2.4} />
+              </Pressable>
+            </View>
+          </View>
+        )}
+      </>}</BlurHeaderFrame>
 
       {mentionType !== null && (
         <Pressable

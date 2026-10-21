@@ -1,9 +1,10 @@
-## Unreleased
+## 0.5.15 — 2026-10-22
+
+- Support official plugin configuration and enablement over Remote while hiding Remote itself from remote plugin management. Fix full-row sidebar hover and right-aligned Exit.
+- 支持远程配置和启停官方插件，远程插件管理隐藏 Remote 自身；修复侧栏整行悬停背景与退出按钮右对齐。
 
 - Enable native Harness automation task editing, deletion and delivery history over the encrypted Remote carrier. Keep task execution on the Host and creation through the official Agent tool; unknown schedule endpoints remain denied.
 - 补齐原生自动化任务的远程修改、删除与投递历史接口；任务由 Host 执行，新建沿用官方 Agent 工具，未列出的日程接口仍拒绝。
-
-## 0.5.15 — 2026-10-22
 
 - Add Japanese, Traditional Chinese, Spanish, German, and French to Android, including system locale matching. Language settings show System default, 简体中文, and English initially; tap “More ...” for all languages.
 - Android 新增日语、繁体中文、西语、德语、法语及系统语言匹配；语言设置默认显示跟随系统、简体中文、English，点击「More ...」展开全部语言。

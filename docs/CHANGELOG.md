@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Add an opt-in global mobile compact-history setting. Supporting Hosts shorten historical tool payloads per authenticated connection, preserving text, pagination, lifecycle and live approvals. Older Hosts keep existing behavior without mobile filtering. Reopen a conversation after changing the setting.
+- 移动端新增默认关闭的全局「会话精简模式」；支持的新 Host 按已认证连接缩减历史工具载荷，保留正文、分页、生命周期和实时审批。旧 Host 保持原行为，手机不做本地精简；切换后重新打开会话生效。
+  Validation: workspace check and 779 tests pass (Plugin 403, mobile 184); shared-package/Plugin build, DSH bundle verification, Android production Hermes export and diff checks pass. Native device and cross-device acceptance remain pending.
+
 - Fix Android cards patched by later turns remaining stale while retaining stable history rows. Validate Harness workspace creation paths before writes, preserve the exact forwarded path, and include directory creation in the published Host bundle.
 - 修复 Android 后续轮次更新旧交互卡片时显示不刷新的问题，保留历史行复用；工作区目录创建在写入前校验路径，保留原路径语义并同步 Host 发布 bundle。
   Validation: shared-package build, Plugin/Android type checks, 183 Android tests, 36 focused Plugin tests, DSH bundle verification and Android production Hermes export pass. The existing noble/hashes exports fallback warning remains; optional Intelligent UI renderer is absent (safe fallback). No native device or cross-device acceptance performed.

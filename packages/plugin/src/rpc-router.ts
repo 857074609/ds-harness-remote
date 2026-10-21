@@ -23,8 +23,10 @@ export { RpcError } from './safe-error.js'
 
 const wireRequestSchema = z.object({ method: z.string().min(1), params: z.unknown() }).strict()
 const emptyParamsSchema = z.object({}).strict()
+const historyConfigureSchema = z.object({ compact: z.boolean() }).strict()
 const apiMethods = new Set([
   'harness.transport.describe',
+  'remote.history.configure',
   'harness.api.call',
   'harness.api.transfer.open',
   'harness.api.transfer.chunk',
@@ -160,7 +162,7 @@ export class RpcRouter {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        const capabilities = [...this.capabilities()]
+        const capabilities = [...new Set([...this.capabilities(), 'remote.history.compact.v1'])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
           try {
@@ -173,6 +175,13 @@ export class RpcRouter {
           capabilities,
           ...(workspaceTypes === undefined ? {} : { workspaceTypes }),
         }
+      }
+      case 'remote.history.configure': {
+        const { compact } = historyConfigureSchema.parse(params)
+        for (const bridge of [this.harnessApi, this.harnessRemote, this.codex, this.acp]) {
+          if (bridge !== undefined) bridge.compactHistoryEnabled = compact
+        }
+        return { compact }
       }
       case 'harness.api.call': return this.requireApiProxy().call(params)
       case 'harness.api.transfer.open': return this.requireApiProxy().openTransfer(params)

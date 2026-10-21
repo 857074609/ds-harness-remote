@@ -21,6 +21,7 @@ import {
   forgetHost,
   loadDefaultPermissionPreset,
   loadFavoriteWorkspaces,
+  loadCompactHistory,
   loadLanguagePreference,
   loadLastConnectedDeviceId,
   loadOrCreateIdentity,
@@ -32,6 +33,7 @@ import {
   loadTrustedHosts,
   saveDefaultPermissionPreset,
   saveFavoriteWorkspaces,
+  saveCompactHistory,
   saveLanguagePreference,
   saveRecentWorkspaces,
   saveServerConfig,
@@ -100,7 +102,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset, compactHistory] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
@@ -111,6 +113,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           loadRecentWorkspaces(),
           loadLastConnectedDeviceId(),
           loadDefaultPermissionPreset(),
+          loadCompactHistory(),
         ])
         const language = applyLanguagePreference(languagePreference)
         set({
@@ -122,6 +125,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           language,
           themePreference,
           statusBarVisible,
+          compactHistory,
           defaultPermissionPreset,
           favoriteWorkspaces,
           recentWorkspaces,
@@ -438,6 +442,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         language,
         themePreference: 'system',
         statusBarVisible: true,
+        compactHistory: false,
         defaultPermissionPreset: 'default',
         lastConnectedDeviceId: undefined,
         pendingAutoConnectDeviceId: undefined,
@@ -447,7 +452,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, statusBarVisible, defaultPermissionPreset } = get()
+      const { config, identity, languagePreference, themePreference, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
       await clearBrowseMemory(true)
       if (config !== undefined && identity !== undefined) {
@@ -462,6 +467,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await saveLanguagePreference(languagePreference)
       await saveThemePreference(themePreference)
       await saveStatusBarVisible(statusBarVisible)
+      await saveCompactHistory(compactHistory)
       await saveDefaultPermissionPreset(defaultPermissionPreset)
       const nextIdentity = await loadOrCreateIdentity()
       set({

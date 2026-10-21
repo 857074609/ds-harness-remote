@@ -96,11 +96,21 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async openSession(session) {
       runtime.flushPendingMuxFrames()
       runtime.flushPendingCodexFrames()
+      const compact = get().compactHistory
+      const historyModeChanged = runtime.historyCompactMode !== undefined && runtime.historyCompactMode !== compact
+      if (historyModeChanged) {
+        runtime.browsePages.clear()
+        set(state => ({ messages: Object.fromEntries(Object.entries(state.messages).map(([id, items]) =>
+          [id, items.filter(item => item.kind === 'approval' || item.kind === 'question'
+            || (item.kind === 'tool' && item.state === 'running')
+            || (item.kind === 'message' && (item.sendState !== undefined || item.streaming)))])) }))
+      }
+      runtime.historyCompactMode = compact
       const hostId = get().selectedDevice?.deviceId ?? ''
-      const pageScope = browseScope(get())
+      const pageScope = browseScope(get()) + (get().compactHistory ? ':compact' : ':full')
       const pageKey = (id: string) => browseKey(pageScope, id)
       const previous = get().selectedSession
-      if (previous !== undefined && !get().busyAction?.startsWith('session:') && !get().historyLoadingOlder) {
+      if (!historyModeChanged && previous !== undefined && !get().busyAction?.startsWith('session:') && !get().historyLoadingOlder) {
         runtime.browsePages.set(pageKey(previous.sessionId), {
           oldestLoadedSeq: get().oldestLoadedSeq, historyHasMore: get().historyHasMore,
         })
@@ -158,6 +168,8 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           },
       }))
       const load = async () => {
+        await runtime.connection.configureHistory(compact)
+        if (!current()) return
         if (session.backend === 'codex') {
           void runtime.closeActiveCodexStream()
           void runtime.closeActiveCursorStream()

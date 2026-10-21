@@ -1,3 +1,4 @@
+import { compactHistory } from './compact-history.js'
 import { TerminalCarrierCompat, usesDuplexTerminal } from './terminal-carrier-compat.js'
 import type {
   HarnessApiTransferChunkParams,
@@ -192,6 +193,7 @@ const allowedEndpoints = new Set<string>(HARNESS_REMOTE_ALLOWLIST)
 
 /** Host-side adapter from the encrypted peer channel to the official alpha Gateway carrier. */
 export class HarnessRemoteBridge {
+  compactHistoryEnabled = false
   private readonly streams = new Map<string, ActiveRemoteStream>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
@@ -262,7 +264,9 @@ export class HarnessRemoteBridge {
       // contract stable by converting only the two bounded preview responses
       // to canonical base64. (Codex/ACP workspace bridges already return the
       // wire shape and are left unchanged.)
-      const wireResult = normalizeWorkspaceBinaryResult(params.endpoint, result)
+      const wireResult = normalizeWorkspaceBinaryResult(params.endpoint,
+        this.compactHistoryEnabled && ['session/page', 'session/history', 'subagent/history'].includes(params.endpoint)
+          ? compactHistory(result) : result)
       return reservation === undefined ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation)
     } catch (error) {
       if (reservation !== undefined) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: 'FAILED', message: '', details: {} } }, reservation)
@@ -420,7 +424,7 @@ export class HarnessRemoteBridge {
       controller.abort()
       throw error
     }
-    void this.pump(params.streamId, source, controller.signal)
+    void this.pump(params.streamId, source, controller.signal, params.endpoint === 'session/follow')
     return { opened: true, streamId: params.streamId }
   }
 
@@ -452,7 +456,7 @@ export class HarnessRemoteBridge {
     }
   }
 
-  private async pump(streamId: string, source: AsyncIterable<unknown>, signal: AbortSignal): Promise<void> {
+  private async pump(streamId: string, source: AsyncIterable<unknown>, signal: AbortSignal, historyFollow = false): Promise<void> {
     let reason: HarnessRemoteStreamClosedData['reason'] = 'completed'
     let failure: HarnessRemoteStreamClosedData['failure']
     try {
@@ -461,7 +465,7 @@ export class HarnessRemoteBridge {
         const frame: HarnessRemoteFrameData = {
           streamId,
           hasValue: true,
-          ...(value === undefined ? {} : { value }),
+          ...(value === undefined ? {} : { value: historyFollow && this.compactHistoryEnabled && isCompactSnapshot(value) ? compactHistory(value) : value }),
         }
         if (encodeMessage(createEvent('harness.remote.frame', frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
           throw new Error('Oversized Harness Remote frame')
@@ -642,4 +646,8 @@ function record(value: unknown): Record<string, unknown> {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isCompactSnapshot(value: unknown): boolean {
+  return value !== null && typeof value === 'object' && (value as { type?: unknown }).type === 'snapshot'
 }

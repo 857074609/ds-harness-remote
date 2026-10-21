@@ -64,6 +64,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   transportPreference: 'auto',
   languagePreference: 'system',
   language: getActiveLanguage(),
+  compactHistory: false,
   themePreference: 'system',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',

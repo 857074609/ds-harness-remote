@@ -1,3 +1,4 @@
+import { compactHistory } from './compact-history.js'
 import type {
   ApiProxy,
   ClientResponse,
@@ -295,6 +296,7 @@ const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 export type { TypertGatewayLike } from './typert-gateway-contract.js'
 
 export class HarnessApiBridge {
+  compactHistoryEnabled = false
   private readonly methods: ReadonlyMap<string, NativeMethod>
   private readonly streams = new Map<string, ActiveStream>()
   private readonly respondable = new Map<string, string>()
@@ -345,7 +347,10 @@ export class HarnessApiBridge {
       )
       let response: RpcResponse<unknown>
       if (params.method === 'session.history') {
-        response = await callSessionHistory(callWithTimeout, params.payload, params.rpcId as never)
+        response = await callSessionHistory(async payload => {
+          const result = await callWithTimeout(payload)
+          return this.compactHistoryEnabled ? { ...result, result: compactHistory(result.result) } : result
+        }, params.payload, params.rpcId as never)
       } else {
         response = await callWithTimeout(request.payload)
       }
@@ -359,7 +364,8 @@ export class HarnessApiBridge {
         method: params.method,
         durationMs: Math.round(performance.now() - startedAt),
       })
-      return response
+      return this.compactHistoryEnabled && params.method === 'subagent.history'
+        ? { ...response, result: compactHistory(response.result) } : response
     } catch (error) {
       const durationMs = Math.round(performance.now() - startedAt)
       this.logger?.warn('harness api call failed', {

@@ -5,12 +5,13 @@ import { backendGroups, browseStatus } from '../src/lib/backend-groups'
 import { foldHistory } from '../src/state/event-reducer'
 
 const { client, proxy } = vi.hoisted(() => ({
-  client: { request: vi.fn(), subscribe: vi.fn() },
+  client: { request: vi.fn(), subscribe: vi.fn(), configureHistory: vi.fn() },
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionPrompt: vi.fn() },
 }))
 vi.mock('expo-haptics', () => ({ impactAsync: vi.fn(), ImpactFeedbackStyle: { Light: 'light' } }))
 vi.mock('../src/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}), saveCodexPermissionPreset: vi.fn(), saveRecentWorkspaces: vi.fn() }))
 vi.mock('../src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
+  async configureHistory(value: boolean) { await client.configureHistory(value) }
   requireCodex() { return client }
   requireProxy() { return proxy }
 } }))
@@ -51,6 +52,31 @@ beforeEach(() => {
 })
 
 describe('fast browsing without changing writer ownership', () => {
+  it('reconfigures global history mode before reads and invalidates pagination across mode changes', async () => {
+    const target = session('a')
+    state.compactHistory = false
+    await state.openSession(target)
+    state.messages[target.sessionId] = foldHistory([event(1), event(20)], target.sessionId, true)
+    state.oldestLoadedSeq = 1
+    state.historyHasMore = true
+    state.compactHistory = true
+    const configure = deferred<void>()
+    client.configureHistory.mockReturnValueOnce(configure.promise)
+    const previousReads = client.request.mock.calls.length
+    const opening = state.openSession(target)
+    await tick()
+    expect(client.request.mock.calls).toHaveLength(previousReads)
+    configure.resolve()
+    expect(await opening).toBe(true)
+    expect(state.messages[target.sessionId]?.map(item => item.id)).toEqual(['m20'])
+    expect(state.oldestLoadedSeq).toBe(20)
+    expect(state.historyHasMore).toBe(false)
+    state.compactHistory = false
+    expect(await state.openSession(target)).toBe(true)
+    expect(client.configureHistory.mock.calls).toEqual([[false], [true], [false]])
+    expect(state.messages[target.sessionId]?.map(item => item.id)).toEqual(['m20'])
+  })
+
   it('shows cached content synchronously and reads while previous unsubscribe is blocked', async () => {
     const a = session('a'), oldClose = deferred<void>(), fresh = deferred<ReturnType<typeof page>>()
     state.sessions = [a]; state.messages[a.sessionId] = foldHistory([event(20)], a.sessionId, true)
@@ -173,6 +199,7 @@ describe('fast browsing without changing writer ownership', () => {
     proxy.sessionHistory.mockReturnValue(history.promise)
     const a = session('dsh', false), pending = state.openSession(a)
     expect(state.selectedSession?.sessionId).toBe('dsh')
+    await tick()
     expect(proxy.sessionHistory).toHaveBeenCalled()
     expect(await state.sendMessage('not yet')).toBe('rejected')
     history.resolve({ events: [event(20)], hasMore: false }); expect(await pending).toBe(true)

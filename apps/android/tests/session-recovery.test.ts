@@ -19,6 +19,7 @@ const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() =>
 vi.mock('expo-haptics', () => ({ impactAsync: async () => undefined, ImpactFeedbackStyle: { Light: 'light' } }))
 vi.mock('../src/services/network-route', () => ({ resolveAutomaticPreferredTransports: async () => ['relay'] }))
 vi.mock('../src/services/connection', () => ({ AndroidRemoteConnection: class {
+  async configureHistory() {}
   requireProxy() { return proxy }
   connect = transport.connect
   close = transport.close

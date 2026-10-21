@@ -89,6 +89,8 @@ export interface AppState {
   historyLoadingOlder: boolean
   oldestLoadedSeq?: number
   transportPreference: TransportPreference
+  compactHistory: boolean
+  setCompactHistory(value: boolean): Promise<void>
   languagePreference: LanguagePreference
   language: AppLanguage
   statusBarVisible: boolean

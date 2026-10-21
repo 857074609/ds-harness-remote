@@ -7,6 +7,7 @@ import { CodexPeerBridge } from '../src/codex/peer-bridge.ts'
 const { client } = vi.hoisted(() => ({ client: { request: vi.fn(), subscribe: vi.fn() } }))
 vi.mock('../../../apps/android/src/services/storage', () => ({ loadCodexPermissionPresets: async () => ({}) }))
 vi.mock('../../../apps/android/src/services/remote-runtime', () => ({ AndroidRemoteRuntime: class {
+  async configureHistory() {}
   requireCodex() { return client }
 } }))
 import { SessionRuntime } from '../../../apps/android/src/state/session-runtime.ts'

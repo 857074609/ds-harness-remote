@@ -140,6 +140,8 @@ Use text or image prompts, switch models, and access supported workspace files a
   <img src="docs/images/image-result.jpg" alt="Viewing the image response in the Android client" width="30%">
 </p>
 
+Mobile Settings includes an opt-in **Compact conversations** switch, applied globally when a conversation is next opened. Supporting Hosts send shorter historical tool details while preserving messages and tool status. Older Hosts keep the existing behavior. Turn it off and reopen the conversation to load full history.
+
 ## How it works
 
 ```text

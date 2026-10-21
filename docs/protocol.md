@@ -839,6 +839,19 @@ Typert Host 必须只宣告与本机 Session wire 对应的一项：v0.1.2 使�
 `harness.remote.v1`，v0.1.5 rc.1 使用 `harness.remote.v3`；禁止同时宣告两项。旧 Host 返回
 `METHOD_NOT_FOUND` 时，Client 才使用 `clientVersion` 做 rc.2 保守降级。
 
+支持 `remote.history.compact.v1` 的 Host 接受加密 RPC `remote.history.configure`，
+Params 为严格的 `{ "compact": boolean }`，Result 回显 `{ "compact": boolean }`。
+模式默认为 `false`，仅绑定当前已认证连接，断线后重置；不修改 Host 配置或会话原始记录，
+不影响其他 Client。移动端全局偏好在每次打开会话前设置，重连重新打开时再次设置。
+未声明该能力的旧 Host 不发送此 RPC，也不在移动端做本地精简兜底。
+
+精简作用于 Harness ApiProxy 历史、Typert `session/page|history` 与 `session/follow` snapshot、
+CodeX 和 ACP 的 `dsh/sessionHistory`，包括既有分块 transfer 路径。保留正文、历史记录顺序、
+seq/cursor/throughSeq/hasMore、轮次生命周期及工具关联/错误状态；工具参数和输出转为有界摘要，
+省略完整工具展示投影。实时流与审批原样传递，允许的 RPC/权限边界不变。
+关闭模式后重新打开会话加载完整历史；CodeX 已有的详情句柄与按需读取继续有效。
+此能力只减少 Host → Client 历史载荷，不保证减少后端读取历史成本。
+
 ACP 的 `agent.acp.v1` / `agent.acp.transfer.v1` 及 `agent.acp.<backend>.v1` 声明表示
 Host 已启用且实现该后端协议，不代表 CLI 已初始化完成。ACP 后台初始化不阻塞 Harness Remote
 上线；初始化中或启动失败时，`workspaceTypes` 对应项的 `available` 必须为 `false`，数据面调用

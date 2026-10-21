@@ -109,6 +109,8 @@ const zhCN = {
   settings: {
     title: '设置', thisPhone: '此手机', androidDevice: 'Android 设备', connection: '连接', server: '服务器', account: '账号', loginMethod: '登录方式', protocol: '协议', notConfigured: '未配置', notSignedIn: '未登录',
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
+    compactHistorySaveFailed: '无法保存会话精简设置',
+    compactHistory: '会话精简模式', compactHistoryNote: '全局应用于下次打开的会话。保留文字和工具状态，缩减历史工具详情，节省流量和内存。需 Host 插件支持。关闭后重新打开会话可加载完整历史。',
     statusBar: '显示状态栏', statusBarNote: '显示屏幕顶部的时间、电量和网络状态。关闭后隐藏系统状态栏。', statusBarSaveFailed: '无法保存状态栏设置', statusBarSaveFailedBody: '本地存储写入失败，请重试。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',

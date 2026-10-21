@@ -1,3 +1,4 @@
+import { compactHistory } from '../compact-history.js'
 import { previewCall } from './history-preview.js'
 import { Buffer } from 'node:buffer'
 import type {
@@ -67,6 +68,7 @@ const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Per-authenticated-connection state for the Codex Remote domain. */
 export class CodexPeerBridge {
+  compactHistoryEnabled = false
   private readonly streams = new Map<string, string>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
   private readonly outgoingTransfers = new Map<string, OutgoingTransfer>()
@@ -86,7 +88,8 @@ export class CodexPeerBridge {
   private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {
     this.requireOpen()
     try {
-      return await previewCall(this, input, value => this.domain.call(this.context.connectionId, value))
+      const result = await previewCall(this, input, value => this.domain.call(this.context.connectionId, value))
+      return this.compactHistoryEnabled && safeMethod(input) === 'dsh/sessionHistory' ? compactHistory(result) : result
     } catch (error) {
       if (logFailure) {
         this.logger?.warn('Codex call failed', {

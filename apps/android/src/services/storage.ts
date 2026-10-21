@@ -20,6 +20,7 @@ const KEYS = {
   transportPreference: 'dshremote.transport-preference.v1',
   languagePreference: 'dshremote.language-preference.v1',
   themePreference: 'dshremote.theme-preference.v1',
+  compactHistory: 'dshremote.compact-history.v1',
   statusBarVisible: 'dshremote.status-bar-visible.v1',
   defaultPermissionPreset: 'dshremote.default-permission-preset.v1',
   collapsedWorkspaces: 'dshremote.collapsed-workspaces.v1',
@@ -439,4 +440,12 @@ export function saveCustomPrompts(items: readonly CustomPrompt[], removed: reado
   })
   customPromptsWrite = nextWrite.catch(() => undefined)
   return nextWrite
+}
+
+export async function loadCompactHistory(): Promise<boolean> {
+  const stored = await readJson<{ value: unknown }>(KEYS.compactHistory)
+  return stored?.value === true
+}
+export async function saveCompactHistory(value: boolean): Promise<void> {
+  await writeJson(KEYS.compactHistory, { value })
 }

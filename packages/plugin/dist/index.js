@@ -5586,10 +5586,10 @@ var util;
       return obj[e];
     });
   };
-  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object2) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object3) => {
     const keys = [];
-    for (const key in object2) {
-      if (Object.prototype.hasOwnProperty.call(object2, key)) {
+    for (const key in object3) {
+      if (Object.prototype.hasOwnProperty.call(object3, key)) {
         keys.push(key);
       }
     }
@@ -9579,6 +9579,7 @@ var rpcMethods = [
   "workspace.upload.commit",
   "workspace.upload.abort",
   "harness.transport.describe",
+  "remote.history.configure",
   "harness.api.call",
   "harness.api.transfer.open",
   "harness.api.transfer.chunk",
@@ -11490,12 +11491,12 @@ var AcpEventCarrier = class {
     } else if (event === "api-session/removed" && sessionId !== void 0) {
       this.broadcastRcHost({ type: "host/session-removed", sessionId });
     } else if (event === "api-session/added" && isRecord3(args[0])) {
-      const summary = args[0];
+      const summary2 = args[0];
       this.broadcastRcHost({
         type: "host/session-added",
-        sessionId: summary.sessionId,
-        blank: summary.blank === true,
-        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
+        sessionId: summary2.sessionId,
+        blank: summary2.blank === true,
+        ...typeof summary2.cwd === "string" ? { cwd: summary2.cwd } : {}
       });
     }
   }
@@ -13325,10 +13326,10 @@ function normalizeProtocol(value) {
   return value.toLowerCase();
 }
 function relatedAddressSummary(address) {
-  const summary = summarizeAddress(address);
+  const summary2 = summarizeAddress(address);
   return {
-    relatedAddressFamily: summary.addressFamily,
-    relatedAddressScope: summary.addressScope
+    relatedAddressFamily: summary2.addressFamily,
+    relatedAddressScope: summary2.addressScope
   };
 }
 function summarizeIpv4Scope(parts) {
@@ -13803,19 +13804,19 @@ var RtcDataChannelTransport = class {
     }
   }
   async handleIce(candidate) {
-    const summary = summarizeIceCandidate(candidate);
+    const summary2 = summarizeIceCandidate(candidate);
     if (!this.remoteDescriptionSet) {
-      recordCandidate(this.remoteCandidateTelemetry, summary);
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary, action: "buffered", diagnostics: this.diagnostics() });
+      recordCandidate(this.remoteCandidateTelemetry, summary2);
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary2, action: "buffered", diagnostics: this.diagnostics() });
       this.remoteCandidates.push(candidate);
       return;
     }
     try {
       await this.pc.addIceCandidate(candidate);
-      recordCandidate(this.remoteCandidateTelemetry, summary);
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary, action: "added", diagnostics: this.diagnostics() });
+      recordCandidate(this.remoteCandidateTelemetry, summary2);
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary2, action: "added", diagnostics: this.diagnostics() });
     } catch {
-      this.emitDiagnostic({ type: "remote-candidate", candidate: summary, action: "ignored", diagnostics: this.diagnostics() });
+      this.emitDiagnostic({ type: "remote-candidate", candidate: summary2, action: "ignored", diagnostics: this.diagnostics() });
     }
   }
   async flushRemoteCandidates() {
@@ -15708,11 +15709,11 @@ function bitLen(n) {
   return len;
 }
 var bitMask = (n) => (_1n << BigInt(n)) - _1n;
-function _validateObject(object2, fields, optFields = {}) {
-  if (!object2 || typeof object2 !== "object")
+function _validateObject(object3, fields, optFields = {}) {
+  if (!object3 || typeof object3 !== "object")
     throw new Error("expected valid options object");
   function checkField(fieldName, expectedType, isOpt) {
-    const val = object2[fieldName];
+    const val = object3[fieldName];
     if (isOpt && val === void 0)
       return;
     const current = typeof val;
@@ -18614,14 +18615,14 @@ var bitMask2 = (n) => {
   asafenumber(n, "n");
   return (_1n7 << BigInt(n)) - _1n7;
 };
-function validateObject2(object2, fields = {}, optFields = {}, title = "object") {
-  aobject2(object2, title);
+function validateObject2(object3, fields = {}, optFields = {}, title = "object") {
+  aobject2(object3, title);
   aobject2(fields, "fields");
   aobject2(optFields, "optFields");
   function checkField(fieldName, expectedType, isOpt) {
     const label = title === "object" ? `param "${String(fieldName)}"` : `"${title}.${String(fieldName)}"`;
-    const val = object2[fieldName];
-    if (!Object.hasOwn(object2, fieldName) && (isOpt ? val !== void 0 : expectedType !== "function")) {
+    const val = object3[fieldName];
+    if (!Object.hasOwn(object3, fieldName) && (isOpt ? val !== void 0 : expectedType !== "function")) {
       throw new TypeError(`${label} is invalid: expected own property`);
     }
     if (isOpt && val === void 0)
@@ -23555,7 +23556,7 @@ async function loadCatalog(client, signal, pendingThreads) {
     return session === void 0 ? void 0 : { thread, session };
   }).filter((value) => value !== void 0);
   const projectWorkspaces = projects.map(projectWorkspace);
-  const workspaceByProjectId = new Map(projects.map((project, index) => [project.id, projectWorkspaces[index]]));
+  const workspaceByProjectId = new Map(projects.map((project2, index) => [project2.id, projectWorkspaces[index]]));
   const visibleSessionIds = /* @__PURE__ */ new Set();
   const visibleThreads = [];
   for (const { thread, session } of projected) {
@@ -23584,8 +23585,8 @@ async function loadCodexProjects(client, signal) {
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       }, signal));
       for (const value of array2(result.data)) {
-        const project = projectCodexProject(value, projects.length);
-        if (project !== void 0 && !projects.some((item) => item.id === project.id)) projects.push(project);
+        const project2 = projectCodexProject(value, projects.length);
+        if (project2 !== void 0 && !projects.some((item) => item.id === project2.id)) projects.push(project2);
       }
       cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
       if (cursor2 === void 0) break;
@@ -23661,16 +23662,16 @@ function nativeWorkspace2(view) {
 function nativeVisibleWorkspaces(catalog, selectedWorkspaceId) {
   return catalog.workspaces.filter((workspace) => workspace.sessionIds.length > 0 || workspace.workspaceId === selectedWorkspaceId);
 }
-function projectWorkspace(project) {
-  const root = project.roots[0];
+function projectWorkspace(project2) {
+  const root = project2.roots[0];
   return {
-    workspaceId: codexProjectWorkspaceId(project.id),
+    workspaceId: codexProjectWorkspaceId(project2.id),
     path: root.path,
-    title: project.name.trim() || basename(root.path),
+    title: project2.name.trim() || basename(root.path),
     sessionIds: [],
     sessionCount: 0,
-    createdAt: isoTime(project.createdAt),
-    updatedAt: isoTime(project.updatedAt || project.createdAt)
+    createdAt: isoTime(project2.createdAt),
+    updatedAt: isoTime(project2.updatedAt || project2.createdAt)
   };
 }
 function projectCodexProject(value, fallbackPosition) {
@@ -23693,7 +23694,7 @@ function findProjectWorkspace(thread, session, projects, workspaceByProjectId) {
   const explicitWorkspace = explicitProjectId === void 0 ? void 0 : workspaceByProjectId.get(explicitProjectId);
   if (explicitWorkspace !== void 0) return explicitWorkspace;
   if (session.cwd === void 0) return void 0;
-  const match = projects.flatMap((project) => project.roots.map((root) => ({ project, root }))).filter((value) => containsPath(value.root.path, session.cwd)).sort((left, right) => {
+  const match = projects.flatMap((project2) => project2.roots.map((root) => ({ project: project2, root }))).filter((value) => containsPath(value.root.path, session.cwd)).sort((left, right) => {
     const length = right.root.path.length - left.root.path.length;
     if (length !== 0) return length;
     const position = left.project.position - right.project.position;
@@ -24229,12 +24230,12 @@ var CodexEventCarrier = class {
     } else if (event === "api-session/removed" && sessionId !== void 0) {
       this.broadcastRcHost({ type: "host/session-removed", sessionId });
     } else if (event === "api-session/added" && isRecord5(args[0])) {
-      const summary = args[0];
+      const summary2 = args[0];
       this.broadcastRcHost({
         type: "host/session-added",
-        sessionId: summary.sessionId,
-        blank: summary.blank === true,
-        ...typeof summary.cwd === "string" ? { cwd: summary.cwd } : {}
+        sessionId: summary2.sessionId,
+        blank: summary2.blank === true,
+        ...typeof summary2.cwd === "string" ? { cwd: summary2.cwd } : {}
       });
     }
   }
@@ -29924,12 +29925,12 @@ var ClientModeRuntime = class {
       roots: [{ path: trimmedPath }],
       idempotencyKey: uuidV7()
     }, signal));
-    const project = record2(result.project);
+    const project2 = record2(result.project);
     this.assertRemoteCurrent(remote, signal);
-    if (typeof project.id !== "string" || project.id.length === 0) {
+    if (typeof project2.id !== "string" || project2.id.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "The Host returned an invalid CodeX project.");
     }
-    return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project.id), signal);
+    return this.openCodexWorkspace(targetDeviceId, codexProjectWorkspaceId(project2.id), signal);
   }
   async listCursorWorkspaces(targetDeviceId, signal, backend = "cursor") {
     const remote = await this.ensureConnected(targetDeviceId, signal);
@@ -30900,14 +30901,66 @@ function threadIdFromParams(params) {
   return typeof params.threadId === "string" ? params.threadId : void 0;
 }
 
+// src/compact-history.ts
+var LIMIT = 512;
+var object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+var summary = (value) => {
+  const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+  return text.length > LIMIT ? text.slice(0, LIMIT) + "\n[Compact history: output omitted]" : text;
+};
+function toolValue(value) {
+  if (Array.isArray(value)) return value.map(toolValue);
+  if (!object(value)) return value;
+  const result = { ...value };
+  for (const [key, child] of Object.entries(value)) {
+    if (["input", "arguments", "output", "result", "rawInput", "rawOutput", "uiResultMeta", "meta", "argumentsDelta"].includes(key)) {
+      result[key] = typeof child === "string" ? summary(child) : { summary: summary(child) };
+    } else if (key === "content" && Array.isArray(child)) {
+      let previews = 0;
+      const blocks = child.flatMap((block) => {
+        if (object(block) && (block.type === "tool-call" || block.type === "tool-result")) return [toolValue(block)];
+        if (previews++ >= 2) return [];
+        return [{ type: "text", text: summary(object(block) ? block.text ?? block : block) }];
+      });
+      if (child.some((block) => object(block) && block.isError === true) && object(blocks[0])) blocks[0].isError = true;
+      result[key] = blocks;
+    } else if (key === "text" && typeof child === "string") result[key] = summary(child);
+    else result[key] = toolValue(child);
+  }
+  return result;
+}
+function messageValue(value) {
+  if (Array.isArray(value)) return value.map(messageValue);
+  if (!object(value)) return value;
+  if (value.type === "tool-call" || value.type === "tool-result") return toolValue(value);
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, messageValue(child)]));
+}
+function project(value) {
+  if (Array.isArray(value)) return value.map(project);
+  if (!object(value)) return value;
+  if (object(value.event) && ["tool/call", "tool/result"].includes(String(value.event.type))) {
+    const { view, ...rest } = value;
+    const event = toolValue(value.event);
+    const data2 = object(event.data) ? event.data : {};
+    const title = object(view) && object(view.view) ? view.view.title : void 0;
+    return { ...rest, event: { ...event, data: { ...data2, ...typeof title === "string" && !data2.name && !data2.toolName ? { toolName: title } : {} } } };
+  }
+  if (typeof value.type === "string" && ["tool/call", "tool/result"].includes(value.type)) return toolValue(value);
+  if (typeof value.type === "string" && ["user/message", "assistant/message"].includes(value.type)) return messageValue(value);
+  return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, project(child)]));
+}
+function compactHistory(value) {
+  return project(value);
+}
+
 // src/codex/history-preview.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
-var object = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : {};
+var object2 = (v) => v !== null && typeof v === "object" && !Array.isArray(v) ? v : {};
 var details = /* @__PURE__ */ new WeakMap();
 var MAX_CACHE = 16 * 1024 * 1024;
 var size = (v) => Buffer.byteLength(JSON.stringify(v), "utf8");
 async function previewCall(peer, input3, invoke) {
-  const call = object(input3), params = object(call.params);
+  const call = object2(input3), params = object2(call.params);
   if (call.method === "dsh/historyDetail") {
     if (Object.keys(call).some((k) => !["method", "params"].includes(k)) || Object.keys(params).some((k) => !["threadId", "detailId"].includes(k)) || typeof params.threadId !== "string" || typeof params.detailId !== "string") throw new RpcError("INVALID_MESSAGE", "Invalid history detail request.");
     const detail = details.get(peer)?.get(params.detailId);
@@ -30918,20 +30971,20 @@ async function previewCall(peer, input3, invoke) {
   if (call.previewHistory !== true) return invoke(input3);
   if (call.method !== "dsh/sessionHistory" || Object.keys(call).some((k) => !["method", "params", "previewHistory"].includes(k)))
     throw new RpcError("INVALID_MESSAGE", "History preview is read-only.");
-  const result = object(await invoke({ method: call.method, params: call.params }));
+  const result = object2(await invoke({ method: call.method, params: call.params }));
   if (!Array.isArray(result.records) || typeof params.threadId !== "string") return result;
   let cache = details.get(peer);
   if (!cache) details.set(peer, cache = /* @__PURE__ */ new Map());
   for (const [id5, value] of cache) if (value.until < Date.now()) cache.delete(id5);
   const records = result.records.map((raw) => {
-    const record9 = object(raw), event = object(record9.event), data2 = object(event.data);
+    const record9 = object2(raw), event = object2(record9.event), data2 = object2(event.data);
     if (event.type !== "tool/result" || size(record9) < 4096) return raw;
     const bytes = size(record9);
     if (bytes > MAX_CACHE) return raw;
     while (cache.size >= 64 || [...cache.values()].reduce((n, v) => n + v.bytes, 0) + bytes > MAX_CACHE) cache.delete(cache.keys().next().value);
     const id5 = randomUUID2();
     cache.set(id5, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
-    const message = object(data2.message);
+    const message = object2(data2.message);
     return { ...record9, view: void 0, event: { ...event, data: {
       id: data2.id,
       callId: data2.callId,
@@ -30939,7 +30992,7 @@ async function previewCall(peer, input3, invoke) {
       toolName: data2.toolName,
       turn: data2.turn,
       step: data2.step,
-      message: { source: message.source, isError: message.isError === true || Array.isArray(message.content) && message.content.some((v) => object(v).isError === true), content: [{ type: "text", text: "Expand to load tool output" }] },
+      message: { source: message.source, isError: message.isError === true || Array.isArray(message.content) && message.content.some((v) => object2(v).isError === true), content: [{ type: "text", text: "Expand to load tool output" }] },
       isError: data2.isError === true,
       failed: data2.failed,
       error: data2.error ? { message: "Tool execution failed" } : void 0,
@@ -30980,6 +31033,7 @@ var CodexPeerBridge = class {
     this.publish = publish;
     this.logger = logger;
   }
+  compactHistoryEnabled = false;
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
@@ -30990,7 +31044,8 @@ var CodexPeerBridge = class {
   async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
-      return await previewCall(this, input3, (value) => this.domain.call(this.context.connectionId, value));
+      const result = await previewCall(this, input3, (value) => this.domain.call(this.context.connectionId, value));
+      return this.compactHistoryEnabled && safeMethod(input3) === "dsh/sessionHistory" ? compactHistory(result) : result;
     } catch (error) {
       if (logFailure) {
         this.logger?.warn("Codex call failed", {
@@ -32009,10 +32064,10 @@ var CodexRemoteDomain = class {
           limit: CODEX_PAGE_LIMIT2,
           ...cursor2 === void 0 ? {} : { cursor: cursor2 }
         }));
-        for (const project of result.data) {
-          const projectRoots = project.roots.map((root) => root.path).filter((path) => isAbsolute2(path));
+        for (const project2 of result.data) {
+          const projectRoots = project2.roots.map((root) => root.path).filter((path) => isAbsolute2(path));
           if (projectRoots.length === 0) continue;
-          projectIds.add(project.id);
+          projectIds.add(project2.id);
           roots.push(...projectRoots);
         }
         cursor2 = typeof result.nextCursor === "string" && result.nextCursor.length > 0 ? result.nextCursor : void 0;
@@ -32310,11 +32365,11 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project = isRecord14(result) ? sanitizeProject(result.project) : void 0;
-  if (project === void 0) {
+  const project2 = isRecord14(result) ? sanitizeProject(result.project) : void 0;
+  if (project2 === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
-  return { project };
+  return { project: project2 };
 }
 function isThreadAllowedByWorkspaceAuthority(thread, authority) {
   const projectId = typeof thread.projectId === "string" ? thread.projectId : void 0;
@@ -36354,6 +36409,7 @@ var AcpPeerBridge = class {
     this.publish = publish;
     this.logger = logger;
   }
+  compactHistoryEnabled = false;
   toolControllers = /* @__PURE__ */ new Map();
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
@@ -36368,7 +36424,8 @@ var AcpPeerBridge = class {
   async callDomain(input3, logFailure) {
     this.requireOpen();
     try {
-      return await this.domain.call(this.context.connectionId, input3);
+      const result = await this.domain.call(this.context.connectionId, input3);
+      return this.compactHistoryEnabled && safeMethod2(input3) === "dsh/sessionHistory" ? compactHistory(result) : result;
     } catch (error) {
       if (logFailure) {
         this.logger?.warn("Cursor call failed", {
@@ -38736,8 +38793,10 @@ function shortId2(value) {
 // src/rpc-router.ts
 var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
 var emptyParamsSchema = external_exports.object({}).strict();
+var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   "harness.transport.describe",
+  "remote.history.configure",
   "harness.api.call",
   "harness.api.transfer.open",
   "harness.api.transfer.chunk",
@@ -38862,7 +38921,7 @@ var RpcRouter = class {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
-        const capabilities = [...this.capabilities()];
+        const capabilities = [.../* @__PURE__ */ new Set([...this.capabilities(), "remote.history.compact.v1"])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
           try {
@@ -38875,6 +38934,13 @@ var RpcRouter = class {
           capabilities,
           ...workspaceTypes === void 0 ? {} : { workspaceTypes }
         };
+      }
+      case "remote.history.configure": {
+        const { compact } = historyConfigureSchema.parse(params);
+        for (const bridge of [this.harnessApi, this.harnessRemote, this.codex, this.acp]) {
+          if (bridge !== void 0) bridge.compactHistoryEnabled = compact;
+        }
+        return { compact };
       }
       case "harness.api.call":
         return this.requireApiProxy().call(params);
@@ -40336,6 +40402,7 @@ var HarnessApiBridge = class {
     this.host = api.events.host.bind(api.events);
     this.answer = api.respond.bind(api);
   }
+  compactHistoryEnabled = false;
   methods;
   streams = /* @__PURE__ */ new Map();
   respondable = /* @__PURE__ */ new Map();
@@ -40367,7 +40434,10 @@ var HarnessApiBridge = class {
       );
       let response;
       if (params.method === "session.history") {
-        response = await callSessionHistory(callWithTimeout, params.payload, params.rpcId);
+        response = await callSessionHistory(async (payload) => {
+          const result = await callWithTimeout(payload);
+          return this.compactHistoryEnabled ? { ...result, result: compactHistory(result.result) } : result;
+        }, params.payload, params.rpcId);
       } else {
         response = await callWithTimeout(request.payload);
       }
@@ -40381,7 +40451,7 @@ var HarnessApiBridge = class {
         method: params.method,
         durationMs: Math.round(performance.now() - startedAt)
       });
-      return response;
+      return this.compactHistoryEnabled && params.method === "subagent.history" ? { ...response, result: compactHistory(response.result) } : response;
     } catch (error) {
       const durationMs = Math.round(performance.now() - startedAt);
       this.logger?.warn("harness api call failed", {
@@ -41066,6 +41136,7 @@ var HarnessRemoteBridge = class {
     this.codexWorkspace = codexWorkspace;
     this.terminalCarrier = usesDuplexTerminal(harnessVersion) ? new TerminalCarrierCompat(gateway) : void 0;
   }
+  compactHistoryEnabled = false;
   streams = /* @__PURE__ */ new Map();
   incomingTransfers = /* @__PURE__ */ new Map();
   outgoingTransfers = /* @__PURE__ */ new Map();
@@ -41111,7 +41182,10 @@ var HarnessRemoteBridge = class {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt)
       });
-      const wireResult = normalizeWorkspaceBinaryResult2(params.endpoint, result);
+      const wireResult = normalizeWorkspaceBinaryResult2(
+        params.endpoint,
+        this.compactHistoryEnabled && ["session/page", "session/history", "subagent/history"].includes(params.endpoint) ? compactHistory(result) : result
+      );
       return reservation === void 0 ? wireResult : this.terminal.result(params.endpoint, params.payload, wireResult, reservation);
     } catch (error) {
       if (reservation !== void 0) this.terminal.result(params.endpoint, params.payload, { ok: false, error: { code: "FAILED", message: "", details: {} } }, reservation);
@@ -41259,7 +41333,7 @@ var HarnessRemoteBridge = class {
       controller.abort();
       throw error;
     }
-    void this.pump(params.streamId, source, controller.signal);
+    void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow");
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input3) {
@@ -41287,7 +41361,7 @@ var HarnessRemoteBridge = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not support Remote event transport.");
     }
   }
-  async pump(streamId, source, signal) {
+  async pump(streamId, source, signal, historyFollow = false) {
     let reason = "completed";
     let failure4;
     try {
@@ -41296,7 +41370,7 @@ var HarnessRemoteBridge = class {
         const frame = {
           streamId,
           hasValue: true,
-          ...value === void 0 ? {} : { value }
+          ...value === void 0 ? {} : { value: historyFollow && this.compactHistoryEnabled && isCompactSnapshot(value) ? compactHistory(value) : value }
         };
         if (encodeMessage(createEvent("harness.remote.frame", frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
           throw new Error("Oversized Harness Remote frame");
@@ -41434,6 +41508,9 @@ function record8(value) {
 }
 function isRecord21(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isCompactSnapshot(value) {
+  return value !== null && typeof value === "object" && value.type === "snapshot";
 }
 
 // src/service.ts

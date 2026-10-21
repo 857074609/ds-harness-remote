@@ -111,6 +111,8 @@ const enUS = {
   settings: {
     title: 'Settings', thisPhone: 'This phone', androidDevice: 'Android device', connection: 'Connection', server: 'Server', account: 'Account', loginMethod: 'Sign-in method', protocol: 'Protocol', notConfigured: 'Not configured', notSignedIn: 'Not signed in',
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
+    compactHistorySaveFailed: 'Could not save compact conversation setting',
+    compactHistory: 'Compact conversations', compactHistoryNote: 'Applies globally when you next open a conversation. Keeps text and tool status with shorter tool details to save data and memory. Requires Host plugin support. Turn off and reopen to load full history.',
     statusBar: 'Show status bar', statusBarNote: 'Show the time, battery and network status at the top of the screen. Turn off to hide the system status bar.', statusBarSaveFailed: 'Could not save status bar setting', statusBarSaveFailedBody: 'Could not write to local storage. Please try again.',
     theme: 'Dark mode', themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System',
     chat: 'Chat',

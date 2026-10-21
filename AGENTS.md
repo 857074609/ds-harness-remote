@@ -607,3 +607,17 @@ APK 与 npm/GitHub Release 发布以工作流实际结果为准，长期后台�
 工作区目录，独立于终端开关，以 Host 用户权限执行。只接受绝对非根路径，拒绝空路径与
 NUL；创建与官方注册使用完全相同的路径，不新增通用 filesystem RPC。若官方注册失败，
 已创建目录保留，不递归删除。CodeX `project/create` 仍只注册已有真实目录。
+
+
+## Mobile compact history (2026-10-21)
+
+移动端全局「会话精简模式」默认关闭，持久化并保留退出账号后的选择；清除本地数据恢复关闭。
+每次打开会话前，仅对声明 `remote.history.compact.v1` 的 Host 发送
+`remote.history.configure { compact: boolean }`。旧 Host 保持原有行为，不做手机本地精简。
+Host 模式仅属于当前已认证连接，重连重新配置，不修改原始会话、Agent 上下文或其他客户端。
+Harness 历史/首帧 snapshot、CodeX 与 ACP 历史（含 transfer）缩减工具参数、输出及展示投影，
+保留正文、事件序号、分页、关联与错误状态；实时流和审批不变。切换后重新打开会话加载，
+同时失效旧模式的历史分页缓存；CodeX 已有详情句柄继续可用。未进行本次原生真机或跨设备验收。
+
+本次全仓 check、779 tests（Plugin 403、Android 184）、共享包/Plugin build、DSH bundle 校验、
+Android production Hermes export 与 diff 检查通过；保留既有 Metro noble/hashes 警告说明。

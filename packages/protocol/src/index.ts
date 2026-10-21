@@ -116,6 +116,7 @@ export const rpcMethods = [
   'workspace.upload.commit',
   'workspace.upload.abort',
   'harness.transport.describe',
+  'remote.history.configure',
   'harness.api.call',
   'harness.api.transfer.open',
   'harness.api.transfer.chunk',
@@ -431,6 +432,7 @@ export const transportCapabilities = [
  * harness.remote.v3); advertising both is a protocol violation.
  */
 export const harnessCapabilityValues = [
+  'remote.history.compact.v1',
   'workspace.upload.v1',
   'harness.api.v1',
   'harness.api.transfer.v1',
@@ -663,6 +665,11 @@ export interface RemoteWorkspaceTypeDescription {
   name: string
   capability: string
   available: boolean
+}
+
+/** Read-only history delivery preference, scoped to one authenticated connection. */
+export interface RemoteHistoryConfigureParams {
+  compact: boolean
 }
 
 export interface HarnessTransportDescription {

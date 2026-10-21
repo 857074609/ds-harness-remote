@@ -57,6 +57,7 @@ export class AndroidRemoteRuntime {
   }
 
   async refreshBackends(): Promise<void> { await this.client.refreshBackends() }
+  configureHistory(compact: boolean) { return this.client.configureHistory(compact) }
   requireProxy() { return this.client.requireProxy() }
   requireCodex() { return this.client.requireCodex() }
   requireSessionTools(sessionId?: string) { return this.client.requireSessionTools(sessionId) }

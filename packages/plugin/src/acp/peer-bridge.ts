@@ -1,3 +1,4 @@
+import { compactHistory } from '../compact-history.js'
 import { acpToolStreamSchema } from './method-policy.js'
 import { Buffer } from 'node:buffer'
 import type {
@@ -67,6 +68,7 @@ const INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024
 
 /** Per-authenticated-connection state for the Cursor Remote domain. */
 export class AcpPeerBridge {
+  compactHistoryEnabled = false
   private readonly toolControllers = new Map<string, AbortController>()
   private readonly streams = new Map<string, string>()
   private readonly incomingTransfers = new Map<string, IncomingTransfer>()
@@ -91,7 +93,8 @@ export class AcpPeerBridge {
   private async callDomain(input: unknown, logFailure: boolean): Promise<unknown> {
     this.requireOpen()
     try {
-      return await this.domain.call(this.context.connectionId, input)
+      const result = await this.domain.call(this.context.connectionId, input)
+      return this.compactHistoryEnabled && safeMethod(input) === 'dsh/sessionHistory' ? compactHistory(result) : result
     } catch (error) {
       if (logFailure) {
         this.logger?.warn('Cursor call failed', {

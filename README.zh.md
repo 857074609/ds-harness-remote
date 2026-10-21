@@ -140,6 +140,8 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
   <img src="docs/images/image-result.jpg" alt="在 Android 客户端中查看图片理解结果" width="30%">
 </p>
 
+移动端设置提供默认关闭的全局「会话精简模式」，下次打开会话生效。支持该能力的 Host 缩减历史工具详情，保留正文和工具状态；旧 Host 保持原有行为，手机不做本地精简。关闭后重新打开会话可加载完整历史。
+
 ## 工作方式
 
 ```text

@@ -339,6 +339,9 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
+  const compactHistory = useAppStore(state => state.compactHistory)
+  const setCompactHistory = useAppStore(state => state.setCompactHistory)
+  const [compactSaving, setCompactSaving] = useState(false)
   const statusBarVisible = useAppStore(state => state.statusBarVisible)
   const setStatusBarVisible = useAppStore(state => state.setStatusBarVisible)
   const [statusBarSaving, setStatusBarSaving] = useState(false)
@@ -352,6 +355,14 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   // Cap the read-only info column on wide landscape tablets; phone portrait
   // already fits inside contentMaxWidth, so nothing changes there.
   const { contentMaxWidth, landscape } = useResponsiveLayout()
+
+  const toggleCompactHistory = async (value: boolean) => {
+    if (compactSaving) return
+    setCompactSaving(true)
+    try { await setCompactHistory(value) }
+    catch { Alert.alert(zhCN.settings.compactHistorySaveFailed, zhCN.settings.statusBarSaveFailedBody) }
+    finally { setCompactSaving(false) }
+  }
 
   const toggleStatusBar = async (visible: boolean) => {
     if (statusBarSaving) return
@@ -474,6 +485,20 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                 />
               </View>
               <Text style={styles.preferenceNote}>{zhCN.settings.statusBarNote}</Text>
+            </View>
+
+            <View style={styles.preferenceList}>
+              <View style={styles.preferenceOption}>
+                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.settings.compactHistory}</Text>
+                <Switch
+                  accessibilityLabel={zhCN.settings.compactHistory}
+                  value={compactHistory}
+                  disabled={compactSaving}
+                  onValueChange={value => void toggleCompactHistory(value)}
+                  trackColor={{ true: colors.primary }}
+                />
+              </View>
+              <Text style={styles.preferenceNote}>{zhCN.settings.compactHistoryNote}</Text>
             </View>
 
             <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>

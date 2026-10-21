@@ -21,6 +21,7 @@ export interface AndroidConnectionOptions {
 }
 
 export class AndroidRemoteConnection {
+  private compactHistorySupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
   private codex?: CodexRemoteClient
@@ -36,6 +37,12 @@ export class AndroidRemoteConnection {
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
+
+  async configureHistory(compact: boolean): Promise<void> {
+    if (this.core !== undefined && this.compactHistorySupported) {
+      await this.core.rpc('remote.history.configure', { compact })
+    }
+  }
 
   async connect(
     baseUrl: string,
@@ -151,6 +158,7 @@ export class AndroidRemoteConnection {
         }
         this.muxHandler?.(frame)
       }
+      this.compactHistorySupported = features.capabilities.includes('remote.history.compact.v1')
       this.applyBackendFeatures(core, features)
       this.unsubscribeArchived = this.cursor?.onSessionArchived(data => {
         if (this.core === core) options.onOpencodeArchived?.(data.sessionId)

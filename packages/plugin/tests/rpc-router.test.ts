@@ -36,7 +36,7 @@ describe('RpcRouter', () => {
 
     expect(response).toMatchObject({
       type: 'rpc.response',
-      payload: { result: { capabilities: ['transport.relay', 'harness.remote.v1'] } },
+      payload: { result: { capabilities: ['transport.relay', 'harness.remote.v1', 'remote.history.compact.v1'] } },
     })
     const invalid = await router.handle(createRpcRequest('harness.transport.describe', { extra: true }))
     expect(invalid).toMatchObject({ type: 'rpc.error', payload: { code: 'INVALID_MESSAGE' } })
@@ -147,7 +147,7 @@ describe('RpcRouter', () => {
             type: 'rpc.response',
             payload: {
               result: {
-                capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1'],
+                capabilities: ['transport.relay', 'codex.appserver.v1', 'codex.appserver.transfer.v1', 'remote.history.compact.v1'],
                 workspaceTypes: [
                   {
                     id: 'codex',
@@ -188,7 +188,7 @@ describe('RpcRouter', () => {
             type: 'rpc.response',
             payload: {
               result: {
-                capabilities: ['transport.relay', 'harness.api.v1'],
+                capabilities: ['transport.relay', 'harness.api.v1', 'remote.history.compact.v1'],
                 workspaceTypes: [],
               },
             },
@@ -204,7 +204,7 @@ describe('RpcRouter', () => {
             type: 'rpc.response',
             payload: {
               result: {
-                capabilities: ['transport.relay', 'codex.appserver.v1'],
+                capabilities: ['transport.relay', 'codex.appserver.v1', 'remote.history.compact.v1'],
               },
             },
           })
@@ -236,7 +236,7 @@ describe('RpcRouter', () => {
             type: 'rpc.response',
             payload: {
               result: {
-                capabilities: ['codex.appserver.v1'],
+                capabilities: ['codex.appserver.v1', 'remote.history.compact.v1'],
                 workspaceTypes: [
                   {
                     id: 'codex',
@@ -267,7 +267,7 @@ describe('RpcRouter', () => {
             type: 'rpc.response',
             payload: {
               result: {
-                capabilities: ['codex.appserver.v1'],
+                capabilities: ['codex.appserver.v1', 'remote.history.compact.v1'],
                 workspaceTypes: [],
               },
             },

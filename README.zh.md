@@ -207,6 +207,8 @@ WebRTC 不可用或连接失败时，会降级到加密的 WebSocket Relay。
 
 网络拓扑、控制面与数据面、NAT、降级、重连语义和当前验证状态详见[网络与传输](docs/network.md)。
 
+创建 Harness 工作区可使用 Host 用户权限创建缺失目录，独立于终端开关。路径必须为绝对非根路径；注册失败时保留已创建目录。
+
 OAuth 登录方式由服务端动态提供。使用 `ds-harness-remote login list` 或 `/remote login list` 查看可用扫码方式；新增服务端集成无需再次发布插件。
 
 ## 安全边界

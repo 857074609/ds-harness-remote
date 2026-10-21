@@ -1,6 +1,7 @@
 import { mkdir, readdir, stat } from 'node:fs/promises'
 import { homedir, platform } from 'node:os'
 import { basename, dirname, isAbsolute, parse, resolve } from 'node:path'
+import { RpcError } from './safe-error.js'
 
 interface DirectoryEntry { name: string; path: string; hidden: boolean }
 export interface DirectoryListing {
@@ -19,11 +20,13 @@ const MAX_ENTRIES = 500
  * Only absolute, non-root paths are accepted.
  */
 export async function ensureHostWorkspaceDirectory(path: string | undefined): Promise<void> {
-  const raw = String(path || '').trim()
-  if (!raw || raw.includes('\0')) return
-  const target = resolve(raw)
-  if (!isAbsolute(target) || target === parse(target).root) return
-  await mkdir(target, { recursive: true })
+  if (typeof path !== 'string' || path.trim() === '' || path.includes('\0') || !isAbsolute(path)
+    || resolve(path) === parse(path).root) {
+    throw new RpcError('INVALID_MESSAGE', 'Workspace path must be an absolute, non-root directory path.')
+  }
+  // Preserve the exact path forwarded to Harness, including whitespace and
+  // symlink/.. traversal semantics; resolve() here could create a different folder.
+  await mkdir(path, { recursive: true })
 }
 
 /** Read-only fallback used only over an authenticated Host channel when Harness has a native-only picker. */

@@ -1,8 +1,8 @@
 import { runScenarios, scenarioName } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, parse } from 'node:path'
 import { HarnessRemoteBridge } from '../src/harness-remote-bridge.js'
 import { CodexWorkspaceBridge, type RemoteTerminalProcess, type RemoteTerminalSpawner } from '../src/codex-workspace-bridge.js'
 import { TerminalPolicy } from '../src/terminal-policy.js'
@@ -77,14 +77,32 @@ describe('HarnessRemoteBridge', () => {
     })))
   })
 
+  it('rejects invalid workspace creation paths before filesystem writes or native dispatch', async () => {
+    await runScenarios([
+      ['missing', undefined], ['blank', '  '], ['relative', 'relative/project'],
+      ['root', parse(tmpdir()).root], ['NUL', join(tmpdir(), 'bad\0path')],
+    ].map(([name, path]) => ({
+      name: String(name),
+      run: async () => {
+        const dispatch = vi.fn()
+        const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+        await expect(bridge.call({ endpoint: 'workspace/create', payload: { args: { request: { path } } } }))
+          .rejects.toMatchObject({ code: 'INVALID_MESSAGE' })
+        expect(dispatch).not.toHaveBeenCalled()
+      },
+    })))
+  })
+
   it('creates missing Host folders before forwarding workspace/create', async () => {
     const root = await mkdtemp(join(tmpdir(), 'dsh-remote-workspace-create-'))
-    const folder = join(root, 'MarcoAgent', 'admin')
+    // Windows normalizes trailing spaces; use an ordinary spaced name there.
+    const name = process.platform === 'win32' ? 'admin folder' : 'admin '
+    const folder = join(root, 'MarcoAgent', name)
     const dispatch = vi.fn(async (endpoint: string, payload: { args: Record<string, unknown> }) => {
       expect(endpoint).toBe('workspace/create')
       expect(payload.args).toEqual({ request: { path: folder } })
       const resolved = await realpath(folder)
-      expect(resolved).toBe(await realpath(folder))
+      expect(resolved.endsWith(name)).toBe(true)
       return {
         ok: true as const,
         value: {
@@ -110,6 +128,11 @@ describe('HarnessRemoteBridge', () => {
         value: { workspace: { workspaceId: 'ws-admin' }, created: true },
       })
       expect(dispatch).toHaveBeenCalledTimes(1)
+      // Registration failure must not delete directories on the Host.
+      dispatch.mockResolvedValueOnce({ ok: false, error: { code: 'FAILED' } } as never)
+      await expect(bridge.call({ endpoint: 'workspace/create', payload: { args: { request: { path: folder } } } }))
+        .resolves.toMatchObject({ ok: false })
+      expect((await stat(folder)).isDirectory()).toBe(true)
     } finally {
       await rm(root, { recursive: true, force: true })
     }

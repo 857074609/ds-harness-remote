@@ -202,6 +202,8 @@ log fields before blaming WebRTC. See [Network and transport](docs/network.md)
 for the topology, control and data planes, NAT behavior, fallback, reconnect semantics, and current
 validation status.
 
+Creating a Harness workspace can create missing directories as the Host user, independently of the terminal switch. Paths must be absolute and non-root; created directories remain if registration fails.
+
 OAuth sign-in methods are loaded from the Server. Use `ds-harness-remote login list` or `/remote login list` to see available QR providers; new server integrations need no further plugin release.
 
 ## Security

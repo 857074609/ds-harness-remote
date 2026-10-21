@@ -153,7 +153,7 @@ Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理�
 3. Remote business message 只能进入已认证的加密 channel；明文、未知 connection、错误 target、重放和 identity mismatch 必须 fail closed。
 4. Server membership 与 Host 本地 trusted peer 必须同时成立。
 5. v1 permission decision 只允许 `allow_once | deny`，禁止恢复 `allow_session`。
-6. 按用户 2026-09-20 授权，支持官方原生文件树/只读预览、默认开启且可在详细 Remote 设置中关闭的 `terminal.enabled` 交互终端，以及 `loopback.ports` 明确授权的 HTTP/WebSocket 预览。文件通过官方 `workspaceFiles`/`officeToPdf` 或已有 dsh-file-viewer provider 读取，除下述 2026-10-18 workspace upload 授权外，禁止新增直接 filesystem 写入、远程桌面或通用 Harness tool RPC。终端以 Host 用户权限运行，独立于 Agent 审批；按设备固定终端归属与连接输入权，断线不重放输入。loopback Host 只出站连接 `127.0.0.1` 白名单端口；Desktop Client 可监听随机本机端口承载独立预览 origin，禁止监听公网、任意目标、CONNECT 和通用 TCP 转发。
+6. 按用户 2026-09-20 授权，支持官方原生文件树/只读预览、默认开启且可在详细 Remote 设置中关闭的 `terminal.enabled` 交互终端，以及 `loopback.ports` 明确授权的 HTTP/WebSocket 预览。文件通过官方 `workspaceFiles`/`officeToPdf` 或已有 dsh-file-viewer provider 读取，除下述 2026-10-18 workspace upload 与 2026-10-21 workspace/create 目录创建授权外，禁止新增直接 filesystem 写入、远程桌面或通用 Harness tool RPC。终端以 Host 用户权限运行，独立于 Agent 审批；按设备固定终端归属与连接输入权，断线不重放输入。loopback Host 只出站连接 `127.0.0.1` 白名单端口；Desktop Client 可监听随机本机端口承载独立预览 origin，禁止监听公网、任意目标、CONNECT 和通用 TCP 转发。
 7. Token、私钥、主机匹配码、prompt、源码和工具输出不得写日志。
 8. Harness v0.1.1 rc.2 业务层只使用官方 `ApiProxy`，v0.1.2 alpha.1–rc.1 与 v0.1.5 rc.1 / v0.1.6 alpha.1 Session V3 业务层只使用官方 `TypertGateway` Remote carrier；原生侧栏使用官方 `workspaceFiles` / `officeToPdf` / `terminal` 固定 allowlist；保留 dsh-file-viewer provider 通道。除规则 10 规定的 CodeX 内存展示载体外，禁止增加 session/agent/workspace/permission adapter、另一套 Harness wire format 或通用文件系统协议。
 9. 不修改用户已有变更，不提交 `node_modules`、Expo cache、Android build 产物或个人 Agent 配置；唯一允许提交的 `dist` 是根 DSH GitHub Bundle 所需的 `packages/plugin/dist/index.js` 与 `client.github.js`，另需保留根 Host 入口 `index.js`。
@@ -600,3 +600,10 @@ DSH bundle 与版本一致性校验通过。此前本机测试的 Peer/createPee
 安装残留的 workspace node_modules 链接遮蔽当前 hoisted 依赖；移走旧链接并按锁文件安装后
 恢复通过，未修改或跳过测试。用户确认本机 Desktop 退出/保存 Server 修复版本可用；新的
 APK 与 npm/GitHub Release 发布以工作流实际结果为准，长期后台与跨设备边界仍见 TODO。
+
+## Harness workspace directory creation (2026-10-21)
+
+按用户明确授权，已认证 Client 可通过现有官方 `workspace/create` 请求递归创建缺失的 Host
+工作区目录，独立于终端开关，以 Host 用户权限执行。只接受绝对非根路径，拒绝空路径与
+NUL；创建与官方注册使用完全相同的路径，不新增通用 filesystem RPC。若官方注册失败，
+已创建目录保留，不递归删除。CodeX `project/create` 仍只注册已有真实目录。

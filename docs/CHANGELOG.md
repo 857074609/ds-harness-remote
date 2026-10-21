@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Fix Android cards patched by later turns remaining stale while retaining stable history rows. Validate Harness workspace creation paths before writes, preserve the exact forwarded path, and include directory creation in the published Host bundle.
+- 修复 Android 后续轮次更新旧交互卡片时显示不刷新的问题，保留历史行复用；工作区目录创建在写入前校验路径，保留原路径语义并同步 Host 发布 bundle。
+  Validation: shared-package build, Plugin/Android type checks, 183 Android tests, 36 focused Plugin tests, DSH bundle verification and Android production Hermes export pass. The existing noble/hashes exports fallback warning remains; optional Intelligent UI renderer is absent (safe fallback). No native device or cross-device acceptance performed.
+
 - Make Server-initiated tunnel closes visible at the default log level (#140): retryable closes now use info instead of debug, and `peer connection disconnected` records `closedBy` (`server`/`host`) with `retryable`. `CONNECTION_FAILED` is both a Server-issued code and a Host fallback, so the debug-only message made the two paths indistinguishable. No runtime transport behavior changed.
 - 让 Server 主动关闭 tunnel 在默认日志级别可见（#140）：retryable 关闭由 debug 提升为 info，`peer connection disconnected` 增加 `closedBy`（`server`/`host`）与 `retryable` 字段。`CONNECTION_FAILED` 同时是 Server 下发的 code 和 Host 本地兜底，旧日志只在 debug 输出，无法区分两条路径。本次未改变运行时传输行为。
 - Improve Android conversation browsing with backend-separated search, local favorites,

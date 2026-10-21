@@ -1050,6 +1050,11 @@ Params：
 }
 ```
 
+`workspace/create` 可在 Host 用户权限下递归创建缺失目录，独立于终端开关。Host 在写入前
+拒绝空路径、NUL、相对路径与根目录；创建和官方注册必须使用完全相同的路径（保留空格及
+符号链接路径语义）。官方注册失败时保留已创建目录，不执行递归清理。此授权只适用于
+Harness 工作区创建，不新增通用写入 RPC，不改变 CodeX `project/create` 的已有目录限制。
+
 Result 必须保持官方 Connection RPC 结果：`{ "ok": true, "value"?: ... }` 或
 `{ "ok": false, "error": { "code", "message", "details" } }`。Host 通过启动时捕获的本地
 Gateway dispatcher 调用，禁止回到已切换的 Client facade 形成递归。

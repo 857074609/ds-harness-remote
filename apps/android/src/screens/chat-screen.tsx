@@ -370,6 +370,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     if (hostId === undefined || session === undefined
       || (session.backend !== undefined && session.backend !== 'harness')) return EMPTY_UI_BY_SECTION
     const next = placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
+    if (next.size === 0) {
+      uiBySectionCache.current = EMPTY_UI_BY_SECTION
+      return EMPTY_UI_BY_SECTION
+    }
     const previous = uiBySectionCache.current
     if (previous.size === 0) {
       uiBySectionCache.current = next
@@ -657,20 +661,12 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     userScrollingRef.current = false
   }, [onListScroll])
 
-  // Stable renderItem keeps FlatList rows from re-rendering on every streaming
-  // delta; ChatItemView is memoized so only the changing row re-renders.
-  // Read the artifact maps through refs so the callback keeps one identity
-  // across streaming deltas; `onBackRef` below uses the same idiom. The values
-  // themselves are stabilized above, so a row whose content did not change
-  // still receives the same props.
-  const uiBySectionRef = useRef(uiBySection)
-  uiBySectionRef.current = uiBySection
-  const visibleUiIdsRef = useRef(visibleUiIds)
-  visibleUiIdsRef.current = visibleUiIds
+  // Artifact changes must invalidate FlatList cells even when their section is
+  // reused (a later turn can patch a card owned by an earlier turn).
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySectionRef.current.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySectionRef.current.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIdsRef.current} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion])
+  [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can

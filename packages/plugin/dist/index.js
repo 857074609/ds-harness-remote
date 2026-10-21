@@ -40051,10 +40051,16 @@ function closeCode(code) {
 }
 
 // src/remote-directory-browser.ts
-import { readdir as readdir4, stat as stat7 } from "node:fs/promises";
+import { mkdir as mkdir3, readdir as readdir4, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir6, platform as platform2 } from "node:os";
 import { basename as basename5, dirname as dirname5, isAbsolute as isAbsolute8, parse, resolve as resolve5 } from "node:path";
 var MAX_ENTRIES = 500;
+async function ensureHostWorkspaceDirectory(path) {
+  if (typeof path !== "string" || path.trim() === "" || path.includes("\0") || !isAbsolute8(path) || resolve5(path) === parse(path).root) {
+    throw new RpcError("INVALID_MESSAGE", "Workspace path must be an absolute, non-root directory path.");
+  }
+  await mkdir3(path, { recursive: true });
+}
 async function listRemoteDirectory(path, signal) {
   signal?.throwIfAborted();
   const home = resolve5(homedir6());
@@ -41089,6 +41095,11 @@ var HarnessRemoteBridge = class {
     if (codexResult !== void 0) return reservation === void 0 ? codexResult : this.terminal.result(params.endpoint, params.payload, codexResult, reservation);
     if (params.endpoint === "session/canOpenWorkspacePath") {
       return { ok: true, value: true };
+    }
+    if (params.endpoint === "workspace/create") {
+      const request = requestArgs(params.payload);
+      const folder = typeof request.path === "string" ? request.path : "";
+      await ensureHostWorkspaceDirectory(folder);
     }
     const startedAt = performance.now();
     const signal = AbortSignal.timeout(6e4);

@@ -1,5 +1,16 @@
 ## Unreleased
 
+- Improve Android conversation browsing with backend-separated search, local favorites,
+  per-conversation drafts, reading anchors and a jump-to-latest action. Keep bounded encrypted
+  text previews scoped to server/account/Host identity, optional startup restoration and live
+  task notifications. Show cached content immediately while fresh history and subscriptions
+  are verified; ignore cancelled reads and deduplicate native Codex catalog snapshots.
+- Android 对话侧栏增加后端分类、搜索和本机收藏；按对话保留草稿、阅读位置和受限加密文字预览，
+  支持可选启动恢复与连接期间的任务通知。切换先显示缓存再核对最新历史，取消过期读取，并按原生
+  Codex 对话 ID 归并重复目录记录。
+- Add an opt-in read-only Codex history preview with authenticated-peer-scoped, expiring tool
+  detail handles. Android requests large tool bodies on expansion; existing clients and older
+  Hosts keep their original history flow.
 - Allow DS Bot 0.2.0 interactive card replies (`view-reply`) over Remote; the Host's native DS Bot handler validates the pending card and answer. Cross-device acceptance remains pending.
 - 放行 DS Bot 0.2.0 交互卡片的远程回复（`view-reply`），由 Host 原生 DS Bot handler 校验待答卡片及答案；跨设备验收待完成。
 

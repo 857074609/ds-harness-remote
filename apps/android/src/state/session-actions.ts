@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../lib/session-kind'
 import { selectAcpModel } from '../services/acp-models'
 import { createCodexTimelineState, projectCodexThread } from '@dsh-remote/client-core'
 import { friendlyError, isRecoverableTransportError, isRpcTimeoutError, isStreamTimeoutError } from '../lib/errors'
@@ -236,7 +237,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         await runtime.closeActiveCodexStream()
         await runtime.closeActiveCursorStream()
         const [history, feedback] = await Promise.all([
-          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 60, session.parentSessionId),
+          runtime.connection.requireProxy().sessionHistory(session.sessionId, undefined, 60, isSubagentSession(session) ? session.parentSessionId : undefined),
           // Older carriers may not expose feedback; history must remain usable.
           runtime.connection.requireProxy().messageFeedbackList(session.sessionId).catch(() => undefined),
         ])
@@ -294,7 +295,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // cycle on every open; top-level session stalls still fall back to
         // forceRelay once (the pre-bounding recovery path).
         const transportRetry = (isRpcTimeoutError(error) || isRecoverableTransportError(error))
-          && !(isStreamTimeoutError(error) && session.parentSessionId !== undefined)
+          && !(isStreamTimeoutError(error) && isSubagentSession(session))
         if (transportRetry) {
           if (runtime.reconnectFlight !== undefined) {
             set({ busyAction: undefined, error: friendlyError(error) })
@@ -749,7 +750,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       try {
         const page = session.backend === 'codex'
           ? await readCodexHistoryPage(runtime.connection.requireCodex(), codexThreadId(session), beforeSeq, 60)
-          : await runtime.connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, session.parentSessionId)
+          : await runtime.connection.requireProxy().sessionHistory(session.sessionId, beforeSeq, 60, isSubagentSession(session) ? session.parentSessionId : undefined)
         const items = foldHistory(page.events, session.sessionId, true)
         const older = oldestSeq(page.events)
         set(state => ({

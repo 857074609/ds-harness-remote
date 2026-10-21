@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fix Android fork history routing: only sessions explicitly marked `origin: 'subagent'` use their durable parent address. Fork ancestry keeps normal session history, pagination and timeout recovery; subagent navigation and fallback titles use the same distinction. Android type checks, 154 tests and Hermes export pass; APK/device acceptance remains pending.
+- 修复 Android 将 fork 会话误当 subagent 读取历史的问题：仅 `origin: 'subagent'` 使用父会话地址，fork 保持普通会话的历史、分页和超时恢复；子会话导航与默认标题同步区分。Android 类型检查、154 项测试与 Hermes 导出通过；APK/真机验收待完成。
+
 - Fix sidebar footer layout corruption on Harness 0.2.x: Remote styles only its own official footer-slot entry, without overriding host CSS Modules classes or legacy better-sidebar account/connection rows. Expanded entries can shrink beside other actions; collapsed entries keep a 36 px icon seat. The active entry keeps Exit in normal flow so long host names can shrink without overlapping it.
 - 修复 Harness 0.2.x 侧栏 footer 布局错乱：Remote 仅设置官方 footer slot 内自身入口的样式，移除对宿主 CSS Modules 类名及旧 better-sidebar 账号/连接条的覆盖；展开入口可与其他按钮并排收缩，折叠入口保持 36 px 图标区域；远程状态下退出按钮参与正常布局，长主机名收缩时不会与其重叠。
 - Add a jump-to-latest button to the Android chat: once the user scrolls away from the newest turn, a floating down-arrow appears above the composer and returns the list to the end in one tap. The tap re-enables follow mode before scrolling, so a reply that is still streaming keeps following, and the button is hidden while the viewport already shows the latest turn. No new tests (presentation-only); type checking, 152 Android tests and the Android Hermes export pass. Real-device scrolling, TalkBack, landscape and streaming behaviour were not verified locally.

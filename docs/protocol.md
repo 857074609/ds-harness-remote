@@ -1085,6 +1085,11 @@ Open Params：`{ "streamId", "endpoint", "payload" }`；Close Params：`{ "strea
 `session/control`）或 `$events`。每个 authenticated connection 最多 16 条 alpha stream；
 stream id、取消和断开清理均按 `connectionId` 隔离。
 
+`session/follow` 与 `session/page` 复用官方 `SessionAddress`：仅 catalog 明确标记
+`origin: 'subagent'` 的会话使用 `{ kind: 'subagent', parentSessionId, childSessionId, mode }`；
+普通会话和 fork 会话使用 `{ kind: 'session', sessionId }`。`parentSessionId` 也表示 fork
+来源，不能单独作为 subagent 判据；Host 的 origin/parent 校验失败不得通过地址降级绕过。
+
 Host 对每个 item 发送 `harness.remote.frame`：
 
 ```json

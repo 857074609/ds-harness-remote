@@ -1,3 +1,4 @@
+import { isSubagentSession } from '../lib/session-kind'
 import * as ImagePicker from 'expo-image-picker'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import {
@@ -336,10 +337,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     // inbox rows carry the host item id needed for queue actions.
     return [...inboxItems, ...pending]
   }, [inboxProjection, messages])
-  // Child (subagent) sessions spawned by this session — the data has always
-  // been in `sessions` (parentSessionId/origin), it just had no UI.
+  // Fork ancestry does not make a conversation a subagent child.
   const childSessions = useMemo(
-    () => sessions.filter(item => item.parentSessionId === session?.sessionId),
+    () => sessions.filter(item => isSubagentSession(item) && item.parentSessionId === session?.sessionId),
     [sessions, session?.sessionId])
   // Agent team: the `agentTeam` projection carries the durable roster
   // (member name + role description + phase) and the task board (subject +
@@ -530,10 +530,10 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   // Back inside a subagent child returns to its parent conversation (the
   // official subagent UI's navigation), instead of leaving the chat entirely.
   const backFromChat = () => {
-    const parent = session?.parentSessionId === undefined
-      ? undefined
-      : sessions.find(item => item.sessionId === session.parentSessionId)
-    if (session?.parentSessionId !== undefined && parent !== undefined) {
+    const parent = session !== undefined && isSubagentSession(session)
+      ? sessions.find(item => item.sessionId === session.parentSessionId)
+      : undefined
+    if (parent !== undefined) {
       Keyboard.dismiss()
       void openSession(parent)
       return

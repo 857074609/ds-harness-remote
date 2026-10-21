@@ -82,6 +82,7 @@ import { useTheme } from '../ui/theme-context'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { promptImageFromAsset, sessionImageLimits, validatePromptImages } from './chat-images'
 import { ChatTrajectory } from './chat-trajectory'
+import { ChatErrorBoundary } from './chat-error-boundary'
 import { ChildAgentPanel, TeamAgentPanel } from './chat/agents'
 import {
   ChatImages,
@@ -121,6 +122,26 @@ const EMPTY_CHAT_ITEMS: ChatItem[] = []
 const EMPTY_UI_ARTIFACTS: UiArtifact[] = []
 const EMPTY_UI_BY_SECTION = new Map<string, { cards: UiArtifact[]; pointers: UiArtifact[] }>()
 const EMPTY_UI_IDS = new Set<string>()
+
+type SectionArtifacts = { cards: UiArtifact[]; pointers: UiArtifact[] }
+
+/**
+ * Artifact identity is `uiId` plus `version`: a ui_patch can only advance the
+ * version, so equal pairs mean equal content. Used to keep the per-section
+ * buckets referentially stable across streaming deltas.
+ */
+function sameArtifacts(a: readonly UiArtifact[], b: readonly UiArtifact[]): boolean {
+  if (a === b) return true
+  if (a.length !== b.length) return false
+  for (let index = 0; index < a.length; index += 1) {
+    const left = a[index]
+    const right = b[index]
+    if (left === right) continue
+    if (left === undefined || right === undefined) return false
+    if (left.uiId !== right.uiId || left.version !== right.version) return false
+  }
+  return true
+}
 
 /** Soft hint threshold; the composer accepts longer input instead of silently truncating. */
 const LONG_DRAFT_HINT = 12_000
@@ -336,14 +357,67 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       // Output-less failure turns keep an empty assistant row carrying only the
       // turnEnd reason — it must stay visible so the failure is explainable.
       || item.turnEnd !== undefined))), [messages, session?.backend])
-  const visibleSections = useMemo(() => chatSections(visibleMessages), [visibleMessages])
-  const uiBySection = useMemo(() => {
+  // Feed the previous list back so untouched groups keep their identity; the
+  // streaming delta then only rebuilds the group that actually changed.
+  const previousSectionsRef = useRef<readonly ChatSection[]>([])
+  const visibleSections = useMemo(() => {
+    const next = chatSections(visibleMessages, previousSectionsRef.current)
+    previousSectionsRef.current = next
+    return next
+  }, [visibleMessages])
+  const uiBySectionCache = useRef<ReadonlyMap<string, SectionArtifacts>>(EMPTY_UI_BY_SECTION)
+  const uiBySection = useMemo<ReadonlyMap<string, SectionArtifacts>>(() => {
     if (hostId === undefined || session === undefined
       || (session.backend !== undefined && session.backend !== 'harness')) return EMPTY_UI_BY_SECTION
-    return placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
+    const next = placeUiArtifacts(projectUiArtifacts(messages, hostId, session.sessionId), visibleSections)
+    const previous = uiBySectionCache.current
+    if (previous.size === 0) {
+      uiBySectionCache.current = next
+      return next
+    }
+    // `placeUiArtifacts` allocates a fresh bucket and fresh arrays on every run,
+    // so an unchanged card would still hand ChatProcessGroup a new prop and
+    // defeat its memo. An equal bucket is reusable as-is.
+    let changed = next.size !== previous.size
+    const stable = new Map<string, SectionArtifacts>()
+    for (const [key, bucket] of next) {
+      const old = previous.get(key)
+      if (old !== undefined && sameArtifacts(old.cards, bucket.cards) && sameArtifacts(old.pointers, bucket.pointers)) {
+        stable.set(key, old)
+      } else {
+        stable.set(key, bucket)
+        changed = true
+      }
+    }
+    if (!changed) return previous
+    uiBySectionCache.current = stable
+    return stable
   }, [messages, hostId, session?.sessionId, session?.backend, visibleSections])
-  const visibleUiIds = useMemo(() => uiBySection.size === 0 ? EMPTY_UI_IDS
-    : new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId))), [uiBySection])
+  const visibleUiIdsCache = useRef<ReadonlySet<string>>(EMPTY_UI_IDS)
+  const visibleUiIds = useMemo(() => {
+    if (uiBySection.size === 0) return EMPTY_UI_IDS
+    const next = new Set([...uiBySection.values()].flatMap(value => value.cards.map(card => card.uiId)))
+    // Identical members -> identical reference, so memoized rows keep their props.
+    const cached = visibleUiIdsCache.current
+    if (cached.size === next.size) {
+      let identical = true
+      for (const id of next) {
+        if (!cached.has(id)) { identical = false; break }
+      }
+      if (identical) return cached
+    }
+    visibleUiIdsCache.current = next
+    return next
+  }, [uiBySection])
+
+  // The caches above describe one transcript. Switching sessions must drop them,
+  // otherwise the first render of the next session would compare against a
+  // foreign list (harmless for correctness, wasteful for memory).
+  useEffect(() => {
+    previousSectionsRef.current = []
+    uiBySectionCache.current = EMPTY_UI_BY_SECTION
+    visibleUiIdsCache.current = EMPTY_UI_IDS
+  }, [session?.sessionId])
   // Queued prompts: the Host `inbox` projection is authoritative (includes
   // items queued from other devices); local `queued` rows are the fallback for
   // Hosts without projections. Rows in this state are hidden from the timeline.
@@ -585,10 +659,18 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
 
   // Stable renderItem keeps FlatList rows from re-rendering on every streaming
   // delta; ChatItemView is memoized so only the changing row re-renders.
+  // Read the artifact maps through refs so the callback keeps one identity
+  // across streaming deltas; `onBackRef` below uses the same idiom. The values
+  // themselves are stabilized above, so a row whose content did not change
+  // still receives the same props.
+  const uiBySectionRef = useRef(uiBySection)
+  uiBySectionRef.current = uiBySection
+  const visibleUiIdsRef = useRef(visibleUiIds)
+  visibleUiIdsRef.current = visibleUiIds
   const renderChatItem = useCallback(({ item }: { item: ChatSection }) => item.kind === 'process'
-    ? <ChatProcessGroup items={item.items} artifacts={uiBySection.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySection.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIds} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
+    ? <ChatProcessGroup items={item.items} artifacts={uiBySectionRef.current.get(item.key)?.cards ?? EMPTY_UI_ARTIFACTS} updatedArtifacts={uiBySectionRef.current.get(item.key)?.pointers ?? EMPTY_UI_ARTIFACTS} availableUiIds={visibleUiIdsRef.current} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />
     : <ChatItemView item={item.item} busyAction={busy} compact={false} onApproval={respondApproval} onQuestion={respondQuestion} />,
-  [busy, respondApproval, respondQuestion, uiBySection, visibleUiIds])
+  [busy, respondApproval, respondQuestion])
 
   // Keep chat's back action at the top of the Android responder stack. The
   // navigator also handles back globally, but a freshly mounted FlatList can
@@ -1193,7 +1275,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         )}
         <View style={styles.splitMain}>
       {/* Messages scroll beneath the frosted header; the trajectory view keeps its own fixed search bar below it. */}
-      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
+      <BlurHeaderFrame header={header} inset={trajectory}>{headerHeight => <ChatErrorBoundary key={session.sessionId} resetKey={session.sessionId}>{trajectory ? <ChatTrajectory key={session.sessionId} items={messages} renderImages={images => <ChatImages images={images} />} hasMore={historyHasMore} loading={historyLoadingOlder} loadOlder={() => void loadOlderHistory()} renderItem={item => <ChatItemView item={item} compact={false} busyAction={busy} onApproval={respondApproval} onQuestion={respondQuestion} />} /> : <>
         <FlatList
           ref={listRef}
           key={session.sessionId}
@@ -1261,7 +1343,8 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
             </View>
           </View>
         )}
-      </>}</BlurHeaderFrame>
+      </>}</ChatErrorBoundary>}</BlurHeaderFrame>
+
 
       {mentionType !== null && (
         <Pressable

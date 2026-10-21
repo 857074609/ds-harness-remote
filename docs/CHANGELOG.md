@@ -1,5 +1,7 @@
 ## Unreleased
 
+- Make Server-initiated tunnel closes visible at the default log level (#140): retryable closes now use info instead of debug, and `peer connection disconnected` records `closedBy` (`server`/`host`) with `retryable`. `CONNECTION_FAILED` is both a Server-issued code and a Host fallback, so the debug-only message made the two paths indistinguishable. No runtime transport behavior changed.
+- 让 Server 主动关闭 tunnel 在默认日志级别可见（#140）：retryable 关闭由 debug 提升为 info，`peer connection disconnected` 增加 `closedBy`（`server`/`host`）与 `retryable` 字段。`CONNECTION_FAILED` 同时是 Server 下发的 code 和 Host 本地兜底，旧日志只在 debug 输出，无法区分两条路径。本次未改变运行时传输行为。
 - Improve Android conversation browsing with backend-separated search, local favorites,
   per-conversation drafts, reading anchors and a jump-to-latest action. Keep bounded encrypted
   text previews scoped to server/account/Host identity, optional startup restoration and live

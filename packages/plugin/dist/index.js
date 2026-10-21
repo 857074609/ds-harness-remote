@@ -41081,6 +41081,10 @@ var HARNESS_REMOTE_ALLOWLIST = [
   "messageFeedback/list",
   "messageFeedback/put",
   "pluginInventory/list",
+  "pluginManager/listBundles",
+  "pluginManager/listPlugins",
+  "pluginManager/setBundleEnabled",
+  "pluginManager/setPluginEnabled",
   "permissionPresets/catalog",
   "schedule/list",
   "schedule/catalog",
@@ -41166,6 +41170,7 @@ var HarnessRemoteBridge = class {
         throw new RpcError("PERMISSION_DENIED", "Remote access settings can only be changed locally on the Host.");
       }
     }
+    await this.checkPluginManagement(params.endpoint, params.payload);
     const reservation = params.endpoint.startsWith("terminal/") ? this.terminal.check(params.endpoint, params.payload) : void 0;
     let codexResult;
     if (this.codexWorkspace !== void 0) {
@@ -41330,6 +41335,7 @@ var HarnessRemoteBridge = class {
   async openStream(input3) {
     const params = streamOpenSchema4.parse(input3);
     this.assertAllowed(params.endpoint);
+    if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "This terminal endpoint is not a stream.");
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload);
@@ -41367,6 +41373,25 @@ var HarnessRemoteBridge = class {
     this.outgoingTransfers.clear();
     for (const [, stream] of streams) stream.controller.abort(reason);
     await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()]);
+  }
+  async checkPluginManagement(endpoint, payload) {
+    if (endpoint !== "pluginManager/setPluginEnabled" && endpoint !== "pluginManager/setBundleEnabled") return;
+    const plugin = endpoint === "pluginManager/setPluginEnabled";
+    const key = plugin ? "id" : "name";
+    const parsed = external_exports.object({ args: external_exports.object({
+      [key]: external_exports.string().min(1).max(4096),
+      enabled: external_exports.boolean()
+    }).strict() }).strict().safeParse(payload);
+    if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin enablement request.");
+    const args = parsed.data.args;
+    const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
+    if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
+    const row = result.value.find((value) => isRecord21(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord21(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
+    if (remoteModule(plugin ? row.moduleName : row.name) || !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord21(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value) || value === "ds-harness-remote-tui"))) {
+      throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
+    }
   }
   assertAllowed(endpoint) {
     if (!allowedEndpoints.has(endpoint) && !TERMINAL_CALLS.has(endpoint) && !TERMINAL_STREAMS.has(endpoint)) {

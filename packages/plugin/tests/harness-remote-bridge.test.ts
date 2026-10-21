@@ -11,6 +11,46 @@ import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 import { MAX_SECURE_MESSAGE_BYTES } from '@dsh-remote/protocol'
 
 describe('HarnessRemoteBridge', () => {
+  it('forwards official plugin configuration and enablement with native outcomes', async () => {
+    await runScenarios([
+      { endpoint: 'pluginManager/listPlugins', args: {} },
+      { endpoint: 'pluginManager/listBundles', args: {} },
+      { endpoint: 'pluginManager/setPluginEnabled', args: { id: 'search-entry', enabled: false } },
+      { endpoint: 'pluginManager/setBundleEnabled', args: { name: 'search-bundle', enabled: true } },
+      { endpoint: 'settings/update', args: { ns: 'web-search', patch: { provider: 'example' } } },
+    ].map(({ endpoint, args }) => ({ name: endpoint, run: async () => {
+      const outcome = { ok: true as const, value: { status: 'restart-required' } }
+      const dispatch = vi.fn(async (method: string) => method === endpoint ? outcome : {
+        ok: true as const, value: [{ entryId: 'search-entry', moduleName: 'search', name: 'search-bundle', rows: [] }],
+      })
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn())
+      await expect(bridge.call({ endpoint, payload: { args } })).resolves.toEqual(outcome)
+      expect(dispatch).toHaveBeenLastCalledWith(endpoint, { args }, expect.any(AbortSignal))
+    } })))
+  })
+
+  it('rejects plugin-management bypasses before native mutation', async () => {
+    await runScenarios([
+      { name: 'Remote entry', endpoint: 'pluginManager/setPluginEnabled', args: { id: 'remote', enabled: false }, rows: [{ entryId: 'remote', moduleName: 'ds-harness-remote' }] },
+      { name: 'Remote bundle', endpoint: 'pluginManager/setBundleEnabled', args: { name: 'ds-harness-remote', enabled: false }, rows: [{ name: 'ds-harness-remote', rows: [] }] },
+      { name: 'bundle contains Remote', endpoint: 'pluginManager/setBundleEnabled', args: { name: 'bundle', enabled: true }, rows: [{ name: 'bundle', rows: [{ moduleName: 'ds-harness-remote/client' }] }] },
+      { name: 'protected entry', endpoint: 'pluginManager/setPluginEnabled', args: { id: 'core', enabled: false }, rows: [{ entryId: 'core', moduleName: 'core', readOnlyReason: 'management-required' }] },
+      { name: 'unknown entry', endpoint: 'pluginManager/setPluginEnabled', args: { id: 'missing', enabled: true }, rows: [] },
+      { name: 'invalid boolean', endpoint: 'pluginManager/setPluginEnabled', args: { id: 'entry', enabled: 'false' }, rows: [] },
+      { name: 'nested alias', endpoint: 'pluginManager/setPluginEnabled', args: { request: { id: 'entry', enabled: true } }, rows: [] },
+      { name: 'install', endpoint: 'pluginManager/installBundle', args: { spec: 'package' }, rows: [] },
+      { name: 'remove', endpoint: 'pluginManager/removeBundle', args: { name: 'package' }, rows: [] },
+    ].map(({ name, endpoint, args, rows }) => ({ name, run: async () => {
+      const dispatch = vi.fn(async (_method: string) => ({ ok: true as const, value: rows }))
+      const open = vi.fn()
+      const bridge = new HarnessRemoteBridge(gateway({ dispatch, open }), vi.fn())
+      await expect(bridge.call({ endpoint, payload: { args } })).rejects.toBeInstanceOf(Error)
+      expect(dispatch.mock.calls.every(([method]) => String(method).startsWith('pluginManager/list'))).toBe(true)
+      await expect(bridge.openStream({ streamId: 'plugins', endpoint, payload: { args } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
+      expect(open).not.toHaveBeenCalled()
+    } })))
+  })
+
   it('forwards only the fixed alpha Gateway endpoint allowlist', async () => {
     const dispatch = vi.fn(async () => ({ ok: true as const, value: [{ id: 'session-1' }] }))
     const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))

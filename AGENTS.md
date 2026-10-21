@@ -631,3 +631,11 @@ schedule/changed 复用官方 $events；创建由会话中的 schedule_create �
 schedule/create Remote 端点。只覆盖原生 Desktop/浏览器界面，不新增 Android 管理页。
 本次共享包/Plugin build、Plugin check、三个 carrier/bridge 测试文件 39 tests、DSH bundle
 校验和 git diff --check 通过；真实跨设备 UI 和多 Client 变更刷新验收仍待完成，未发布。
+
+
+## Official plugin management (2026-10-22)
+
+按用户要求，Typert 固定 allowlist 增加官方 pluginManager 的 listBundles/listPlugins 与
+setBundleEnabled/setPluginEnabled；配置复用既有 settings 通道。启停先核对 Host 官方
+inventory，拒绝未知/只读目标及 Remote 自身；禁止 stream 绕过、安装、卸载和任意管理方法。
+原生结果直接返回，不伪造热更新成功；此改动不代表跨设备 UI 验收或已发布。

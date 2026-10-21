@@ -25,6 +25,8 @@
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind 下载量" width="137" height="20" align="absmiddle"></a>
 </p>
 
+远程模式支持官方插件页的列表、配置和启用/停用（需更新 Host Remote 插件）。Remote 自身仍只能在 Host 本地配置和启停；不开放远程安装、卸载。
+
 ## 一次连接，随时可用。
 
 从手机、电脑、浏览器继续使用你的 DeepSeek Harness 实例。

@@ -132,6 +132,10 @@ export const HARNESS_REMOTE_ALLOWLIST = [
   'messageFeedback/list',
   'messageFeedback/put',
   'pluginInventory/list',
+  'pluginManager/listBundles',
+  'pluginManager/listPlugins',
+  'pluginManager/setBundleEnabled',
+  'pluginManager/setPluginEnabled',
   'permissionPresets/catalog',
   'schedule/list',
   'schedule/catalog',
@@ -224,6 +228,7 @@ export class HarnessRemoteBridge {
         throw new RpcError('PERMISSION_DENIED', 'Remote access settings can only be changed locally on the Host.')
       }
     }
+    await this.checkPluginManagement(params.endpoint, params.payload)
     const reservation = params.endpoint.startsWith('terminal/') ? this.terminal.check(params.endpoint, params.payload) : undefined
     let codexResult: TypertRpcResult | undefined
     if (this.codexWorkspace !== undefined) {
@@ -406,6 +411,7 @@ export class HarnessRemoteBridge {
   async openStream(input: unknown): Promise<{ opened: true; streamId: string }> {
     const params = streamOpenSchema.parse(input) as HarnessRemoteStreamOpenParams
     this.assertAllowed(params.endpoint)
+    if (params.endpoint.startsWith('pluginManager/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Plugin management endpoints are not streams.')
     if (params.endpoint.startsWith('settings/')) throw new RpcError('METHOD_NOT_ALLOWED', 'Settings endpoints are not streams.')
     if (TERMINAL_CALLS.has(params.endpoint)) throw new RpcError('METHOD_NOT_ALLOWED', 'This terminal endpoint is not a stream.')
     if (TERMINAL_STREAMS.has(params.endpoint)) this.terminal.check(params.endpoint, params.payload)
@@ -448,6 +454,31 @@ export class HarnessRemoteBridge {
     this.outgoingTransfers.clear()
     for (const [, stream] of streams) stream.controller.abort(reason)
     await Promise.all([this.gateway.dispose?.(), this.codexWorkspace?.closeAll()])
+  }
+
+  private async checkPluginManagement(endpoint: string, payload: unknown): Promise<void> {
+    if (endpoint !== 'pluginManager/setPluginEnabled' && endpoint !== 'pluginManager/setBundleEnabled') return
+    const plugin = endpoint === 'pluginManager/setPluginEnabled'
+    const key = plugin ? 'id' : 'name'
+    // Validate the actual Typert argument envelope; never authorize a nested alias
+    // while forwarding different top-level arguments to the official Gateway.
+    const parsed = z.object({ args: z.object({
+      [key]: z.string().min(1).max(4096),
+      enabled: z.boolean(),
+    }).strict() }).strict().safeParse(payload)
+    if (!parsed.success) throw new RpcError('INVALID_MESSAGE', 'Invalid plugin enablement request.')
+    const args = parsed.data.args
+    const result = await this.gateway.dispatch(plugin ? 'pluginManager/listPlugins' : 'pluginManager/listBundles', { args: {} }, AbortSignal.timeout(60_000))
+    if (!result.ok || !Array.isArray(result.value)) throw new RpcError('PERMISSION_DENIED', 'Cannot verify the Host plugin inventory.')
+    const row = result.value.find(value => isRecord(value) && value[plugin ? 'entryId' : 'name'] === args[key])
+    if (!isRecord(row) || row.readOnlyReason !== undefined) throw new RpcError('PERMISSION_DENIED', 'The Host plugin cannot be changed remotely.')
+    const remoteModule = (value: unknown): boolean => typeof value === 'string'
+      && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value)
+    if (remoteModule(plugin ? row.moduleName : row.name)
+      || (!plugin && (!Array.isArray(row.rows) || row.rows.some(value => !isRecord(value) || remoteModule(value.moduleName))
+        || (Array.isArray(row.overrides) && row.overrides.some(value => remoteModule(value) || value === 'ds-harness-remote-tui'))))) {
+      throw new RpcError('PERMISSION_DENIED', 'The Remote plugin can only be enabled or disabled locally on the Host.')
+    }
   }
 
   private assertAllowed(endpoint: string): void {

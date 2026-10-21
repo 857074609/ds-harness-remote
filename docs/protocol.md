@@ -1976,3 +1976,18 @@ configuration RPC or fabricated choices. The display name is `Claude`, backend I
 ### Optional read-only history preview
 
 `codex.app.call` accepts `{method: "dsh/sessionHistory", params, previewHistory: true}` on supporting Hosts. Ordinary history is returned directly up to 2 MiB. Tool-result bodies over 4 KiB are represented by an opaque `remoteDetail: {threadId, detailId}` handle; the original remains in a per-authenticated-peer memory cache (64 entries, 16 MiB, ten minutes). `dsh/historyDetail` accepts exactly that pair, verifies the peer/thread/expiry and revalidates `thread/read` before returning the original through the existing bounded transfer. Handles never authorize mutations. Clients fall back to the existing read-only transfer only on `INVALID_MESSAGE` (older Host) or `RESPONSE_TOO_LARGE`; timeouts and authority failures are not replayed.
+
+
+### Official plugin management (2026-10-22)
+
+The authenticated Typert channel allows only `pluginManager/listBundles`,
+`pluginManager/listPlugins`, `pluginManager/setBundleEnabled` and
+`pluginManager/setPluginEnabled` for the official plugin page. Enablement keeps
+the official `{ args: { name, enabled } }` / `{ args: { id, enabled } }` envelope
+and native saved/runtime/restart outcomes. The Host checks the current official
+inventory before mutation; unknown/read-only entries, Remote itself and bundles
+containing Remote are rejected. These endpoints cannot be opened as streams.
+Plugin configuration continues through the existing official `settings` endpoints;
+Remote access namespaces remain local-only. Installation, removal, arbitrary
+plugin-manager methods and legacy ApiProxy plugin management remain disallowed.
+This adds no new wire format or capability and requires an updated Host plugin.

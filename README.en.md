@@ -25,6 +25,8 @@
   <a href="https://dshfind.com/zh/plugins/liguobao/ds-harness-remote?ref=badge"><img src="https://dshfind.com/api/badge/liguobao/ds-harness-remote?metric=downloads&amp;lang=zh" alt="dshfind downloads" width="137" height="20" align="absmiddle"></a>
 </p>
 
+Remote mode supports the official plugin page for listing, configuration, and enabling/disabling plugins (requires an updated Host Remote plugin). Remote itself remains locally managed on the Host; remote installation and removal are not exposed.
+
 ## Connect once. Ready whenever you are.
 
 Continue using your DeepSeek Harness instance from a phone, computer, or browser. Return to the same Harness session from whichever device is with you.

@@ -48,8 +48,7 @@ CodeX App Server domain advertised by the Host.
   after it is tapped; the app renders the same-origin `scanUrl` locally, polls the one-time QR
   session and then registers this Android device with the returned account token. Large screens
   use a larger code; browser OAuth and email/password sign-in remain available.
-- Show the interface in English or Simplified Chinese, follow Android's current locale by default,
-  and persist an explicit in-app language choice across launches.
+- Show the interface in English, Simplified Chinese, Traditional Chinese, Japanese, Spanish, German, or French. Follow Android's current locale by default and persist an explicit in-app language choice across launches. Language settings initially show System default, 简体中文, and English; tap “More ...” to expand all languages. A selected additional language keeps the full list visible.
 - Show the installed app/build version and the complete open-source repository and latest-release
   addresses in Settings; both addresses open in the system browser.
 - Open saved prompts directly from **Prompts** beside the composer's `+` button. Tap a

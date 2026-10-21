@@ -5,6 +5,29 @@ import {randomUUID} from 'node:crypto'
 const result = {header:{id:'codex:t'},hasMore:false,records:[{type:'event',event:{type:'tool/result',seq:1,time:1,data:{callId:'tool',isError:true,message:{source:{callId:'tool'},content:[{type:'text',text:'output'.repeat(2000)}]}}}}]}
 afterEach(()=>vi.useRealTimers())
 describe('authenticated history preview',()=>{
+  it('keeps page handles atomic across count and byte limits and falls back without evicting existing details',async()=>{
+    for (const scenario of [
+      {name:'count limit', count:64, bytes:5000, oversized:false},
+      {name:'count overflow', count:65, bytes:5000, oversized:true},
+      {name:'byte overflow', count:4, bytes:5*1024*1024, oversized:true},
+    ]) {
+      const peer = {}, request = {method:'dsh/sessionHistory',params:{threadId:'t'},previewHistory:true}
+      const previous:any = await previewCall(peer,request,async()=>result)
+      const records = Array.from({length:scenario.count},(_,seq)=>({event:{type:'tool/result',seq,data:{callId:String(seq),message:{content:[{type:'text',text:'x'.repeat(scenario.bytes)}]}}}}))
+      const history = {...result,records}, invoke = vi.fn(async()=>history)
+      if (scenario.oversized) {
+        await expect.soft(previewCall(peer,request,invoke),scenario.name).rejects.toMatchObject({code:'RESPONSE_TOO_LARGE'})
+        await expect.soft(previewCall(peer,{method:'dsh/historyDetail',params:previous.records[0].event.data.remoteDetail},invoke),scenario.name).resolves.toEqual(result.records[0])
+        await expect.soft(previewCall(peer,{method:'dsh/sessionHistory',params:{threadId:'t'}},invoke),scenario.name).resolves.toBe(history)
+      } else {
+        const page:any = await previewCall(peer,request,invoke)
+        for (let index=0;index<records.length;index++) {
+          await expect.soft(previewCall(peer,{method:'dsh/historyDetail',params:page.records[index].event.data.remoteDetail},invoke),`${scenario.name}: ${index}`).resolves.toEqual(records[index])
+        }
+        await expect.soft(previewCall(peer,{method:'dsh/historyDetail',params:previous.records[0].event.data.remoteDetail},invoke),scenario.name).rejects.toMatchObject({code:'HISTORY_DETAIL_EXPIRED'})
+      }
+    }
+  })
   it('retrieves deferred output through the real peer bridge bounded-transfer path',async()=>{
     const call=vi.fn(async()=>result)
     const domain={call,detachPeer:vi.fn(async()=>undefined)}

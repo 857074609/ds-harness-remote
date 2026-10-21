@@ -3,9 +3,8 @@ import * as Application from 'expo-application'
 import * as Crypto from 'expo-crypto'
 import * as Device from 'expo-device'
 import * as SecureStore from 'expo-secure-store'
-import { isLanguagePreference, strings, type LanguagePreference } from '../locales/i18n'
+import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference } from '../locales/i18n'
 import type { Messages } from '../locales/types'
-import enUS from '../locales/en-US'
 import zhCN from '../locales/zh-CN'
 import { isThemePreference, type ThemePreference } from '../ui/theme'
 import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
@@ -374,19 +373,10 @@ export function getBuiltInPrompts(messages?: Messages): readonly CustomPrompt[] 
 
 export const BUILT_IN_PROMPTS: readonly CustomPrompt[] = Object.freeze(getBuiltInPrompts(zhCN))
 
-const factoryZhBuiltIns = getBuiltInPrompts(zhCN)
-const factoryEnBuiltIns = getBuiltInPrompts(enUS)
+const factoryBuiltIns = Object.values(messageCatalogs).flatMap(getBuiltInPrompts)
 
 function isFactoryDefaultBuiltIn(prompt: CustomPrompt): boolean {
-  const zh = factoryZhBuiltIns.find(item => item.id === prompt.id)
-  if (zh !== undefined && prompt.title === zh.title && prompt.text === zh.text) {
-    return true
-  }
-  const en = factoryEnBuiltIns.find(item => item.id === prompt.id)
-  if (en !== undefined && prompt.title === en.title && prompt.text === en.text) {
-    return true
-  }
-  return false
+  return factoryBuiltIns.some(item => item.id === prompt.id && item.title === prompt.title && item.text === prompt.text)
 }
 
 function isBuiltInPrompt(id: string): boolean {

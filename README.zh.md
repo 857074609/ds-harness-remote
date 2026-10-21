@@ -166,7 +166,7 @@ Workspace 会在 Harness 原生界面中打开，顶部显示当前 Host 和加�
 
 ### Android
 
-支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。详细使用见 [Android 说明](apps/android/README.md)。
+支持文字/图片 Prompt、模型切换，以及可用工作区的文件和终端。界面默认跟随系统，支持英文、简体中文、日语、繁体中文、西语、德语、法语；语言设置点击「More ...」可展开全部语言。详细使用见 [Android 说明](apps/android/README.md)。
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android 客户端中的在线和离线设备列表" width="30%">

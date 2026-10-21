@@ -1,0 +1,283 @@
+import type { Messages } from './types'
+
+const jaJP = {
+  comfort: {
+    notificationsNote: "通知にはアクティブな接続が必要です。",
+    continueWork: "ワークスペースの設定",
+    resume: "起動時に最後の会話を復元する",
+    notifications: "タスクと確認の通知",
+    systemNotifications: "システムの通知設定を開く",
+    cacheSaveFailed: "閲覧設定を保存できませんでした。現時点では、未送信のテキストのコピーを保管しておいてください。",
+    cacheRestoreFailed: "閲覧設定を復元できませんでした。オンライン履歴は引き続き利用可能です。",
+    conversationMissing: "この会話は現在のホストでは利用できなくなりました。",
+    unknownHost: "通知ホストは現在のアカウントにとって信頼できるデバイスではありません。",
+    starred: "お気に入りの会話",
+    running: "実行中",
+    recent: "最近開いた会話",
+    other: "その他の会話",
+    star: "会話をお気に入りに追加",
+    unstar: "お気に入りを削除",
+    new: "新しい",
+    unknownStatus: "ステータスを確認中",
+    returnLatest: "最新へ移動 ↓",
+    newContent: "新しい内容 · 最新へ移動 ↓",
+    noRunning: "実行中のタスクはありません",
+    search: "会話またはワークスペースを検索する",
+    searchLabel: "会話とワークスペースを検索する",
+    toolLoading: "ツール出力をロード中…",
+    toolInvalid: "ツール詳細形式が一致しませんでした。",
+    toolUnavailable: "詳細を取得できません。もう一度お試しください。",
+    taskEnded: "タスクが終了しました。タップして結果を表示します。",
+    taskInput: "あなたの確認が必要です。タップして会話を開きます。",
+  },
+  tools: {
+    download: "携帯電話に保存",
+    downloading: "保存中…",
+    downloaded: "ファイルが保存されました",
+    downloadHint: "フォルダーを選択します。ファイルあたり最大 100 MiB。",
+    downloadTooLarge: "このファイルは、携帯電話に保存できる 100 MiB の制限を超えています。",
+    "files": "ファイル",
+    "terminal": "ターミナル",
+    "root": "ワークスペース",
+    "empty": "このフォルダは空です",
+    "truncated": "このディレクトリにはエントリが多すぎるため、ホストは部分的なリストを返しました。",
+    "previous": "前のページへ",
+    "next": "次のページ",
+    "readOnly": "読み取り専用プレビュー",
+    "retry": "リトライ",
+    "refresh": "リフレッシュ",
+    "unsupported": "このホスト上の DSH とリモート プラグインを更新し、再接続してこの機能を使用します。",
+    "terminalDisabled": "コンピュータのリモート設定でリモートターミナルを有効にしてから、再試行してください。",
+    "controlDenied": "別の接続がこの端末を制御します。もう一度開いて再度接続します。",
+    "notText": "このファイルは UTF-8 テキストではないため、プレビューできません。",
+    "tooLarge": "ファイルまたはページがホストの読み取り制限を超えています。",
+    previewUnsupported: "このファイル形式ではプレビューは利用できません。",
+    previewTooLarge: "モバイル制限: 8 MiB、画像サイズは 8192 ピクセル、合計 1600 万ピクセル。オフィスソース: 50 MiB。",
+    accessDenied: "ホストはこのセッションへのアクセスを拒否しました。コンピューターの認証を確認してください。",
+    previewChanged: "読み取り中にファイルが変更されました。更新して再試行してください。",
+    previewInvalid: "ホストが無効なファイル データを返しました。プレビューが停止されました。",
+    previewFailed: "このファイルは表示できませんでした。もう一度やり直してください。",
+    previewLoading: "ファイルを読み取り中…",
+    officeLoading: "パソコンでPDFに変換中…",
+    officeUnavailable: "ドキュメント変換は利用できません。 Office to PDF サポートがコンピューターにインストールされ、有効になっていることを確認します。",
+    officeFailed: "ドキュメントの変換に失敗しました。ドキュメントがサポートされていないか、破損している可能性があります。",
+    officeBusy: "ドキュメント変換がビジー状態か、タイムアウトしました。後でもう一度試してください。",
+    missingFonts: (fonts: string) => `コンピュータ上にフォントがありません。レイアウトは異なる場合があります: ${fonts}`,
+    pdfPage: (page: number, total: number) => `ページ ${page}/${total}`,
+    pdfLoading: "PDF をレンダリング中…",
+    pdfPassword: "暗号化またはパスワードで保護された PDF はサポートされていません。",
+    zoomIn: "ズームイン",
+    zoomOut: "ズームアウト",
+    "failed": "操作は失敗しました。接続を確認して再試行してください。",
+    "newTerminal": "新しいターミナル",
+    "closeTerminal": "終端端子",
+    "connecting": "端末に接続中…",
+    "creating": "ターミナルを作成中…",
+    "exited": "端末が終了しました",
+    "disconnected": "端末が切断されました。入力は自動的に再送信されません。",
+    "permissionUnavailable": "権限を読み込めませんでした。 Host Remote プラグインを更新して、再試行してください。",
+    "enter": "Enter",
+    "keyboard": "キーボード",
+    "interrupt": "割り込み",
+    "tab": "Tab",
+    "escape": "Esc",
+    "up": "上",
+    "down": "下",
+    "left": "左",
+    "right": "右",
+    "backspace": "Backspace"
+},
+  common: {
+    back: "戻る", retry: "リトライ", close: "近い", cancel: "キャンセル", refresh: "リフレッシュ", delete: "消去", unavailable: "利用不可", unknown: "未知",
+  },
+  app: {
+    credit: "Power By Github/liguobao",
+    oauthCancelled: "認可が完了していませんでした。もう一度試してください。", oauthInvalid: "サインイン情報は有効ではなくなりました。再度サインインしてください。",
+    loadingTagline: "一度接続してください。いつでも準備完了です。", loadingIdentity: "安全な ID を準備しています…", bootFailed: "DSH リモートを開始できませんでした", secureStorageUnavailable: "この電話上の安全なデータは一時的に利用できません。もう一度試してください。",
+    deviceUnavailable: "このデバイスは見つかりませんでした", deviceNoLongerTrusted: "現在のアカウントから削除されているか、サインアウトされている可能性があります。", backToDevices: "デバイスに戻る",
+  },
+  status: { online: "オンライン", offline: "オフライン", disconnected: "切断されました", lan: "直接LAN", relay: "サーバーリレー", p2p: "ダイレクト P2P", turn: "ターンリレー", waiting: "接続中", running: "実行中" },
+  setup: {
+    title: "サインイン", signIn: "アカウントにサインインする", signInAgain: "再度サインインしてください", lead: "この電話機に同じアカウントのデバイスを表示することを許可し、会話を続行します。",
+    oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "電子メール", zhihu: "志胡を続ける", github: "GitHub を続ける", oauthHint: "ブラウザが開いて認証が完了し、自動的にここに戻ります。",
+    qr: "QRコードでサインイン", qrEntryHint: "タップしてコードを表示し、携帯電話でスキャンします", qrScanTitle: "携帯電話でサインインする", qrScanHint: "このコードを携帯電話でスキャンし、認証ページで確認してください。このデバイスはその後自動的にサインインします。", qrWaiting: "電話を待っています…", qrExpired: "このQRコードは有効期限が切れています。更新して再試行してください。", qrRefresh: "リフレッシュコード", qrUnsupported: "このサーバーは QR サインインを提供しません。別のサインイン方法を使用してください。", qrFailed: "QRサインインが完了しませんでした。もう一度やり直してください。",
+    email: "電子メール", emailPlaceholder: "メールアドレスを入力してください", password: "パスワード", passwordPlaceholder: "パスワードを入力してください", passwordHint: "パスワードはこのサインインにのみ使用され、携帯電話には保存されません。",
+    server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
+  },
+  settings: {
+    appearance: "外観",
+    title: "設定", thisPhone: "この電話", androidDevice: "Androidデバイス", connection: "繋がり", server: "サーバ", account: "アカウント", loginMethod: "サインイン方法", protocol: "プロトコル", notConfigured: "未設定", notSignedIn: "サインインしていません",
+    languageShowAll: "すべての言語を表示",
+    language: "言語", languageSystem: "システム設定に従う", languageChinese: "简体中文", languageEnglish: "English", languageNote: "「システム設定に従う」を選ぶと、Android の言語設定に合わせて自動的に切り替わります。",
+    compactHistorySaveFailed: "コンパクト会話設定を保存できませんでした",
+    compactHistory: "会話履歴を簡略化", compactHistoryNote: "ツール履歴を短縮し、テキストとステータスを保持します。ホストのサポートが必要です。これを変更した後、会話を再開してください。",
+    statusBar: "ステータスバーを表示する", statusBarNote: "画面上部に時刻、バッテリー、ネットワークのステータスを表示します。オフにすると、システム ステータス バーが非表示になります。", statusBarSaveFailed: "ステータスバーの設定を保存できませんでした", statusBarSaveFailedBody: "ローカルストレージに書き込めませんでした。もう一度試してください。",
+    theme: "ダークモード", themeLight: "ライト", themeDark: "ダーク", themeSystem: "システム設定に従う",
+    chat: "チャット",
+    defaultPermission: "新しいチャットのデフォルトの権限", defaultPermissionHost: "デフォルトの権限を使用する", defaultPermissionHostDescription: "DeepSeek Harness はコンピューターの設定に従います。CodeX はワークスペースへの書き込みを許可します。", defaultPermissionNote: "新しい DSH / CodeX 会話にのみ適用されます。既存の会話は変更されません。",
+    defaultPermissionFullAccessTitle: "新しいチャットにフルアクセスを使用しますか?", defaultPermissionFullAccessBody: "この電話で作成された DeepSeek Harness および CodeX チャットは、毎回確認することなくファイルを変更したり、コマンドを実行したりすることができます。各チャットで権限を変更することもできます。", defaultPermissionSaveFailed: "デフォルトの権限を保存できませんでした", defaultPermissionSaveFailedBody: "ローカルストレージに書き込めませんでした。もう一度試してください。", defaultPermissionNotConfirmed: "コンピュータは、新しいチャットのデフォルトの権限を確認しませんでした。再接続してもう一度お試しください。",
+    transport: "接続方法", transportNote: "変更すると再接続します。直接接続が失敗した場合はリレーにフォールバックします。", identity: "この電話の ID", deviceId: "デバイスID", publicKey: "セキュリティキー", keyNote: "セキュリティ キーは Android によって暗号化され、この携帯電話から離れることはありません。",
+    about: "について", aboutLead: "現在のバージョン、ソースコード、アップデートを表示します", developer: "開発者", developerValue: "知乎@李国宝", twitter: "ツイッター", appVersion: "現在のバージョン", sourceCodeUrl: "ソースコード", updateUrl: "アップデート", linkFailedTitle: "リンクを開けませんでした", linkFailedBody: "接続を確認するか、アドレスをコピーしてブラウザで開きます。",
+    more: "もっと", checkUpdates: "アップデートをチェックする", checkingUpdates: "アップデートをチェック中…", updateFoundTitle: "新しいバージョンが利用可能になりました", updateFoundBody: (latest: string, current: string) => `バージョン v${latest} が利用可能です。現在のバージョン: ${current}。`, downloadUpdate: "アップデートをダウンロード", openUpdates: "オープンアップデート", downloadingUpdate: "アップデートをダウンロードしています", downloadFailedTitle: "ダウンロードに失敗しました", downloadFailedBody: "最新のパッケージをダウンロードできませんでした。接続を確認して、もう一度試してください。", installFailedTitle: "インストーラーを開けませんでした", installFailedBody: "パッケージはダウンロードされましたが、インストーラーを開くことができませんでした。このアプリに不明なアプリのインストールを許可してから、もう一度試してください。", openInstallSettings: "設定を開く", upToDateTitle: "最新情報を入手しています", upToDateBody: "すでに最新バージョンを使用しています。", checkFailedTitle: "更新チェックに失敗しました", checkFailedBody: "接続を確認して、もう一度試してください。",
+    signOut: "サインアウト", resetLocal: "ローカルデータをクリアする", resetTitle: "この携帯電話のデータを消去しますか?", resetBody: "これにより、サーバー設定、サインイン情報、および信頼されたデバイスが削除されます。再度サインインする必要があります。これを元に戻すことはできません。", reset: "データのクリア", signOutTitle: "このアカウントからサインアウトしますか?", signOutBody: "デバイスにアクセスするには、再度サインインする必要があります。",
+  },
+  devices: {
+    rename: "名前の変更", renameTitle: "デバイスの名前を変更する", namePlaceholder: "デバイス名を入力してください", saveName: "保存", renameHint: "新しい名前は、アカウントのデバイス リスト全体で共有されます。",
+    title: "デバイス", myDevices: "私のデバイス", lead: "作業を続けるためのデバイスを選択してください", footer: "いつでも作業を続けてください。", favorites: "お気に入り", recent: "最近アクセスした項目", openFavorite: (title: string, device: string) => `お気に入りから ${device} の「${title}」を開きます`, openRecent: (title: string, device: string) => `${device} で最近アクセスした「${title}」を開きます`, removeFavorite: (title: string) => `「${title}」をお気に入りから削除します`, emptyTitle: "利用可能なデバイスがありません", emptyBody: "DSH リモート プラグインをコンピュータにインストールし、同じアカウントにサインインします。ここにデバイスが表示されます。", options: "デバイスの管理", encrypted: "安全な接続",
+    connectionInterrupted: "接続が中断されました", trustExplanation: "確認後、この電話はデバイスの安全な ID を記憶します。その ID が変更されると、データを保護するために接続が停止します。", trust: "信頼して続けてください", connectReady: "接続すると、コンピュータ上で会話を表示したり、会話を継続したりできます。", offlineHelp: "このデバイスはオフラインです。 DSH リモート プラグインがコンピュータ上で実行されていることを確認してください。", secureConnect: "安全に接続する",
+    connectingTitle: "デバイスを接続する", connecting: "接続中", connectionReady: "準備ができて", retryConnection: "再度接続してください", cancelConnection: "接続をキャンセルする", openInfo: "デバイスと接続情報の表示",
+    connectionProbeLabels: {
+      lan: "ローカルダイレクトパスのプローブ",
+      p2p: "ピアツーピア パスの調査",
+      turn: "プロービングターンリレー",
+      relay: "サーバー中継の準備",
+    },
+    connectionProbeDetails: {
+      lan: "ローカルダイレクト",
+      p2p: "ピアツーピア",
+      turn: "ターンリレー",
+      relay: "サーバーリレー",
+    },
+    connectionSteps: {
+      authenticating: { title: "デバイスの検証", body: "アカウントとデバイスのアクセスを確認する" },
+      transport: { title: "接続パスを選択してください", body: "LAN、P2P、またはサーバーリレーを試してください" },
+      secure: { title: "安全なチャネルを開く", body: "デバイスの ID を確認し、暗号化を完了する" },
+      loading: { title: "ワークスペースをロードする", body: "ワークスペースと会話を同期する" },
+    },
+    info: "デバイス情報", harness: "DeepSeek Harness", harnessShort: "DSH", pluginShort: "プラグイン", plugin: "リモートプラグイン", provider: "モデルプロバイダー", directory: "現在のディレクトリ", model: "現行モデル", workspaces: "ワークスペース", conversations: "会話", secureConnection: "接続情報", path: "接続方法", probeOrder: "プローブの順序", encryption: "安全", viewWorkspaces: "ワークスペースと会話を表示する", unknownVersion: "バージョンが利用できません",
+    networkDetails: "ネットワークの詳細", phoneEndpoint: "電話エンドポイント", computerEndpoint: "コンピュータのエンドポイント", relayEndpointUnavailable: "サーバーリレー経由では公開されない", connectionServer: "接続サーバー", networkProtocol: "ネットワークプロトコル", candidatePath: "候補パス", roundTripTime: "往復時間", availableBitrate: "利用可能なアップリンク", traffic: "接続トラフィック", connectedAt: "接続先", sent: "送信済み", received: "受け取った",
+    forgetTitle: (name: string) => `「${name}」のバインドを解除しますか?`, forgetBody: "これにより、アカウントからデバイスが削除され、リモート アクセスが切断されます。この携帯電話から使用する前に、コンピュータで再度バインドしてください。", forget: "バインドを解除する",
+  },
+  sessionInfo: { title: "会話情報", workspaceInfo: "ワークスペース情報", host: "ホスト", workspaceDirectory: "ワークスペースディレクトリ", sessionDirectory: "会話ディレクトリ" },
+  sessions: { archive: "会話をアーカイブする", archiveTitle: "この会話をアーカイブしますか?", archiveBody: "会話はワークスペースのリストから非表示になります。", untitled: "新しい会話", child: "サブタスクの会話" },
+  time: { unavailable: "更新時間が利用できません", lastSeenUnavailable: "アクティブ時間が利用できません", lastActive: (value: string) => `最終アクティブ: ${value}`, now: "たった今", justNow: "たった今更新", minutesAgo: (n: number) => `${n} 分前`, hoursAgo: (n: number) => `${n} 時間前`, updatedSuffix: "", locale: "ja-JP" },
+  transport: { auto: "自動 (推奨)", autoDescription: "最初に直接 P2P を試行し、次に必要に応じて TURN またはサーバーリレーを試行します", turn: "ターンを好む", turnDescription: "制限されたネットワークでの安定性のために TURN リレーを優先します", relay: "サーバーリレーのみ", relayDescription: "すべてのデータを DSH リモート サーバー リレー経由でルーティングします。" },
+  workspaces: {
+    loadFailed: "ワークスペースを読み込めませんでした",
+    offlineBody: "コンピューターに再接続して、ワークスペースと会話を表示します。",
+    reconnectingBody: "接続を復元し、ワークスペースと会話を読み込みます。お待ちください。",
+    title: "ワークスペース", create: "新しいワークスペース", type: "ワークスペースの種類", dsh: "DSH", deviceTitle: (name: string) => name, deviceInfo: "デバイスと接続情報",
+    deviceSubtitle: (name: string, status: string) => `${name} · ${status}`, noDevice: "デバイスが接続されていません",
+    emptyTitle: "まだワークスペースがありません", emptyBody: "関連する会話を整理するには、コンピュータ上のプロジェクト ディレクトリを選択します。", search: "ワークスペースの検索", clearSearch: "検索をクリア", noSearchResults: "ワークスペースが見つかりません", noSearchResultsBody: "別のワークスペース名またはディレクトリ パスを試してください。", options: "ワークスペースの管理", addFavorite: (title: string) => `「${title}」をお気に入りに追加`, removeFavorite: (title: string) => `「${title}」をお気に入りから削除します`, favoriteUnavailable: "お気に入りのこのワークスペースはコンピューター上に存在しません。削除された可能性があります。", noSessions: "まだ会話はありません。タップして作成します。", loadAllSessions: "すべてロードする", showMoreSessions: "もっと見る", unnamedSession: "無題の会話", codex: "CodeX", cursor: "Cursor", pi: "Pi", antigravity: "Antigravity", opencode: "OpenCode", claude: "Claude",
+    deleteTitle: (title: string) => `「${title}」を削除しますか?`, deleteBody: "これにより、ワークスペースとそのすべての会話がこのデバイスから削除されます。これを元に戻すことはできません。", delete: "ワークスペースの削除", rename: "名前の変更", moveUp: "上に移動", moveDown: "下に移動", expandWorkspace: (title: string) => `ワークスペース「${title}」を展開します`, collapseWorkspace: (title: string) => `ワークスペース「${title}」を折りたたむ`, newSessionIn: (title: string) => `「${title}」での新しい会話`, deviceDirectory: "コンピュータ上のプロジェクト ディレクトリ", browse: "ディレクトリを選択してください", directoryHint: "ここで作成された会話はこのディレクトリを使用します。", codexDirectoryHint: "選択したディレクトリがコンピューター上の CodeX プロジェクト カタログに追加されます。", cursorDirectoryHint: "選択したディレクトリはCursor ACP セッション cwd になります（この電話接続専用に保持されます）。", piDirectoryHint: "選択したディレクトリは Pi ACP セッション cwd になります（この電話接続専用に保持されます）。", antigravityDirectoryHint: "このディレクトリは AGY の会話に使用します。既存の会話がコンピュータからロードされます。", opencodeDirectoryHint: "このディレクトリは OpenCode の会話に使用します。既存の会話がコンピュータからロードされます。", claudeDirectoryHint: "このディレクトリはClaudeとの会話に使用します。既存の会話がコンピュータからロードされます。", renameTitle: "ワークスペースの名前を変更する", namePlaceholder: "ワークスペース名を入力してください", saveName: "保存", chooseFolder: "プロジェクトディレクトリを選択してください", loading: "読み込み中…", loadingDirectory: "ディレクトリを読み取り中…", noFolders: "ここには使用できるフォルダーがありません", showHidden: "隠しフォルダーを表示する", hideHidden: "隠しフォルダーを隠す", chooseThisFolder: "このディレクトリを使用します",
+  },
+  chat: {
+    currentWorkSessions: "現在の仕事", noCurrentWorkSessions: "このリモート接続ではまだ会話が使用されていません",
+    otherHostSessions: "その他の会話",
+    hostSessions: "会話を主催する", openHostSessions: "このホストで会話を開く", backToWorkspaces: "ワークスペースに戻る", noHostSessions: "このホストではまだ会話がありません",
+    quickCheckChanges: "変更を確認する", quickCheckChangesPrompt: "現在のコードの変更を確認し、問題がある場合は指摘します。", quickCommit: "変更をコミット", quickCommitPrompt: "現在の変更内容を確認し、確認を求めずにそのままコミットしてください。", quickViewScreenshot: "スクリーンショットを確認する", quickViewScreenshotPrompt: "最新のスクリーンショットを確認し、インターフェースの問題がないか確認してください。",
+    fullAccessTitle: "フルアクセスを有効にしますか?", fullAccessBody: "フルアクセスにより、DeepSeek Harness はファイルを変更し、コマンドを直接実行できます。現在のタスクを信頼できる場合にのみ有効にしてください。", codexFullAccessTitle: "CodeX にコンピュータへのフル アクセスを許可しますか?", codexFullAccessBody: "CodeX は、後でコマンドやファイル変更の承認を再度要求することなく、コンピューター上のすべてのファイルにアクセスできるようになります。このタスクを完全に信頼できる場合にのみ有効にしてください。", enable: "フルアクセスを有効にする", stop: "応答停止", selectModel: "モデルを選択してください", selectReasoningEffort: "思考レベルを選択してください", reasoningEffortLabel: (name: string) => `思考レベル: ${name}`, approvalMode: "権限", approvalModeLabel: (name: string) => `権限: ${name}`, reconnect: "現在の会話を再接続する", reconnecting: "この会話を復元しています…", offline: "このデバイスへの接続が失われました。再接続してこの会話を続けるには、上の更新ボタンを使用してください。", hostOperation: (name: string) => `パソコン上の ${name}`,
+    toolRunning: (name: string) => `${name} を実行中`, processRunning: "リクエストを分析しています", older: "以前のメッセージを表示する", jumpToLatest: "最新のメッセージにジャンプします", messageLabel: "DeepSeek Harness にメッセージを送信", codexMessageLabel: "CodeX にメッセージを送信", cursorMessageLabel: "Cursor にメッセージを送信", piMessageLabel: "Pi にメッセージを送信", antigravityMessageLabel: "Antigravity にメッセージを送信", opencodeMessageLabel: "OpenCode にメッセージを送信", claudeMessageLabel: "Claude にメッセージを送信", placeholder: "メッセージを入力してください…", codexPlaceholder: "CodeX にタスクを依頼…", cursorPlaceholder: "Cursor にタスクを依頼…", piPlaceholder: "Pi にタスクを依頼…", antigravityPlaceholder: "Antigravity にタスクを依頼…", opencodePlaceholder: "OpenCode にタスクを依頼…", claudePlaceholder: "Claude にタスクを依頼…", send: "送信", draftLong: (count: number) => `${count.toLocaleString()} 文字`, draftTooLongTitle: "メッセージが長すぎます", draftTooLong: (max: number) => `メッセージは ${max.toLocaleString()} 文字に制限されています。短くして再送信してください。`, queueTitle: (count: number) => `キューに入れられたメッセージ (${count})`, queuePending: "実行を待っています", queueSteer: "今すぐ配信", subagentsTitle: (count: number) => `サブエージェント · ${count}`, teamTitle: (count: number) => `エージェント チーム · ${count}`, teamTaskPending: "待機中", teamTaskInProgress: "進行中", teamTaskCompleted: "完了", teamPhaseProvisioning: "プロビジョニング", teamPhaseFailed: "失敗した", teamMoreTasks: (count: number) => `他 ${count - 1} 件のタスク`, teamIdle: "待機中", teamLead: "リーダー", queueRemove: "キューから削除", resendImageMissing: "再送信する前に、再度画像を追加する必要があります。", sendFailed: "送信に失敗しました", sendUnconfirmed: "配達は確認されていません", sendCanceled: "キャンセル", resendConfirm: "配信結果は不明。再度送信すると、このメッセージが 2 回実行される場合があります。リトライ？", resend: "再送信", questionCustomPlaceholder: "あなた自身の答えを追加してください…", addImages: "画像を追加する", removeImage: (name: string) => `画像「${name}」を削除します`, unnamedImage: "画像", imageLimitTitle: "画像を追加できませんでした", tooManyImages: (max: number) => `各メッセージには最大 ${max} 枚の画像を追加できます。`, unsupportedImage: (name: string) => `「${name}」はサポートされていません。 PNG、JPEG、WebP、または GIF 画像を選択します。`, imageTooLarge: (name: string, max: string) => `「${name}」は画像ごとの制限 ${max} を超えています。`, imagesTooLarge: (max: string) => `これらの画像は合計 ${max} 制限を超えています。`, imageDimensionsTooLarge: (name: string, max: number) => `「${name}」の幅または高さが ${max} ピクセルを超えています。`, imagePixelsTooLarge: (name: string) => `「${name}」は画像のピクセル制限を超えています。`, imagePickerFailedTitle: "画像を読み取れませんでした", imagePickerFailedBody: "PNG、JPEG、WebP、または GIF 画像を選択して、再試行してください。", policyHint: "メッセージは全体的に暗号化されます。リモート操作には、引き続きコンピューター上の DeepSeek Harness 権限が適用されます。", codexPolicyHint: "メッセージは全体的に暗号化されます。リモート操作には、コンピューター上の CodeX 権限が引き続き適用されます。", cursorPolicyHint: "メッセージは全体的に暗号化されます。リモート操作は引き続き Cursor ACP 権限の対象となります。現時点ではテキスト プロンプトのみです。", piPolicyHint: "メッセージは全体的に暗号化されます。リモート操作は引き続き Pi ACP 権限の対象となります。現時点ではテキスト プロンプトのみです。", antigravityPolicyHint: "メッセージは全体的に暗号化されます。画像はコンピュータ上のプライベート一時キャッシュを使用します。 AGY は画像ツールを使用してそれらを読み取ります。", opencodePolicyHint: "メッセージは全体的に暗号化されます。リモート操作は引き続き OpenCode ACP 権限の対象となります。", claudePolicyHint: "メッセージは全体的に暗号化されます。リモート操作には引き続き Claude ACP 権限が適用されます。", you: "あなた", system: "システム", generating: "DeepSeek が処理中", codexGenerating: "考え", cursorGenerating: "考え", piGenerating: "考え", antigravityGenerating: "考え", opencodeGenerating: "考え", claudeGenerating: "考え", stopping: "応答停止中", reasoning: "思考", reasoningActive: "思考中", reasoningExpand: "思考プロセスを拡張する", reasoningCollapse: "思考プロセスを崩壊させる", failed: "未完了", completed: "完了", toolCall: "通話詳細", toolResult: "結果", toolExpand: (name: string) => `「${name}」の詳細を表示`, toolCollapse: (name: string) => `「${name}」の詳細を非表示にする`, toolTruncated: "この内容は長すぎます。最初の 64 KB のみが表示されます。", denied: "拒否されました", allowedOnce: "今回のみ許可済み", approvalHandled: "別のデバイスで処理される", permissionTitle: "この操作を許可しますか?", permissionScope: "許可はこのリクエストにのみ適用されます。他の操作でも確認が必要です。", allowOnce: "今回のみ許可", deny: "拒否", answered: "答えた", questionCancelled: "質問はキャンセルされました", questionQueued: "応答がキューに入れられ、エージェントを待っています", questionContinued: "エージェントは続けた。まだ返信できます", questionRemaining: (seconds: number) => `残り ${seconds} 秒`, questionTitle: "DeepSeek Harnessには確認が必要です", answerToContinue: "続けて答える", submitAnswer: "回答を送信する", welcomeSlogan: "未知へ", moreActions: "さらなるアクション", openWorkspaces: "ワークスペース", welcomeBadge: "プレビュー", takePhoto: "カメラ", photos: "写真", files: "ファイル", mode: "モード", selectMode: "モード選択", modeDefault: "デフォルト", reasoningEffort: "推論の強度", reasoningEffortDefault: "デフォルト", toolAccess: "ツールへのアクセス", quickPrompts: "プロンプト", toolPrompts: "プロンプト", toolFilesDescription: "コンピューター上のファイルとフォルダーを参照する", toolTerminalDescription: "コンピューター上でコマンドを実行する", toolPromptsDescription: "頻繁なプロンプト。いずれかをタップして送信します", toolPromptEdit: "プロンプトの編集", toolPromptEditDescription: "頻繁に表示されるプロンプトを追加、削除、または編集する", toolPromptAdd: "新しいプロンプト", toolPromptEditTitle: (title: string) => `「${title}」を編集します`, toolPromptTitlePlaceholder: "プロンプト名", toolPromptTextPlaceholder: "プロンプトテキスト", toolPromptSave: "保存", toolPromptSaveFailedTitle: "プロンプトを保存できませんでした", toolPromptSaveFailedBody: "ローカルストレージへの書き込みに失敗しました。もう一度試してください。", toolPromptDeleteTitle: (title: string) => `「${title}」を削除しますか?`, toolPromptDeleteBody: "これを元に戻すことはできません。", toolPromptEmptyTitle: "まだプロンプトはありません", toolPromptEmptyBody: "「プロンプトを編集」をタップして、頻繁に行うプロンプトを追加します。", toolPromptSent: (title: string) => `「${title}」を送信しました`, toolPromptSendFailed: "送信できませんでした。接続を確認して再試行してください。", newChat: "新しいチャット", newChatFailedTitle: "新しいチャットを開始できませんでした", newChatFailedBody: "接続を確認して再試行してください。", selectWorkspace: "ワークスペースの選択", moveSessionHint: "この会話を選択したワークスペースに移動します", workspaceNone: "ワークスペースなし", workspacePickerEmptyTitle: "まだワークスペースがありません", workspacePickerEmptyBody: "コンピューター上の DeepSeek Harness にプロジェクト ディレクトリを追加し、そこに会話を移動します。", manageWorkspaces: "ワークスペースの管理", moveStartedTitle: "この会話は移動できません", moveStartedBody: (name: string) => `この会話はすでに別のディレクトリで開始されており、その作業ディレクトリを変更することはできません。代わりに「${name}」で新しい会話を始めますか?`, moveStartedConfirm: "新しい会話を開始する", moveFailedTitle: "このワークスペースで会話を開始できませんでした", moveFailedBody: "接続を確認して再試行してください。", modeLockedTitle: "モードを切り替えられない", modeLockedBody: "この会話はすでに始まっています。モードは最初のメッセージの前にのみ変更できます。新しい会話を開始して会話を選択してください。", modeSelectFailedBody: "モードを切り替えることができませんでした。接続を確認して再試行してください。", modeLoadFailed: "モードをロードできませんでした。 「その他のアクション」を再度開いて再試行してください。", cameraPermissionTitle: "カメラが使用できません", cameraPermissionBody: "システム設定で DSH Remote がカメラを使用できるようにします。", filePickerFailedTitle: "ファイルを読み取れませんでした", filePickerFailedBody: "PNG、JPEG、WebP、または GIF 画像を選択して、再試行してください。", permissionReadOnly: "読み取り専用", permissionReadOnlyDescription: "読み取り専用アクセス。ファイルの変更とコマンドはそれぞれ確認が必要です。", permissionWorkspaceWrite: "ワークスペース書き込み", permissionWorkspaceWriteDescription: "現在のワークスペース内でファイルを書き込み、コマンドを実行します。より広範なアクセスにはまだ承認が必要です。", permissionFullAccess: "フルアクセス", permissionFullAccessDescription: "操作ごとの承認なしで、ファイルの変更やコマンドの実行を許可します。信頼できるタスクでのみ使用してください。", presetStandardName: "標準", presetStandardDescription: "必要に応じて検索、編集、ターミナル ツールを使用して、ほとんどのタスクのコード、ファイル、調査を処理します。", presetPtcName: "PTC", presetPtcDescription: "すべてが Standard にあり、バッチでツールを呼び出し、その結果をフィルタリング、重複排除、および要約するように調整されています。", presetMinimalName: "最小限", presetMinimalDescription: "ターミナル ツールのみを使用します。ベースライン動作のテストと比較に役立ちます。", presetCordisName: "クリエイター", presetCordisDescription: "会話によって DSH をカスタマイズする: エージェントに機能や UI を追加するプラグインを作成させたり、ツールやプロンプトを組み合わせて独自のモードを作成させたりします。", welcomeTitle: "この会話を続けてください", welcomeBody: "何を検査、説明、または変更したいかを DeepSeek Harness に伝えます。画像を追加することもできます。確認が必要な操作はすべて会話に直接表示されます。", codexWelcomeTitle: "この CodeX の会話を続けます", codexWelcomeBody: "何を検査、説明、または変更したいかを CodeX に伝えます。画像を追加することもできます。コマンドまたはファイル変更の承認は会話に直接表示されます。", cursorWelcomeTitle: "このCursor会話を続けます", cursorWelcomeBody: "検査、説明、または変更したい内容を Cursor に伝えます。許可リクエストは会話に直接表示されます。現時点では、リモート プロンプトはテキストのみです。", antigravityWelcomeTitle: "このAntigravityに関する会話を続けます", antigravityWelcomeBody: "検査、説明、変更したい内容を AGY に伝えてください。画像を添付することもできます。", opencodeWelcomeTitle: "この OpenCode 会話を続けます", claudeWelcomeTitle: "このClaudeの会話を続けます", opencodeWelcomeBody: "何を検査、説明、または変更したいかを OpenCode に伝えます。", claudeWelcomeBody: "検査、説明、変更したいことをClaudeに伝えます。",
+    codexWorkspaceWrite: "ワークスペースの書き込み", codexWorkspaceWriteDescription: "現在のプロジェクトに書き込むことができます。より広範なコマンドとファイルへのアクセスには、依然として 1 回限りの承認が必要です。", codexFullAccess: "フルアクセス", codexFullAccessDescription: "CodeX は、後で操作を再度要求することなく、コンピューター上のすべてのファイルにアクセスできるようになります。", codexCommand: "CodeX コマンド", codexFileChange: "CodeXファイルの変更", codexWebSearch: "CodeX Web 検索", codexSubagent: "CodeXサブエージェント", codexPlan: "CodeX プラン", codexOperation: "CodeXの操作", codexError: "CodeX は操作を完了しませんでした。",
+  },
+  mention: {
+    addSection: "追加", commandSection: "コマンド", skillSection: "スキル", sessionSection: "セッション", fileSection: "ファイル",
+    file: "ファイル", fileDescription: "コンピューター上のファイルを参照する",
+    goal: "ゴール", goalDescription: "長時間実行されるタスクの目標を設定または表示する",
+    plan: "プラン", planDescription: "プランモードの開始または終了",
+    feedback: "フィードバック", feedbackDescription: "このセッションに関するフィードバックを記録する",
+    compact: "コンパクト", compactDescription: "古い会話履歴をコンパクトにする",
+    permission: "許可", permissionDescription: "権限プリセットの切り替え（サンドボックスモード+承認ポリシー）",
+    model: "モデル", modelDescription: "このセッションで使用されるモデルを選択してください",
+    export: "輸出", exportDescription: "このセッション ログを ZIP アーカイブとしてダウンロードします",
+    exportTitle: "セッションのエクスポート", exportTriggered: "エクスポートがトリガーされました。", exportFailed: "エクスポートに失敗しました。後でもう一度試してください。",
+    skillUserOnly: "ユーザー専用", noMatches: "一致しません",
+    builtinOfficeDocx: "レポート、レター、書式設定された表などの Word 文書 (.docx) を作成、読み取り、編集、確認します。",
+    builtinOfficePptx: "スライド テキスト、表、画像、グラフなどの PowerPoint プレゼンテーション (.pptx) を作成、読み取り、編集、確認します。",
+    builtinOfficeXlsx: "データ、数式、書式設定を含む Excel ワークブック (.xlsx) の読み取り、作成、変更を行います。",
+    builtinDshBadge: "公式の「powered by dsh」バッジをドキュメント、プル リクエスト、マージ リクエスト、その他のコンテンツに追加します。",
+  },
+  validation: { serverRequired: "サーバーアドレスを入力します。", serverInvalid: "サーバーアドレスが無効です。例: https://remote.example.com", httpsRequired: "HTTPS アドレスを使用します。 HTTP はローカル開発に許可されています。", serverPartsForbidden: "サーバー アドレスのみを入力し、アカウント情報、クエリ パラメーター、ページ フラグメントは入力しません。" },
+  runtime: {
+    identityNotReady: "この電話はまだ準備ができていません。しばらくしてからもう一度お試しください。", zhihuUnsupported: "このサーバーは Zhihu 認証をサポートしていません。別のサインイン方法を試してください。", githubUnsupported: "このサーバーは GitHub 認証をサポートしていません。別のサインイン方法を試してください。", hostClosed: "このデバイスへの接続が失われました。", openSessionFirst: "このリクエストに応答する前に、会話を開いてください。", networkUnavailable: "利用可能なネットワークがありません。ネットワークが復旧すると、アプリは再接続を試みます。", connectHostFirst: "まずコンピュータに接続します。", codexUnavailable: "このデバイスでは CodeX Remote が有効になっていないか、CodeX は現在利用できません。", codexInvalidResponse: "CodeX Remote は、アプリが認識できないデータを返しました。", codexTurnUnavailable: "この CodeX ターンは別の接続に属しているため、電話から停止することはできません。", codexWorkspaceReadOnly: "CodeX ワークスペースはここに追加できますが、名前変更、並べ替え、削除はコンピューター上の CodeX によって管理されたままになります。", cursorUnavailable: "このデバイスでは Cursor Remote が有効になっていないか、Cursor ACP が現在使用できません。", piUnavailable: "このデバイスでは Pi Remote が有効になっていないか、Pi ACP が現在利用できません。", antigravityUnavailable: "このデバイスでは Antigravity Remote が有効になっていないか、Antigravity ACP が現在利用できません。", opencodeUnavailable: "このデバイスでは OpenCode Remote が有効になっていないか、OpenCode ACP が現在利用できません。", claudeUnavailable: "このデバイスでは Claude Remote が有効になっていないか、Claude ACP が現在利用できません。", cursorTextOnly: "Cursor Remote は現在、テキスト メッセージのみをサポートしており、画像はサポートしていません。", piTextOnly: "Pi Remote は現在、テキスト メッセージのみをサポートしており、画像はサポートしていません。", hostMissingKey: "このデバイスにはセキュリティ キーがありません。もう一度確認して信頼してください。", unexpectedRelayDevice: "安全な接続が選択したデバイスと一致しません。", secureChannelNotConnected: "安全な接続が確立されていません。", secureHandshakeTimedOut: "安全な接続がタイムアウトしました。もう一度やり直してください。", secureHandshakeOrder: "安全な接続ハンドシェイクが正常ではありませんでした。", secureHandshakeIncomplete: "安全な接続ハンドシェイクが完了しませんでした。", secureHandshakeFailed: "安全な接続ハンドシェイクが失敗しました。",
+  },
+  messageActions: {
+    copy: "回答をコピーする", copied: "コピーされました", good: "良い回答", bad: "良くない回答", branch: "新しいチャットで分岐する",
+    unavailable: "このホストまたはメッセージはこのアクションをサポートしていません", failed: "アクションが完了していません", feedbackSaved: "ホストに保存されたフィードバック",
+    usageUnavailable: "使用不可", timeUnavailable: "利用できない時間", usage: "実際の使用状況", input: "入力", output: "出力",
+    cacheRead: "キャッシュ読み取り", cacheWrite: "キャッシュ書き込み", reasoning: "推論", total: "合計",
+  },
+  chatProcess: {
+    processActivity: {
+      "thinking": {
+        "running": "リクエストの分析",
+        "done": "分析完了"
+      },
+      "read": {
+        "running": "ファイルの読み取り",
+        "done": "ファイルの読み取り"
+      },
+      "readImage": {
+        "running": "画像の読み取り",
+        "done": "画像の読み取り"
+      },
+      "write": {
+        "running": "ファイルの書き込み",
+        "done": "書き込まれたファイル"
+      },
+      "search": {
+        "running": "コードを検索する",
+        "done": "検索されたコード"
+      },
+      "edit": {
+        "running": "ファイルの編集",
+        "done": "編集されたファイル"
+      },
+      "commands": {
+        "running": "コマンドの実行",
+        "done": "実行コマンド"
+      },
+      "code": {
+        "running": "実行コード",
+        "done": "ランコード"
+      },
+      "webSearch": {
+        "running": "ウェブを検索する",
+        "done": "ウェブで検索した"
+      },
+      "webFetch": {
+        "running": "Web ページにアクセスする",
+        "done": "訪問したWebページ"
+      },
+      "subagents": {
+        "running": "代理人の調整",
+        "done": "調整されたサブエージェント"
+      },
+      "plan": {
+        "running": "計画を更新する",
+        "done": "計画を更新しました"
+      },
+      "questions": {
+        "running": "あなたのアクションを待っています",
+        "done": "よくある質問"
+      },
+      "tools": {
+        "running": "通話ツール",
+        "done": "呼ばれるツール"
+      }
+    },
+    stopped: "停止しました",
+    join: "、",
+    more: "、など。",
+    sharedPrefix: "",
+    joinTwo: (first: string, second: string) => `${first} と ${second}`,
+    toolTitles: {
+      bash: "Bash", pwsh: "PowerShell", read: "読む", read_image: "画像を読む", write: "書く", edit: "編集",
+      apply_patch: "編集", grep: "Grep", glob: "Glob", run_code: "コード", web_search: "ウェブ検索", web_fetch: "ページ取得",
+    },
+  },
+  trajectory: {
+    expand: "エントリを展開する", collapse: "エントリを折りたたむ", clearSearch: "検索をクリア", attachments: (count: number) => `${count} 枚の画像`,
+    noText: "テキストコンテンツなし",
+    open: "軌道に切り替える", close: "会話に切り替える", title: "軌跡", all: "全て", system: "システム", user: "ユーザー",
+    context: "コンテクスト", assistant: "アシスタント", tool: "道具", search: "メッセージ、ツール、ターンを検索", turn: "振り向く", empty: "一致するロード軌道がありません",
+    loadedOnly: "実際にロードされたメッセージのみが表示されます。古い履歴をロードして軌道を拡張します。",
+  },
+  errors: {
+    'session/writer-held': "この会話は別のクライアントによって行われています。そのクライアントで DeepSeek Harness を完全に終了してから、ここで再試行してください。会話を切り替えたり、ウィンドウを閉じたりしても、解放されない場合があります。メッセージは送信されていません。",
+    ACCOUNT_AUTH_REQUIRED: "この電話を接続する前にサインインしてください。", AUTH_INVALID: "サインインは無効になりました。再度サインインします。", AUTH_REQUIRED: "続行するには、再度サインインしてください。", TOKEN_EXPIRED: "サインインの有効期限が切れました。再度サインインします。", TOKEN_REUSED: "この電話はアカウントを保護するためにサインアウトされました。再度サインインします。", DEVICE_NOT_FOUND: "このデバイスは見つかりませんでした。デバイスリストを更新します。", DEVICE_REVOKED: "この電話はアカウントから削除されました。再度サインインします。", DEVICE_OWNERSHIP_REQUIRED: "この電話のサインイン情報は無効になりました。再度サインインします。", MEMBERSHIP_REQUIRED: "このデバイスにはもうアクセスできません。両方のデバイスが同じアカウントを使用していることを確認してください。", HOST_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", DEVICE_OFFLINE: "このデバイスはオフラインです。 DeepSeek Harness と DSH Remote プラグインが実行されていることを確認してください。", PEER_IDENTITY_MISMATCH: "このデバイスの安全な ID が変更されました。デバイスを確認し、再度信頼します。", RATE_LIMITED: "操作が多すぎます。後でもう一度試してください。", CONNECTION_FAILED: "このデバイスに接続できませんでした。ネットワークを確認して、もう一度試してください。", P2P_FAILED: "直接接続に失敗しました。サーバーリレーに切り替えます。", RELAY_UNAVAILABLE: "サーバーリレーが一時的に利用できなくなりました。後でもう一度試してください。", TURN_UNAVAILABLE: "安定した接続を確立できませんでした。別の方法を試しています。", SECURE_CHANNEL_FAILED: "安全な接続を確立できませんでした。もう一度やり直してください。", STREAM_TIMEOUT: "セッション接続がタイムアウトしました。再試行してください。", RPC_TIMEOUT: "デバイスの応答に時間がかかりすぎました。もう一度やり直してください。", UNSUPPORTED_VERSION: "この DSH リモート バージョンには互換性がありません。アプリを更新して、もう一度お試しください。", METHOD_NOT_ALLOWED: "現在の設定では、携帯電話からこの操作を行うことはできません。", PERMISSION_NOT_PENDING: "このリクエストはすでに処理されているか、期限が切れています。", SESSION_NOT_FOUND: "この会話は見つかりませんでした。会話リストに戻って更新します。", HARNESS_UNAVAILABLE: "DeepSeek Harnessはこのデバイスでは一時的に利用できません。実行されていることを確認してください。", AGENT_BUSY: "DeepSeek Harnessは別の操作を処理しています。しばらくしてからもう一度お試しください。", FULL_RESYNC_REQUIRED: "会話はコンピュータ上で変わりました。続行するには再度開いてください。",
+    CODEX_UNAVAILABLE: "このデバイスでは CodeX を利用できません。 CodeX Remote が有効になっていて、CodeX がコンピューターにサインインしていることを確認します。", CODEX_TURN_OWNED: "別のデバイスがこの CodeX ターンを操作しています。後でもう一度試してください。", CODEX_APPROVAL_NOT_FOUND: "この CodeX 承認はすでに処理されているか、期限が切れています。", CODEX_PATH_NOT_ALLOWED: "このディレクトリは、コンピューター上の CodeX ワークスペース カタログには存在しません。", FEATURE_NOT_SUPPORTED: "コンピューターはこの機能をサポートしていません。 DSH リモート プラグインを更新します。", INVALID_MESSAGE: "サーバーは、アプリが認識できないデータを返しました。後でもう一度試してください。", serverUnreachable: "サーバーに接続できませんでした。サーバーアドレスとネットワークを確認してください。", unknown: "操作は完了していません。もう一度やり直してください。",
+  },
+} satisfies Messages
+
+export default jaJP

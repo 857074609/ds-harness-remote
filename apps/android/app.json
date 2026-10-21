@@ -64,7 +64,12 @@
           "supportedLocales": {
             "android": [
               "en-US",
-              "zh-CN"
+              "zh-CN",
+              "ja-JP",
+              "zh-TW",
+              "es-ES",
+              "de-DE",
+              "fr-FR"
             ]
           }
         }

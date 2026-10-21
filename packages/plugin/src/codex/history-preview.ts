@@ -25,14 +25,21 @@ export async function previewCall(peer: object, input: unknown, invoke: (input: 
   let cache = details.get(peer)
   if (!cache) details.set(peer, cache = new Map())
   for (const [id, value] of cache) if (value.until < Date.now()) cache.delete(id)
+  // Stage the whole page before evicting anything. Every returned handle must
+  // fit together; otherwise let the client retry through bounded transfer.
+  const pending = new Map<string, Detail>()
+  let pendingBytes = 0
   const records = result.records.map(raw => {
     const record = object(raw), event = object(record.event), data = object(event.data)
     if (event.type !== 'tool/result' || size(record) < 4096) return raw
     const bytes = size(record)
     if (bytes > MAX_CACHE) return raw
-    while (cache!.size >= 64 || [...cache!.values()].reduce((n, v) => n + v.bytes, 0) + bytes > MAX_CACHE) cache!.delete(cache!.keys().next().value!)
+    if (pending.size >= 64 || pendingBytes + bytes > MAX_CACHE) {
+      throw new RpcError('RESPONSE_TOO_LARGE', 'History requires chunked transfer.')
+    }
     const id = randomUUID()
-    cache!.set(id, {threadId: params.threadId as string, record: raw, bytes, until: Date.now() + 10 * 60_000})
+    pending.set(id, {threadId: params.threadId as string, record: raw, bytes, until: Date.now() + 10 * 60_000})
+    pendingBytes += bytes
     const message = object(data.message)
     return {...record, view: undefined, event: {...event, data: {
       id: data.id, callId: data.callId, name: data.name, toolName: data.toolName, turn: data.turn, step: data.step,
@@ -43,5 +50,12 @@ export async function previewCall(peer: object, input: unknown, invoke: (input: 
   })
   const preview = {...result, records}
   if (size(preview) > 2 * 1024 * 1024) throw new RpcError('RESPONSE_TOO_LARGE', 'History requires chunked transfer.')
+  let cachedBytes = [...cache.values()].reduce((n, value) => n + value.bytes, 0)
+  while (cache.size + pending.size > 64 || cachedBytes + pendingBytes > MAX_CACHE) {
+    const oldest = cache.keys().next().value!
+    cachedBytes -= cache.get(oldest)!.bytes
+    cache.delete(oldest)
+  }
+  for (const [id, detail] of pending) cache.set(id, detail)
   return preview
 }

@@ -105,6 +105,7 @@ const zhCN = {
   settings: {
     appearance: '外观',
     title: '设置', thisPhone: '此手机', androidDevice: 'Android 设备', connection: '连接', server: '服务器', account: '账号', loginMethod: '登录方式', protocol: '协议', notConfigured: '未配置', notSignedIn: '未登录',
+    languageShowAll: '展开所有语言',
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
     compactHistorySaveFailed: '无法保存会话精简设置',
     compactHistory: '会话精简模式', compactHistoryNote: '缩减历史工具详情，保留正文和状态。需 Host 支持；切换后重新打开会话生效。',

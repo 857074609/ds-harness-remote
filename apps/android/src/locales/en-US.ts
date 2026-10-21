@@ -107,6 +107,7 @@ const enUS = {
   settings: {
     appearance: 'Appearance',
     title: 'Settings', thisPhone: 'This phone', androidDevice: 'Android device', connection: 'Connection', server: 'Server', account: 'Account', loginMethod: 'Sign-in method', protocol: 'Protocol', notConfigured: 'Not configured', notSignedIn: 'Not signed in',
+    languageShowAll: 'Show all languages',
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
     compactHistorySaveFailed: 'Could not save compact conversation setting',
     compactHistory: 'Compact conversations', compactHistoryNote: 'Shortens tool history, keeping text and status. Requires Host support. Reopen the conversation after changing this.',

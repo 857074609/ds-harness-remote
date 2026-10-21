@@ -1,0 +1,283 @@
+import type { Messages } from './types'
+
+const esES = {
+  comfort: {
+    notificationsNote: "Las notificaciones requieren una conexión activa.",
+    continueWork: "Configuración del espacio de trabajo",
+    resume: "Restaurar la última conversación al iniciar",
+    notifications: "Notificaciones de tareas y confirmación",
+    systemNotifications: "Abrir la configuración de notificaciones del sistema",
+    cacheSaveFailed: "No se pudieron guardar las preferencias de navegación. Guarde una copia del texto no enviado por ahora.",
+    cacheRestoreFailed: "No se pudieron restaurar las preferencias de navegación. El historial en línea todavía está disponible.",
+    conversationMissing: "Esta conversación ya no está disponible en el anfitrión actual.",
+    unknownHost: "La notificación El host no es un dispositivo confiable para la cuenta actual.",
+    starred: "Conversaciones favoritas",
+    running: "En curso",
+    recent: "Visitas recientes",
+    other: "Otras conversaciones",
+    star: "Conversación favorita",
+    unstar: "Eliminar favorito",
+    new: "Nuevo",
+    unknownStatus: "Comprobando estado",
+    returnLatest: "Saltar a lo último ↓",
+    newContent: "Nuevo contenido · Saltar a lo último ↓",
+    noRunning: "Sin tareas en ejecución",
+    search: "Buscar conversaciones o espacios de trabajo",
+    searchLabel: "Buscar conversaciones y espacios de trabajo",
+    toolLoading: "Cargando salida de herramienta…",
+    toolInvalid: "El formato de detalle de la herramienta no coincide.",
+    toolUnavailable: "Los detalles no están disponibles. Intentar otra vez.",
+    taskEnded: "Tarea finalizada. Toque para ver el resultado.",
+    taskInput: "Se necesita su confirmación. Toque para abrir la conversación.",
+  },
+  tools: {
+    download: "guardar en el teléfono",
+    downloading: "Ahorro…",
+    downloaded: "Archivo guardado",
+    downloadHint: "Elija una carpeta. Hasta 100 MiB por archivo.",
+    downloadTooLarge: "Este archivo excede el límite de 100 MiB para guardarlo en su teléfono.",
+    "files": "Archivos",
+    "terminal": "Terminal",
+    "root": "Espacio de trabajo",
+    "empty": "Esta carpeta está vacía",
+    "truncated": "El anfitrión devolvió un listado parcial porque este directorio tiene demasiadas entradas.",
+    "previous": "Pagina anterior",
+    "next": "Página siguiente",
+    "readOnly": "Vista previa de solo lectura",
+    "retry": "Rever",
+    "refresh": "Refrescar",
+    "unsupported": "Actualice DSH y el complemento remoto en este host, luego vuelva a conectarse para usar esta función.",
+    "terminalDisabled": "Habilite Terminal remoto en la configuración remota de la computadora y luego vuelva a intentarlo.",
+    "controlDenied": "Otra conexión controla este terminal. Vuelva a abrirlo para adjuntarlo nuevamente.",
+    "notText": "Este archivo no es texto UTF-8 y no se puede obtener una vista previa.",
+    "tooLarge": "El archivo o página excede el límite de lectura del Host.",
+    previewUnsupported: "La vista previa no está disponible para este tipo de archivo.",
+    previewTooLarge: "Límites móviles: 8 MiB, dimensiones de imagen de 8192 píxeles y 16 millones de píxeles en total; Fuentes de oficina: 50 MiB.",
+    accessDenied: "El anfitrión negó el acceso a esta sesión. Verifique la autorización en la computadora.",
+    previewChanged: "El archivo cambió mientras se leía. Actualiza e inténtalo de nuevo.",
+    previewInvalid: "El anfitrión devolvió datos de archivo no válidos. Se detuvo la vista previa.",
+    previewFailed: "Este archivo no se pudo mostrar. Intentar otra vez.",
+    previewLoading: "Leyendo archivo…",
+    officeLoading: "Convirtiendo a PDF en la computadora…",
+    officeUnavailable: "La conversión de documentos no está disponible. Verifique que la compatibilidad con Office a PDF esté instalada y habilitada en la computadora.",
+    officeFailed: "Error en la conversión del documento. Es posible que el documento no esté respaldado o esté dañado.",
+    officeBusy: "La conversión de documentos está ocupada o se agotó el tiempo de espera. Vuelve a intentarlo más tarde.",
+    missingFonts: (fonts: string) => `Fuentes faltantes en la computadora; el diseño puede diferir: ${fonts}`,
+    pdfPage: (page: number, total: number) => `Página ${page} de ${total}`,
+    pdfLoading: "Renderizando PDF…",
+    pdfPassword: "No se admiten archivos PDF cifrados o protegidos con contraseña.",
+    zoomIn: "Dar un golpe de zoom",
+    zoomOut: "alejar",
+    "failed": "La operación fracasó. Verifique la conexión y vuelva a intentarlo.",
+    "newTerminal": "Nueva terminal",
+    "closeTerminal": "Terminal final",
+    "connecting": "Conectando al terminal…",
+    "creating": "Creando terminal…",
+    "exited": "Terminal salida",
+    "disconnected": "Terminal desconectado; La entrada no se reenviará automáticamente.",
+    "permissionUnavailable": "No se pudieron cargar los permisos. Actualice el complemento Host Remote y vuelva a intentarlo.",
+    "enter": "Intro",
+    "keyboard": "Teclado",
+    "interrupt": "Interrumpir",
+    "tab": "Tab",
+    "escape": "Esc",
+    "up": "Arriba",
+    "down": "Abajo",
+    "left": "Izquierda",
+    "right": "Bien",
+    "backspace": "Retroceso"
+},
+  common: {
+    back: "Atrás", retry: "Rever", close: "Cerca", cancel: "Cancelar", refresh: "Refrescar", delete: "Borrar", unavailable: "Indisponible", unknown: "Desconocido",
+  },
+  app: {
+    credit: "Power By Github/liguobao",
+    oauthCancelled: "La autorización no se completó. Por favor inténtalo de nuevo.", oauthInvalid: "Su información de inicio de sesión ya no es válida. Por favor inicia sesión nuevamente.",
+    loadingTagline: "Conéctese una vez. Listo cuando lo estés.", loadingIdentity: "Preparando una identidad segura...", bootFailed: "DSH remoto no pudo iniciarse", secureStorageUnavailable: "Los datos seguros en este teléfono no están disponibles temporalmente. Por favor inténtalo de nuevo.",
+    deviceUnavailable: "Este dispositivo no se pudo encontrar", deviceNoLongerTrusted: "Es posible que se haya eliminado o cerrado sesión en la cuenta actual.", backToDevices: "Volver a dispositivos",
+  },
+  status: { online: "En línea", offline: "Desconectado", disconnected: "Desconectado", lan: "LAN directa", relay: "Retransmisión del servidor", p2p: "P2P directo", turn: "Relé de giro", waiting: "Conectando", running: "En curso" },
+  setup: {
+    title: "Iniciar sesión", signIn: "Inicia sesión en tu cuenta", signInAgain: "Iniciar sesión nuevamente", lead: "Autorice este teléfono para ver dispositivos en la misma cuenta y continuar sus conversaciones.",
+    oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "Correo electrónico", zhihu: "Continuar con Zhihu", github: "Continuar con GitHub", oauthHint: "Se abrirá un navegador para finalizar la autorización y luego regresará aquí automáticamente.",
+    qr: "Iniciar sesión con código QR", qrEntryHint: "Toca para mostrar el código y luego escanéalo con tu teléfono.", qrScanTitle: "Inicia sesión con tu teléfono", qrScanHint: "Escanee este código con su teléfono y confírmelo en la página de autorización. Este dispositivo inicia sesión automáticamente después.", qrWaiting: "Esperando tu teléfono...", qrExpired: "Este código QR expiró. Actualiza e inténtalo de nuevo.", qrRefresh: "Actualizar código", qrUnsupported: "Este servidor no ofrece inicio de sesión QR. Utilice otro método de inicio de sesión.", qrFailed: "El inicio de sesión QR no se completó. Intentar otra vez.",
+    email: "Correo electrónico", emailPlaceholder: "Introduce tu correo electrónico", password: "Contraseña", passwordPlaceholder: "Introduce tu contraseña", passwordHint: "Su contraseña se utiliza únicamente para este inicio de sesión y no se almacena en su teléfono.",
+    server: "Dirección del servidor", serverHint: "Utilice una dirección HTTPS.", trustTitle: "Protege tus dispositivos y conversaciones", trustBody: "Los datos de la conversación se cifran en tránsito. Solo los dispositivos confiables que hayan iniciado sesión en la misma cuenta pueden acceder a él.",
+  },
+  settings: {
+    appearance: "Apariencia",
+    title: "Ajustes", thisPhone: "este telefono", androidDevice: "dispositivo Android", connection: "Conexión", server: "Servidor", account: "Cuenta", loginMethod: "Método de inicio de sesión", protocol: "Protocolo", notConfigured: "No configurado", notSignedIn: "No iniciado sesión",
+    languageShowAll: "Mostrar todos los idiomas",
+    language: "Idioma", languageSystem: "Seguir el sistema", languageChinese: "简体中文", languageEnglish: "English", languageNote: "Con el sistema predeterminado, la aplicación sigue automáticamente la configuración de idioma de Android.",
+    compactHistorySaveFailed: "No se pudo guardar la configuración de conversación compacta",
+    compactHistory: "Conversaciones compactas", compactHistoryNote: "Acorta el historial de la herramienta, manteniendo el texto y el estado. Requiere soporte de anfitrión. Vuelva a abrir la conversación después de cambiar esto.",
+    statusBar: "Mostrar barra de estado", statusBarNote: "Muestra la hora, la batería y el estado de la red en la parte superior de la pantalla. Desactívelo para ocultar la barra de estado del sistema.", statusBarSaveFailed: "No se pudo guardar la configuración de la barra de estado", statusBarSaveFailedBody: "No se pudo escribir en el almacenamiento local. Por favor inténtalo de nuevo.",
+    theme: "Modo oscuro", themeLight: "Claro", themeDark: "Oscuro", themeSystem: "Sistema",
+    chat: "Charlar",
+    defaultPermission: "Permisos predeterminados para nuevos chats", defaultPermissionHost: "Usar permisos predeterminados", defaultPermissionHostDescription: "DeepSeek Harness sigue los ajustes del ordenador; CodeX permite escribir en el espacio de trabajo.", defaultPermissionNote: "Se aplica únicamente a nuevas conversaciones DSH/CodeX. Las conversaciones existentes permanecen sin cambios.",
+    defaultPermissionFullAccessTitle: "¿Usar acceso completo para nuevos chats?", defaultPermissionFullAccessBody: "Los chats de DeepSeek Harness y CodeX creados en este teléfono podrán modificar archivos y ejecutar comandos sin preguntar cada vez. Aún puedes cambiar los permisos en cada chat.", defaultPermissionSaveFailed: "No se pudieron guardar los permisos predeterminados", defaultPermissionSaveFailedBody: "No se pudo escribir en el almacenamiento local. Por favor inténtalo de nuevo.", defaultPermissionNotConfirmed: "La computadora no confirmó los permisos predeterminados para el nuevo chat. Vuelve a conectarte y vuelve a intentarlo.",
+    transport: "Método de conexión", transportNote: "Se vuelve a conectar cuando se cambia; recurre al relé si falla una conexión directa.", identity: "Identidad en este teléfono", deviceId: "ID del dispositivo", publicKey: "clave de seguridad", keyNote: "La clave de seguridad está cifrada por Android y nunca sale de este teléfono.",
+    about: "Acerca de", aboutLead: "Ver la versión actual, el código fuente y las actualizaciones", developer: "Revelador", developerValue: "知乎@李国宝", twitter: "Gorjeo", appVersion: "Versión actual", sourceCodeUrl: "código fuente", updateUrl: "Actualizaciones", linkFailedTitle: "No se pudo abrir el enlace", linkFailedBody: "Verifique su conexión o copie la dirección y ábrala en un navegador.",
+    more: "Más", checkUpdates: "Buscar actualizaciones", checkingUpdates: "Buscando actualizaciones...", updateFoundTitle: "Nueva versión disponible", updateFoundBody: (latest: string, current: string) => `La versión v${latest} está disponible. Versión actual: ${current}.`, downloadUpdate: "Descargar actualización", openUpdates: "Actualizaciones abiertas", downloadingUpdate: "Descargando actualización", downloadFailedTitle: "Descarga fallida", downloadFailedBody: "No se pudo descargar el paquete más reciente. Por favor verifique su conexión e inténtelo nuevamente.", installFailedTitle: "No se pudo abrir el instalador", installFailedBody: "El paquete se descargó pero el instalador no se pudo abrir. Permita que esta aplicación instale aplicaciones desconocidas y vuelva a intentarlo.", openInstallSettings: "Abrir configuración", upToDateTitle: "estas al dia", upToDateBody: "Ya estás en la última versión.", checkFailedTitle: "Error en la comprobación de actualización", checkFailedBody: "Por favor verifique su conexión e inténtelo nuevamente.",
+    signOut: "desconectar", resetLocal: "Borrar datos locales", resetTitle: "¿Borrar datos en este teléfono?", resetBody: "Esto elimina la configuración del servidor, la información de inicio de sesión y los dispositivos confiables. Deberá iniciar sesión nuevamente. Esto no se puede deshacer.", reset: "Borrar datos", signOutTitle: "¿Cerrar sesión en esta cuenta?", signOutBody: "Deberá iniciar sesión nuevamente para acceder a sus dispositivos.",
+  },
+  devices: {
+    rename: "Rebautizar", renameTitle: "Cambiar nombre del dispositivo", namePlaceholder: "Introduzca un nombre de dispositivo", saveName: "Ahorrar", renameHint: "El nuevo nombre se comparte en todas las listas de dispositivos de su cuenta.",
+    title: "Dispositivos", myDevices: "Mis dispositivos", lead: "Elige un dispositivo para continuar tu trabajo", footer: "Continúe su trabajo en cualquier momento.", favorites: "Favoritos", recent: "Visitado recientemente", openFavorite: (title: string, device: string) => `Abra “${title}” en ${device} desde Favoritos`, openRecent: (title: string, device: string) => `Abrir “${title}” visitado recientemente en ${device}`, removeFavorite: (title: string) => `Eliminar "${title}" de Favoritos`, emptyTitle: "No hay dispositivos disponibles", emptyBody: "Instale el complemento DSH Remote en su computadora e inicie sesión en la misma cuenta. El dispositivo aparecerá aquí.", options: "Administrar dispositivo", encrypted: "Conexión segura",
+    connectionInterrupted: "Conexión interrumpida", trustExplanation: "Después de la confirmación, este teléfono recuerda la identidad segura del dispositivo. Si esa identidad cambia, la conexión se detiene para proteger sus datos.", trust: "Confía y continúa", connectReady: "Conéctese para ver y continuar conversaciones en su computadora.", offlineHelp: "Este dispositivo está fuera de línea. Asegúrese de que el complemento DSH Remote se esté ejecutando en su computadora.", secureConnect: "Conéctese de forma segura",
+    connectingTitle: "Conectar dispositivo", connecting: "Conectando", connectionReady: "Listo", retryConnection: "Conéctate de nuevo", cancelConnection: "Cancelar conexión", openInfo: "Ver información del dispositivo y de la conexión",
+    connectionProbeLabels: {
+      lan: "Sondeo de ruta directa local",
+      p2p: "Sondeo de ruta de igual a igual",
+      turn: "Sondeo del relé de GIRO",
+      relay: "Preparando la retransmisión del servidor",
+    },
+    connectionProbeDetails: {
+      lan: "locales directos",
+      p2p: "De igual a igual",
+      turn: "Relé de giro",
+      relay: "Retransmisión del servidor",
+    },
+    connectionSteps: {
+      authenticating: { title: "Verificar dispositivo", body: "Confirmar el acceso a la cuenta y al dispositivo" },
+      transport: { title: "Elija una ruta de conexión", body: "Pruebe LAN, P2P o retransmisión de servidor" },
+      secure: { title: "Abrir un canal seguro", body: "Verifique la identidad del dispositivo y complete el cifrado" },
+      loading: { title: "Cargar espacios de trabajo", body: "Sincronizar espacios de trabajo y conversaciones" },
+    },
+    info: "Información del dispositivo", harness: "DeepSeek Harness", harnessShort: "DSH", pluginShort: "Complemento", plugin: "Complemento remoto", provider: "Proveedor de modelos", directory: "directorio actual", model: "Modelo actual", workspaces: "Espacios de trabajo", conversations: "Conversaciones", secureConnection: "Información de conexión", path: "Método de conexión", probeOrder: "Orden de sonda", encryption: "Seguridad", viewWorkspaces: "Ver espacios de trabajo y conversaciones", unknownVersion: "Versión no disponible",
+    networkDetails: "Detalles de la red", phoneEndpoint: "Punto final del teléfono", computerEndpoint: "Punto final de la computadora", relayEndpointUnavailable: "No expuesto a través de la retransmisión del servidor", connectionServer: "Servidor de conexión", networkProtocol: "protocolo de red", candidatePath: "Ruta del candidato", roundTripTime: "tiempo de ida y vuelta", availableBitrate: "Enlace ascendente disponible", traffic: "Tráfico de conexión", connectedAt: "Conectado en", sent: "enviado", received: "recibió",
+    forgetTitle: (name: string) => `¿Desvincular “${name}”?`, forgetBody: "Esto elimina el dispositivo de su cuenta y desconecta el acceso remoto. Vuelva a vincularlo en la computadora antes de usarlo desde este teléfono.", forget: "Desatar",
+  },
+  sessionInfo: { title: "Información de conversación", workspaceInfo: "Información del espacio de trabajo", host: "Anfitrión", workspaceDirectory: "Directorio del espacio de trabajo", sessionDirectory: "Directorio de conversación" },
+  sessions: { archive: "Archivar conversación", archiveTitle: "¿Archivar esta conversación?", archiveBody: "La conversación se ocultará de las listas de espacios de trabajo.", untitled: "Nueva conversación", child: "Conversación de subtarea" },
+  time: { unavailable: "Hora de actualización no disponible", lastSeenUnavailable: "Tiempo activo no disponible", lastActive: (value: string) => `Activo ${value}`, now: "En este momento", justNow: "Actualizado hace un momento", minutesAgo: (n: number) => `Hace ${n} minutos`, hoursAgo: (n: number) => `Hace ${n} hora`, updatedSuffix: "", locale: "es-ES" },
+  transport: { auto: "Automático (recomendado)", autoDescription: "Primero intenta P2P directo, luego TURN o la retransmisión del servidor cuando sea necesario", turn: "Prefiero TURNO", turnDescription: "Prioriza la retransmisión TURN para la estabilidad en redes restringidas", relay: "Sólo retransmisión del servidor", relayDescription: "Enruta todos los datos a través del relé del servidor remoto DSH" },
+  workspaces: {
+    loadFailed: "No se pudieron cargar los espacios de trabajo",
+    offlineBody: "Vuelva a conectarse a su computadora para ver espacios de trabajo y conversaciones.",
+    reconnectingBody: "Restaurando la conexión y cargando espacios de trabajo y conversaciones. Espere por favor.",
+    title: "Espacios de trabajo", create: "Nuevo espacio de trabajo", type: "Tipo de espacio de trabajo", dsh: "DSH", deviceTitle: (name: string) => name, deviceInfo: "Información del dispositivo y de la conexión",
+    deviceSubtitle: (name: string, status: string) => `${name} · ${status}`, noDevice: "Ningún dispositivo conectado",
+    emptyTitle: "Aún no hay espacios de trabajo", emptyBody: "Elija un directorio de proyectos en su computadora para organizar conversaciones relacionadas.", search: "Buscar espacios de trabajo", clearSearch: "Borrar búsqueda", noSearchResults: "No se encontraron espacios de trabajo", noSearchResultsBody: "Pruebe con otro nombre de espacio de trabajo o ruta de directorio.", options: "Administrar espacio de trabajo", addFavorite: (title: string) => `Agregue "${title}" a Favoritos`, removeFavorite: (title: string) => `Eliminar "${title}" de Favoritos`, favoriteUnavailable: "Este espacio de trabajo en Favoritos ya no está en la computadora. Es posible que haya sido eliminado.", noSessions: "Aún no hay conversaciones. Toca para crear uno.", loadAllSessions: "Cargar todo", showMoreSessions: "Mostrar más", unnamedSession: "Conversación sin título", codex: "CodeX", cursor: "Cursor", pi: "Pi", antigravity: "Antigravity", opencode: "OpenCode", claude: "Claude",
+    deleteTitle: (title: string) => `¿Eliminar “${title}”?`, deleteBody: "Esto elimina el espacio de trabajo y todas sus conversaciones de este dispositivo. Esto no se puede deshacer.", delete: "Eliminar espacio de trabajo", rename: "Rebautizar", moveUp: "Subir", moveDown: "Bajar", expandWorkspace: (title: string) => `Expandir el espacio de trabajo "${title}"`, collapseWorkspace: (title: string) => `Contraer espacio de trabajo “${title}”`, newSessionIn: (title: string) => `Nueva conversación en “${title}”`, deviceDirectory: "Directorio de proyectos en la computadora", browse: "Elige directorio", directoryHint: "Las conversaciones creadas aquí utilizarán este directorio.", codexDirectoryHint: "El directorio seleccionado se agregará al catálogo de proyectos CodeX en la computadora.", cursorDirectoryHint: "El directorio seleccionado se convierte en la sesión cwd del Cursor ACP (se conserva solo para esta conexión telefónica).", piDirectoryHint: "El directorio seleccionado se convierte en la sesión cwd de Pi ACP (se conserva solo para esta conexión telefónica).", antigravityDirectoryHint: "Utilice este directorio para conversaciones sobre AGY. Las conversaciones existentes se cargan desde la computadora.", opencodeDirectoryHint: "Utilice este directorio para conversaciones OpenCode. Las conversaciones existentes se cargan desde la computadora.", claudeDirectoryHint: "Utilice este directorio para conversaciones de Claude. Las conversaciones existentes se cargan desde la computadora.", renameTitle: "Cambiar nombre del espacio de trabajo", namePlaceholder: "Ingrese un nombre de espacio de trabajo", saveName: "Ahorrar", chooseFolder: "Elija el directorio del proyecto", loading: "Cargando…", loadingDirectory: "Leyendo directorio…", noFolders: "No hay carpetas disponibles aquí", showHidden: "Mostrar carpetas ocultas", hideHidden: "Ocultar carpetas ocultas", chooseThisFolder: "Utilice este directorio",
+  },
+  chat: {
+    currentWorkSessions: "Trabajo actual", noCurrentWorkSessions: "Aún no se han utilizado conversaciones en esta conexión remota",
+    otherHostSessions: "Otras conversaciones",
+    hostSessions: "Anfitrión de conversaciones", openHostSessions: "Abrir conversaciones en este anfitrión", backToWorkspaces: "Volver a los espacios de trabajo", noHostSessions: "Aún no hay conversaciones en este anfitrión.",
+    quickCheckChanges: "Revisar cambios", quickCheckChangesPrompt: "Revise los cambios del código actual y señale cualquier problema.", quickCommit: "Confirmar cambios", quickCommitPrompt: "Revisa los cambios actuales y crea un commit directamente sin pedir confirmación.", quickViewScreenshot: "Revisar captura de pantalla", quickViewScreenshotPrompt: "Revise la última captura de pantalla y compruebe si hay problemas con la interfaz.",
+    fullAccessTitle: "¿Habilitar acceso completo?", fullAccessBody: "El acceso completo permite a DeepSeek Harness modificar archivos y ejecutar comandos directamente. Habilítelo solo cuando confíe en la tarea actual.", codexFullAccessTitle: "¿Dar a CodeX acceso completo a la computadora?", codexFullAccessBody: "CodeX podrá acceder a todos los archivos de la computadora sin volver a solicitar el comando o la aprobación del cambio de archivo en turnos posteriores. Habilítelo sólo cuando confíe plenamente en esta tarea.", enable: "Habilitar acceso completo", stop: "Detener respuesta", selectModel: "Elige modelo", selectReasoningEffort: "Elige el nivel de pensamiento", reasoningEffortLabel: (name: string) => `Nivel de pensamiento: ${name}`, approvalMode: "Permisos", approvalModeLabel: (name: string) => `Permisos: ${name}`, reconnect: "Reconectar la conversación actual", reconnecting: "Restaurando esta conversación...", offline: "Se perdió la conexión con este dispositivo. Utilice el botón de actualización de arriba para volver a conectarse y continuar esta conversación.", hostOperation: (name: string) => `${name} en la computadora`,
+    toolRunning: (name: string) => `Ejecutando ${name}`, processRunning: "Analizando solicitud", older: "Ver mensajes anteriores", jumpToLatest: "Saltar al último mensaje", messageLabel: "Enviar un mensaje a DeepSeek Harness", codexMessageLabel: "Enviar un mensaje a CodeX", cursorMessageLabel: "Enviar un mensaje a Cursor", piMessageLabel: "Enviar un mensaje a Pi", antigravityMessageLabel: "Enviar un mensaje a Antigravity", opencodeMessageLabel: "Enviar un mensaje a OpenCode", claudeMessageLabel: "Enviar un mensaje a Claude", placeholder: "Escribe un mensaje…", codexPlaceholder: "Asigna una tarea a CodeX…", cursorPlaceholder: "Asigna una tarea a Cursor…", piPlaceholder: "Asigna una tarea a Pi…", antigravityPlaceholder: "Asigna una tarea a Antigravity…", opencodePlaceholder: "Asigna una tarea a OpenCode…", claudePlaceholder: "Asigna una tarea a Claude…", send: "Enviar", draftLong: (count: number) => `${count.toLocaleString()} caracteres`, draftTooLongTitle: "Mensaje demasiado largo", draftTooLong: (max: number) => `Los mensajes están limitados a ${max.toLocaleString()} caracteres. Acórtelo y envíelo nuevamente.`, queueTitle: (count: number) => `Mensajes en cola (${count})`, queuePending: "esperando para correr", queueSteer: "Entregar ahora", subagentsTitle: (count: number) => `Subagentes · ${count}`, teamTitle: (count: number) => `Equipo de agentes · ${count}`, teamTaskPending: "pendiente", teamTaskInProgress: "en curso", teamTaskCompleted: "terminado", teamPhaseProvisioning: "aprovisionamiento", teamPhaseFailed: "fallido", teamMoreTasks: (count: number) => `${count - 1} tareas más`, teamIdle: "Inactivo", teamLead: "Coordinador", queueRemove: "Quitar de la cola", resendImageMissing: "Las imágenes deben agregarse nuevamente antes de reenviarlas.", sendFailed: "Envío fallido", sendUnconfirmed: "Entrega no confirmada", sendCanceled: "Cancelado", resendConfirm: "Se desconoce el resultado de la entrega. Enviar nuevamente puede ejecutar este mensaje dos veces. ¿Rever?", resend: "Enviar de nuevo", questionCustomPlaceholder: "Añade tu propia respuesta...", addImages: "Agregar imágenes", removeImage: (name: string) => `Eliminar imagen “${name}”`, unnamedImage: "Imagen", imageLimitTitle: "No se pudieron agregar imágenes", tooManyImages: (max: number) => `Puedes agregar hasta ${max} imágenes a cada mensaje.`, unsupportedImage: (name: string) => `“${name}” no es compatible. Elija una imagen PNG, JPEG, WebP o GIF.`, imageTooLarge: (name: string, max: string) => `“${name}” supera el límite de ${max} por imagen.`, imagesTooLarge: (max: string) => `Estas imágenes superan el límite combinado de ${max}.`, imageDimensionsTooLarge: (name: string, max: number) => `El ancho o alto de “${name}” supera los ${max} píxeles.`, imagePixelsTooLarge: (name: string) => `“${name}” supera el límite de píxeles de la imagen.`, imagePickerFailedTitle: "No se pudo leer la imagen", imagePickerFailedBody: "Elija una imagen PNG, JPEG, WebP o GIF e inténtelo de nuevo.", policyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen estando sujetas a los permisos de DeepSeek Harness en su computadora.", codexPolicyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen sujetas a los permisos de CodeX en su computadora.", cursorPolicyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen sujetas a los permisos del Cursor ACP; mensajes de texto solo por ahora.", piPolicyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen sujetas a los permisos de Pi ACP; mensajes de texto solo por ahora.", antigravityPolicyHint: "Los mensajes están cifrados en todo momento. Las imágenes utilizan un caché temporal privado en su computadora; AGY los lee con su herramienta de imágenes.", opencodePolicyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen sujetas a los permisos OpenCode ACP.", claudePolicyHint: "Los mensajes están cifrados en todo momento. Las operaciones remotas siguen sujetas a los permisos de Claude ACP.", you: "Tú", system: "Sistema", generating: "DeepSeek está trabajando", codexGenerating: "Pensamiento", cursorGenerating: "Pensamiento", piGenerating: "Pensamiento", antigravityGenerating: "Pensamiento", opencodeGenerating: "Pensamiento", claudeGenerating: "Pensamiento", stopping: "Deteniendo la respuesta", reasoning: "Pensar", reasoningActive: "Pensamiento", reasoningExpand: "Ampliar el proceso de pensamiento", reasoningCollapse: "Colapso del proceso de pensamiento", failed: "No completado", completed: "Terminado", toolCall: "Detalles de la llamada", toolResult: "Resultado", toolExpand: (name: string) => `Mostrar detalles de "${name}"`, toolCollapse: (name: string) => `Ocultar detalles de "${name}"`, toolTruncated: "Este contenido es demasiado largo. Sólo se muestran los primeros 64 KB.", denied: "Denegado", allowedOnce: "Permitido una vez", approvalHandled: "Manejado en otro dispositivo", permissionTitle: "¿Permitir esta operación?", permissionScope: "El permiso se aplica sólo a esta solicitud. Otras operaciones aún requerirán confirmación.", allowOnce: "Permitir una vez", deny: "Denegar", answered: "Respondido", questionCancelled: "Pregunta cancelada", questionQueued: "Respuesta en cola, esperando al agente.", questionContinued: "El agente continuó; todavía puedes responder", questionRemaining: (seconds: number) => `Quedan ${seconds} s`, questionTitle: "DeepSeek Harness necesita su confirmación", answerToContinue: "Responde para continuar", submitAnswer: "Enviar respuesta", welcomeSlogan: "Hacia lo desconocido", moreActions: "Más acciones", openWorkspaces: "Espacios de trabajo", welcomeBadge: "Avance", takePhoto: "Cámara", photos: "Fotos", files: "Archivos", mode: "Modo", selectMode: "Seleccionar modo", modeDefault: "Por defecto", reasoningEffort: "esfuerzo de razonamiento", reasoningEffortDefault: "Por defecto", toolAccess: "Acceso a herramientas", quickPrompts: "Indicaciones", toolPrompts: "Indicaciones", toolFilesDescription: "Explorar archivos y carpetas en la computadora", toolTerminalDescription: "Ejecutar comandos en la computadora", toolPromptsDescription: "Indicaciones frecuentes; toca uno para enviarlo", toolPromptEdit: "Editar mensajes", toolPromptEditDescription: "Agregar, eliminar o editar mensajes frecuentes", toolPromptAdd: "Nuevo mensaje", toolPromptEditTitle: (title: string) => `Editar "${title}"`, toolPromptTitlePlaceholder: "nombre del mensaje", toolPromptTextPlaceholder: "Texto rápido", toolPromptSave: "Ahorrar", toolPromptSaveFailedTitle: "No se pudieron guardar las indicaciones", toolPromptSaveFailedBody: "No se pudo escribir en el almacenamiento local. Por favor inténtalo de nuevo.", toolPromptDeleteTitle: (title: string) => `¿Eliminar “${title}”?`, toolPromptDeleteBody: "Esto no se puede deshacer.", toolPromptEmptyTitle: "Aún no hay mensajes", toolPromptEmptyBody: "Toque \"Editar mensajes\" para agregar un mensaje frecuente.", toolPromptSent: (title: string) => `Enviado "${title}"`, toolPromptSendFailed: "No se pudo enviar. Verifique la conexión y vuelva a intentarlo.", newChat: "Nuevo chat", newChatFailedTitle: "No se pudo iniciar un nuevo chat", newChatFailedBody: "Verifique la conexión y vuelva a intentarlo.", selectWorkspace: "Elige espacio de trabajo", moveSessionHint: "Mover esta conversación al espacio de trabajo elegido", workspaceNone: "Sin espacio de trabajo", workspacePickerEmptyTitle: "Aún no hay espacios de trabajo", workspacePickerEmptyBody: "Agregue un directorio de proyecto en DeepSeek Harness en la computadora y luego mueva las conversaciones a él.", manageWorkspaces: "Administrar espacios de trabajo", moveStartedTitle: "Esta conversación no se puede mover.", moveStartedBody: (name: string) => `Esta conversación ya comenzó en otro directorio y su directorio de trabajo no puede cambiar. ¿Iniciar una nueva conversación en “${name}”?`, moveStartedConfirm: "Iniciar una nueva conversación", moveFailedTitle: "No se pudo iniciar una conversación en este espacio de trabajo", moveFailedBody: "Verifique la conexión y vuelva a intentarlo.", modeLockedTitle: "No puedo cambiar de modo", modeLockedBody: "Esta conversación ya ha comenzado. El modo sólo puede cambiar antes del primer mensaje. Inicie una nueva conversación para elegir uno.", modeSelectFailedBody: "No se pudo cambiar el modo. Verifique la conexión y vuelva a intentarlo.", modeLoadFailed: "No se pudieron cargar los modos. Vuelva a abrir \"Más acciones\" para volver a intentarlo.", cameraPermissionTitle: "Cámara no disponible", cameraPermissionBody: "Permita que DSH Remote use la cámara en la configuración del sistema.", filePickerFailedTitle: "No se pudo leer el archivo", filePickerFailedBody: "Elija una imagen PNG, JPEG, WebP o GIF e inténtelo de nuevo.", permissionReadOnly: "Solo lectura", permissionReadOnlyDescription: "Acceso de sólo lectura; Los cambios de archivos y los comandos necesitan su confirmación.", permissionWorkspaceWrite: "Escritura en el espacio de trabajo", permissionWorkspaceWriteDescription: "Escriba archivos y ejecute comandos dentro del espacio de trabajo actual; un acceso más amplio todavía necesita aprobación.", permissionFullAccess: "Acceso completo", permissionFullAccessDescription: "Sin aprobación por acción. Los archivos se pueden modificar y los comandos se ejecutan directamente. Úselo únicamente cuando confíe en la tarea.", presetStandardName: "Estándar", presetStandardDescription: "Maneja código, archivos e investigación para la mayoría de las tareas, utilizando herramientas de búsqueda, edición y terminal según sea necesario.", presetPtcName: "PTC", presetPtcDescription: "Todo en Estándar, optimizado para llamar a herramientas en lotes y luego filtrar, deduplicar y resumir los resultados.", presetMinimalName: "Mínimo", presetMinimalDescription: "Utiliza únicamente la herramienta terminal, útil para probar y comparar el comportamiento de referencia.", presetCordisName: "Creador", presetCordisDescription: "Personalice DSH mediante conversación: permita que el agente escriba complementos que agreguen funciones o interfaz de usuario, o combine herramientas e indicaciones en su propio modo.", welcomeTitle: "Continuar esta conversación", welcomeBody: "Dígale a DeepSeek Harness lo que desea inspeccionar, explicar o cambiar. También puedes agregar imágenes. Cualquier operación que requiera confirmación aparecerá directamente en la conversación.", codexWelcomeTitle: "Continuar esta conversación de CodeX", codexWelcomeBody: "Dígale a CodeX lo que desea inspeccionar, explicar o cambiar. También puedes agregar imágenes. Las aprobaciones de cambios de archivos o comandos aparecerán directamente en la conversación.", cursorWelcomeTitle: "Continuar esta conversación del Cursor", cursorWelcomeBody: "Dígale a Cursor lo que desea inspeccionar, explicar o cambiar. Las solicitudes de permiso aparecen directamente en la conversación. Las indicaciones remotas son solo de texto por ahora.", antigravityWelcomeTitle: "Continúe esta conversación sobre Antigravity", antigravityWelcomeBody: "Dígale a AGY lo que desea inspeccionar, explicar o cambiar. También puedes adjuntar imágenes.", opencodeWelcomeTitle: "Continuar esta conversación OpenCode", claudeWelcomeTitle: "Continuar esta conversación con Claude", opencodeWelcomeBody: "Dígale a OpenCode lo que desea inspeccionar, explicar o cambiar.", claudeWelcomeBody: "Dígale a Claude lo que desea inspeccionar, explicar o cambiar.",
+    codexWorkspaceWrite: "Escritura en el espacio de trabajo", codexWorkspaceWriteDescription: "Puede escribir en el proyecto actual; el acceso más amplio a comandos y archivos aún necesita una aprobación única.", codexFullAccess: "Acceso completo", codexFullAccessDescription: "Permite que CodeX acceda a todos los archivos de la computadora sin volver a solicitar operaciones posteriores.", codexCommand: "Comando CodeX", codexFileChange: "Cambio de archivo CodeX", codexWebSearch: "Búsqueda web CodeX", codexSubagent: "subagente CodeX", codexPlan: "plan CodeX", codexOperation: "Operación CodeX", codexError: "CodeX no completó la operación.",
+  },
+  mention: {
+    addSection: "Agregar", commandSection: "Comandos", skillSection: "Habilidades", sessionSection: "Sesiones", fileSection: "Archivos",
+    file: "Archivo", fileDescription: "Hacer referencia a un archivo en la computadora",
+    goal: "Meta", goalDescription: "Establecer o ver el objetivo de una tarea de larga duración",
+    plan: "Plan", planDescription: "Entrar o salir del modo plan",
+    feedback: "Comentario", feedbackDescription: "Registrar comentarios sobre esta sesión",
+    compact: "Compacto", compactDescription: "Historial de conversaciones antiguo compacto",
+    permission: "Permiso", permissionDescription: "Cambiar el ajuste preestablecido de permisos (modo sandbox + política de aprobación)",
+    model: "Modelo", modelDescription: "Elija el modelo utilizado por esta sesión",
+    export: "Exportar", exportDescription: "Descargue este registro de sesión como un archivo ZIP",
+    exportTitle: "Exportación de sesión", exportTriggered: "Se activó la exportación.", exportFailed: "La exportación falló. Vuelve a intentarlo más tarde.",
+    skillUserOnly: "solo usuario", noMatches: "No hay coincidencias",
+    builtinOfficeDocx: "Cree, lea, edite y revise documentos de Word (.docx), incluidos informes, cartas y tablas formateadas.",
+    builtinOfficePptx: "Cree, lea, edite y revise presentaciones de PowerPoint (.pptx), incluidos textos de diapositivas, tablas, imágenes y gráficos.",
+    builtinOfficeXlsx: "Lea, cree y modifique libros de Excel (.xlsx), incluidos datos, fórmulas y formato.",
+    builtinDshBadge: "Agregue la insignia oficial \"powered by dsh\" a documentos, solicitudes de extracción, solicitudes de fusión y otro contenido.",
+  },
+  validation: { serverRequired: "Introduzca una dirección de servidor.", serverInvalid: "La dirección del servidor no es válida. Ejemplo: https://remote.example.com", httpsRequired: "Utilice una dirección HTTPS. HTTP está permitido para el desarrollo local.", serverPartsForbidden: "Ingrese solo la dirección del servidor, sin información de la cuenta, parámetros de consulta ni un fragmento de página." },
+  runtime: {
+    identityNotReady: "Este teléfono aún no está listo. Inténtelo de nuevo en breve.", zhihuUnsupported: "Este servidor no admite la autorización de Zhihu. Pruebe con otro método de inicio de sesión.", githubUnsupported: "Este servidor no admite la autorización de GitHub. Pruebe con otro método de inicio de sesión.", hostClosed: "Se perdió la conexión con este dispositivo.", openSessionFirst: "Abra una conversación antes de responder a esta solicitud.", networkUnavailable: "No hay red disponible. La aplicación intentará volver a conectarse cuando vuelva la red.", connectHostFirst: "Conéctese primero a su computadora.", codexUnavailable: "CodeX Remote no está habilitado en este dispositivo o CodeX no está disponible actualmente.", codexInvalidResponse: "CodeX Remote devolvió datos que la aplicación no pudo reconocer.", codexTurnUnavailable: "Este turno de CodeX pertenece a otra conexión y no se puede detener desde el teléfono.", codexWorkspaceReadOnly: "Los espacios de trabajo de CodeX se pueden agregar aquí, pero el cambio de nombre, la reordenación y la eliminación siguen siendo administrados por CodeX en la computadora.", cursorUnavailable: "Cursor Remote no está habilitado en este dispositivo o Cursor ACP no está disponible actualmente.", piUnavailable: "Pi Remote no está habilitado en este dispositivo o Pi ACP no está disponible actualmente.", antigravityUnavailable: "Antigravity Remote no está habilitado en este dispositivo o Antigravity ACP no está disponible actualmente.", opencodeUnavailable: "OpenCode Remote no está habilitado en este dispositivo o OpenCode ACP no está disponible actualmente.", claudeUnavailable: "Claude Remote no está habilitado en este dispositivo o Claude ACP no está disponible actualmente.", cursorTextOnly: "Actualmente, Cursor Remote solo admite mensajes de texto, no imágenes.", piTextOnly: "Actualmente, Pi Remote solo admite mensajes de texto, no imágenes.", hostMissingKey: "Este dispositivo no tiene clave de seguridad. Verifíquelo y confíe nuevamente.", unexpectedRelayDevice: "La conexión segura no coincide con el dispositivo seleccionado.", secureChannelNotConnected: "La conexión segura no se ha establecido.", secureHandshakeTimedOut: "La conexión segura expiró. Intentar otra vez.", secureHandshakeOrder: "El protocolo de enlace de conexión segura no funcionaba.", secureHandshakeIncomplete: "El protocolo de enlace de conexión segura no se completó.", secureHandshakeFailed: "El protocolo de enlace de conexión segura falló.",
+  },
+  messageActions: {
+    copy: "Copiar respuesta", copied: "Copiado", good: "buena respuesta", bad: "Mala respuesta", branch: "Rama en un nuevo chat",
+    unavailable: "Este Host o mensaje no soporta esta acción", failed: "Acción no completada", feedbackSaved: "Comentarios guardados en el anfitrión",
+    usageUnavailable: "Uso no disponible", timeUnavailable: "Hora no disponible", usage: "Uso real", input: "Aporte", output: "Producción",
+    cacheRead: "lectura de caché", cacheWrite: "escritura en caché", reasoning: "Razonamiento", total: "Total",
+  },
+  chatProcess: {
+    processActivity: {
+      "thinking": {
+        "running": "Analizando la solicitud",
+        "done": "Análisis completado"
+      },
+      "read": {
+        "running": "Leyendo archivos",
+        "done": "leer archivos"
+      },
+      "readImage": {
+        "running": "Leyendo imágenes",
+        "done": "Leer imágenes"
+      },
+      "write": {
+        "running": "Escribir archivos",
+        "done": "Escribió archivos"
+      },
+      "search": {
+        "running": "código de búsqueda",
+        "done": "código buscado"
+      },
+      "edit": {
+        "running": "Editar archivos",
+        "done": "Archivos editados"
+      },
+      "commands": {
+        "running": "Ejecutar comandos",
+        "done": "Comandos ejecutados"
+      },
+      "code": {
+        "running": "Código en ejecución",
+        "done": "código ejecutado"
+      },
+      "webSearch": {
+        "running": "buscando en la web",
+        "done": "Busqué en la web"
+      },
+      "webFetch": {
+        "running": "Visitar páginas web",
+        "done": "Paginas web visitadas"
+      },
+      "subagents": {
+        "running": "Subagentes coordinadores",
+        "done": "Subagentes coordinados"
+      },
+      "plan": {
+        "running": "Actualizando el plan",
+        "done": "Actualizado el plan"
+      },
+      "questions": {
+        "running": "Esperando tu acción",
+        "done": "preguntas hechas"
+      },
+      "tools": {
+        "running": "herramientas de llamada",
+        "done": "herramientas llamadas"
+      }
+    },
+    stopped: "Interrumpido",
+    join: ", ",
+    more: ", etc.",
+    sharedPrefix: "",
+    joinTwo: (first: string, second: string) => `${first} y ${second}`,
+    toolTitles: {
+      bash: "Bash", pwsh: "PowerShell", read: "Leer", read_image: "Leer imagen", write: "Escribir", edit: "Editar",
+      apply_patch: "Editar", grep: "Grep", glob: "Glob", run_code: "Código", web_search: "búsqueda web", web_fetch: "Obtener página web",
+    },
+  },
+  trajectory: {
+    expand: "Ampliar entrada", collapse: "Contraer entrada", clearSearch: "Borrar búsqueda", attachments: (count: number) => `${count} ${count === 1 ? "imagen" : "imágenes"}`,
+    noText: "Sin contenido de texto",
+    open: "Cambiar a trayectoria", close: "Cambiar a conversación", title: "Trayectoria", all: "Todo", system: "Sistema", user: "Usuario",
+    context: "Contexto", assistant: "Asistente", tool: "Herramienta", search: "Buscar mensajes, herramientas o turnos", turn: "Doblar", empty: "No hay trayectoria cargada coincidente",
+    loadedOnly: "Sólo se muestran los mensajes cargados reales. Cargue el historial anterior para ampliar la trayectoria.",
+  },
+  errors: {
+    'session/writer-held': "Esta conversación la mantiene otro cliente. Salga completamente de DeepSeek Harness en ese cliente y vuelva a intentarlo aquí; Es posible que cambiar de conversación o cerrar su ventana no lo libere. Tu mensaje no ha sido enviado.",
+    ACCOUNT_AUTH_REQUIRED: "Inicie sesión antes de conectar este teléfono.", AUTH_INVALID: "Su inicio de sesión ya no es válido. Inicia sesión nuevamente.", AUTH_REQUIRED: "Inicia sesión nuevamente para continuar.", TOKEN_EXPIRED: "Su inicio de sesión expiró. Inicia sesión nuevamente.", TOKEN_REUSED: "Se cerró la sesión de este teléfono para proteger su cuenta. Inicia sesión nuevamente.", DEVICE_NOT_FOUND: "No se pudo encontrar este dispositivo. Actualiza la lista de dispositivos.", DEVICE_REVOKED: "Este teléfono fue eliminado de la cuenta. Inicia sesión nuevamente.", DEVICE_OWNERSHIP_REQUIRED: "La información de inicio de sesión en este teléfono ya no es válida. Inicia sesión nuevamente.", MEMBERSHIP_REQUIRED: "Ya no tienes acceso a este dispositivo. Asegúrese de que ambos dispositivos usen la misma cuenta.", HOST_OFFLINE: "Este dispositivo está fuera de línea. Asegúrese de que DeepSeek Harness y el complemento DSH Remote se estén ejecutando.", DEVICE_OFFLINE: "Este dispositivo está fuera de línea. Asegúrese de que DeepSeek Harness y el complemento DSH Remote se estén ejecutando.", PEER_IDENTITY_MISMATCH: "La identidad segura de este dispositivo cambió. Verifique el dispositivo y luego confíe en él nuevamente.", RATE_LIMITED: "Demasiadas operaciones. Vuelve a intentarlo más tarde.", CONNECTION_FAILED: "No se pudo conectar a este dispositivo. Verifique su red e inténtelo nuevamente.", P2P_FAILED: "La conexión directa falló. Cambiando al relé del servidor.", RELAY_UNAVAILABLE: "La retransmisión del servidor no está disponible temporalmente. Vuelve a intentarlo más tarde.", TURN_UNAVAILABLE: "No se pudo establecer una conexión estable. Probando otro método.", SECURE_CHANNEL_FAILED: "No se pudo establecer una conexión segura. Intentar otra vez.", STREAM_TIMEOUT: "Se agotó el tiempo de conexión de la sesión. Vuelva a intentarlo.", RPC_TIMEOUT: "El dispositivo tardó demasiado en responder. Intentar otra vez.", UNSUPPORTED_VERSION: "Esta versión de DSH Remote es incompatible. Actualiza la aplicación y vuelve a intentarlo.", METHOD_NOT_ALLOWED: "La configuración actual no permite esta operación desde su teléfono.", PERMISSION_NOT_PENDING: "Esta solicitud ya fue manejada o ha caducado.", SESSION_NOT_FOUND: "No se pudo encontrar esta conversación. Regrese a la lista de conversaciones y actualice.", HARNESS_UNAVAILABLE: "DeepSeek Harness no está disponible temporalmente en este dispositivo. Asegúrate de que esté funcionando.", AGENT_BUSY: "DeepSeek Harness está procesando otra operación. Vuelve a intentarlo en breve.", FULL_RESYNC_REQUIRED: "La conversación cambió en tu computadora. Vuelve a abrirlo para continuar.",
+    CODEX_UNAVAILABLE: "CodeX no está disponible en este dispositivo. Asegúrese de que CodeX Remote esté habilitado y que CodeX haya iniciado sesión en la computadora.", CODEX_TURN_OWNED: "Otro dispositivo está operando este giro CodeX. Vuelve a intentarlo más tarde.", CODEX_APPROVAL_NOT_FOUND: "Esta aprobación de CodeX ya se tramitó o expiró.", CODEX_PATH_NOT_ALLOWED: "Este directorio no está presente en el catálogo del espacio de trabajo de CodeX en la computadora.", FEATURE_NOT_SUPPORTED: "La computadora no admite esta función. Actualice el complemento DSH Remote.", INVALID_MESSAGE: "El servidor devolvió datos que la aplicación no pudo reconocer. Vuelve a intentarlo más tarde.", serverUnreachable: "No se pudo conectar al servidor. Verifique la dirección del servidor y su red.", unknown: "La operación no se completó. Intentar otra vez.",
+  },
+} satisfies Messages
+
+export default esES

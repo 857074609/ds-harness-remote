@@ -30976,14 +30976,19 @@ async function previewCall(peer, input3, invoke) {
   let cache = details.get(peer);
   if (!cache) details.set(peer, cache = /* @__PURE__ */ new Map());
   for (const [id5, value] of cache) if (value.until < Date.now()) cache.delete(id5);
+  const pending = /* @__PURE__ */ new Map();
+  let pendingBytes = 0;
   const records = result.records.map((raw) => {
     const record9 = object2(raw), event = object2(record9.event), data2 = object2(event.data);
     if (event.type !== "tool/result" || size(record9) < 4096) return raw;
     const bytes = size(record9);
     if (bytes > MAX_CACHE) return raw;
-    while (cache.size >= 64 || [...cache.values()].reduce((n, v) => n + v.bytes, 0) + bytes > MAX_CACHE) cache.delete(cache.keys().next().value);
+    if (pending.size >= 64 || pendingBytes + bytes > MAX_CACHE) {
+      throw new RpcError("RESPONSE_TOO_LARGE", "History requires chunked transfer.");
+    }
     const id5 = randomUUID2();
-    cache.set(id5, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
+    pending.set(id5, { threadId: params.threadId, record: raw, bytes, until: Date.now() + 10 * 6e4 });
+    pendingBytes += bytes;
     const message = object2(data2.message);
     return { ...record9, view: void 0, event: { ...event, data: {
       id: data2.id,
@@ -31001,6 +31006,13 @@ async function previewCall(peer, input3, invoke) {
   });
   const preview = { ...result, records };
   if (size(preview) > 2 * 1024 * 1024) throw new RpcError("RESPONSE_TOO_LARGE", "History requires chunked transfer.");
+  let cachedBytes = [...cache.values()].reduce((n, value) => n + value.bytes, 0);
+  while (cache.size + pending.size > 64 || cachedBytes + pendingBytes > MAX_CACHE) {
+    const oldest = cache.keys().next().value;
+    cachedBytes -= cache.get(oldest).bytes;
+    cache.delete(oldest);
+  }
+  for (const [id5, detail] of pending) cache.set(id5, detail);
   return preview;
 }
 

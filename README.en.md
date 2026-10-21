@@ -166,7 +166,7 @@ connection status shown in the header.
 
 ### Android
 
-Use text or image prompts, switch models, and access supported workspace files and terminals. See the [Android guide](apps/android/README.md) for details.
+Use text or image prompts, switch models, and access supported workspace files and terminals. The interface follows the system language and supports English, Simplified and Traditional Chinese, Japanese, Spanish, German, and French. In language settings, tap “More ...” to show all languages. See the [Android guide](apps/android/README.md) for details.
 
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">

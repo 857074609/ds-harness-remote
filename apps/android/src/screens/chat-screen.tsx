@@ -530,9 +530,14 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     setAwayFromLatest(false)
     setNewContent(false)
     restoringPosition.current = false
+    if (session !== undefined) {
+      updateBrowseEntry(memoryScope, session.sessionId, {
+        position: { offset: 0, atBottom: true }, seenAt: session.updatedAt,
+      })
+    }
     listRef.current?.scrollToEnd({ animated: false })
     scheduleScrollToBottom()
-  }, [cancelPendingScroll, scheduleScrollToBottom])
+  }, [cancelPendingScroll, scheduleScrollToBottom, memoryScope, session?.sessionId, session?.updatedAt])
 
   // Restore reading position before the new list can emit scroll events.
   useLayoutEffect(() => {

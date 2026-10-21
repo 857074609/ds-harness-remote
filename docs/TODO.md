@@ -266,7 +266,7 @@ capability 探测，以及 Host → Workspace → Session 层级导航、Prompt�
 固定、Adaptive transport + Noise secure channel、`harness.api.*` 或 `harness.remote.*`
 tunnel 与 mux/Gateway frame 聊天。功能已对标 Web 端 Remote 控制台：新建/继续/归档会话、历史分页、
 模型目录与切换、相册图片 Prompt（Host limits 预检 + transfer 分块）、Workspace 管理（创建+只读目录浏览/重命名/删除/排序）、连接详情面板与
-传输偏好（Auto/TURN/Relay），以及跟随系统/英文/简体中文语言设置。CodeX 侧直接消费独立
+传输偏好（Auto/TURN/Relay），以及跟随系统/英文/简体中文/日语/繁体中文/西语/德语/法语语言设置。CodeX 侧直接消费独立
 `codex.app.*`，使用 `project/list` Workspace 或精确的 `thread/list.cwd` 后备 Workspace、分页 History/独立 stream、模型/权限、图片 Prompt、
 interrupt 与单次审批，不恢复旧 Android RPC。剩余工作：
 

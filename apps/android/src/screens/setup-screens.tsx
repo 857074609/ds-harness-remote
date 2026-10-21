@@ -338,6 +338,8 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   const setPreference = useAppStore(state => state.setTransportPreference)
   const languagePreference = useAppStore(state => state.languagePreference)
   const setLanguagePreference = useAppStore(state => state.setLanguagePreference)
+  const [allLanguagesVisible, setAllLanguagesVisible] = useState(false)
+  const showAllLanguages = allLanguagesVisible || !['system', 'zh-CN', 'en-US'].includes(languagePreference)
   const themePreference = useAppStore(state => state.themePreference)
   const setThemePreference = useAppStore(state => state.setThemePreference)
   const compactHistory = useAppStore(state => state.compactHistory)
@@ -434,7 +436,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
             <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
             <View style={styles.preferenceList}>
-              {languageOptions().map(option => {
+              {languageOptions().filter((_, index) => showAllLanguages || index < 3).map(option => {
                 const chosen = option.value === languagePreference
                 return (
                   <Pressable
@@ -442,13 +444,24 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                     accessibilityRole="button"
                     accessibilityState={{ selected: chosen }}
                     onPress={() => void setLanguagePreference(option.value)}
-                    style={[styles.preferenceOption, chosen && styles.preferenceOptionChosen]}
+                    style={[styles.preferenceOption, styles.preferenceAction, chosen && styles.preferenceOptionChosen]}
                   >
                     <Text style={[styles.preferenceName, styles.languageName]}>{option.name}</Text>
                     {chosen && <Check size={17} color={colors.primary} />}
                   </Pressable>
                 )
               })}
+              {!showAllLanguages && (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={zhCN.settings.languageShowAll}
+                  accessibilityState={{ expanded: false }}
+                  onPress={() => setAllLanguagesVisible(true)}
+                  style={[styles.preferenceOption, styles.preferenceAction]}
+                >
+                  <Text style={styles.preferenceName}>More ...</Text>
+                </Pressable>
+              )}
             </View>
 
             <Text style={styles.groupLabel}>{zhCN.settings.appearance}</Text>
@@ -861,6 +874,11 @@ function languageOptions(): Array<{ value: LanguagePreference; name: string }> {
     { value: 'system', name: zhCN.settings.languageSystem },
     { value: 'zh-CN', name: zhCN.settings.languageChinese },
     { value: 'en-US', name: zhCN.settings.languageEnglish },
+    { value: 'ja-JP', name: '日本語' },
+    { value: 'zh-TW', name: '繁體中文' },
+    { value: 'es-ES', name: 'Español' },
+    { value: 'de-DE', name: 'Deutsch' },
+    { value: 'fr-FR', name: 'Français' },
   ]
 }
 

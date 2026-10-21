@@ -15,7 +15,6 @@ export function browseStatus(session: RemoteSession, lifecycle?: { running: bool
 export function backendGroups(input: {
   backend: AgentBackend; workspaces: WorkspaceView[]; sessions: RemoteSession[];
   archived: string[]; recent: string[]; selected?: RemoteSession;
-  lifecycles: Record<string, { running: boolean }>;
 }) {
   const archived = new Set(input.archived)
   const known = input.selected !== undefined && !input.sessions.some(s => s.sessionId === input.selected!.sessionId)
@@ -30,12 +29,10 @@ export function backendGroups(input: {
   const assigned = new Set(workspaces.flatMap(w => w.sessionIds))
   const unassigned = sessions.filter(s => !assigned.has(s.sessionId)).sort(order)
   if (unassigned.length) groups.push({key: `unassigned:${input.backend}`, title: strings.comfort.other, backend: input.backend, sessions: unassigned})
-  const active = sessions.filter(s => browseStatus(s, input.lifecycles[s.sessionId]) === 'running').sort(order)
   const recentOrder = new Map(input.recent.map((id, index) => [id, index]))
-  const recent = sessions.filter(s => recentOrder.has(s.sessionId) && browseStatus(s, input.lifecycles[s.sessionId]) !== 'running')
+  const recent = sessions.filter(s => recentOrder.has(s.sessionId))
     .sort((a, b) => recentOrder.get(b.sessionId)! - recentOrder.get(a.sessionId)!).slice(0, 5)
   return [
-    {key: `active:${input.backend}`, title: strings.comfort.running, backend: input.backend, sessions: active},
     ...(recent.length ? [{key: `recent:${input.backend}`, title: strings.comfort.recent, backend: input.backend, sessions: recent}] : []),
     ...groups,
   ]

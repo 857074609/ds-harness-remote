@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, TextInput, ScrollView, SectionList, Modal, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Activity, ArrowLeft, Check, ChevronDown, ChevronRight, Code2, Folder, FolderOpen, MessageSquare, Sparkles, RefreshCw, Star, Search } from 'lucide-react-native'
+import { ArrowLeft, Check, ChevronDown, ChevronRight, Code2, Folder, FolderOpen, MessageSquare, Sparkles, RefreshCw, Star, Search } from 'lucide-react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppStore } from '../state/store'
 import type { AgentBackend, RemoteSession } from '../types'
@@ -96,15 +96,15 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
   const styles = useThemedStyles(createStyles)
   const insets = useSafeAreaInsets()
   const groups = useMemo(() => backendGroups({ backend, workspaces, sessions,
-    archived: archivedIds, recent: currentWorkSessionIds, selected, lifecycles }),
-    [backend, workspaces, sessions, archivedIds, currentWorkSessionIds, selected, lifecycles])
+    archived: archivedIds, recent: currentWorkSessionIds, selected }),
+    [backend, workspaces, sessions, archivedIds, currentWorkSessionIds, selected])
   const stars = sessions.filter(s => (s.backend ?? 'harness') === backend && !archivedIds.includes(s.sessionId) && entries[browseKey(memoryScope, s.sessionId)]?.starred)
   const visibleGroups = [...(stars.length ? [{key: `starred:${backend}`, title: strings.comfort.starred, backend, sessions: stars}] : []), ...groups]
   const search = query.trim().toLocaleLowerCase()
   const sections = visibleGroups.map(group => ({...group, sessions: !search || group.title.toLocaleLowerCase().includes(search) ? group.sessions
     : group.sessions.filter(s => (resolveSessionDisplayTitle(s) ?? '').toLocaleLowerCase().includes(search))})).filter(g => !search || g.sessions.length > 0).map(group => {
     const isWorkspace = group.key.startsWith('workspace:')
-    const expanded = search ? true : expandedGroups[group.key] ?? (isWorkspace || group.key.startsWith('starred:') || group.key.startsWith('active:') || group.key.startsWith('recent:') || group.sessions.some(session => session.sessionId === selected?.sessionId))
+    const expanded = search ? true : expandedGroups[group.key] ?? (group.key.startsWith('starred:') || group.key.startsWith('recent:'))
     const visibleSessions = isWorkspace && !search ? group.sessions.slice(0, visibleSessionCounts[group.key] ?? SESSION_PAGE_SIZE) : group.sessions
     return { ...group, expanded, data: expanded ? visibleSessions : [] }
   })
@@ -125,7 +125,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabs} contentContainerStyle={styles.tabContent} accessibilityRole="tablist">
           {backends.map(value => <Pressable key={value} accessibilityRole="tab"
             accessibilityState={{selected: backend === value}} onPress={() => selectBackend(value)}
-            style={[styles.tab, backend === value && styles.activeRow]}>
+            style={({ pressed }) => [styles.tab, backend === value && styles.activeRow, pressed && styles.pressedRow]}>
             <Text style={[styles.sessionTitle, backend === value && styles.activeTitle]}>{value === 'harness' ? 'DSH' : value === 'codex' ? 'Codex' : value}</Text>
           </Pressable>)}
         </ScrollView>
@@ -145,9 +145,6 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
           onRefresh={() => void refresh()}
           renderSectionFooter={({ section }) => {
             if (!section.expanded) return null
-            if (section.key.startsWith('active:') && section.sessions.length === 0) {
-              return <Text style={styles.emptyRunning}>{strings.comfort.noRunning}</Text>
-            }
             if (section.data.length === section.sessions.length) return null
             return <Pressable
               accessibilityRole="button"
@@ -168,9 +165,7 @@ export function HostSessionsDrawer({ onBack, onClose, onSelect, inline = false, 
             style={({ pressed }) => [styles.group, !section.expanded && styles.collapsedGroup, pressed && styles.pressedRow]}
           >
             <View style={styles.workspaceIcon}>
-              {section.key.startsWith('active:')
-                ? <Activity size={18} color={colors.muted} />
-                : section.backend === 'codex'
+              {section.backend === 'codex'
                 ? <Code2 size={18} color={colors.muted} />
                 : section.backend !== 'harness'
                   ? <Sparkles size={18} color={colors.muted} />
@@ -236,9 +231,9 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   inlineDrawer: { width: '100%', maxWidth: '100%', borderRightWidth: StyleSheet.hairlineWidth, borderRightColor: colors.separator },
   header: { flexDirection: 'row', alignItems: 'center', padding: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   title: { ...type.heading, color: colors.ink, flex: 1, minWidth: 0, textAlign: 'center', paddingHorizontal: spacing.xs },
-  tabs: { flexGrow: 0, maxHeight: 48 },
-  tabContent: { paddingHorizontal: spacing.sm, gap: spacing.sm },
-  tab: { minHeight: 44, minWidth: 92, padding: spacing.sm, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  tabs: { flexGrow: 0, flexShrink: 0 },
+  tabContent: { paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, gap: spacing.sm, alignItems: 'center' },
+  tab: { minHeight: 48, minWidth: 92, padding: spacing.sm, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   list: { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm },
   loading: { paddingVertical: spacing.xl },
   group: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xs, paddingHorizontal: spacing.xs, minHeight: 48, marginTop: spacing.xs, borderRadius: radius.sm },
@@ -257,6 +252,5 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   sessionTitle: { ...type.small, color: colors.ink },
   activeTitle: { fontWeight: '600' },
   runningStatus: { ...type.caption, color: colors.primary },
-  emptyRunning: { ...type.caption, color: colors.muted, paddingVertical: spacing.sm, paddingLeft: spacing.lg + spacing.xs + 20 + spacing.xs, paddingRight: spacing.xs },
   error: { ...type.small, color: colors.danger, padding: spacing.sm },
 })

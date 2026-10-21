@@ -230,7 +230,7 @@ describe('fast browsing without changing writer ownership', () => {
 })
 
 describe('backend separated conversation drawer', () => {
-  it('isolates same-named workspaces, unassigned sessions and running/recent lists', () => {
+  it('isolates same-named workspaces, unassigned sessions and recent lists', () => {
     const c = session('c'), active = { ...session('active'), running: true }, unknown = { ...session('unknown'), running: true, projections: {values: {remoteStatusKnown: false}} }
     const h = session('h', false), loose = session('loose', false), archived = session('archived')
     const input = { workspaces: [
@@ -238,7 +238,6 @@ describe('backend separated conversation drawer', () => {
       { workspaceId: 'same', title: 'Same name', backend: 'harness' as const, path: '/same', sessionIds: [h.sessionId], createdAt: '', updatedAt: '' },
     ], sessions: [c, active, unknown, h, loose, archived], archived: [archived.sessionId], recent: [h.sessionId, c.sessionId, unknown.sessionId], lifecycles: {} }
     const codex = backendGroups({ ...input, backend: 'codex' })
-    expect(codex[0]?.sessions.map(s => s.sessionId)).toEqual([active.sessionId])
     expect(codex.flatMap(g => g.sessions).every(s => s.backend === 'codex')).toBe(true)
     expect(codex.flatMap(g => g.sessions)).not.toContain(archived)
     expect(codex.find(g => g.key === 'recent:codex')?.sessions.map(s => s.sessionId)).toEqual([unknown.sessionId, c.sessionId])

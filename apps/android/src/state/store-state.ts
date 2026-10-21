@@ -89,6 +89,7 @@ export interface AppState {
   transportPreference: TransportPreference
   languagePreference: LanguagePreference
   language: AppLanguage
+  statusBarVisible: boolean
   themePreference: ThemePreference
   defaultPermissionPreset: DefaultPermissionPreset
   pendingOAuthBaseUrl?: string
@@ -158,6 +159,7 @@ export interface AppState {
   hostListDirectory(path?: string): Promise<import('../types').DirectoryListing | undefined>
   setTransportPreference(preference: TransportPreference): Promise<void>
   setLanguagePreference(preference: LanguagePreference): Promise<void>
+  setStatusBarVisible(visible: boolean): Promise<void>
   setThemePreference(preference: ThemePreference): Promise<void>
   setDefaultPermissionPreset(preset: DefaultPermissionPreset): Promise<void>
   syncSystemLocales(localeTags: readonly string[]): void

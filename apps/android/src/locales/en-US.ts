@@ -78,6 +78,7 @@ const enUS = {
   settings: {
     title: 'Settings', thisPhone: 'This phone', androidDevice: 'Android device', connection: 'Connection', server: 'Server', account: 'Account', loginMethod: 'Sign-in method', protocol: 'Protocol', notConfigured: 'Not configured', notSignedIn: 'Not signed in',
     language: 'Language', languageSystem: 'System default', languageChinese: '简体中文', languageEnglish: 'English', languageNote: 'With System default, the app follows the Android language setting automatically.',
+    statusBar: 'Show status bar', statusBarNote: 'Show the time, battery and network status at the top of the screen. Turn off to hide the system status bar.', statusBarSaveFailed: 'Could not save status bar setting', statusBarSaveFailedBody: 'Could not write to local storage. Please try again.',
     theme: 'Dark mode', themeLight: 'Light', themeDark: 'Dark', themeSystem: 'System',
     chat: 'Chat',
     defaultPermission: 'Default permissions for new chats', defaultPermissionHost: 'Use default permissions', defaultPermissionHostDescription: 'DeepSeek Harness follows the computer settings; CodeX uses workspace write.', defaultPermissionNote: 'Applied to DeepSeek Harness and CodeX chats created on this phone. Existing chats are unchanged. Does not apply to Cursor or AGY.',

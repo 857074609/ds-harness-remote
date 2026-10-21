@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Add an Android “Show status bar” switch in Settings, enabled by default. Changes apply after saving and persist across restarts and sign-out; clearing local data restores visibility. Android type checking passes; native device layout remains unverified. No presentation-only tests added.
+- Android 设置新增「显示状态栏」开关，默认开启，保存后生效，重启和退出账号保留选择，清除本地数据恢复显示。Android 类型检查通过；原生真机布局尚未验证，未新增纯展示测试。
+
 - Fix Android fork history routing: only sessions explicitly marked `origin: 'subagent'` use their durable parent address. Fork ancestry keeps normal session history, pagination and timeout recovery; subagent navigation and fallback titles use the same distinction. Android type checks, 154 tests and Hermes export pass; APK/device acceptance remains pending.
 - 修复 Android 将 fork 会话误当 subagent 读取历史的问题：仅 `origin: 'subagent'` 使用父会话地址，fork 保持普通会话的历史、分页和超时恢复；子会话导航与默认标题同步区分。Android 类型检查、154 项测试与 Hermes 导出通过；APK/真机验收待完成。
 

@@ -27,6 +27,7 @@ import {
   loadRecentWorkspaces,
   loadServerConfig,
   loadThemePreference,
+  loadStatusBarVisible,
   loadTransportPreference,
   loadTrustedHosts,
   saveDefaultPermissionPreset,
@@ -35,6 +36,7 @@ import {
   saveRecentWorkspaces,
   saveServerConfig,
   saveThemePreference,
+  saveStatusBarVisible,
   trustHost,
 } from '../services/storage'
 import type { ServerConfig, WorkspaceShortcut } from '../types'
@@ -97,12 +99,13 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async bootstrap() {
       set({ bootPhase: 'loading', error: undefined, pendingAutoConnectDeviceId: undefined, reauthRequired: false })
       try {
-        const [config, identity, transportPreference, languagePreference, themePreference, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset] = await Promise.all([
+        const [config, identity, transportPreference, languagePreference, themePreference, statusBarVisible, favoriteWorkspaces, recentWorkspaces, lastConnectedDeviceId, defaultPermissionPreset] = await Promise.all([
           loadServerConfig(),
           loadOrCreateIdentity(),
           loadTransportPreference(),
           loadLanguagePreference(),
           loadThemePreference(),
+          loadStatusBarVisible(),
           loadFavoriteWorkspaces(),
           loadRecentWorkspaces(),
           loadLastConnectedDeviceId(),
@@ -117,6 +120,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
           languagePreference,
           language,
           themePreference,
+          statusBarVisible,
           defaultPermissionPreset,
           favoriteWorkspaces,
           recentWorkspaces,
@@ -431,6 +435,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         languagePreference: 'system',
         language,
         themePreference: 'system',
+        statusBarVisible: true,
         defaultPermissionPreset: 'default',
         lastConnectedDeviceId: undefined,
         pendingAutoConnectDeviceId: undefined,
@@ -440,7 +445,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     },
 
     async signOut() {
-      const { config, identity, languagePreference, themePreference, defaultPermissionPreset } = get()
+      const { config, identity, languagePreference, themePreference, statusBarVisible, defaultPermissionPreset } = get()
       await get().disconnect()
       if (config !== undefined && identity !== undefined) {
         try {
@@ -453,6 +458,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       await clearLocalData()
       await saveLanguagePreference(languagePreference)
       await saveThemePreference(themePreference)
+      await saveStatusBarVisible(statusBarVisible)
       await saveDefaultPermissionPreset(defaultPermissionPreset)
       const nextIdentity = await loadOrCreateIdentity()
       set({

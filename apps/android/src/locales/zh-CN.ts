@@ -76,6 +76,7 @@ const zhCN = {
   settings: {
     title: '设置', thisPhone: '此手机', androidDevice: 'Android 设备', connection: '连接', server: '服务器', account: '账号', loginMethod: '登录方式', protocol: '协议', notConfigured: '未配置', notSignedIn: '未登录',
     language: '语言', languageSystem: '跟随系统', languageChinese: '简体中文', languageEnglish: 'English', languageNote: '选择“跟随系统”后，App 会随 Android 的语言设置自动切换。',
+    statusBar: '显示状态栏', statusBarNote: '显示屏幕顶部的时间、电量和网络状态。关闭后隐藏系统状态栏。', statusBarSaveFailed: '无法保存状态栏设置', statusBarSaveFailedBody: '本地存储写入失败，请重试。',
     theme: '深色模式', themeLight: '浅色', themeDark: '深色', themeSystem: '跟随系统',
     chat: '对话',
     defaultPermission: '新对话默认权限', defaultPermissionHost: '使用默认权限', defaultPermissionHostDescription: 'DeepSeek Harness 沿用电脑端设置；CodeX 使用工作区内修改。', defaultPermissionNote: '自动应用于此手机新建的 DeepSeek Harness 和 CodeX 对话；已有对话不变。Cursor 和 AGY 不适用。',

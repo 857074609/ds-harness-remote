@@ -41197,7 +41197,7 @@ var HarnessRemoteBridge = class {
     try {
       const nativePayload = normalizeWorkspaceRequestPayload(params.endpoint, params.payload, this.harnessVersion);
       const nativeResult = params.endpoint === "commands/execute" ? await dispatchCommandForHost(this.gateway, params.payload, signal, this.harnessVersion) : this.terminalCarrier !== void 0 && (params.endpoint === "terminal/write" || params.endpoint === "terminal/resize") ? await this.terminalCarrier.call(params.endpoint, nativePayload, signal) : await this.gateway.dispatch(params.endpoint, nativePayload, signal);
-      const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : nativeResult;
+      const result = params.endpoint === "directoryPicker/list" && needsDirectoryFallback(nativeResult) ? await this.directoryList(params.payload, signal) : filterRemotePluginInventory(params.endpoint, nativeResult);
       this.logger?.debug("harness remote call ok", {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt)
@@ -41537,6 +41537,21 @@ function needsDirectoryFallback(result) {
   const code = result.error.code.toLocaleLowerCase();
   const message = result.error.message.toLocaleLowerCase();
   return code.includes("capability") || code === "directory-picker/unavailable" || code === "directory-picker-unavailable" || message.includes("browse capability") || message.includes("browser capability") || message.includes("brower capability") || message.includes("directory-picker-unavailable");
+}
+function filterRemotePluginInventory(endpoint, result) {
+  if (!result.ok) return result;
+  const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord21(entry) || !isRemote(entry.moduleName));
+  if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
+    return { ...result, value: filterEntries(result.value) };
+  }
+  if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
+    return { ...result, value: result.value.filter((bundle) => !isRecord21(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord21(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+  }
+  if (endpoint === "pluginInventory/list" && isRecord21(result.value) && Array.isArray(result.value.entries)) {
+    return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
+  }
+  return result;
 }
 function requestArgs(payload) {
   const root = record8(payload);

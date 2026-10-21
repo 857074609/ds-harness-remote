@@ -262,7 +262,7 @@ export class HarnessRemoteBridge {
           : await this.gateway.dispatch(params.endpoint, nativePayload, signal)
       const result = params.endpoint === 'directoryPicker/list' && needsDirectoryFallback(nativeResult)
         ? await this.directoryList(params.payload, signal)
-        : nativeResult
+        : filterRemotePluginInventory(params.endpoint, nativeResult)
       this.logger?.debug('harness remote call ok', {
         endpoint: params.endpoint,
         durationMs: Math.round(performance.now() - startedAt),
@@ -666,6 +666,28 @@ function needsDirectoryFallback(result: TypertRpcResult): boolean {
     || message.includes('browser capability')
     || message.includes('brower capability')
     || message.includes('directory-picker-unavailable')
+}
+
+/** Hide this transport's own controls only in the remote inventory projection. */
+function filterRemotePluginInventory(endpoint: string, result: TypertRpcResult): TypertRpcResult {
+  if (!result.ok) return result
+  const isRemote = (value: unknown): boolean => typeof value === 'string'
+    && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value)
+  const filterEntries = (entries: unknown[]): unknown[] => entries.filter(entry =>
+    !isRecord(entry) || !isRemote(entry.moduleName))
+  if (endpoint === 'pluginManager/listPlugins' && Array.isArray(result.value)) {
+    return { ...result, value: filterEntries(result.value) }
+  }
+  if (endpoint === 'pluginManager/listBundles' && Array.isArray(result.value)) {
+    return { ...result, value: result.value
+      .filter(bundle => !isRecord(bundle) || !isRemote(bundle.name))
+      .map(bundle => isRecord(bundle) && Array.isArray(bundle.rows)
+        ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) }
+  }
+  if (endpoint === 'pluginInventory/list' && isRecord(result.value) && Array.isArray(result.value.entries)) {
+    return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } }
+  }
+  return result
 }
 
 function requestArgs(payload: unknown): Record<string, unknown> {

@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Allow DS Bot 0.2.0 interactive card replies (`view-reply`) over Remote; the Host's native DS Bot handler validates the pending card and answer. Cross-device acceptance remains pending.
+- 放行 DS Bot 0.2.0 交互卡片的远程回复（`view-reply`），由 Host 原生 DS Bot handler 校验待答卡片及答案；跨设备验收待完成。
+
 - Add an Android “Show status bar” switch in Settings, enabled by default. Changes apply after saving and persist across restarts and sign-out; clearing local data restores visibility. Android type checking passes; native device layout remains unverified. No presentation-only tests added.
 - Android 设置新增「显示状态栏」开关，默认开启，保存后生效，重启和退出账号保留选择，清除本地数据恢复显示。Android 类型检查通过；原生真机布局尚未验证，未新增纯展示测试。
 

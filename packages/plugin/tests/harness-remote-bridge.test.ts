@@ -40,9 +40,28 @@ describe('HarnessRemoteBridge', () => {
       await expect(bridge.call({ endpoint, payload })).resolves.toMatchObject({ ok: true })
       expect(dispatch).toHaveBeenLastCalledWith(endpoint, payload, expect.any(AbortSignal))
     }
-    for (const endpoint of ['schedule/create', 'schedule/delete', 'schedule/arbitrary']) {
+    for (const endpoint of ['schedule/create', 'schedule/arbitrary', 'schedule/updateAll']) {
       await expect(bridge.call({ endpoint, payload: { args: {} } })).rejects.toMatchObject({ code: 'METHOD_NOT_ALLOWED' })
     }
+  })
+
+  it('preserves official schedule management requests, conflicts and missing-task results', async () => {
+    await runScenarios([
+      { endpoint: 'schedule/history', request: { sessionId: 'session-1', id: 'task-1', limit: 20, before: 'message-1' }, value: { id: 'task-1', records: [], earlierRecordsUnavailable: false, earlierRecordsPruned: false, retention: { days: 30, records: 100 } } },
+      { endpoint: 'schedule/update', request: { sessionId: 'session-1', id: 'task-1', expected: { id: 'task-1', kind: 'at', title: 'Old', prompt: 'Check build', scheduledAt: '2026-10-23T00:00:00.000Z' }, title: 'New' }, value: { id: 'task-1', updated: false, code: 'schedule_conflict' } },
+      { endpoint: 'schedule/delete', request: { sessionId: 'session-1', id: 'task-1' }, value: { id: 'task-1', deleted: false, code: 'schedule_not_found' } },
+    ].map(({ endpoint, request, value }) => ({
+      name: endpoint,
+      run: async () => {
+        const result = { ok: true as const, value }
+        const dispatch = vi.fn(async () => result)
+        const bridge = new HarnessRemoteBridge(gateway({ dispatch }), vi.fn(async () => undefined))
+        const payload = { args: { request } }
+        await expect(bridge.call({ endpoint, payload })).resolves.toEqual(result)
+        expect(dispatch).toHaveBeenCalledTimes(1)
+        expect(dispatch).toHaveBeenCalledWith(endpoint, payload, expect.any(AbortSignal))
+      },
+    })))
   })
 
   it('forwards the background-job roster and observation streams', async () => {

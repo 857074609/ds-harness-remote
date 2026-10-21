@@ -1089,8 +1089,11 @@ picker 时，可以退回 Plugin Host 本地只读目录枚举；`session/canOpe
 `dynamicCordisRunner/*` 固定调用本地 Gateway，不得因选中远端 Host 而把本机 UI/runtime
 装载请求转发到 Host。
 
-原生日程 UI 的只读 `schedule/list` 与 `schedule/catalog` 使用相同官方 carrier；不开放
-`schedule/create`、`schedule/delete` 或按 namespace 放开其他方法。Client 的本机 HTTP
+原生自动化任务 UI 的 `schedule/list`、`schedule/catalog`、`schedule/history`、
+`schedule/update` 与 `schedule/delete` 使用相同官方 carrier，支持列表、投递历史、修改与删除。
+任务绑定、输入校验、更新冲突和持久化均由 Host 官方 Schedule service 处理，Remote 原样返回
+业务结果；`schedule/changed` 复用官方 `$events` 通道。创建任务仍通过会话中的官方
+`schedule_create` 工具，不开放不存在的 Remote `schedule/create` 或按 namespace 放开其他方法。Client 的本机 HTTP
 dispatcher 将远程 RPC 拒绝与传输错误封装为官方 `{ ok: false, error }`，保留 request 的
 `rpcId`，不得回落到本地服务或把预期拒绝变成裸 HTTP 500。
 

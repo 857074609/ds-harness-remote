@@ -61,6 +61,8 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 
 ## 主要特性
 
+Remote 支持 Desktop/浏览器原生「自动化任务」界面的任务列表、投递历史、时间/名称/指令修改和删除；新建仍通过官方 `schedule_create` Agent 工具完成。任务保存在 Host 并由 Host 执行，需更新 Host Remote 插件以启用管理接口。
+
 - 从另一台设备（Web、PC、移动端）远程到本地Harness实例：DSH 优先，CodeX、Cursor、Antigravity 一样可用。
 - DeepSeek Harness 原生界面，不另外维护一套桌面会话 UI。
 - 支持新建工作区、模型配置、对话模型切换，远端如本地一样丝滑。

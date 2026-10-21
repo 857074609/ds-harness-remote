@@ -621,3 +621,13 @@ Harness 历史/首帧 snapshot、CodeX 与 ACP 历史（含 transfer）缩减工
 
 本次全仓 check、779 tests（Plugin 403、Android 184）、共享包/Plugin build、DSH bundle 校验、
 Android production Hermes export 与 diff 检查通过；保留既有 Metro noble/hashes 警告说明。
+
+
+## Native automation task Remote support (2026-10-22)
+
+内置自动化任务沿用官方 Typert carrier，固定放行 schedule/list、catalog、history、update、delete。
+更新保留官方 expected record 冲突校验与 session/task 绑定，Remote 不实现第二套调度器或持久化。
+schedule/changed 复用官方 $events；创建由会话中的 schedule_create 工具执行，不开放不存在的
+schedule/create Remote 端点。只覆盖原生 Desktop/浏览器界面，不新增 Android 管理页。
+本次共享包/Plugin build、Plugin check、三个 carrier/bridge 测试文件 39 tests、DSH bundle
+校验和 git diff --check 通过；真实跨设备 UI 和多 Client 变更刷新验收仍待完成，未发布。

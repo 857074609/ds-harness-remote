@@ -59,6 +59,8 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 
 ## Features
 
+Harness automation tasks are available through the native Desktop/browser UI over Remote: view tasks and delivery history, edit timing/name/instructions, and delete tasks. Create tasks through the official `schedule_create` Agent tool. Tasks remain stored and executed on the Host; update the Host Remote plugin to enable management.
+
 - Access your local Harness instance remotely from the web, a PC, or a mobile device: DSH first, with Codex, Cursor, and Antigravity support too.
 - Use the native DeepSeek Harness interface without a separate desktop conversation UI.
 - Create workspaces, configure models, and switch conversation models with the same smooth workflow as local use.

@@ -2,12 +2,12 @@ import { strings } from '../locales/i18n'
 import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
-import type { ChatItem, PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
+import type { PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
 
 export type ReadingPosition = { key?: string; offset: number; atBottom: boolean }
 export type BrowseEntry = {
   draft?: string; images?: PromptImage[]; position?: ReadingPosition; starred?: boolean
-  seenAt?: number; visitedAt?: number; session?: RemoteSession; messages?: ChatItem[]
+  seenAt?: number; visitedAt?: number; session?: RemoteSession
 }
 type Snapshot = {
   entries: Record<string, BrowseEntry>
@@ -30,19 +30,6 @@ const file = (fs: typeof import('expo-file-system/legacy')) => `${fs.documentDir
 const keyName = 'dshremote.browse-key.v1'
 const aad = 'dsh-remote-private-browse-v1'
 
-/** Preview only: never persist approval handles, permissions, pending sends or image bytes. */
-export function previewMessages(items: ChatItem[]): ChatItem[] {
-  let bytes = 0
-  return items.filter(item => item.kind === 'message' && item.role !== 'system' && item.sendState === undefined
-    && item.queuedAdopted !== true && !item.id.startsWith('local:')).slice(-16).reverse().flatMap(item => {
-    if (item.kind !== 'message') return []
-    const text = item.text.length > 32_000 ? `${item.text.slice(0, 32_000)}\n\n${strings.comfort.cachePreview}` : item.text
-    bytes += text.length * 3
-    if (bytes > 128 * 1024) return []
-    return [{ kind: 'message' as const, id: item.id, sessionId: item.sessionId, createdAt: item.createdAt,
-      role: item.role, text, nativeSeq: item.nativeSeq, nativeTime: item.nativeTime }]
-  }).reverse()
-}
 function safeSession(session: RemoteSession): RemoteSession {
   return { sessionId: session.sessionId, nativeId: session.nativeId, backend: session.backend,
     title: session.title, cwd: session.cwd, updatedAt: session.updatedAt, blank: session.blank,
@@ -62,14 +49,15 @@ function restoreCatalog(catalog: Snapshot['catalogs'][string]): Snapshot['catalo
     ...workspace, sessionIds: [...new Set(workspace.sessionIds)],
   }))}
 }
+/** Persist browsing preferences only, never message bodies or image bytes. */
+function savedEntry(value: BrowseEntry): BrowseEntry {
+  return { draft: value.draft, position: value.position, starred: value.starred,
+    seenAt: value.seenAt, visitedAt: value.visitedAt,
+    session: value.session === undefined ? undefined : safeSession(value.session) }
+}
 function snapshot(): Snapshot {
   const state = useBrowseMemory.getState()
-  const hot = new Set(Object.entries(state.entries).sort((a, b) => (b[1].visitedAt ?? 0) - (a[1].visitedAt ?? 0)).slice(0, 12).map(([id]) => id))
-  const entries = Object.fromEntries(Object.entries(state.entries).map(([id, value]) => [id, {
-    draft: value.draft, position: value.position, starred: value.starred, seenAt: value.seenAt, visitedAt: value.visitedAt,
-    session: value.session === undefined ? undefined : safeSession(value.session),
-    messages: hot.has(id) ? previewMessages(value.messages ?? []) : undefined,
-  }]))
+  const entries = Object.fromEntries(Object.entries(state.entries).map(([id, value]) => [id, savedEntry(value)]))
   return {entries, catalogs: state.catalogs, resume: state.resume, notifications: state.notifications, last: state.last}
 }
 export function flushBrowseMemory(): Promise<void> {
@@ -106,7 +94,10 @@ export async function hydrateBrowseMemory(): Promise<void> {
       const encrypted = JSON.parse(await FileSystem.readAsStringAsync(file(FileSystem)))
       const data = JSON.parse(new TextDecoder().decode(decryptFrame(key, encrypted, aad))) as Snapshot
       const catalogs = Object.fromEntries(Object.entries(data.catalogs).map(([scope, catalog]) => [scope, restoreCatalog(catalog)]))
-      useBrowseMemory.setState({...empty(), ...data, catalogs, ready: true})
+      const entries = Object.fromEntries(Object.entries(data.entries).map(([id, value]) => [id, savedEntry(value)]))
+      useBrowseMemory.setState({...empty(), ...data, entries, catalogs, ready: true})
+      // Remove legacy text previews from disk without losing drafts or preferences.
+      if (Object.values(data.entries).some(value => Object.hasOwn(value, 'messages'))) await flushBrowseMemory()
     } else useBrowseMemory.setState({ready: true})
   } catch {useBrowseMemory.setState({ready: true, error: strings.comfort.cacheRestoreFailed})}
 }
@@ -124,12 +115,10 @@ export function saveBrowseCatalog(scope: string, workspaces: WorkspaceView[], se
 export function browsePreference(patch: Partial<Pick<Snapshot, 'resume' | 'notifications' | 'last'>>): void {
   useBrowseMemory.setState(patch); schedule()
 }
-export async function clearBrowseMemory(includeDrafts = false): Promise<void> {
+export async function clearBrowseMemory(): Promise<void> {
   ++epoch
   if (timer !== undefined) {clearTimeout(timer); timer = undefined}
   await writes
-  if (includeDrafts) useBrowseMemory.setState({...empty(), error: undefined})
-  else useBrowseMemory.setState(state => ({catalogs: {}, last: undefined, entries: Object.fromEntries(
-    Object.entries(state.entries).map(([id, value]) => [id, {...value, messages: undefined, position: undefined}]))}))
+  useBrowseMemory.setState({...empty(), error: undefined})
   await flushBrowseMemory()
 }

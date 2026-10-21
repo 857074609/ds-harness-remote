@@ -1,4 +1,4 @@
-import { browseScope, browseKey, useBrowseMemory } from '../services/browse-memory'
+import { browseScope, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
 import { initialProbeTransports } from '../lib/network-route'
 import { strings as zhCN } from '../locales/i18n'
@@ -29,7 +29,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       // In-memory catalogs belong to one Host; keep them only across its reconnect.
       set(state => ({
         ...(!recovering ? { currentWorkSessionIds: [] } : {}),
-        ...(!sameHost ? { selectedSession: undefined, messages: Object.fromEntries((cached?.sessions ?? []).map(s => [s.sessionId, memory.entries[browseKey(scope, s.sessionId)]?.messages ?? []])), feedbackBySession: {} } : {}),
+        ...(!sameHost ? { selectedSession: undefined, messages: {}, feedbackBySession: {} } : {}),
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
         permissionSelecting: false,

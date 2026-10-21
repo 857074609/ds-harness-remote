@@ -26,7 +26,7 @@ export function startBrowseTracking(): () => void {
     if (selected !== undefined && !state.busyAction?.startsWith('session:') && (previousSelected !== selectedKey || previousMessages !== messages || previousUpdated !== selected.updatedAt)) {
       previousSelected = selectedKey; previousMessages = messages; previousUpdated = selected.updatedAt
       const entry = memory.entries[browseKey(scope, selected.sessionId)]
-      updateBrowseEntry(scope, selected.sessionId, {session: selected, messages: state.messages[selected.sessionId] ?? [],
+      updateBrowseEntry(scope, selected.sessionId, {session: selected,
         visitedAt: Date.now(), ...(entry?.position?.atBottom !== false && AppState.currentState === 'active' ? {seenAt: selected.updatedAt} : {})})
       browsePreference({last: {scope, deviceId: device.deviceId, sessionId: selected.sessionId}})
     }

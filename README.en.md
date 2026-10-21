@@ -69,18 +69,18 @@ The DeepSeek Harness desktop edition is supported. Install the latest release:
 - Access workspace files, read-only previews, remote terminals, and authorized local development-service previews through the native Harness sidebar.
 - CodeX and ACP terminals use the Host's default shell in the session directory and restore the terminal screen on reconnect.
 - Android keeps per-conversation drafts and reading positions, offers backend-separated search
-  and local favorites, and loads retained previews before refreshing conversation history.
+  and local favorites. Conversation text is loaded from the connected Host.
 
 ## Supported clients
 
 | Client | Form | Status | Notes |
 | --- | --- | --- | --- |
-| DSH Desktop plugin | Remote sidebar inside DeepSeek Harness Desktop | Supported | Install `ds-harness-remote@0.5.14`; this computer can also be the Host |
-| Remote Web | Browser page | Supported | Open [dsh.r2049.cn/app](https://dsh.r2049.cn/app); reuses the native Harness interface |
+| DSH&nbsp;Desktop&nbsp;plugin | Remote sidebar inside DeepSeek Harness Desktop | Supported | Install `ds-harness-remote@0.5.14`; this computer can also be the Host |
+| Remote&nbsp;Web | Browser page | Supported | Open [dsh.r2049.cn/app](https://dsh.r2049.cn/app); reuses the native Harness interface |
 | Android | Native app | Supported | Download the APK from [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest); see the [Android guide](apps/android/README.md) |
 | iOS | TestFlight beta | Beta | Not publicly released; see [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
-| VS Code | IDE extension | Experimental | Sign-in, Host fingerprint pinning, workspace-to-session navigation and prompts; streaming updates, automatic reconnect and the question UI are still in development, and cross-machine end-to-end validation is not finished |
-| Browser extension | Chrome / Edge MV3 extension | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
+| VS&nbsp;Code | IDE extension | Experimental | Sign-in, Host fingerprint pinning, workspace-to-session navigation and prompts; streaming updates, automatic reconnect and the question UI are still in development, and cross-machine end-to-end validation is not finished |
+| Browser&nbsp;extension | Chrome / Edge MV3 extension | Entry point only | Exchanges an already signed-in Web authorization for a separate device credential, lists online Hosts and opens the same-origin Remote Web; it does not host a conversation UI |
 | dsh-TUI | Terminal-only CLI profile | Supported | Can act as a Host; see the [dsh-TUI Remote guide](docs/dsh-tui.md). The installer never creates a Web service for it automatically |
 
 Several clients can connect to the same Host at once; RPC calls and streams are isolated per connection.

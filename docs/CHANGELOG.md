@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Remove persisted Android conversation text previews and the cache-clear setting; preserve drafts, favorites, reading positions and recent visits. Existing preview bodies are removed on load.
+- 移除 Android 对话正文预览缓存及清理入口，保留草稿、收藏、阅读位置与最近访问；升级后加载时清除旧预览正文。
+
 - Add an opt-in global mobile compact-history setting. Supporting Hosts shorten historical tool payloads per authenticated connection, preserving text, pagination, lifecycle and live approvals. Older Hosts keep existing behavior without mobile filtering. Reopen a conversation after changing the setting.
 - 移动端新增默认关闭的全局「会话精简模式」；支持的新 Host 按已认证连接缩减历史工具载荷，保留正文、分页、生命周期和实时审批。旧 Host 保持原行为，手机不做本地精简；切换后重新打开会话生效。
   Validation: workspace check and 779 tests pass (Plugin 403, mobile 184); shared-package/Plugin build, DSH bundle verification, Android production Hermes export and diff checks pass. Native device and cross-device acceptance remain pending.

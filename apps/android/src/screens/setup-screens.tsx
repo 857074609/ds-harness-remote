@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { useBrowseMemory, browsePreference, clearBrowseMemory } from '../services/browse-memory'
+import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, QrCode as QrCodeIcon, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
@@ -27,6 +27,7 @@ const defaultServerUrl = 'https://dsh.r2049.cn'
 const updateUrl = 'https://github.com/liguobao/ds-harness-remote/releases/latest'
 const releaseApiUrl = 'https://api.github.com/repos/liguobao/ds-harness-remote/releases/latest'
 const developerUrl = 'https://www.zhihu.com/people/codelover'
+const twitterUrl = 'https://x.com/liguobao2077'
 
 type SetupLoginMethod = Extract<LoginMethod, 'oauth' | 'github-oauth' | 'password'> | 'qr'
 
@@ -356,6 +357,18 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   // already fits inside contentMaxWidth, so nothing changes there.
   const { contentMaxWidth, landscape } = useResponsiveLayout()
 
+  const openNotificationSettings = async () => {
+    if (Platform.OS === 'android' && Application.applicationId) {
+      try {
+        await IntentLauncher.startActivityAsync(IntentLauncher.ActivityAction.APP_NOTIFICATION_SETTINGS, {
+          extra: { 'android.provider.extra.APP_PACKAGE': Application.applicationId },
+        })
+        return
+      } catch { /* Some Android variants only expose the app details page. */ }
+    }
+    await Linking.openSettings()
+  }
+
   const toggleCompactHistory = async (value: boolean) => {
     if (compactSaving) return
     setCompactSaving(true)
@@ -419,20 +432,6 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
       <BlurHeaderFrame header={<TopBar title={zhCN.settings.title} onBack={onBack} />}>
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
-            <View style={styles.settingsHeader}>
-              <View style={styles.settingsIcon}><Settings size={25} color={colors.primary} /></View>
-              <View style={styles.securityCopy}><Text style={styles.settingsTitle}>{zhCN.settings.thisPhone}</Text><Text style={styles.settingsSubtitle}>{identity?.name ?? zhCN.settings.androidDevice}</Text></View>
-            </View>
-
-            <Text style={styles.groupLabel}>{zhCN.comfort.continueWork}</Text>
-            <View style={styles.preferenceList}>
-              <Button label={comfort.resume ? zhCN.comfort.resumeOn : zhCN.comfort.resumeOff} variant="secondary" onPress={() => browsePreference({resume: !comfort.resume})} />
-              <Button label={comfort.notifications ? zhCN.comfort.notificationsOn : zhCN.comfort.notificationsOff} variant="secondary" onPress={() => browsePreference({notifications: !comfort.notifications})} />
-              <Button label={zhCN.comfort.systemNotifications} variant="secondary" onPress={() => void Linking.openSettings()} />
-              <Text style={styles.preferenceNote}>{zhCN.comfort.cacheNote}</Text>
-              <Button label={zhCN.comfort.clearCache} variant="secondary" onPress={() => void clearBrowseMemory()} />
-              {comfort.error !== undefined && <Text accessibilityRole="alert">{comfort.error}</Text>}
-            </View>
             <Text style={styles.groupLabel}>{zhCN.settings.language}</Text>
             <View style={styles.preferenceList}>
               {languageOptions().map(option => {
@@ -450,11 +449,10 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   </Pressable>
                 )
               })}
-              <Text style={styles.preferenceNote}>{zhCN.settings.languageNote}</Text>
             </View>
 
-            <Text style={styles.groupLabel}>{zhCN.settings.theme}</Text>
-            <View style={styles.segmentRow} accessibilityRole="tablist">
+            <Text style={styles.groupLabel}>{zhCN.settings.appearance}</Text>
+            <View style={[styles.segmentRow, styles.appearanceSegments]} accessibilityRole="tablist">
               {themeOptions().map(option => {
                 const chosen = option.value === themePreference
                 return (
@@ -484,21 +482,38 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   trackColor={{ true: colors.primary }}
                 />
               </View>
-              <Text style={styles.preferenceNote}>{zhCN.settings.statusBarNote}</Text>
             </View>
 
+            <Text style={styles.groupLabel}>{zhCN.comfort.continueWork}</Text>
             <View style={styles.preferenceList}>
               <View style={styles.preferenceOption}>
-                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.settings.compactHistory}</Text>
-                <Switch
-                  accessibilityLabel={zhCN.settings.compactHistory}
-                  value={compactHistory}
-                  disabled={compactSaving}
-                  onValueChange={value => void toggleCompactHistory(value)}
-                  trackColor={{ true: colors.primary }}
-                />
+                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.comfort.resume}</Text>
+                <Switch accessibilityLabel={zhCN.comfort.resume} value={comfort.resume}
+                  onValueChange={resume => browsePreference({ resume })} trackColor={{ true: colors.primary }} />
               </View>
-              <Text style={styles.preferenceNote}>{zhCN.settings.compactHistoryNote}</Text>
+              <View style={styles.preferenceOption}>
+                <View style={styles.preferenceCopy}>
+                  <Text style={styles.preferenceName}>{zhCN.settings.compactHistory}</Text>
+                  <Text style={styles.preferenceDescription}>{zhCN.settings.compactHistoryNote}</Text>
+                </View>
+                <Switch accessibilityLabel={zhCN.settings.compactHistory} value={compactHistory}
+                  disabled={compactSaving} onValueChange={value => void toggleCompactHistory(value)}
+                  trackColor={{ true: colors.primary }} />
+              </View>
+              <View style={styles.preferenceOption}>
+                <View style={styles.preferenceCopy}>
+                  <Text style={styles.preferenceName}>{zhCN.comfort.notifications}</Text>
+                  <Text style={styles.preferenceDescription}>{zhCN.comfort.notificationsNote}</Text>
+                </View>
+                <Switch accessibilityLabel={zhCN.comfort.notifications} value={comfort.notifications}
+                  onValueChange={notifications => browsePreference({ notifications })} trackColor={{ true: colors.primary }} />
+              </View>
+              <Pressable accessibilityRole="button" onPress={() => void openNotificationSettings()}
+                style={({ pressed }) => [styles.preferenceOption, styles.preferenceAction, pressed && styles.preferenceActionPressed]}>
+                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.comfort.systemNotifications}</Text>
+                <ExternalLink size={17} color={colors.muted} />
+              </Pressable>
+              {comfort.error !== undefined && <Text style={styles.preferenceError} accessibilityRole="alert">{comfort.error}</Text>}
             </View>
 
             <Text style={styles.groupLabel}>{zhCN.settings.defaultPermission}</Text>
@@ -562,6 +577,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
 
             <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
             <View style={styles.group}>
+              <KeyValue label={zhCN.settings.thisPhone} value={identity?.name ?? zhCN.settings.androidDevice} />
               <KeyValue label={zhCN.settings.deviceId} value={shorten(identity?.deviceId)} mono />
               <KeyValue label={zhCN.settings.publicKey} value={fingerprint(identity?.publicKey)} mono />
               <View style={styles.keyNote}><KeyRound size={17} color={colors.muted} /><Text style={styles.keyNoteText}>{zhCN.settings.keyNote}</Text></View>
@@ -787,12 +803,13 @@ export function AboutScreen({ onBack }: { onBack: () => void }) {
         <Screen>
           <View style={styles.aboutHero}>
             <Image source={require('../../assets/icon.png')} style={styles.aboutLogo} resizeMode="contain" />
-            <Text style={styles.aboutProductName}>DeepSeek Harness Remote</Text>
+            <Text style={styles.aboutProductName}>DS Harness Remote</Text>
             <Text style={styles.aboutVersion}>{versionLabel}</Text>
           </View>
 
           <View style={styles.group}>
             <SettingsLink label={zhCN.settings.developer} value={zhCN.settings.developerValue} url={developerUrl} />
+            <SettingsLink label={zhCN.settings.twitter} url={twitterUrl} />
             <SettingsLink label={zhCN.settings.sourceCodeUrl} url={SOURCE_CODE_URL} />
             <SettingsLink label={zhCN.settings.updateUrl} url={updateUrl} />
           </View>
@@ -894,14 +911,13 @@ function createStyles(colors: ThemeColors) {
   securityCopy: { flex: 1 },
   securityTitle: { ...type.smallStrong, color: colors.ink },
   securityBody: { ...type.small, color: colors.muted, marginTop: 2 },
-  settingsHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.xl },
-  settingsIcon: { width: 48, height: 48, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
-  settingsTitle: { ...type.heading, color: colors.ink },
-  settingsSubtitle: { ...type.small, color: colors.muted },
   groupLabel: { ...type.smallStrong, color: colors.muted, marginTop: spacing.xl, marginBottom: spacing.xs },
   group: { borderRadius: radius.lg, backgroundColor: colors.surface, paddingHorizontal: spacing.md },
   preferenceList: { gap: spacing.xs },
   preferenceOption: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+  preferenceAction: { minHeight: 48 },
+  preferenceActionPressed: { backgroundColor: colors.surfaceStrong },
+  preferenceError: { ...type.caption, color: colors.danger },
   preferenceOptionChosen: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   permissionOption: { minHeight: 48 },
   preferenceCopy: { flex: 1 },
@@ -909,6 +925,7 @@ function createStyles(colors: ThemeColors) {
   languageName: { flex: 1 },
   preferenceDescription: { ...type.caption, color: colors.muted, marginTop: 2 },
   preferenceNote: { ...type.caption, color: colors.muted, marginTop: spacing.xs },
+  appearanceSegments: { marginBottom: spacing.xs },
   segmentRow: { flexDirection: 'row', padding: 4, borderRadius: radius.md, backgroundColor: colors.surfaceStrong },
   segmentButton: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm, paddingHorizontal: spacing.xs },
   segmentButtonActive: { backgroundColor: colors.surface },

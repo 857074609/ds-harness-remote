@@ -70,17 +70,17 @@ DS Harness Remote 只是通往这个工作环境的另一个窗口。
 - 优先使用P2P网络，全球多TURN节点中转，极端情况下使用Server Relay确保可用。
 - 通过 Harness 原生侧栏提供工作区文件、只读预览、远程终端和已授权本机开发服务预览。
 - CodeX / ACP 终端使用 Host 默认 shell，在会话目录启动，并在重连时恢复终端屏幕。
-- Android 按对话保留草稿与阅读位置，提供后端分类搜索和本机收藏；切换时先显示保留的预览，再刷新最新历史。
+- Android 按对话保留草稿与阅读位置，提供后端分类搜索和本机收藏；对话正文从已连接的 Host 加载。
 
 ## 支持的客户端
 
 | 客户端 | 形态 | 状态 | 说明 |
 | --- | --- | --- | --- |
-| DSH Desktop 插件 | Harness 桌面版内的 Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.5.14`；Host 也可以就是这台电脑 |
-| Remote Web | 浏览器页面 | 已支持 | 打开 [dsh.r2049.cn/app](https://dsh.r2049.cn/app)，复用 Harness 原生界面 |
+| DSH&nbsp;Desktop&nbsp;插件 | Harness 桌面版内的 Remote 侧栏 | 已支持 | 装 `ds-harness-remote@0.5.14`；Host 也可以就是这台电脑 |
+| Remote&nbsp;Web | 浏览器页面 | 已支持 | 打开 [dsh.r2049.cn/app](https://dsh.r2049.cn/app)，复用 Harness 原生界面 |
 | Android | 原生 App | 已支持 | 从 [Releases](https://github.com/liguobao/ds-harness-remote/releases/latest) 下载 APK，见 [Android 说明](apps/android/README.md) |
 | iOS | TestFlight 内测 | 内测 | 未公开上架，入口见 [issue #20](https://github.com/liguobao/ds-harness-remote/issues/20) |
-| VS Code | IDE 扩展 | 实验性 | 登录、Host 指纹固定、工作区到会话导航与 Prompt；流式更新、自动重连与问答界面仍在开发，跨机端到端验证尚未完成 |
+| VS&nbsp;Code | IDE 扩展 | 实验性 | 登录、Host 指纹固定、工作区到会话导航与 Prompt；流式更新、自动重连与问答界面仍在开发，跨机端到端验证尚未完成 |
 | 浏览器扩展 | Chrome / Edge MV3 扩展 | 仅入口 | 读取已登录 Web 的授权换取独立设备凭据、列出在线 Host、打开同源 Remote Web，不承载会话界面 |
 | dsh-TUI | 纯终端 CLI profile | 已支持 | 可作 Host，见 [dsh-TUI Remote 使用指南](docs/dsh-tui.md)；安装脚本不会为它自动创建 Web 服务 |
 

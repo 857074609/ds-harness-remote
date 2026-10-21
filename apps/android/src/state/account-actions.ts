@@ -431,7 +431,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
 
     async resetLocalData() {
       await get().disconnect()
-      await clearBrowseMemory(true)
+      await clearBrowseMemory()
       await clearLocalData()
       const identity = await loadOrCreateIdentity()
       const language = applyLanguagePreference('system')
@@ -454,7 +454,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     async signOut() {
       const { config, identity, languagePreference, themePreference, statusBarVisible, defaultPermissionPreset, compactHistory } = get()
       await get().disconnect()
-      await clearBrowseMemory(true)
+      await clearBrowseMemory()
       if (config !== undefined && identity !== undefined) {
         try {
           const { api } = await serverSession.authenticate(config.baseUrl, identity)

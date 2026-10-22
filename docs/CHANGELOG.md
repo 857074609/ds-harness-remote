@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.5.16 — 2026-10-22
+
 - Harden self-hosted Server Docker packaging against missing `@dsh-remote/protocol` entries (#146): explicitly install its manifest and compiled output, declare its package files, and load the Server import graph in the final image during build. Validated on haru with Docker: image build, healthy startup, pages/assets, login, cookie authorization, anonymous rejection and restart pass; Server type check and 12 core tests pass. The reported failure was not reproduced with a clean current-source build or the current published `latest` image; the original failing image remains unidentified.
 - 加固自部署 Server 的 Docker 打包（#146）：显式装入 protocol 入口清单与编译产物，声明包文件范围，并在最终镜像构建时检查 Server 模块加载。haru Docker 构建、健康启动、页面与资源、登录、Cookie 鉴权、匿名拒绝及重启验证通过；Server 类型检查和 12 项核心测试通过。当前源码干净构建与已发布 latest 均未复现原报错，尚未确定当时出错的镜像。
 

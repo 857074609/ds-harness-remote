@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.5.17 — 2026-10-22
+
 - Serialize CI and release workspace builds: Android prebuild recompiles shared packages and could overwrite client-core output while Plugin bundling reads it. Verify both committed Plugin bundles again after the production build.
 - CI 与发布全仓构建改为串行，避免 Android prebuild 重编译共享包时与 Plugin 打包并发读写 client-core 产物；生产构建后再次校验两份已提交 Plugin bundle。
 

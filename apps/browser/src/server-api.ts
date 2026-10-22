@@ -5,7 +5,7 @@ import {
 } from '@dsh-remote/protocol'
 import type { Credentials, DeviceIdentity, RemoteHost } from './types.js'
 
-const CLIENT_VERSION = '0.5.16'
+const CLIENT_VERSION = '0.5.17'
 
 export class ServerApi {
   readonly baseUrl: string

@@ -153,7 +153,7 @@ export function BotModeScreen({ selectedId, onSelect, onAgentMode, onBack, onDev
       </View>}
     </Screen> : <View style={styles.flex}>
       {visibleError && <View><Text accessibilityRole="alert" style={styles.error}>{visibleError}</Text><Button label={s.bots.retry} onPress={retry} /></View>}
-      {session && state && client.value ? <BotConversation key={selectedId} bot={bot} room={room} state={state} session={session} client={client.value} busy={busy} active={active} perform={perform} /> : loading || (targetSessionId && !openError) ? <ActivityIndicator color={colors.primary} /> : <EmptyState icon={Bot} title={s.bots.sessionUnavailable} body={s.bots.sessionUnavailable} action={<Button label={s.bots.back} onPress={() => onSelect(undefined)} />} />}
+      {session && state && client.value ? <BotConversation key={selectedId} bot={bot} room={room} state={state} session={session} client={client.value} busy={busy} active={active} perform={perform} onSelectBot={onSelect} /> : loading || (targetSessionId && !openError) ? <ActivityIndicator color={colors.primary} /> : <EmptyState icon={Bot} title={s.bots.sessionUnavailable} body={s.bots.sessionUnavailable} action={<Button label={s.bots.back} onPress={() => onSelect(undefined)} />} />}
     </View>}
   </BlurHeaderFrame>
     {editor && state && client.value && <BotEditor key={`${editor.kind}:${editor.id ?? 'new'}`} kind={editor.kind} bot={state.bots.find(entry => entry.id === editor.id)} room={state.rooms.find(entry => entry.id === editor.id)} state={state} client={client.value} busy={busy} error={visibleError} perform={perform} onClose={() => setEditor(undefined)} />}

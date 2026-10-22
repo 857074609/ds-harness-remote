@@ -13,8 +13,12 @@ const parser = new MarkdownIt({ html: false, linkify: false, breaks: true })
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
 
-export function MarkdownLinkProvider({ onLinkPress, children }: { onLinkPress?: MarkdownLinkHandler; children: ReactNode }) {
-  return <markdownLinkContext.Provider value={onLinkPress}>{children}</markdownLinkContext.Provider>
+const markdownTextContext = createContext<((text: string) => string) | undefined>(undefined)
+
+export function MarkdownLinkProvider({ onLinkPress, transformText, children }: {
+  onLinkPress?: MarkdownLinkHandler; transformText?: (text: string) => string; children: ReactNode
+}) {
+  return <markdownLinkContext.Provider value={onLinkPress}><markdownTextContext.Provider value={transformText}>{children}</markdownTextContext.Provider></markdownLinkContext.Provider>
 }
 
 /** Convert an agent-produced Markdown link into a workspace path. Network links stay inert. */
@@ -50,11 +54,13 @@ interface MarkdownNode {
  */
 export const NativeMarkdown = memo(function NativeMarkdown({ text }: { text: string }) {
   const onLinkPress = useContext(markdownLinkContext)
+  const transformText = useContext(markdownTextContext)
+  const source = useMemo(() => transformText?.(text) ?? text, [text, transformText])
   const styles = useThemedStyles(createStyles)
   const cacheRef = useRef<BlockParseCache | undefined>(undefined)
   // markdown-it treats `\r\n?` as a line break; a lone CR would desync the
   // incremental offsets and silently drop paragraphs. Normalize first.
-  const nodes = useMemo(() => parseBlocks(cacheRef, text.replace(/\r\n?/gu, '\n')), [text])
+  const nodes = useMemo(() => parseBlocks(cacheRef, source.replace(/\r\n?/gu, '\n')), [source])
   return <View style={styles.container}>{nodes.map(node => renderBlockCached(node, styles, onLinkPress))}</View>
 })
 

@@ -1,5 +1,9 @@
 ## Unreleased
 
+- Make Android Bot message @mentions navigable through the current Host roster, including group replies and earlier messages. Reuse native Bot conversation navigation and resolve upstream bots.local links locally; leave other URLs inert. Type check, mention matching smoke checks and release build pass; APK installed. Device navigation verification remains pending.
+
+- Fold Android Bot system context and receipts even when native history omits a turn identifier. Keep pending questions/approvals outside activity disclosures so they remain actionable without forcing internal context open. Type check and release build pass; APK installed. On-device expansion/collapse verification remains pending.
+
 - Reuse the App home actions menu (devices, settings, about and updates) for the Android Bot home three-dot button; retain the adjacent Workspace switch and section creation buttons. Conversation dots still open Bot/group management. Type check and release build pass; updated APK installed; shared-menu interaction on the phone remains to be checked.
 
 - Unify Android Bot controls with App button variants, theme colors/radii and shared modal surfaces. Share icon action rows and checked radio/checkbox rows across management, models, members and interactive cards; use secondary/quiet rejection, cancellation and history controls. Standardize sheet headers/close actions and pin editor submission controls below scrolling fields. Type check/release build pass; installed and visually checked Bot creation, group member selection with fixed footer, and Chief management. Live card/approval submission and dark-mode device validation remain pending.

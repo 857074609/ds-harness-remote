@@ -88,8 +88,11 @@ pnpm --filter './packages/**' -r build
 pnpm -r check
 node scripts/verify-dsh-plugin.mjs
 pnpm -r test
-NODE_ENV=production pnpm -r build
+NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 ```
+
+全仓 build 必须使用 `--workspace-concurrency=1`：Android prebuild 会再次编译共享包，
+并发执行可能让 Plugin bundler 读到正在重写的 dist 文件。
 
 先构建 `packages/**`，确保 workspace package 从 fresh clone 开始也能解析 `dist` 类型。根 `package.json` 刻意不声明 `scripts`，避免 pnpm 将 DSH Desktop 的 GitHub 安装误判为需要执行构建脚本。
 

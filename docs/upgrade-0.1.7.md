@@ -141,7 +141,7 @@ pnpm install
 pnpm --filter './packages/**' -r build
 pnpm -r check
 pnpm -r test            # 允许的既有 Windows 平台假设失败例外见 AGENTS.md
-NODE_ENV=production pnpm -r build
+NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 node scripts/verify-dsh-plugin.mjs
 git diff --check
 ```

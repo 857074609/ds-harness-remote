@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Serialize CI and release workspace builds: Android prebuild recompiles shared packages and could overwrite client-core output while Plugin bundling reads it. Verify both committed Plugin bundles again after the production build.
+- CI 与发布全仓构建改为串行，避免 Android prebuild 重编译共享包时与 Plugin 打包并发读写 client-core 产物；生产构建后再次校验两份已提交 Plugin bundle。
+
 ## 0.5.16 — 2026-10-22
 
 - Harden self-hosted Server Docker packaging against missing `@dsh-remote/protocol` entries (#146): explicitly install its manifest and compiled output, declare its package files, and load the Server import graph in the final image during build. Validated on haru with Docker: image build, healthy startup, pages/assets, login, cookie authorization, anonymous rejection and restart pass; Server type check and 12 core tests pass. The reported failure was not reproduced with a clean current-source build or the current published `latest` image; the original failing image remains unidentified.

@@ -68,8 +68,15 @@ jobs:
       - name: Run tests
         run: pnpm -r test
 
+      # Android prebuild recompiles shared packages. Serialize workspace builds
+      # so Plugin bundling cannot read dist files while tsc rewrites them.
       - name: Build workspace
-        run: NODE_ENV=production pnpm -r build
+        run: NODE_ENV=production pnpm --workspace-concurrency=1 -r build
+
+      - name: Verify production Plugin bundles
+        run: |
+          git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/client.github.js
+          node scripts/verify-dsh-plugin.mjs
 
       - name: Pack npm plugin
         run: |

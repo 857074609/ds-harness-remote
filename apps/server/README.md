@@ -71,7 +71,7 @@ Run the checks locally before creating a tag:
 pnpm --filter './packages/**' -r build
 pnpm -r check
 pnpm -r test
-NODE_ENV=production pnpm -r build
+NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 node scripts/verify-dsh-plugin.mjs
 pnpm --dir packages/plugin pack --pack-destination /tmp/dsh-release-assets
 ```

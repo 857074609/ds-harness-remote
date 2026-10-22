@@ -202,9 +202,18 @@ function AppNavigator() {
     if (autoRestored.current || !didChooseInitialRoute.current || route.name !== 'devices') return
     autoRestored.current = true
     const memory = useBrowseMemory.getState(), last = memory.last
-    if (!memory.resume || !last || routeRef.current.name !== 'devices') return
-    const device = devices.find(item => item.deviceId === last.deviceId && item.trusted && item.online)
-    if (device && browseScope({config, selectedDevice: device}) === last.scope) push({name: 'connecting', deviceId: device.deviceId, sessionId: last.sessionId})
+    if (routeRef.current.name !== 'devices') return
+    if (memory.resume && last) {
+      const device = devices.find(item => item.deviceId === last.deviceId && item.trusted && item.online)
+      if (device && browseScope({config, selectedDevice: device}) === last.scope) {
+        push({name: 'connecting', deviceId: device.deviceId, sessionId: last.sessionId})
+        return
+      }
+    }
+    // Only skip device selection when there is exactly one trusted, online host.
+    // The one-shot guard also lets users return here or cancel without a loop.
+    const onlyDevice = devices.length === 1 ? devices[0] : undefined
+    if (onlyDevice?.trusted && onlyDevice.online) openDevice(onlyDevice)
   }, [bootPhase, browseReady, linksReady, devices, pendingConversation, reauthRequired, route.name])
 
   // Zhihu OAuth deep link: dshremote://oauth?token=... completes the

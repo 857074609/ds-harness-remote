@@ -492,7 +492,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   value={statusBarVisible}
                   disabled={statusBarSaving}
                   onValueChange={visible => void toggleStatusBar(visible)}
-                  trackColor={{ true: colors.primary }}
+                  trackColor={{ false: colors.disabled, true: colors.primary }} thumbColor={colors.white}
                 />
               </View>
             </View>
@@ -502,7 +502,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               <View style={styles.preferenceOption}>
                 <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.comfort.resume}</Text>
                 <Switch accessibilityLabel={zhCN.comfort.resume} value={comfort.resume}
-                  onValueChange={resume => browsePreference({ resume })} trackColor={{ true: colors.primary }} />
+                  onValueChange={resume => browsePreference({ resume })} trackColor={{ false: colors.disabled, true: colors.primary }} thumbColor={colors.white} />
               </View>
               <View style={styles.preferenceOption}>
                 <View style={styles.preferenceCopy}>
@@ -511,7 +511,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                 </View>
                 <Switch accessibilityLabel={zhCN.settings.compactHistory} value={compactHistory}
                   disabled={compactSaving} onValueChange={value => void toggleCompactHistory(value)}
-                  trackColor={{ true: colors.primary }} />
+                  trackColor={{ false: colors.disabled, true: colors.primary }} thumbColor={colors.white} />
               </View>
               <View style={styles.preferenceOption}>
                 <View style={styles.preferenceCopy}>
@@ -519,7 +519,7 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
                   <Text style={styles.preferenceDescription}>{zhCN.comfort.notificationsNote}</Text>
                 </View>
                 <Switch accessibilityLabel={zhCN.comfort.notifications} value={comfort.notifications}
-                  onValueChange={notifications => browsePreference({ notifications })} trackColor={{ true: colors.primary }} />
+                  onValueChange={notifications => browsePreference({ notifications })} trackColor={{ false: colors.disabled, true: colors.primary }} thumbColor={colors.white} />
               </View>
               <Pressable accessibilityRole="button" onPress={() => void openNotificationSettings()}
                 style={({ pressed }) => [styles.preferenceOption, styles.preferenceAction, pressed && styles.preferenceActionPressed]}>

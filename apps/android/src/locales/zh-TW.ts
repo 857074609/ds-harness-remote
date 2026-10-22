@@ -112,6 +112,7 @@ const zhTW = {
   tools: {
     download: '儲存到手機',
     downloading: '儲存中…',
+    savedToDownloads: '已儲存至下載資料夾',
     downloaded: '檔案已儲存',
     downloadHint: '選擇儲存位置，單個檔案最大 100 MiB。',
     downloadTooLarge: '此檔案超過 100 MiB，暫不支援儲存到手機。',

@@ -114,6 +114,7 @@ const enUS = {
   tools: {
     download: 'Save to phone',
     downloading: 'Saving…',
+    savedToDownloads: 'Saved to Downloads',
     downloaded: 'File saved',
     downloadHint: 'Choose a folder. Up to 100 MiB per file.',
     downloadTooLarge: 'This file exceeds the 100 MiB limit for saving to your phone.',

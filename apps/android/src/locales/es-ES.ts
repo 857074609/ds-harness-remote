@@ -114,6 +114,7 @@ const esES = {
   tools: {
     download: "guardar en el teléfono",
     downloading: "Ahorro…",
+    savedToDownloads: 'Guardado en Descargas',
     downloaded: "Archivo guardado",
     downloadHint: "Elija una carpeta. Hasta 100 MiB por archivo.",
     downloadTooLarge: "Este archivo excede el límite de 100 MiB para guardarlo en su teléfono.",

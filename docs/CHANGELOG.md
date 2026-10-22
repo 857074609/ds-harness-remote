@@ -1,5 +1,13 @@
 ## Unreleased
 
+- Render Markdown workspace previews with the shared native Markdown renderer and screen-width paragraph wrapping, instead of a horizontal source-code view. Preserve bounded text pagination and isolate preview content from Bot mention transformations. Type check and release build pass; APK installed. Device rendering verification remains pending.
+
+- Save Android workspace files directly to system Downloads with MediaStore on Android 10+, avoiding the Android 11+ directory-picker restriction on the Downloads root. Copy bounded app-cache transfers into pending entries, publish only completed saves and clean failed/cancelled entries. Replace success alerts with a short toast; Android 8–9 retain directory selection. Type check and native release build pass; APK installed on Android 16. Actual Downloads save/cancellation verification remains pending.
+
+- Move Save to phone into the file preview header beside Refresh, replacing the large inline button and persistent hint. Show header progress during saving; retain unsupported-preview and size-limit notices. Type check and release build pass; APK installed, visual device validation pending.
+
+- Connect Android Bot Markdown file links to the existing session-scoped file preview panel, retaining Bot mention navigation and Host path authorization. File loading and errors use the shared workspace preview. Type check and release build pass; APK installed. Opening the reported Host file on-device remains to be verified.
+
 - Make Android Bot message @mentions navigable through the current Host roster, including group replies and earlier messages. Reuse native Bot conversation navigation and resolve upstream bots.local links locally; leave other URLs inert. Type check, mention matching smoke checks and release build pass; APK installed. Device navigation verification remains pending.
 
 - Fold Android Bot system context and receipts even when native history omits a turn identifier. Keep pending questions/approvals outside activity disclosures so they remain actionable without forcing internal context open. Type check and release build pass; APK installed. On-device expansion/collapse verification remains pending.

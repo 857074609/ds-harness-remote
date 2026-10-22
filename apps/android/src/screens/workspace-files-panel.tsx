@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, FlatList, Image, NativeModules, Pressable, ScrollView, StyleSheet, Text, ToastAndroid, View } from 'react-native'
 import * as FileSystem from 'expo-file-system/legacy'
 import { File as LocalFile, FileMode, Paths } from 'expo-file-system'
 import { randomUUID } from 'expo-crypto'
-import { ChevronLeft, File, Folder, RefreshCw } from 'lucide-react-native'
+import { ChevronLeft, Download, File, Folder, RefreshCw } from 'lucide-react-native'
 import { requireSessionTools } from '../state/store'
 import type { WorkspaceDirectory, WorkspaceText } from '../services/session-tools'
 import { classifyWorkspaceFile, loadWorkspaceDownload, loadWorkspacePreview, MAX_DOWNLOAD_BYTES, PREVIEW_CHUNK_BYTES } from '../services/workspace-file-preview'
 import { strings as t } from '../locales/i18n'
 import { BlurHeaderFrame, Button, IconButton, TopBar } from '../ui/components'
 import { useTheme } from '../ui/theme-context'
+import { MarkdownLinkProvider, NativeMarkdown } from '../ui/markdown'
 import { spacing, type } from '../ui/theme'
 import { sessionToolsError } from './session-tools-error'
 import { PdfPreview } from './pdf-preview'
+
+const downloads = NativeModules.DshRemoteDownloads as {
+  supported: boolean
+  prepare(source: string, name: string): Promise<string>
+  finish(uri: string, publish: boolean): Promise<void>
+} | undefined
 
 export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessionId: string; initialFile?: string; onClose: () => void }) {
   const { colors } = useTheme()
@@ -41,8 +48,8 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
     let uri: string | undefined
     let temporary: LocalFile | undefined
     try {
-      const permission = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync()
-      if (!permission.granted || controller.signal.aborted) return
+      const directory = downloads?.supported ? undefined : await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync()
+      if (controller.signal.aborted || (directory !== undefined && !directory.granted)) return
       temporary = new LocalFile(Paths.cache, `workspace-download-${randomUUID()}`)
       temporary.create()
       const handle = temporary.open()
@@ -52,7 +59,15 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
         handle.close()
       }
       if (controller.signal.aborted) return
-      uri = await FileSystem.StorageAccessFramework.createFileAsync(permission.directoryUri, file.split('/').pop() || 'download', 'application/octet-stream')
+      const name = file.split(/[\\/]/).pop() || 'download'
+      if (downloads?.supported) {
+        const pending = await downloads.prepare(temporary.uri, name)
+        await downloads.finish(pending, !controller.signal.aborted)
+        if (!controller.signal.aborted) ToastAndroid.show(t.tools.savedToDownloads, ToastAndroid.SHORT)
+        return
+      }
+      if (directory === undefined || !directory.granted) return
+      uri = await FileSystem.StorageAccessFramework.createFileAsync(directory.directoryUri, name, 'application/octet-stream')
       if (controller.signal.aborted) return
       const source = temporary.open(FileMode.ReadOnly)
       try {
@@ -75,7 +90,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
       }
       if (controller.signal.aborted) return
       uri = undefined
-      if (!controller.signal.aborted) Alert.alert(t.tools.downloaded)
+      if (!controller.signal.aborted) ToastAndroid.show(t.tools.downloaded, ToastAndroid.SHORT)
     } catch (e) {
       if (!controller.signal.aborted) Alert.alert(t.tools.download, typeof e === 'object' && e !== null && 'code' in e && e.code === 'workspace-preview/too-large' ? t.tools.downloadTooLarge : sessionToolsError(e))
     } finally {
@@ -93,6 +108,7 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
   }
   const preview = useRef<ScrollView>(null)
   const kind = file === undefined ? undefined : classifyWorkspaceFile(file)
+  const markdown = file !== undefined && /\.(?:md|markdown|mdown)$/i.test(file)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -137,16 +153,18 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
   return <BlurHeaderFrame inset header={<TopBar
     title={t.tools.files}
     onBack={back}
-    action={<IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading} />}
+    action={<>
+      {file !== undefined && (downloading
+        ? <ActivityIndicator accessibilityLabel={t.tools.downloading} color={colors.primary} />
+        : <IconButton label={t.tools.download} icon={Download} onPress={() => void download()} disabled={tooLargeToSave} />)}
+      <IconButton label={t.tools.refresh} icon={RefreshCw} onPress={() => setRevision(v => v + 1)} disabled={loading || downloading} />
+    </>}
   />}>
     <View style={styles.toolbar}>
       <ScrollView style={styles.pathScroll} nestedScrollEnabled><Text selectable style={[styles.pathLabel, { color: colors.ink }]}>{file ?? (path || t.tools.root)}</Text></ScrollView>
     </View>
-    {file !== undefined && <View style={styles.downloadRow}>
-      {kind === 'unsupported' && <Text style={[styles.pathLabel, { color: colors.muted }]}>{t.tools.previewUnsupported}</Text>}
-      <Button label={downloading ? t.tools.downloading : t.tools.download} variant="secondary" disabled={downloading || tooLargeToSave} onPress={() => void download()} />
-      <Text style={[styles.downloadHint, { color: colors.muted }]}>{tooLargeToSave ? t.tools.downloadTooLarge : t.tools.downloadHint}</Text>
-    </View>}
+    {file !== undefined && kind === 'unsupported' && <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.previewUnsupported}</Text>}
+    {file !== undefined && tooLargeToSave && <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.downloadTooLarge}</Text>}
     {loading && <View style={styles.notice}><ActivityIndicator color={colors.primary} /><Text style={{ color: colors.muted }}>{kind === 'office' ? t.tools.officeLoading : t.tools.previewLoading}</Text></View>}
     {error && <View style={styles.notice}><Text accessibilityRole="alert" style={{ color: colors.danger }}>{error}</Text><Button label={t.tools.retry} onPress={() => setRevision(v => v + 1)} /></View>}
     {listing && <FlatList data={[...listing.entries].sort((a, b) => Number(b.type === 'directory') - Number(a.type === 'directory') || a.name.localeCompare(b.name))}
@@ -163,7 +181,11 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
       </Pressable>} />}
     {page && <>
       <Text style={[styles.caption, { color: colors.muted }]}>{t.tools.readOnly} · {page.offset}–{page.offset + Math.max(0, page.lines - 1)}</Text>
-      <ScrollView ref={preview} style={styles.container}><ScrollView horizontal><Text selectable style={[styles.code, { color: colors.ink }]}>{page.text}</Text></ScrollView></ScrollView>
+      <ScrollView ref={preview} style={styles.container} contentContainerStyle={markdown ? styles.markdown : undefined}>
+        {markdown
+          ? <MarkdownLinkProvider><NativeMarkdown text={page.text} /></MarkdownLinkProvider>
+          : <ScrollView horizontal><Text selectable style={[styles.code, { color: colors.ink }]}>{page.text}</Text></ScrollView>}
+      </ScrollView>
       <View style={styles.toolbar}>
         <Button label={t.tools.previous} variant="secondary" disabled={loading || offset <= 1} onPress={() => setOffset(Math.max(1, offset - 200))} />
         <Button label={t.tools.next} variant="secondary" disabled={loading || page.eof || page.lines === 0} onPress={() => setOffset(page.offset + page.lines)} />
@@ -181,11 +203,10 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
 const styles = StyleSheet.create({
   container: { flex: 1 }, toolbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, padding: spacing.sm },
   pathScroll: { flex: 1, maxHeight: 120 }, pathLabel: { ...type.body },
-  downloadRow: { gap: spacing.sm, padding: spacing.md },
-  downloadHint: { ...type.caption },
   listContent: { paddingBottom: spacing.lg },
   path: { ...type.body, flex: 1 }, row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, borderBottomWidth: StyleSheet.hairlineWidth },
   notice: { padding: spacing.md, gap: spacing.md }, caption: { ...type.caption, paddingHorizontal: spacing.md },
+  markdown: { padding: spacing.md },
   code: { fontFamily: 'monospace', fontSize: 14, lineHeight: 21, padding: spacing.md },
   image: { flex: 1, width: '100%', minHeight: 120 },
 })

@@ -114,6 +114,7 @@ const jaJP = {
   tools: {
     download: "携帯電話に保存",
     downloading: "保存中…",
+    savedToDownloads: 'ダウンロードに保存しました',
     downloaded: "ファイルが保存されました",
     downloadHint: "フォルダーを選択します。ファイルあたり最大 100 MiB。",
     downloadTooLarge: "このファイルは、携帯電話に保存できる 100 MiB の制限を超えています。",

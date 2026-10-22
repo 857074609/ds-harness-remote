@@ -6,7 +6,7 @@ import { object, objects, text, type BotEntry, type BotRoom, type BotState, type
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
-import { MarkdownLinkProvider, NativeMarkdown } from '../../ui/markdown'
+import { markdownFilePath, MarkdownLinkProvider, NativeMarkdown } from '../../ui/markdown'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
 import { ChatActivityGroup, ChatItemView } from '../chat/messages'
@@ -16,6 +16,7 @@ import { BotQuestion, BotViewCard } from './cards'
 import type { BotPerform } from './editor'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
+import { SessionToolsPanel } from '../session-tools-panel'
 
 const EMPTY: ChatItem[] = []
 type BotChatRow = { kind: 'item'; key: string; item: ChatItem } | { kind: 'activity'; key: string; items: ChatItem[]; closed: boolean }
@@ -24,10 +25,6 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   busy: boolean; active: boolean; perform: BotPerform; onSelectBot: (id: string) => void
 }) {
   const transformText = useCallback((value: string) => linkBotMentions(value, state.bots, bot?.id), [state.bots, bot?.id])
-  const onLinkPress = useCallback((href: string) => {
-    const target = botMentionTarget(href, state.bots)
-    if (target !== undefined && target !== bot?.id) onSelectBot(target)
-  }, [state.bots, bot?.id, onSelectBot])
   const styles = useThemedStyles(createBotStyles)
   const { colors } = useTheme()
   const messages = useAppStore(store => store.messages[session.sessionId] ?? EMPTY)
@@ -40,6 +37,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const respondQuestion = useAppStore(store => store.respondQuestion)
   const stopSession = useAppStore(store => store.stopSession)
   const [draft, setDraft] = useState('')
+  const [fileLinkPath, setFileLinkPath] = useState<string>()
+  const connected = useAppStore(store => store.connection.phase === 'connected')
   const [progress, setProgress] = useState<BotObject[]>([])
   const [earlier, setEarlier] = useState<BotObject[]>([])
   const [cursor, setCursor] = useState<unknown>(undefined)
@@ -58,6 +57,17 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   }
   useEffect(() => () => { if (scrollFrame.current !== undefined) cancelAnimationFrame(scrollFrame.current) }, [])
   const ready = selected?.sessionId === session.sessionId
+  const onLinkPress = useCallback((href: string) => {
+    if (!ready || !connected) return
+    const target = botMentionTarget(href, state.bots)
+    if (target !== undefined) {
+      if (target !== bot?.id) onSelectBot(target)
+      return
+    }
+    const path = markdownFilePath(href)
+    if (path !== undefined) setFileLinkPath(path)
+  }, [state.bots, bot?.id, onSelectBot, ready, connected])
+  useEffect(() => { setFileLinkPath(undefined) }, [session.sessionId])
   const disabled = busy || !active || !ready || (bot !== undefined && bot.sessionId !== session.sessionId) || state.readOnly !== undefined
   useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current.abort() } }, [])
@@ -184,6 +194,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       {selected?.running && <IconButton label={s.bots.stop} icon={Square} disabled={disabled} onPress={() => void stopSession()} />}
       {busy ? <ActivityIndicator color={colors.primary} /> : <IconButton label={s.bots.send} icon={ArrowUp} tint={colors.primary} disabled={disabled || !draft.trim()} onPress={() => void send()} />}
     </View>
+    {fileLinkPath !== undefined && connected && ready && <SessionToolsPanel
+      key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}
+      initialFile={fileLinkPath} onClose={() => setFileLinkPath(undefined)} />}
   </View></MarkdownLinkProvider>
 }
 function Replies({ rows }: { rows: BotObject[] }) {

@@ -112,6 +112,7 @@ const zhCN = {
   tools: {
     download: '保存到手机',
     downloading: '保存中…',
+    savedToDownloads: '已保存到下载文件夹',
     downloaded: '文件已保存',
     downloadHint: '选择保存位置，单个文件最大 100 MiB。',
     downloadTooLarge: '此文件超过 100 MiB，暂不支持保存到手机。',

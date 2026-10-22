@@ -114,6 +114,7 @@ const frFR = {
   tools: {
     download: "Enregistrer sur le téléphone",
     downloading: "Économie…",
+    savedToDownloads: 'Enregistré dans Téléchargements',
     downloaded: "Fichier enregistré",
     downloadHint: "Choisissez un dossier. Jusqu'à 100 Mio par fichier.",
     downloadTooLarge: "Ce fichier dépasse la limite de 100 Mio pour l'enregistrement sur votre téléphone.",

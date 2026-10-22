@@ -255,3 +255,7 @@ Bot conversations collapse intermediate reasoning/tool activity using the shared
 Create a Bot directly with **+** beside **My team**, or create a group with **+** beside **Groups**. Conversation details use compact icon rows for edit/main/duplicate, with deletion separated in red.
 
 New Bots ask only for a name and optional model; omitted model/avatar settings use official Host defaults. New groups ask for a name and members, leaving administrator selection to the Host. Roles, instructions, reasoning effort and group administration remain in Edit. Creation calls the existing official create-bot/create-room operations directly.
+
+### Saving workspace files
+
+The file preview header offers Save to phone. On Android 10 and newer it writes to the system Downloads folder using MediaStore, without directory access permission. Android 8–9 use the system directory picker. Saves are limited to 100 MiB and use a temporary app-cache file, deleted after completion or cancellation; normal preview does not create this download cache. Incomplete MediaStore entries are not published. A short toast confirms successful saves.

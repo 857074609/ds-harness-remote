@@ -114,6 +114,7 @@ const deDE = {
   tools: {
     download: "Auf Telefon speichern",
     downloading: "Sparen…",
+    savedToDownloads: 'In Downloads gespeichert',
     downloaded: "Datei gespeichert",
     downloadHint: "Wählen Sie einen Ordner. Bis zu 100 MiB pro Datei.",
     downloadTooLarge: "Diese Datei überschreitet die 100-MiB-Grenze zum Speichern auf Ihrem Telefon.",

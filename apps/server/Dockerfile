@@ -16,6 +16,13 @@ RUN pnpm --filter @dsh-remote/protocol build \
     && pnpm --filter @dsh-remote/server build \
     && pnpm --filter @dsh-remote/server deploy --prod /out
 
+# Install the compiled workspace package explicitly: runtime must not depend on
+# a deploy/store snapshot taken before protocol was built.
+RUN rm -rf /out/node_modules/@dsh-remote/protocol \
+    && mkdir -p /out/node_modules/@dsh-remote/protocol \
+    && cp packages/protocol/package.json /out/node_modules/@dsh-remote/protocol/ \
+    && cp -R packages/protocol/dist /out/node_modules/@dsh-remote/protocol/dist
+
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     DSH_SERVER_HOST=0.0.0.0 \
@@ -25,6 +32,8 @@ WORKDIR /app
 COPY --from=build --chown=node:node /out/ ./
 RUN mkdir /data && chown node:node /data
 USER node
+# Resolve the actual server import graph in the final image, including protocol.
+RUN node --input-type=module -e "await import('./dist/server.js')"
 EXPOSE 8080
 VOLUME ["/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

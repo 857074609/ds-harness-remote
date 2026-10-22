@@ -19,6 +19,8 @@ docker compose up -d --build
 
 Open <http://localhost:8080>. Device credentials persist in the `server-data` volume. Stop the service with `docker compose down`.
 
+If an older image fails to resolve `@dsh-remote/protocol`, update the source and rebuild with `docker compose build --no-cache server && docker compose up -d server`. The image explicitly includes the compiled protocol package and checks the Server import graph during the build. Rebuilding preserves the data volume.
+
 The GitHub Tag workflow builds the production image. Put an HTTPS reverse proxy in front of it instead of exposing the Node listener directly to the public internet.
 
 ## Local setup

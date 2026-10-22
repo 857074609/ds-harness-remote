@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Fix Android Harness queued-message visibility (#147): show locally accepted messages as unconfirmed when they leave the inbox before their echo, and prevent delayed queue projections from hiding durable user messages. Preserve delivery state across late acknowledgements and explicit queue actions. Queueing versus immediate-delivery behavior is unchanged.
+- 修复 Android Harness 排队消息不可见问题（#147）：消息离开队列但回显尚未到达时，在聊天区保留“发送结果未确认”状态；迟到的队列投影不再隐藏已确认的用户消息。处理迟到 ACK 与队列操作的交错顺序；不改变排队与立即发送的既有行为。
+
 ## 0.5.17 — 2026-10-22
 
 - Serialize CI and release workspace builds: Android prebuild recompiles shared packages and could overwrite client-core output while Plugin bundling reads it. Verify both committed Plugin bundles again after the production build.

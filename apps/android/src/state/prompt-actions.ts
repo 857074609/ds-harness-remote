@@ -11,7 +11,7 @@ import {
 import { cursorNativeId } from '../services/cursor'
 import type { ChatItem } from '../types'
 import { loadSavedCodexPermissions, withCodexPermissionState } from './codex-session-state'
-import { findApproval, findQuestion, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
+import { findApproval, findQuestion, inboxRpcIds, mapApprovalOutcome, mapQuestionAnswered } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isRecord, record, stringValue, withActiveCodexTurn } from './session-state'
 import type { AppState } from './store-state'
@@ -175,24 +175,27 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           // event stream shows the turn starting. When a turn was already active
           // the Host queued the prompt (`inbox` projection is authoritative), so
           // the row leaves the timeline and appears in the queue dock.
-          set(state => ({
-            messages: {
-              ...state.messages,
-              [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
-                item.id === optimistic.id && item.kind === 'message'
-                  ? {
-                    ...item,
-                    sendState: queuedAtSend ? 'queued' : undefined,
-                    // The inbox may already have adopted this rpcId (retry
-                    // reuse, or the batch landed before this row existed) —
-                    // mark it so the queue fallback can never resurrect it.
-                    ...(queuedAtSend && runtime.adoptedQueueRpcIds.get(session.sessionId)?.has(requestRpcId) === true
-                      ? { queuedAdopted: true as const }
-                      : {}),
-                  }
-                  : item),
-            },
-          }))
+          set(state => {
+            const latest = state.selectedSession?.sessionId === session.sessionId
+              ? state.selectedSession : state.sessions.find(item => item.sessionId === session.sessionId)
+            const inInbox = inboxRpcIds(latest?.projections?.values?.inbox).has(requestRpcId)
+            return {
+              messages: {
+                ...state.messages,
+                [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
+                  item.id === optimistic.id && item.kind === 'message' && item.sendState !== 'canceled'
+                    ? {
+                      ...item,
+                      // A projection may already have queued or released this
+                      // row while the acknowledgement was still in flight.
+                      sendState: item.queuedAdopted === true ? item.sendState
+                        : inInbox ? 'queued' : item.sendState ?? (queuedAtSend ? 'queued' : undefined),
+                      ...(inInbox ? { queuedAdopted: true as const } : {}),
+                    }
+                    : item),
+              },
+            }
+          })
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)
           return 'sent'
         }
@@ -210,6 +213,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
             ...state.messages,
             [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
               item.id === optimistic.id && item.kind === 'message'
+                && item.queuedAdopted !== true && item.sendState !== 'canceled'
                 ? { ...item, sendState: unconfirmed ? 'unconfirmed' : 'failed', sendError: friendlyError(error) }
                 : item),
           },
@@ -251,8 +255,9 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
           messages: {
             ...state.messages,
             [session.sessionId]: (state.messages[session.sessionId] ?? []).map(item =>
-              item.kind === 'message' && item.requestRpcId === rpcId && item.sendState === 'queued'
-                ? { ...item, sendState: action === 'steer' ? undefined : 'canceled' as const }
+              item.kind === 'message' && item.requestRpcId === rpcId && item.id.startsWith('local:')
+                && item.nativeSeq === undefined && (item.sendState === 'queued' || item.sendState === 'unconfirmed')
+                ? { ...item, queuedAdopted: true, sendState: action === 'steer' ? 'unconfirmed' as const : 'canceled' as const, sendError: undefined }
                 : item),
           },
         }))
@@ -267,7 +272,7 @@ export function createPromptActions({ get, set, runtime }: SessionAccess): Pick<
       const session = state.selectedSession
       if (session === undefined) return false
       const row = (state.messages[session.sessionId] ?? []).find(item => item.id === itemId)
-      if (row?.kind !== 'message' || row.sendState === undefined || row.requestRpcId === undefined) return false
+      if (row?.kind !== 'message' || (row.sendState !== 'failed' && row.sendState !== 'unconfirmed') || row.requestRpcId === undefined) return false
       // Reuse the original request rpcId: a prompt the Host already accepted
       // (unconfirmed outcome) must not be executed twice where the Host dedupes.
       return (await get().sendMessage(row.text, row.promptImages ?? [], row.requestRpcId)) === 'sent'

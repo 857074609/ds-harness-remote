@@ -347,10 +347,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const [awayFromLatest, setAwayFromLatest] = useState(false)
   const visibleMessages = useMemo(() => (session?.backend === 'codex' ? mergeReplyReasoning(messages) : messages).filter(item =>
     item.kind !== 'message' || (item.role !== 'system' && !item.context && item.sendState !== 'queued'
-      // An adopted row is in the Host queue regardless of the local sendState
-      // snapshot: it leaves the timeline for the queue dock until its echo
-      // replaces it (or the authoritative drop retires it).
-      && !(item.queuedAdopted === true && item.sendState === undefined) && (
+      && (
       hasVisibleMessageText(item.text)
       || hasVisibleMessageText(item.reasoning ?? '')
       || (item.images?.length ?? 0) > 0

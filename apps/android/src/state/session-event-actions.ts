@@ -30,52 +30,25 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
             ...session,
             projections: { ...session.projections, values: { ...session.projections?.values, [key]: value } },
           }
-          // Distinguish "never received" from "received and then dropped": an
-          // rpcId the inbox adopted is marked on its local row and must never
-          // re-enter the queue fallback. If it later vanishes from the inbox
-          // without its echo replacing the row (removed elsewhere), the Host
-          // dropped it — retire the row after one update of grace so a consumed
-          // prompt's echo can land first.
-          const settle = key === 'inbox' ? (() => {
-            const followed = state.selectedSession?.sessionId === sessionId
-            const current = new Set(inboxRpcIds(value))
-            const adopted = runtime.adoptedQueueRpcIds.get(sessionId) ?? new Set<string>()
-            const vanishing = runtime.vanishingQueueRpcIds.get(sessionId) ?? new Set<string>()
-            const retire = new Set<string>()
-            const mark = new Set<string>()
-            for (const rpcId of current) {
-              if (!adopted.has(rpcId)) mark.add(rpcId)
-              adopted.add(rpcId)
-              vanishing.delete(rpcId)
-            }
-            // Retire only while the session is followed: its echo travels the
-            // follow stream whose ordering against the control projection is not
-            // guaranteed elsewhere — unfollowed sessions are reconciled on open.
-            for (const rpcId of followed ? [...adopted] : []) {
-              if (current.has(rpcId)) continue
-              if (vanishing.has(rpcId)) {
-                // Retired: the row is settled (or already replaced by its echo) —
-                // forget the rpcId so it stops re-entering the retire path on
-                // every following projection update.
-                retire.add(rpcId)
-                adopted.delete(rpcId)
-                vanishing.delete(rpcId)
-              } else vanishing.add(rpcId)
-            }
-            runtime.adoptedQueueRpcIds.set(sessionId, adopted)
-            runtime.vanishingQueueRpcIds.set(sessionId, vanishing)
-            if (mark.size === 0 && retire.size === 0) return undefined
-            return (items: ChatItem[]): ChatItem[] => items.map(item =>
-              item.kind === 'message' && item.requestRpcId !== undefined
-                && (mark.has(item.requestRpcId) || (retire.has(item.requestRpcId)
-                  && (item.sendState === 'queued' || item.sendState === 'unconfirmed' || item.sendState === 'failed')))
-                ? {
-                  ...item,
-                  ...(mark.has(item.requestRpcId) ? { queuedAdopted: true as const } : {}),
-                  ...(retire.has(item.requestRpcId) ? { sendState: 'canceled' as const } : {}),
-                }
-                : item)
-          })() : undefined
+          // Only local pending rows follow the inbox. A durable user/message
+          // echo is stronger evidence than a delayed control-stream projection.
+          // Leaving the inbox may mean execution, steering, or removal; keep the
+          // row visible as unconfirmed until an echo/history or explicit action
+          // settles it. No second projection or timer is needed for visibility.
+          const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
+            const queued = inboxRpcIds(value)
+            return items.map(item => {
+              if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
+                || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
+              if (queued.has(item.requestRpcId)) {
+                return { ...item, sendState: 'queued', queuedAdopted: true, sendError: undefined }
+              }
+              if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
+                return { ...item, sendState: 'unconfirmed', sendError: undefined }
+              }
+              return item
+            })
+          } : undefined
           return {
             sessions: state.sessions.map(update),
             selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),

@@ -229,7 +229,6 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       ++runtime.sessionLoadGeneration
       runtime.reconnectFlight = undefined
       runtime.clearPendingMuxFrames()
-      runtime.clearQueueAdoption()
       await runtime.closeActiveCodexStream(false)
       await runtime.closeActiveCursorStream(false)
       await runtime.connection.close()
@@ -267,7 +266,6 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         runtime.flushPendingMuxFrames()
         ++runtime.sessionLoadGeneration
         runtime.clearPendingMuxFrames()
-        runtime.clearQueueAdoption()
         set({
           connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.networkUnavailable,
             ...(get().connection.retryable === false ? { retryable: false } : {}) },

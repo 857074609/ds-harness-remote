@@ -290,9 +290,10 @@ export interface ChatMessage extends ChatItemBase {
    * Delivery state of a local optimistic user message.
    * `queued`: the Host accepted the prompt into its queue (authoritative via
    * the `inbox` projection) — hidden from the timeline and shown in the queue
-   * dock until the executed `user/message` echo replaces it.
+   * dock until an inbox update releases it or a `user/message` echo replaces it.
    * `failed`: the Host rejected the prompt — kept with a retry affordance.
-   * `unconfirmed`: timeout/disconnect left the outcome unknown — kept until a
+   * `unconfirmed`: timeout/disconnect, or leaving the inbox without an echo,
+   * left the outcome unknown — visible until a
    * history/inbox reconciliation decides its fate (never judged by timers).
    * `canceled`: reconciliation found the queued prompt neither echoed nor in
    * the inbox (removed remotely); kept quiet in the timeline, and a late echo
@@ -301,9 +302,9 @@ export interface ChatMessage extends ChatItemBase {
   sendState?: 'queued' | 'failed' | 'unconfirmed' | 'canceled'
   /** Human-readable delivery failure reason kept on the row (single error surface). */
   sendError?: string
-  /** Original prompt image payloads kept for retries (the row's `images` are display-only). */
-  /** The Host inbox adopted this queued prompt — it must never re-enter the local queue fallback. */
+  /** The Host inbox adopted this local prompt — it must never re-enter the local queue fallback. */
   queuedAdopted?: boolean
+  /** Original prompt image payloads kept for retries (the row's `images` are display-only). */
   promptImages?: PromptImage[]
   context?: boolean
   feedback?: 'positive' | 'negative'

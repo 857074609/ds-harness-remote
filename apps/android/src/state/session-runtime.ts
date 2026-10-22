@@ -31,10 +31,6 @@ export class SessionRuntime {
   connectionGeneration = 0
   /** Rows created before this instant predate the current connection (reconcile scope). */
   connectionStartedAt = 0
-  /** Queue-adoption bookkeeping: rpcIds the Host inbox has ever adopted, per session. */
-  readonly adoptedQueueRpcIds = new Map<string, Set<string>>()
-  /** Adopted rpcIds absent from the latest projection — one update of grace for the echo. */
-  readonly vanishingQueueRpcIds = new Map<string, Set<string>>()
   pendingMuxFrames: { generation: number; frame: MuxStreamFrame }[] = []
   muxFlushTimer: ReturnType<typeof setTimeout> | undefined
   private pendingCodexFrames: { generation: number; frame: { method: string; params: unknown } }[] = []
@@ -120,12 +116,6 @@ export class SessionRuntime {
       this.muxFlushTimer = undefined
     }
     this.pendingMuxFrames = []
-  }
-
-  clearQueueAdoption(): void {
-    // `adopted` is a Host-side fact (the durable queue received the prompt) and
-    // survives reconnects; only the grace window restarts.
-    this.vanishingQueueRpcIds.clear()
   }
 
   async refreshAntigravityCatalog(): Promise<void> {

@@ -9,7 +9,7 @@ import { ForegroundConnectionRecovery } from '../src/services/connection-recover
 
 const { proxy, transport, storage, authenticate, acp, codex } = vi.hoisted(() => ({
   proxy: { sessionHistory: vi.fn(), messageFeedbackList: vi.fn(), sessionModels: vi.fn(),
-    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn() },
+    sessionList: vi.fn(), sessionCreate: vi.fn(), hostDescribe: vi.fn(), workspaceList: vi.fn(), workspaceArchiveSession: vi.fn(), sessionSelectPermission: vi.fn(), sessionPrompt: vi.fn(), sessionUpdateQueue: vi.fn() },
   transport: { connect: vi.fn(), close: vi.fn(), checkHealth: vi.fn(), refreshBackends: vi.fn(), hasCodex: vi.fn(), hasCursor: vi.fn(), hasAntigravity: vi.fn(), hasPi: vi.fn(), hasOpencode: vi.fn(), hasClaude: vi.fn() },
   acp: { call: vi.fn(), transferCall: vi.fn(), openStream: vi.fn(), prompt: vi.fn(), sessionModels: vi.fn(), selectModel: vi.fn(), archiveSession: vi.fn() },
   storage: { saveRecentWorkspaces: vi.fn(), saveLastConnectedDeviceId: vi.fn(), loadCodexPermissionPresets: vi.fn(), saveCodexPermissionPreset: vi.fn() },
@@ -211,31 +211,94 @@ describe('OpenCode native archive confirmation', () => {
 })
 
 describe('ordered history recovery', () => {
-  it('retains queue adoption across either ordering of the inbox and prompt acknowledgement', async () => {
-    await runScenarios(['inbox-first', 'ack-first'].map(order => ({ name: order, run: async () => {
-      prepareScenario1()
+  it('keeps queue delivery state visible across acknowledgement, projection and echo orderings', async () => {
+    const scenarios = [
+      { name: 'ack before inbox, missing echo', steps: ['ack', 'in', 'out', 'end', 'out'] },
+      { name: 'inbox before ack, missing echo', steps: ['in', 'ack', 'out', 'end'] },
+      { name: 'inbox released before ack', steps: ['in', 'out', 'ack', 'end'] },
+      { name: 'echo before delayed inbox', steps: ['ack', 'echo', 'in', 'out', 'out'] },
+      { name: 'echo after inbox', steps: ['ack', 'in', 'out', 'echo'] },
+      { name: 'echo before ack', steps: ['in', 'out', 'echo', 'ack'] },
+      { name: 'timeout after inbox acceptance', steps: ['in', 'timeout', 'out', 'end'] },
+      { name: 'timeout after inbox release', steps: ['in', 'out', 'timeout', 'end'] },
+    ]
+    await runScenarios(scenarios.map(({ name, steps }) => ({ name, run: async () => {
       const running = { ...session, running: true }
       useAppStore.setState({ selectedSession: running, sessions: [running] })
       let acknowledge!: () => void
-      proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
-      const rpcId = `adoption-${order}`
+      let reject!: (error: Error) => void
+      proxy.sessionPrompt.mockImplementation(() => new Promise<void>((resolve, fail) => { acknowledge = resolve; reject = fail }))
+      const rpcId = `adoption-${name}`
       const sending = useAppStore.getState().sendMessage('queued prompt', [], rpcId)
-      const projectInbox = (value: unknown, seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '',
-        payload: { type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value } } as MuxStreamFrame)
-      const inbox = { 'next-turn': [{ id: 'host-item', source: { kind: 'user', rpcId },
-        content: [{ type: 'text', text: 'queued prompt' }] }] }
-      if (order === 'inbox-first') projectInbox(inbox, 1)
-      acknowledge()
-      expect(await sending).toBe('sent')
-      if (order === 'ack-first') projectInbox(inbox, 1)
-      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ requestRpcId: rpcId,
-        sendState: 'queued', queuedAdopted: true })
-      // Another device removes it; one projection of grace prevents racing its echo.
-      projectInbox({ 'next-turn': [] }, 2)
-      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ queuedAdopted: true })
-      projectInbox({ 'next-turn': [] }, 3)
-      expect(useAppStore.getState().messages.s1?.[0]).toMatchObject({ sendState: 'canceled', queuedAdopted: true })
-    } })))
+      const message = { id: 'host-item', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'queued prompt' }] }
+      const echo = frame(entry('user/message', 20, { turn: 2, message }))
+      const row = () => useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+      let seq = 1
+      let adopted = false
+      let echoed = false
+      for (const step of steps) {
+        if (step === 'ack' || step === 'timeout') {
+          if (step === 'ack') acknowledge()
+          else reject(Object.assign(new Error('synthetic timeout'), { code: 'TIMEOUT' }))
+          expect(await sending).toBe(step === 'ack' ? 'sent' : 'kept')
+        } else if (step === 'in' || step === 'out') {
+          useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+            type: 'session/projection', sessionId: 's1', key: 'inbox', seq: seq++,
+            value: { 'next-turn': step === 'in' ? [message] : [] },
+          } } as MuxStreamFrame)
+          if (step === 'in') adopted = true
+        } else if (step === 'echo') {
+          useAppStore.getState().handleMuxFrame(echo)
+          echoed = true
+        } else useAppStore.getState().handleMuxFrame(frame(entry('turn/end', 21, { turn: 2, reason: { kind: 'completed' } })))
+        if (echoed) {
+          expect(row()).toMatchObject({ id: 'host-item', nativeSeq: 20 })
+          expect(row()).not.toHaveProperty('queuedAdopted')
+          expect(row()).not.toHaveProperty('sendState')
+        } else if (adopted) {
+          const inQueue = (useAppStore.getState().selectedSession?.projections?.values?.inbox as { 'next-turn': unknown[] })['next-turn'].length > 0
+          expect(row()).toMatchObject({ queuedAdopted: true, sendState: inQueue ? 'queued' : 'unconfirmed' })
+        }
+      }
+      // A late echo heals the released row once, retaining native identity.
+      useAppStore.getState().handleMuxFrame(echo)
+      expect(useAppStore.getState().messages.s1?.filter(item => item.kind === 'message' && item.requestRpcId === rpcId)).toHaveLength(1)
+      expect(row()).toMatchObject({ id: 'host-item', nativeSeq: 20 })
+      expect(row()).not.toHaveProperty('sendState')
+      expect(row()).not.toHaveProperty('queuedAdopted')
+    } })), prepareScenario1)
+  })
+
+  it('settles explicit queue actions without reviving removed rows or overwriting durable echoes', async () => {
+    await runScenarios(['remove', 'steer'].flatMap(action => ['queue-first', 'release-first', 'echo-first'].map(order => ({
+      name: `${action}, ${order}`, run: async () => {
+        const running = { ...session, running: true }
+        useAppStore.setState({ selectedSession: running, sessions: [running] })
+        let acknowledge!: () => void
+        proxy.sessionPrompt.mockImplementation(() => new Promise<void>(resolve => { acknowledge = resolve }))
+        const rpcId = `action-${action}-${order}`
+        const sending = useAppStore.getState().sendMessage('queued prompt', [], rpcId)
+        const message = { id: 'host-item', source: { kind: 'user', rpcId }, content: [{ type: 'text', text: 'queued prompt' }] }
+        const inbox = (items: unknown[], seq: number) => useAppStore.getState().handleMuxFrame({ rpcId: '', payload: {
+          type: 'session/projection', sessionId: 's1', key: 'inbox', seq, value: { 'next-turn': items },
+        } } as MuxStreamFrame)
+        inbox([message], 1)
+        proxy.sessionUpdateQueue.mockImplementation(async () => {
+          if (order !== 'queue-first') inbox([], 2)
+          if (order === 'echo-first') useAppStore.getState().handleMuxFrame(frame(entry('user/message', 3, { message })))
+        })
+        expect(await useAppStore.getState().updateQueueItem('host-item', action as 'remove' | 'steer', rpcId)).toBe(true)
+        // Even a stale inbox snapshot must not undo an explicit action on ACK.
+        acknowledge()
+        expect(await sending).toBe('sent')
+        const row = useAppStore.getState().messages.s1?.find(item => item.kind === 'message' && item.requestRpcId === rpcId)
+        if (order === 'echo-first') {
+          expect(row).toMatchObject({ id: 'host-item', nativeSeq: 3 })
+          expect(row).not.toHaveProperty('sendState')
+          expect(row).not.toHaveProperty('queuedAdopted')
+        } else expect(row).toMatchObject({ sendState: action === 'remove' ? 'canceled' : 'unconfirmed' })
+      },
+    }))), prepareScenario1)
   })
 
   it('reconciles local delivery states by marking, never by deleting', async () => {

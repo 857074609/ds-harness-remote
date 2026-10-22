@@ -110,6 +110,34 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+  it('binds Bot requests to the advertised encrypted Host and rejects retired clients', async () => {
+    await runScenarios(['unsupported', 'current', 'replaced', 'revoked'].map(outcome => ({ name: outcome, run: async () => {
+      prepareScenario1()
+      if (outcome !== 'unsupported') testState.capabilities.push('plugin.route.v1')
+      const connection = new AndroidRemoteConnection()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      const core = testState.cores[0]!
+      if (outcome === 'unsupported') {
+        expect(() => connection.requireBotClient()).toThrow()
+        expect(core.rpcCalls.some(call => call.method === 'plugin.route.call')).toBe(false)
+      } else {
+        const client = connection.requireBotClient()
+        if (outcome === 'current') {
+          vi.spyOn(core, 'rpc').mockResolvedValueOnce({ status: 200, json: { ok: true, value: { bots: [], rooms: [] } } })
+          await expect(client.state()).resolves.toMatchObject({ bots: [], rooms: [] })
+          expect(core.rpc).toHaveBeenCalledWith('plugin.route.call', { route: 'api/bot', body: { endpoint: 'state', payload: null } }, undefined)
+        } else {
+          if (outcome === 'replaced') await connection.connect('https://server.example.com', identity, { ...host, deviceId: 'host-2' }, 'synthetic', () => undefined)
+          else { testState.capabilities = ['harness.api.v1']; await connection.refreshBackends() }
+          const spy = vi.spyOn(core, 'rpc')
+          await expect(client.call('send', { sessionId: 'bot', text: 'hello' })).rejects.toThrow()
+          expect(spy).not.toHaveBeenCalled()
+        }
+      }
+      await connection.close()
+    } })))
+  })
+
   it('periodically verifies the encrypted Host path and retires silent carriers without touching replacements', async () => {
     await runScenarios(['healthy', 'silent', 'shared-probe', 'replaced', 'disconnected'].map(outcome => ({ name: outcome, run: async () => {
       vi.useFakeTimers()

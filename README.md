@@ -172,6 +172,8 @@ connection status shown in the header.
 
 Use text or image prompts, switch models, and access supported workspace files and terminals. The interface follows the system language and supports English, Simplified and Traditional Chinese, Japanese, Spanish, German, and French. In language settings, tap “More ...” to show all languages. See the [Android guide](apps/android/README.md) for details.
 
+The Bot button to the left of **+** on the Host workspace header opens the native DS Bot team mode: Bots, group chats, management, questions and interactive cards. In Bot mode, the header shows a Workspace switch immediately left of the three-dot menu. DS Bot must be enabled on the connected Host; see the [Bot mode guide](apps/android/README.md#bot-mode) for availability and validation limits.
+
 <p align="center">
   <img src="docs/images/mobile-list.jpg" alt="Android client listing online and offline computers" width="30%">
   <img src="docs/images/image-msg.jpg" alt="Sending an image prompt from the Android client" width="30%">

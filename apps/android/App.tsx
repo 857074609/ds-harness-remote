@@ -1,4 +1,4 @@
-import { hydrateBrowseMemory, useBrowseMemory, browseScope } from './src/services/browse-memory'
+import { hydrateBrowseMemory, useBrowseMemory, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, BackHandler, Image, Linking, StyleSheet, Text, View } from 'react-native'
@@ -30,7 +30,7 @@ type Route =
   | { name: 'devices' }
   | { name: 'device'; deviceId: string; source?: 'workspaces' }
   | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
-  | { name: 'workspaces'; focusWorkspaceKey?: string }
+  | { name: 'workspaces'; focusWorkspaceKey?: string; botConversationId?: string }
   | { name: 'chat' }
   | { name: 'settings' }
   | { name: 'about' }
@@ -82,6 +82,8 @@ function AppNavigator() {
   const config = useAppStore(state => state.config)
   const devices = useAppStore(state => state.devices)
   const selectedDevice = useAppStore(state => state.selectedDevice)
+  const hostScope = browseScope({ config, selectedDevice })
+  const botMode = useBrowseMemory(state => state.hostModes[hostScope] === 'bot')
   const error = useAppStore(state => state.error)
   const bootstrap = useAppStore(state => state.bootstrap)
   const reconnect = useAppStore(state => state.reconnect)
@@ -206,7 +208,7 @@ function AppNavigator() {
     if (memory.resume && last) {
       const device = devices.find(item => item.deviceId === last.deviceId && item.trusted && item.online)
       if (device && browseScope({config, selectedDevice: device}) === last.scope) {
-        push({name: 'connecting', deviceId: device.deviceId, sessionId: last.sessionId})
+        push({name: 'connecting', deviceId: device.deviceId, ...(memory.hostModes[last.scope] === 'bot' ? {} : {sessionId: last.sessionId})})
         return
       }
     }
@@ -274,6 +276,11 @@ function AppNavigator() {
       }
       // ConnectionScreen owns hardware back (and may swallow it while connecting).
       if (route.name === 'connecting') return false
+      const current = routeRef.current
+      if (current.name === 'workspaces' && botMode && current.botConversationId !== undefined) {
+        setRoutes(entries => entries.map((entry, index) => index === entries.length - 1 && entry.name === 'workspaces' ? { ...entry, botConversationId: undefined } : entry))
+        return true
+      }
       // The workspaces home steps back to the device list instead of exiting.
       if (routes.length <= 1) {
         if (route.name !== 'workspaces') return false
@@ -284,7 +291,7 @@ function AppNavigator() {
       return true
     })
     return () => subscription.remove()
-  }, [homeMenuOpen, route.name, routes.length])
+  }, [homeMenuOpen, route.name, routes.length, botMode])
 
   useEffect(() => {
     const recovery = new ForegroundConnectionRecovery(
@@ -386,6 +393,14 @@ function AppNavigator() {
       />}
       {route.name === 'device' && deviceForRoute === undefined && <MissingRoute onBack={() => reset({ name: 'devices' })} />}
       {route.name === 'workspaces' && <WorkspacesScreen
+        botMode={botMode}
+        onMore={openHomeMenu}
+        botConversationId={route.botConversationId}
+        onBotMode={next => {
+          saveHostMode(hostScope, next ? 'bot' : 'agent')
+          setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'workspaces' ? { ...entry, botConversationId: undefined } : entry))
+        }}
+        onSelectBot={botConversationId => setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'workspaces' ? { ...entry, botConversationId } : entry))}
         onBack={backFromWorkspaces}
         onOpenDevices={() => reset({ name: 'devices' })}
         onSession={() => push({ name: 'chat' })}

@@ -1,3 +1,32 @@
+## Unreleased
+
+- Reuse the App home actions menu (devices, settings, about and updates) for the Android Bot home three-dot button; retain the adjacent Workspace switch and section creation buttons. Conversation dots still open Bot/group management. Type check and release build pass; updated APK installed; shared-menu interaction on the phone remains to be checked.
+
+- Unify Android Bot controls with App button variants, theme colors/radii and shared modal surfaces. Share icon action rows and checked radio/checkbox rows across management, models, members and interactive cards; use secondary/quiet rejection, cancellation and history controls. Standardize sheet headers/close actions and pin editor submission controls below scrolling fields. Type check/release build pass; installed and visually checked Bot creation, group member selection with fixed footer, and Chief management. Live card/approval submission and dark-mode device validation remain pending.
+
+- Simplify Android Bot creation to name and optional model, sending only those fields to the official create-bot operation. Group creation sends name/members and lets the Host select its default administrator. Keep advanced fields in Edit, collapse model selection by default, and use a single create action plus a close control. Type check/release build pass; APK installed. No Bot/group was created during validation.
+
+- Add direct Bot creation beside My team on the Android Bot home, alongside the existing Groups creation entry. Replace conversation management’s primary-button stack with compact icon rows, avatar header, close control and separated red deletion; remove unrelated creation/mode actions from that sheet. Type check and release build pass; APK installed. Visual acceptance of this revision remains pending.
+
+- Tighten Android Bot activity-to-reply spacing: remove the extra list gap and use a compact process disclosure while preserving its touch target. Type check/release build pass; reinstalled and visually checked Chief on the phone.
+
+- Make Android Main Bots compact rows with a slightly larger 48dp avatar and no idle status label. Fold Bot conversation reasoning/tools with the shared activity renderer while retaining visible replies/cards and pending approvals. Initial layout follows the latest message without treating programmatic scrolling as user navigation. Type check and release build pass; reinstalled and verified Chief opens at its latest reply with intermediate tools collapsed.
+
+- Restore a dedicated Workspace switch immediately left of the Bot header’s three-dot menu. The Host title opens device information again; equal-width side areas keep the title centered. Type check and release build pass; installed and visually verified on the phone.
+
+- Replace the Android Bot system action alert with an in-app bottom sheet for Workspace, Bot/group creation and device information. Center Bot headers with equal-width side controls; the Host title has a dropdown entry back to Workspace. Type check/release build pass; installed and visually checked the title/menu and Workspace navigation on DSH-046.
+
+- Remember Android Agent/Bot mode per server, account and pinned Host identity in encrypted local preferences. Restore it when returning to the Host or restarting the app; Bot preference takes precedence over automatic restoration of an old Agent conversation. Type check and release build pass; installed and verified Bot restoration after force-stop/relaunch and Agent restoration on Host re-entry on DSH-046.
+
+- Android Bot rows now show the latest visible session outline; group rows use the Host-provided speaker/message preview, with role/member fallbacks. Exclude internal exchanges and reject stale catalog responses. Bot headers retain only the three-dot menu, containing Agent mode and creation actions; usage/schedule links use a subdued icon footer. Type checks, 5 Bot contract tests and release build pass; reinstalled and checked roster/group previews and header on DSH-046.
+
+- Align Android Bot roster with DS Bot 0.2.0: native character avatars and stored colors/shapes, centered Main Bots, compact team rows without duplicate Main Bots, and member avatars for groups. Preserve upstream Apache-2.0 attribution. Type checks, Bot contract tests and release build pass; installed and visually checked on Xiaomi against DSH-046. Avatars are static; custom image avatars and theme/motion synchronization remain unsupported.
+
+- Fix Android Bot loading failing with `undefined is not a function`: use cancellation checks supported by React Native’s AbortController. Reinstalled the release APK and verified roster and existing conversation history on DSH-046.
+
+- Add native Android DS Bot mode from the button left of + in the Host workspace header, with team/group conversations, management, model selection, questions, one-time approvals and interactive cards. Host capabilities and the official Session catalog gate access; mutations are never replayed. Device smoke checks confirm roster/history loading; full interaction acceptance is pending.
+- Android 主机工作区「＋」左侧新增原生 Bot 模式，提供团队/群聊、管理、模型选择、问答、单次审批与交互卡片。访问受 Host capability 和官方 Session 目录约束，不重放操作；真机列表与历史加载已验证，完整交互验收待完成。
+
 ## 0.5.15 — 2026-10-22
 
 - Support official plugin configuration and enablement over Remote while hiding Remote itself from remote plugin management. Fix full-row sidebar hover and right-aligned Exit.

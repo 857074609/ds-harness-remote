@@ -639,3 +639,19 @@ schedule/create Remote 端点。只覆盖原生 Desktop/浏览器界面，不新
 setBundleEnabled/setPluginEnabled；配置复用既有 settings 通道。启停先核对 Host 官方
 inventory，拒绝未知/只读目标及 Remote 自身；禁止 stream 绕过、安装、卸载和任意管理方法。
 原生结果直接返回，不伪造热更新成功；此改动不代表跨设备 UI 验收或已发布。
+
+
+## Android DS Bot mode (2026-10-22)
+
+Android 主机工作区「＋」左侧进入 Bot；Bot 模式标题栏三点菜单左侧提供工作区切换图标，新建操作收在菜单内，本地导航不修改 Host UI 偏好。Bot 模式的
+「＋」创建 Bot/群聊。原生团队与专属对话复用官方 Harness 历史和 stream，发送及管理走
+现有 `plugin.route.call` / `api/bot` 白名单。打开会话先从同 Host 的 Bot state 获取当前
+Session ID，再用官方 Session catalog 核对，禁止构造持久化或虚拟 Bot Session。
+`BotRemoteClient` 固定绑定创建时的加密 core/proxy；断线、替换连接和能力撤回均拒绝。
+Mutation 不重试，后台停止团队/群聊进度轮询；UI 卡片纯原生声明式渲染，不运行模型代码。
+记忆、连接器、凭据、浏览器与本机偏好仍不开放。真机/跨设备验收与其他语言文案见 TODO。
+
+本次 Android 类型检查、32 文件 / 189 tests 与 arm64 Release APK/Hermes 构建通过。
+测试保护 Bot operation allowlist、单次审批、当前 Session authority、错误/取消和连接
+替换/能力撤回，不增加纯 UI 断言。原生工程重新按当前 0.5.15 / versionCode 59 生成。
+后续 Xiaomi 2304FPN6DC 真机检查发现 React Native AbortSignal 不支持 throwIfAborted，已改为检查 aborted 并增加原生 polyfill 取消契约回归。类型检查、14 个 Bot/connection 测试及 arm64 Release 重构建通过，已重装并确认 DSH-046 Bot 列表与 Chief 既有历史加载正常；完整交互验收仍待完成。noble/hashes exports fallback 警告保留。

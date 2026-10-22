@@ -1,7 +1,7 @@
 import { isSubagentSession } from '../lib/session-kind'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ActivityIndicator, Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, type StyleProp, type ViewStyle, View } from 'react-native'
-import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
+import { ArrowDown, ArrowUp, Bot, ChevronDown, ChevronRight, CircleAlert, CirclePlus, Code2, Eye, EyeOff, Folder, FolderOpen, MoreVertical, Pencil, RefreshCw, Search, Sparkles, Star, Trash2, WifiOff, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { DirectoryListing, RemoteSession, WorkspaceView } from '../types'
 import { BlurHeaderFrame, Button, EmptyState, IconButton, Screen, TopBar } from '../ui/components'
@@ -18,6 +18,7 @@ import { getVisibleWorkspaceSessions } from '../lib/workspace-sessions'
 import { loadCollapsedWorkspaceIds, loadWorkspaceBackend, saveCollapsedWorkspaceIds, saveWorkspaceBackend } from '../services/storage'
 import { SwipeableSessionRow } from './device-screens'
 import { resolveSessionDisplayTitle } from './session-title'
+import { BotModeScreen } from './bot-mode-screen'
 
 const FAVORITE_HIGHLIGHT_MS = 2400
 /**
@@ -28,11 +29,16 @@ const FAVORITE_HIGHLIGHT_MS = 2400
 const DIRECTORY_SHEET_COMPACT_RATIO = 0.92
 const DIRECTORY_SHEET_RATIO = 0.75
 
-export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInfo, focusWorkspaceKey }: {
+export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInfo, onMore, focusWorkspaceKey, botMode = false, botConversationId, onBotMode, onSelectBot }: {
+  botMode?: boolean
+  botConversationId?: string
+  onBotMode: (enabled: boolean) => void
+  onSelectBot: (id?: string) => void
   onBack?: () => void
   onOpenDevices: () => void
   onSession: (session: RemoteSession) => void
   onDeviceInfo: () => void
+  onMore: () => void
   /** Home-screen shortcut target: expand, reveal, and briefly highlight this workspace. */
   focusWorkspaceKey?: string
 }) {
@@ -41,6 +47,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const connected = connection.phase === 'connected'
   const reconnecting = connection.phase === 'connecting' || connection.phase === 'reconnecting'
   const selectedDevice = useAppStore(state => state.selectedDevice)
+  const botScope = useAppStore(state => JSON.stringify([state.config?.baseUrl, state.account, state.selectedDevice?.deviceId]))
   const codexAvailable = useAppStore(state => state.codexAvailable)
   const cursorAvailable = useAppStore(state => state.cursorAvailable)
   const piAvailable = useAppStore(state => state.piAvailable)
@@ -77,7 +84,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   const [focusedWorkspaceKey, setFocusedWorkspaceKey] = useState<string | undefined>(undefined)
   const [openSessionId, setOpenSessionId] = useState<string>()
   const backendSelectionVersion = useRef(0)
-  useLiveSessionStatus(backendReady && activeBackend === 'harness')
+  useLiveSessionStatus(!botMode && backendReady && activeBackend === 'harness')
   const scrollRef = useRef<ScrollView>(null)
   const workspaceOffsets = useRef(new Map<string, number>())
   const pendingScrollKey = useRef<string | undefined>(undefined)
@@ -140,8 +147,8 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
   }, [selectedDevice?.deviceId, codexAvailable, cursorAvailable, antigravityAvailable, piAvailable, opencodeAvailable, claudeAvailable])
 
   useEffect(() => {
-    if (connected && backendReady) void refreshWorkspaces(activeBackend)
-  }, [connected, backendReady, activeBackend, selectedDevice?.deviceId, refreshWorkspaces])
+    if (!botMode && connected && backendReady) void refreshWorkspaces(activeBackend)
+  }, [botMode, connected, backendReady, activeBackend, selectedDevice?.deviceId, refreshWorkspaces])
 
   const favoriteKeys = new Set(favoriteWorkspaces
     .filter(favorite => favorite.deviceId === selectedDevice?.deviceId)
@@ -332,6 +339,8 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
     </View>
   )
 
+  if (botMode) return <BotModeScreen key={botScope} selectedId={botConversationId} onSelect={onSelectBot} onAgentMode={() => onBotMode(false)} onBack={onBack} onDeviceInfo={onDeviceInfo} onMore={onMore} />
+
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar
@@ -339,7 +348,7 @@ export function WorkspacesScreen({ onBack, onOpenDevices, onSession, onDeviceInf
         titleLines={2}
         onTitlePress={onDeviceInfo}
         onBack={onBack}
-        action={<IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} />}
+        action={<><IconButton dense label={zhCN.bots.mode} icon={Bot} tint={colors.primary} onPress={() => onBotMode(true)} /><IconButton dense label={zhCN.workspaces.create} icon={CirclePlus} tint={colors.primary} onPress={() => setCreateOpen(true)} /></>}
       />}>
         <Screen scrollRef={scrollRef} refreshing={refreshing} onRefresh={() => void refresh()}>
           {showBackendTabs && <View style={[styles.backendTabs, styles.contentTop]} accessibilityRole="tablist">

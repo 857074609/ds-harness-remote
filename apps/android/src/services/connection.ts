@@ -6,6 +6,7 @@ import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
 import { RemoteApiProxy } from './api-proxy'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
 import { SecureTransport } from './secure-transport'
+import { BotRemoteClient } from './bot-catalog'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
 export type CloseHandler = (options?: { retryable: boolean }) => void
@@ -22,6 +23,7 @@ export interface AndroidConnectionOptions {
 
 export class AndroidRemoteConnection {
   private compactHistorySupported = false
+  private pluginRouteSupported = false
   private core?: RemoteClientCore
   private proxy?: RemoteHarnessClient
   private codex?: CodexRemoteClient
@@ -206,6 +208,7 @@ export class AndroidRemoteConnection {
   }
 
   private applyBackendFeatures(core: RemoteClientCore, features: RemoteHostFeatures): void {
+    this.pluginRouteSupported = features.pluginRoute
     this.codexAvailable = features.capabilities.includes('codex.appserver.transfer.v1')
       && remoteWorkspaceTypeAvailable(features.capabilities, features.workspaceTypes, 'codex', 'codex.appserver.v1')
     if (this.codexAvailable) this.codex ??= new CodexRemoteClient(core, true)
@@ -222,6 +225,22 @@ export class AndroidRemoteConnection {
   requireProxy(): RemoteHarnessClient {
     if (this.proxy === undefined) throw new Error(strings.runtime.connectHostFirst)
     return this.proxy
+  }
+
+  requireBotClient(): BotRemoteClient {
+    const core = this.core
+    const proxy = this.proxy
+    if (core === undefined || proxy === undefined) throw new Error(strings.runtime.connectHostFirst)
+    if (!this.pluginRouteSupported) throw new Error(strings.bots.unsupported)
+    const current = () => {
+      if (this.core !== core || this.proxy !== proxy) throw new Error(strings.runtime.connectHostFirst)
+      if (!this.pluginRouteSupported) throw new Error(strings.bots.unsupported)
+    }
+    return new BotRemoteClient(
+      (body, signal) => { current(); return core.rpc('plugin.route.call', { route: 'api/bot', body }, signal) },
+      () => { current(); return proxy.sessionList() },
+      current,
+    )
   }
 
   /** Optional CodeX business client; available only when the Host advertises both domain capabilities. */

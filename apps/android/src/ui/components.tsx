@@ -130,8 +130,12 @@ export function TopBar({
   backLabel,
   action,
   titleLines = 1,
+  titleAccessory,
+  centered = false,
 }: {
   title: string
+  titleAccessory?: ReactNode
+  centered?: boolean | number
   subtitle?: string
   onSubtitlePress?: () => void
   onTitlePress?: () => void
@@ -178,7 +182,7 @@ export function TopBar({
           pointerEvents="none"
         />
       )}
-      <View style={styles.topBarSide}>
+      <View style={[styles.topBarSide, !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
         {onBack !== undefined && (
           <IconButton label={backLabel ?? zhCN.common.back} icon={backIcon ?? ArrowLeft} onPress={onBack} hitSlop={8} />
         )}
@@ -194,7 +198,8 @@ export function TopBar({
               hitSlop={4}
               style={({ pressed }) => [styles.topBarTitleRow, pressed && styles.iconButtonPressed]}
             >
-              <Text style={[styles.topBarTitle, styles.topBarTitleLink]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+              <Text style={[styles.topBarTitle, titleAccessory === undefined && styles.topBarTitleLink, { flexShrink: 1 }]} numberOfLines={titleLines} ellipsizeMode="tail">{title}</Text>
+              {titleAccessory}
             </Pressable>
           )}
         {hasSubtitle && (
@@ -214,7 +219,7 @@ export function TopBar({
             )
         )}
       </View>
-      <View style={[styles.topBarSide, styles.topBarTrailing]}>
+      <View style={[styles.topBarSide, styles.topBarTrailing, !!centered && { width: typeof centered === 'number' ? centered : 48 }]}>
         {action !== undefined && action !== null && (
           <View style={styles.topBarActions}>{action}</View>
         )}

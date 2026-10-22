@@ -12,11 +12,12 @@ export type BrowseEntry = {
 type Snapshot = {
   entries: Record<string, BrowseEntry>
   catalogs: Record<string, { workspaces: WorkspaceView[]; sessions: RemoteSession[] }>
+  hostModes: Record<string, 'agent' | 'bot'>
   resume: boolean; notifications: boolean
   last?: { scope: string; deviceId: string; sessionId: string }
 }
 type Memory = Snapshot & { ready: boolean; error?: string }
-const empty = (): Snapshot => ({ entries: {}, catalogs: {}, resume: false, notifications: true })
+const empty = (): Snapshot => ({ entries: {}, catalogs: {}, hostModes: {}, resume: false, notifications: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
 export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
@@ -58,7 +59,7 @@ function savedEntry(value: BrowseEntry): BrowseEntry {
 function snapshot(): Snapshot {
   const state = useBrowseMemory.getState()
   const entries = Object.fromEntries(Object.entries(state.entries).map(([id, value]) => [id, savedEntry(value)]))
-  return {entries, catalogs: state.catalogs, resume: state.resume, notifications: state.notifications, last: state.last}
+  return {entries, catalogs: state.catalogs, hostModes: state.hostModes, resume: state.resume, notifications: state.notifications, last: state.last}
 }
 export function flushBrowseMemory(): Promise<void> {
   if (timer !== undefined) {clearTimeout(timer); timer = undefined}
@@ -121,4 +122,10 @@ export async function clearBrowseMemory(): Promise<void> {
   await writes
   useBrowseMemory.setState({...empty(), error: undefined})
   await flushBrowseMemory()
+}
+
+/** Local display preference, isolated by server, account, device and pinned identity. */
+export function saveHostMode(scope: string, mode: 'agent' | 'bot'): void {
+  useBrowseMemory.setState(state => ({hostModes: {...state.hostModes, [scope]: mode}}))
+  void flushBrowseMemory()
 }

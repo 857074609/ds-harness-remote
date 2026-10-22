@@ -115,9 +115,10 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
   return true
 })
 
-const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, busyAction, onApproval, onQuestion }: {
+export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, dense = false, busyAction, onApproval, onQuestion }: {
   items: ChatItem[]
   closed: boolean
+  dense?: boolean
   busyAction?: string
   onApproval: (itemId: string, outcome: 'allowed-once' | 'rejected') => Promise<void>
   onQuestion: (itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>) => Promise<void>
@@ -146,7 +147,8 @@ const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed, busyA
     <Pressable accessibilityRole="button" accessibilityLabel={detail === undefined ? label : `${label} · ${detail}`}
       accessibilityState={{ expanded, disabled: pending }} disabled={pending}
       onPress={() => setOpen(value => !value)}
-      style={({ pressed }) => [styles.processHeader, pressed && styles.reasoningHeaderPressed]}>
+      hitSlop={dense ? { top: 6, bottom: 6 } : undefined}
+      style={({ pressed }) => [styles.processHeader, dense && { minHeight: 32 }, pressed && styles.reasoningHeaderPressed]}>
       {expanded ? <ChevronUp size={17} color={colors.muted} /> : <ChevronDown size={17} color={colors.muted} />}
       <Text style={styles.processLabel} numberOfLines={1}>{label}{detail === undefined ? '' : ` · ${detail}`}</Text>
     </Pressable>

@@ -218,3 +218,40 @@ Validation: Android typecheck, 286 tests, and production Hermes export passed. A
 using the real AGY CLI verified image replies and catalog/history/image recovery after Host restart;
 it did not exercise encrypted transport or an Android UI. No Android device or Java runtime was
 available, so this change has not been validated in a newly built APK on a physical device.
+
+## Bot mode
+
+The Bot button immediately left of **+** on the Host workspace header switches the
+Android view to a DS Bot team. Bot mode shows a Workspace switch immediately left of the three-dot menu;
+the menu contains Bot/group creation actions. This is a local navigation choice
+and does not change the Host's UI mode. The last Agent/Bot selection is saved per server, account and pinned Host identity and restored when returning to that Host, including after an app restart. Enable `ds-bot` in the connected Harness instance
+and use a Remote Host advertising `plugin.route.v1` (with `view-reply` support for
+interactive cards).
+
+The native team and conversation views provide Main Bots, Bot/group creation and
+editing, duplication/deletion, model/effort selection, group membership, text chat,
+live Harness history, questions, one-time approvals, and declarative interactive
+cards. Usage and schedules are read-only. Memory, connectors, credentials, browser
+control and Host preferences remain Host-local; this does not expose arbitrary
+plugin endpoints. Bot messages use DS Bot's own `send` operation; opening a Bot or
+group resolves its current identity against the official Harness Session catalog.
+Older Host responses, disconnects and replaced connections fail closed. Mutations
+are never automatically retried. Team state remains in memory and polling pauses
+when the app is backgrounded. New Bot labels support Chinese/English (other locales
+currently fall back to English).
+
+Device smoke checks on Xiaomi 2304FPN6DC against DSH-046 confirmed Bot roster and existing Chief conversation history loading. Full interaction and cross-device acceptance remain pending.
+
+Local validation (2026-10-22): Android type checks, all 32 test files / 189 tests,
+and an arm64 Release APK (including Hermes) pass. Tests cover Bot operation
+allowlisting, one-time approval, current-session authority, rejected Host responses,
+cancellation, and connection replacement/revocation. The existing Metro
+`@noble/hashes/crypto.js` package-exports fallback warning remains. A subsequent device check exposed React Native AbortSignal lacking `throwIfAborted`; cancellation now checks `aborted` directly. Type checks, 14 targeted Bot/connection tests and a rebuilt arm64 release APK passed; the APK was reinstalled and roster/history loading verified on the phone.
+
+Roster rows show the latest visible official session outline, excluding internal Bot exchanges; group previews use the Host-provided speaker and message. Roles/members remain the fallback for empty conversations.
+
+Bot conversations collapse intermediate reasoning/tool activity using the shared chat renderer. Pending questions/approvals remain visible, as do Bot cards and group replies. Opening a conversation follows the latest message after layout; manually scrolling upward stops following.
+
+Create a Bot directly with **+** beside **My team**, or create a group with **+** beside **Groups**. Conversation details use compact icon rows for edit/main/duplicate, with deletion separated in red.
+
+New Bots ask only for a name and optional model; omitted model/avatar settings use official Host defaults. New groups ask for a name and members, leaving administrator selection to the Host. Roles, instructions, reasoning effort and group administration remain in Edit. Creation calls the existing official create-bot/create-room operations directly.

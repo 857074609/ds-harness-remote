@@ -18,6 +18,7 @@ const runtime: SessionRuntime = new SessionRuntime({
 
 /** Only exposes the authenticated native carrier of the current connection. */
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
+export const requireBotClient = () => runtime.connection.requireBotClient()
 
 export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
 

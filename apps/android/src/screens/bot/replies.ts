@@ -67,13 +67,14 @@ function unwrapEnvelopes(candidate: string, seen: Set<string>): string[] {
   return inner
 }
 
-function collectBlocks(value: unknown, push: (text: string) => void): void {
-  if (!Array.isArray(value)) return
+function collectBlocks(value: unknown, push: (text: string) => void, depth = 0): void {
+  // Tool results are untrusted; deeper envelopes retain the ordinary renderer.
+  if (depth >= 32 || !Array.isArray(value)) return
   for (const block of value) {
     if (typeof block !== 'object' || block === null) continue
     const record = block as Record<string, unknown>
     if (typeof record.text === 'string') push(record.text)
-    collectBlocks(record.content, push)
+    collectBlocks(record.content, push, depth + 1)
   }
 }
 
@@ -87,20 +88,32 @@ function salvageReplyArray(truncated: string): BotObject[] | undefined {
   const body = truncated.slice('{"replies"'.length).replace(/^\s*:\s*/, '')
   if (!body.startsWith('[')) return undefined
   const complete: string[] = []
-  let depth = 0, start = -1, inString = false, escaped = false
-  for (let i = 0; i < body.length; i++) {
-    const char = body[i]
+  const brackets: string[] = []
+  let start = -1, inString = false, escaped = false, expectEntry = true
+  for (let i = 1; i < body.length; i++) {
+    const char = body[i]!
     if (inString) {
       if (escaped) escaped = false
       else if (char === '\\') escaped = true
       else if (char === '"') inString = false
       continue
     }
+    if (brackets.length === 0) {
+      if (/\s/u.test(char)) continue
+      if (char === ']') break
+      if (char === ',' && !expectEntry) { expectEntry = true; continue }
+      // Recover only direct object entries, never nested arrays or later fields.
+      if (char !== '{' || !expectEntry) break
+      start = i
+      brackets.push(char)
+      expectEntry = false
+      continue
+    }
     if (char === '"') { inString = true; continue }
-    if (char === '{') { if (depth === 0) start = i; depth++; continue }
-    if (char === '}' && depth > 0) {
-      depth--
-      if (depth === 0 && start >= 0) { complete.push(body.slice(start, i + 1)); start = -1 }
+    if (char === '{' || char === '[') { brackets.push(char); continue }
+    if (char === '}' || char === ']') {
+      if (brackets.pop() !== (char === '}' ? '{' : '[')) break
+      if (brackets.length === 0 && start >= 0) { complete.push(body.slice(start, i + 1)); start = -1 }
     }
   }
   const replies = complete.flatMap(item => {

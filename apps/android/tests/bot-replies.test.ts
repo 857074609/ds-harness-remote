@@ -24,6 +24,10 @@ describe('Bot room reply extraction', () => {
       { name: 'plain prose', detail: '没有可解析的回复', expected: 0 },
       { name: 'embedded replies keyword without valid entries', detail: '示例：{"replies":[1,{"nope":true}],"passed":2}', expected: 0 },
       { name: 'empty replies array', detail: round([]), expected: 0 },
+      { name: 'deep untrusted content stays on ordinary tool renderer', detail: '{"content":['.repeat(4500) + '{}' + ']}'.repeat(4500), expected: 0 },
+      { name: 'salvage stops at replies boundary', detail: `${round([message('x')]).slice(0, -1)},"meta":{"text":"not a reply"}} trailing`, expected: 1 },
+      { name: 'salvage rejects nested array entries', detail: `{"replies":[[${JSON.stringify(message('x'))}]]} trailing`, expected: 0 },
+      { name: 'salvage rejects missing entry separators', detail: `{"replies":[${JSON.stringify(message('x'))}{"text":"invalid"}`, expected: 1 },
     ].map(row => ({ name: row.name, run: async () => {
       const replies = parseBotReplies(row.detail)
       expect(replies?.length ?? 0).toBe(row.expected)

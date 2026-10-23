@@ -1,5 +1,8 @@
 ## Unreleased
 
+- Add offline LaTeX formulas to Android shared Markdown: `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` display blocks, rendered as native SVG with horizontal scrolling for wide display formulas. Keep code literal and fall back to source for unsupported or oversized formulas. No WebView, remote fonts or network math service. Native device rendering remains to be verified.
+- Android 共享 Markdown 新增离线 LaTeX 公式：行内与独立公式块使用原生 SVG，较宽公式块可横向滚动；代码保持原样，不支持或超限公式回退源码。不使用 WebView、远程字体或网络公式服务；真机显示仍待验证。
+
 - Adapt Remote to DS Bot 0.2.1: allow dedicated side-question/cancel and group-continuation operations; Android claims `/btw` without falling back to ordinary prompts, restores current/earlier aside cards, and shows paused-group continuation. Add validated native chart/calculator cards using the upstream bounded formula interpreter; HTML remains summary-only. No release or cross-device acceptance is implied.
 - 适配 DS Bot 0.2.1：放行旁问/取消与群聊继续操作，Android 独立处理 `/btw`、恢复当前/旧分段旁问卡片及群聊暂停入口；使用上游受限公式解释器显示原生图表与计算卡片，HTML 仅显示摘要。尚未发布或完成跨设备验收。
 

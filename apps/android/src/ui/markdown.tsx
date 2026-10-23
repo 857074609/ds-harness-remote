@@ -2,13 +2,16 @@ import { createContext, memo, useContext, useMemo, useRef, type ReactNode } from
 import { StyleSheet, Text, View } from 'react-native'
 import MarkdownIt, { type Token } from 'markdown-it'
 import { radius, spacing, type } from './theme'
+import { installMath } from './markdown-math'
+import { MathFormula } from './math-formula'
 import { type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 
 // Remote messages are untrusted E2EE business content. Parse Markdown without
-// HTML/linkification and render only native Text/View nodes: no WebView,
+// HTML/linkification and render native Text/View/SVG nodes: no WebView,
 // external navigation, or remote image requests.
 const parser = new MarkdownIt({ html: false, linkify: false, breaks: true })
+installMath(parser)
 
 type MarkdownLinkHandler = (href: string) => void
 const markdownLinkContext = createContext<MarkdownLinkHandler | undefined>(undefined)
@@ -107,7 +110,9 @@ function parseBlocks(cacheRef: { current: BlockParseCache | undefined }, text: s
   const cache = cacheRef.current
   if (cache !== undefined && cache.tailStart >= 0 && cache.tailKey >= 0
     && text.length > cache.text.length && text.startsWith(cache.text)
-    && !LINK_REF_DEFINITION.test(text)) {
+    && !LINK_REF_DEFINITION.test(text)
+    // An unfinished display formula can span previously parsed paragraphs.
+    && !/\$\$|\\\[/u.test(text)) {
     const suffix = text.slice(cache.tailStart)
     const suffixNodes = markdownTree(parser.parse(suffix, {}), cache.tailKey)
     const nodes = [...cache.nodes.slice(0, -1), ...suffixNodes]
@@ -159,6 +164,7 @@ type MarkdownStyles = ReturnType<typeof createStyles>
 
 function renderBlock(node: MarkdownNode, styles: MarkdownStyles, onLinkPress?: MarkdownLinkHandler): ReactNode {
   const { token, key, children } = node
+  if (token.type === 'math_block') return <MathFormula key={key} source={token.content} display />
   if (token.type === 'paragraph_open') {
     return <Text key={key} selectable style={styles.paragraph}>{renderInlineChildren(children, styles, onLinkPress)}</Text>
   }
@@ -218,7 +224,8 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!
     const key = `${prefix}:${index}`
-    if (token.type === 'text') output.push(token.content)
+    if (token.type === 'math_inline') output.push(<MathFormula key={key} source={token.content} />)
+    else if (token.type === 'text') output.push(token.content)
     else if (token.type === 'softbreak' || token.type === 'hardbreak') output.push('\n')
     else if (token.type === 'code_inline') {
       const isMention = token.content.startsWith('/') || token.content.startsWith('@')

@@ -29,6 +29,7 @@
     "expo-system-ui": "~57.0.2",
     "lucide-react-native": "^1.31.0",
     "markdown-it": "^14.3.3",
+    "mathjax-full": "3.2.2",
     "pdfjs-dist": "6.3.289",
     "qrcode-generator": "2.0.4",
     "react": "19.2.3",

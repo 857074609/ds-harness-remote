@@ -1,4 +1,7 @@
-## Unreleased
+## 0.5.18 — 2026-10-23
+
+- Harden reply parsing against deeply nested untrusted tool output and restrict truncated-result recovery to direct entries inside the replies array, preventing render-time stack overflow and unrelated-object attribution.
+- 加固回复解析：限制不可信工具输出的嵌套深度，截断恢复仅接受 replies 数组内的直接对象，避免渲染时栈溢出及误将其他对象展示为回复。
 
 - Refresh Android sign-in with discovered OAuth providers, Google authorization, per-provider QR login, and a server-switching modal in the overflow menu. Simplify the header, synchronize localized guidance, and add a GitHub attribution link.
 - 更新 Android 登录页：按服务端能力展示 OAuth 方式，支持 Google 授权与各渠道扫码登录，将切换服务器移至三点菜单中的模态框；简化标题、同步多语言提示并添加 GitHub 署名链接。
@@ -14,6 +17,12 @@
 
 - Fix Android Harness queued-message visibility (#147): show locally accepted messages as unconfirmed when they leave the inbox before their echo, and prevent delayed queue projections from hiding durable user messages. Preserve delivery state across late acknowledgements and explicit queue actions. Queueing versus immediate-delivery behavior is unchanged.
 - 修复 Android Harness 排队消息不可见问题（#147）：消息离开队列但回显尚未到达时，在聊天区保留“发送结果未确认”状态；迟到的队列投影不再隐藏已确认的用户消息。处理迟到 ACK 与队列操作的交错顺序；不改变排队与立即发送的既有行为。
+
+- Fix Android conversation folder links: when a linked path cannot be previewed as a file, use the existing authorized directory listing and reopen it in the file browser on success.
+- 修复 Android 会话文件夹链接：链接路径无法按文件预览时，尝试现有授权目录列表，成功后在文件浏览面板中打开目录。
+
+- Validation: full workspace check and 794 tests passed (407 Plugin, 195 Android). Production build (including Android Hermes export) and DSH bundle validation passed; no new native-device or cross-device acceptance was performed.
+- 验证：全仓 check 与 794 tests 通过（Plugin 407、Android 195）。生产 build（含 Android Hermes export）与 DSH bundle 校验通过；本次未新增原生真机或跨设备验收。
 
 ## 0.5.17 — 2026-10-22
 

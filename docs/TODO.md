@@ -1,6 +1,8 @@
 # TODO
 
-更新日期：2026-10-22。本次发布版本统一为 `0.5.17`（Tag `v0.5.17`），Android `versionCode 61`，Expo iOS `buildNumber 61`；发布状态以 GitHub Release 工作流为准。
+更新日期：2026-10-23。本次发布版本统一为 `0.5.18`（Tag `v0.5.18`），Android `versionCode 63`，Expo iOS `buildNumber 63`；发布状态以 GitHub Release 工作流为准。
+
+本次全仓 check 与 794 tests 通过（Plugin 407、Android 195；7+78+1+12+44+43+7+407+195=794）。生产 build（含 Android Hermes export）与 DSH bundle 校验通过，未新增原生真机或跨设备验收；既有 Metro noble/hashes exports fallback 警告仍保留。
 
 Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
 peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。

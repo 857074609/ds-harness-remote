@@ -1,6 +1,6 @@
 {
   "name": "@dsh-remote/android",
-  "version": "0.5.18",
+  "version": "0.5.19",
   "type": "module",
   "main": "index.ts",
   "dependencies": {

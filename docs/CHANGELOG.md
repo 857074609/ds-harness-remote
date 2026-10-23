@@ -1,4 +1,4 @@
-## Unreleased
+## 0.5.19 — Unreleased
 
 - Add offline LaTeX formulas to Android shared Markdown: `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` display blocks, rendered as native SVG with horizontal scrolling for wide display formulas. Keep code literal and fall back to source for unsupported or oversized formulas. No WebView, remote fonts or network math service. Native device rendering remains to be verified.
 - Android 共享 Markdown 新增离线 LaTeX 公式：行内与独立公式块使用原生 SVG，较宽公式块可横向滚动；代码保持原样，不支持或超限公式回退源码。不使用 WebView、远程字体或网络公式服务；真机显示仍待验证。

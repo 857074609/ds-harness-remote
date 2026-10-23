@@ -1,6 +1,6 @@
 # TODO
 
-更新日期：2026-10-23。本次发布版本统一为 `0.5.18`（Tag `v0.5.18`），Android `versionCode 63`，Expo iOS `buildNumber 63`；发布状态以 GitHub Release 工作流为准。
+更新日期：2026-10-24。当前内部待发布版本统一为 `0.5.19`，Android `versionCode 64`，Expo iOS `buildNumber 64`；尚未为此版本创建 Tag 或 Release。
 
 本次全仓 check 与 794 tests 通过（Plugin 407、Android 195；7+78+1+12+44+43+7+407+195=794）。生产 build（含 Android Hermes export）与 DSH bundle 校验通过，未新增原生真机或跨设备验收；既有 Metro noble/hashes exports fallback 警告仍保留。
 

@@ -1,5 +1,17 @@
 ## Unreleased
 
+- Refresh Android sign-in with discovered OAuth providers, Google authorization, per-provider QR login, and a server-switching modal in the overflow menu. Simplify the header, synchronize localized guidance, and add a GitHub attribution link.
+- 更新 Android 登录页：按服务端能力展示 OAuth 方式，支持 Google 授权与各渠道扫码登录，将切换服务器移至三点菜单中的模态框；简化标题、同步多语言提示并添加 GitHub 署名链接。
+
+- Render recognized, completed `group_relay` replies as conversation content without redundant completion/tool headers; retain failure and other tool diagnostics.
+- 对已识别回复的 `group_relay` 特别处理：只展示群聊内容，隐藏重复的完成状态与工具层级，保留失败提示和其他工具详情。
+
+- Show ds-bot group replies from tool results directly in Android Harness conversations, preserving message order and folded tool diagnostics.
+- 修复 Android 普通 Harness 会话中群聊回复被折叠进工具活动的问题：直接展示回复正文，保留原始顺序与可展开的工具详情。
+
+- Render ds-bot group reply payloads in individual Bot conversations as well as rooms, keeping reply text visible outside folded tool activity. Empty or unrecognized payloads retain the tool result display.
+- 修复单 Bot 会话调用群聊工具后仍显示原始 JSON：按回复内容展示正文，不再要求群聊入口；空结果和无法识别的结果保留工具展示。
+
 - Fix Android Harness queued-message visibility (#147): show locally accepted messages as unconfirmed when they leave the inbox before their echo, and prevent delayed queue projections from hiding durable user messages. Preserve delivery state across late acknowledgements and explicit queue actions. Queueing versus immediate-delivery behavior is unchanged.
 - 修复 Android Harness 排队消息不可见问题（#147）：消息离开队列但回显尚未到达时，在聊天区保留“发送结果未确认”状态；迟到的队列投影不再隐藏已确认的用户消息。处理迟到 ACK 与队列操作的交错顺序；不改变排队与立即发送的既有行为。
 

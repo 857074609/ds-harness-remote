@@ -116,10 +116,13 @@ export interface AppState {
   bootstrap(): Promise<void>
   requireReauth(message?: string): Promise<void>
   consumePendingAutoConnect(): string | undefined
+  selectServer(input: string): Promise<string | undefined>
   configureServer(input: string, email: string, password: string): Promise<boolean>
   startOAuth(input: string): Promise<string | undefined>
   startGithubOAuth(input: string): Promise<string | undefined>
+  startGoogleOAuth(input: string): Promise<string | undefined>
   completeOAuth(token: string): Promise<boolean>
+  listLoginProviders(input: string): Promise<QrProviderList | undefined>
   listQrProviders(input: string): Promise<QrProviderList | undefined>
   startQrLogin(input: string, providerId: string): Promise<QrLoginStart | undefined>
   pollQrLogin(baseUrl: string, qrId: string): Promise<OAuthQrPollResult | undefined>

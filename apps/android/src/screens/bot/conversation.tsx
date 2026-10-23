@@ -14,6 +14,7 @@ import { chatSections } from '../../state/message-helpers'
 import { processSegments } from '../chat-process'
 import { BotQuestion, BotViewCard } from './cards'
 import { parseBotReplies } from './replies'
+import { BotReplies } from './reply-view'
 import type { BotPerform } from './editor'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
@@ -117,7 +118,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const isDisplayTool = (item: ChatItem): boolean => {
     if (item.kind !== 'tool') return false
     if (item.toolKey === 'show_view') return true
-    if (room && item.state === 'finished') return parseBotReplies(item.resultDetail?.text) !== undefined
+    // A single Bot can relay a group round too; the payload determines presentation.
+    if (item.state === 'finished') return (parseBotReplies(item.resultDetail?.text)?.length ?? 0) > 0
     return false
   }
   const rows: BotChatRow[] = chatSections(visible).flatMap((section): BotChatRow[] => {
@@ -157,9 +159,9 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         if (args.view !== undefined) return <BotViewCard pending={args} busy reply={() => {}} />
       } catch { /* Retain the native tool row if its args are unavailable. */ }
     }
-    if (room && item.kind === 'tool' && item.state === 'finished') {
+    if (item.kind === 'tool' && item.state === 'finished') {
       const rows = parseBotReplies(item.resultDetail?.text)
-      if (rows !== undefined) return <Replies rows={rows} />
+      if (rows !== undefined && rows.length > 0) return <BotReplies rows={rows} />
     }
     return <ChatItemView item={item} compact={false} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
   }
@@ -181,7 +183,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
         {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
       </View>}
       ListFooterComponent={<View style={styles.section}>
-        {room && progress.length > 0 && <Replies rows={progress} />}
+        {room && progress.length > 0 && <BotReplies rows={progress} />}
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
         {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}
         {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}
@@ -195,8 +197,4 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       key={`${session.sessionId}:${fileLinkPath}`} mode="files" sessionId={session.sessionId}
       initialFile={fileLinkPath} onClose={() => setFileLinkPath(undefined)} />}
   </View></MarkdownLinkProvider>
-}
-function Replies({ rows }: { rows: BotObject[] }) {
-  const styles = useThemedStyles(createBotStyles)
-  return <View style={styles.section}>{rows.map((reply, i) => <View key={i} style={styles.card}><Text style={styles.heading}>{text(reply.name) || (reply.kind === 'user' ? s.bots.yourAnswer : s.bots.title)}</Text><NativeMarkdown text={text(reply.text) || text(reply.kind)} /></View>)}</View>
 }

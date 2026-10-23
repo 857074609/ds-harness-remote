@@ -180,7 +180,9 @@ const jaJP = {
   },
   status: { online: "オンライン", offline: "オフライン", disconnected: "切断されました", lan: "直接LAN", relay: "サーバーリレー", p2p: "ダイレクト P2P", turn: "ターンリレー", waiting: "接続中", running: "実行中" },
   setup: {
-    title: "サインイン", signIn: "アカウントにサインインする", signInAgain: "再度サインインしてください", lead: "この電話機に同じアカウントのデバイスを表示することを許可し、会話を続行します。",
+    title: "サインイン", signIn: "アカウントにサインインする", signInAgain: "再度サインインしてください", lead: "リモートデバイスと同じログイン方法を選択して、作業を続けてください。",
+    switchServer: "サーバーを切り替える", saveServer: "サーバーを保存", switchServerHint: "保存すると現在の接続が切断され、新しいサーバーへのログインが必要になります。",
+    google: "Google でログイン",
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "電子メール", zhihu: "志胡を続ける", github: "GitHub を続ける", oauthHint: "ブラウザが開いて認証が完了し、自動的にここに戻ります。",
     qr: "QRコードでサインイン", qrEntryHint: "タップしてコードを表示し、携帯電話でスキャンします", qrScanTitle: "携帯電話でサインインする", qrScanHint: "このコードを携帯電話でスキャンし、認証ページで確認してください。このデバイスはその後自動的にサインインします。", qrWaiting: "電話を待っています…", qrExpired: "このQRコードは有効期限が切れています。更新して再試行してください。", qrRefresh: "リフレッシュコード", qrUnsupported: "このサーバーは QR サインインを提供しません。別のサインイン方法を使用してください。", qrFailed: "QRサインインが完了しませんでした。もう一度やり直してください。",
     email: "電子メール", emailPlaceholder: "メールアドレスを入力してください", password: "パスワード", passwordPlaceholder: "パスワードを入力してください", passwordHint: "パスワードはこのサインインにのみ使用され、携帯電話には保存されません。",
@@ -271,6 +273,7 @@ const jaJP = {
   },
   validation: { serverRequired: "サーバーアドレスを入力します。", serverInvalid: "サーバーアドレスが無効です。例: https://remote.example.com", httpsRequired: "HTTPS アドレスを使用します。 HTTP はローカル開発に許可されています。", serverPartsForbidden: "サーバー アドレスのみを入力し、アカウント情報、クエリ パラメーター、ページ フラグメントは入力しません。" },
   runtime: {
+    googleUnsupported: "このサーバーは Google 認証に対応していません。別のログイン方法をお試しください。",
     identityNotReady: "この電話はまだ準備ができていません。しばらくしてからもう一度お試しください。", zhihuUnsupported: "このサーバーは Zhihu 認証をサポートしていません。別のサインイン方法を試してください。", githubUnsupported: "このサーバーは GitHub 認証をサポートしていません。別のサインイン方法を試してください。", hostClosed: "このデバイスへの接続が失われました。", openSessionFirst: "このリクエストに応答する前に、会話を開いてください。", networkUnavailable: "利用可能なネットワークがありません。ネットワークが復旧すると、アプリは再接続を試みます。", connectHostFirst: "まずコンピュータに接続します。", codexUnavailable: "このデバイスでは CodeX Remote が有効になっていないか、CodeX は現在利用できません。", codexInvalidResponse: "CodeX Remote は、アプリが認識できないデータを返しました。", codexTurnUnavailable: "この CodeX ターンは別の接続に属しているため、電話から停止することはできません。", codexWorkspaceReadOnly: "CodeX ワークスペースはここに追加できますが、名前変更、並べ替え、削除はコンピューター上の CodeX によって管理されたままになります。", cursorUnavailable: "このデバイスでは Cursor Remote が有効になっていないか、Cursor ACP が現在使用できません。", piUnavailable: "このデバイスでは Pi Remote が有効になっていないか、Pi ACP が現在利用できません。", antigravityUnavailable: "このデバイスでは Antigravity Remote が有効になっていないか、Antigravity ACP が現在利用できません。", opencodeUnavailable: "このデバイスでは OpenCode Remote が有効になっていないか、OpenCode ACP が現在利用できません。", claudeUnavailable: "このデバイスでは Claude Remote が有効になっていないか、Claude ACP が現在利用できません。", cursorTextOnly: "Cursor Remote は現在、テキスト メッセージのみをサポートしており、画像はサポートしていません。", piTextOnly: "Pi Remote は現在、テキスト メッセージのみをサポートしており、画像はサポートしていません。", hostMissingKey: "このデバイスにはセキュリティ キーがありません。もう一度確認して信頼してください。", unexpectedRelayDevice: "安全な接続が選択したデバイスと一致しません。", secureChannelNotConnected: "安全な接続が確立されていません。", secureHandshakeTimedOut: "安全な接続がタイムアウトしました。もう一度やり直してください。", secureHandshakeOrder: "安全な接続ハンドシェイクが正常ではありませんでした。", secureHandshakeIncomplete: "安全な接続ハンドシェイクが完了しませんでした。", secureHandshakeFailed: "安全な接続ハンドシェイクが失敗しました。",
   },
   messageActions: {

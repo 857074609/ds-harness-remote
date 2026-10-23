@@ -178,7 +178,9 @@ const zhTW = {
   },
   status: { online: '線上', offline: '離線', disconnected: '未連線', lan: '區域網直連', relay: '伺服器轉發', p2p: 'P2P 直連', turn: 'TURN 轉發', waiting: '連線中', running: '執行中' },
   setup: {
-    title: '登入', signIn: '登入賬號', signInAgain: '重新登入', lead: '授權此手機後，即可檢視同一賬號下的裝置並繼續對話。',
+    title: '登入', signIn: '登入賬號', signInAgain: '重新登入', lead: '請選擇與遠端裝置相同的登入方式，繼續你的工作。',
+    switchServer: "切換伺服器", saveServer: "儲存伺服器", switchServerHint: "儲存後會中斷目前連線，並需要在新伺服器重新登入。",
+    google: "使用 Google 帳號登入",
     oauth: '知乎', githubOAuth: 'GitHub', passwordMethod: '郵箱', zhihu: '使用知乎賬號登入', github: '使用 GitHub 賬號登入', oauthHint: '會開啟瀏覽器完成授權，然後自動返回這裡。',
     qr: '掃碼登入', qrEntryHint: '點選顯示二維碼，用手機掃碼授權', qrScanTitle: '使用手機掃碼登入', qrScanHint: '用手機掃描二維碼並在授權頁確認，完成後會自動登入此裝置。', qrWaiting: '等待手機掃碼…', qrExpired: '二維碼已過期，請重新整理後重試。', qrRefresh: '重新整理二維碼', qrUnsupported: '當前伺服器未開啟掃碼登入，請使用其他方式登入。', qrFailed: '掃碼登入未完成，請重試。',
     email: '郵箱', emailPlaceholder: '輸入郵箱', password: '密碼', passwordPlaceholder: '輸入密碼', passwordHint: '密碼只用於本次登入，不會儲存在手機上。',
@@ -269,6 +271,7 @@ const zhTW = {
   },
   validation: { serverRequired: '請輸入服務地址。', serverInvalid: '服務地址格式不正確。例如：https://remote.example.com', httpsRequired: '請使用 HTTPS 地址。本地開發環境可以使用 HTTP。', serverPartsForbidden: '請只輸入服務地址，不要包含賬號資訊、查詢引數或頁面錨點。' },
   runtime: {
+    googleUnsupported: "當前服務不支援 Google 授權，請改用其他登入方式。",
     identityNotReady: '此手機尚未準備完成，請稍後重試。', zhihuUnsupported: '當前服務不支援知乎授權，請改用其他登入方式。', githubUnsupported: '當前服務不支援 GitHub 授權，請改用其他登入方式。', hostClosed: '與裝置的連線已斷開。', openSessionFirst: '請先開啟對話，再回答這個請求。', networkUnavailable: '當前沒有可用網路，恢復網路後會嘗試重新連線。', connectHostFirst: '請先連線電腦端裝置。', codexUnavailable: '這臺裝置沒有啟用 CodeX Remote，或 CodeX 當前不可用。', codexInvalidResponse: 'CodeX Remote 返回了無法識別的資料。', codexTurnUnavailable: '當前 CodeX 回合不屬於此連線，無法從手機停止。', codexWorkspaceReadOnly: 'CodeX 工作區可以新增，但重新命名、排序和刪除仍由電腦端 CodeX 管理。', cursorUnavailable: '這臺裝置沒有啟用 Cursor Remote，或 Cursor ACP 當前不可用。', piUnavailable: '這臺裝置沒有啟用 Pi Remote，或 Pi ACP 當前不可用。', antigravityUnavailable: '這臺裝置沒有啟用 Antigravity Remote，或 Antigravity ACP 當前不可用。', opencodeUnavailable: '這臺裝置沒有啟用 OpenCode Remote，或 OpenCode ACP 當前不可用。', claudeUnavailable: '這臺裝置沒有啟用 Claude Remote，或 Claude ACP 當前不可用。', cursorTextOnly: 'Cursor Remote 當前僅支援文字訊息，暫不支援圖片。', piTextOnly: 'Pi Remote 當前僅支援文字訊息，暫不支援圖片。', hostMissingKey: '這臺裝置沒有可用的安全金鑰，請先重新確認並信任它。', unexpectedRelayDevice: '安全連線對應的裝置與所選裝置不一致。', secureChannelNotConnected: '安全連線尚未建立。', secureHandshakeTimedOut: '建立安全連線超時，請重試。', secureHandshakeOrder: '安全連線握手順序無效。', secureHandshakeIncomplete: '安全連線握手未完成。', secureHandshakeFailed: '無法完成安全連線握手。',
   },
   messageActions: {

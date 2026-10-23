@@ -4,13 +4,13 @@ import * as Application from 'expo-application'
 import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, QrCode as QrCodeIcon, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
+import { ActivityIndicator, Alert, Image, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { Check, ChevronRight, Download, ExternalLink, Info, KeyRound, Laptop, LockKeyhole, MoreVertical, QrCode as QrCodeIcon, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { QrLoginStart } from '../state/store-state'
 import { SOURCE_CODE_URL } from '../lib/links'
 import type { OAuthProviderInfo } from '../services/api'
-import { BlurHeaderFrame, Button, Field, KeyValue, Screen, TopBar } from '../ui/components'
+import { BlurHeaderFrame, Button, Field, IconButton, KeyValue, Screen, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { transportPreferenceOptions } from '../types'
 import type { DefaultPermissionPreset, LoginMethod } from '../types'
@@ -29,32 +29,53 @@ const releaseApiUrl = 'https://api.github.com/repos/liguobao/ds-harness-remote/r
 const developerUrl = 'https://www.zhihu.com/people/codelover'
 const twitterUrl = 'https://x.com/liguobao2077'
 
-type SetupLoginMethod = Extract<LoginMethod, 'oauth' | 'github-oauth' | 'password'> | 'qr'
+type SetupLoginMethod = LoginMethod
+
+function qrProviderFor(method: SetupLoginMethod): string | undefined {
+  if (method === 'oauth') return 'zhihu'
+  if (method === 'github-oauth') return 'github'
+  if (method === 'google-oauth') return 'google'
+  return undefined
+}
 
 function loginMethodLabel(method?: LoginMethod): string {
   if (method === 'oauth') return zhCN.setup.oauth
   if (method === 'github-oauth') return zhCN.setup.githubOAuth
+  if (method === 'google-oauth') return 'Google'
   if (method === 'password') return zhCN.setup.passwordMethod
   return zhCN.common.unknown
 }
 
-export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => void; onBack?: () => void }) {
+export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, setServerExpanded }: { onComplete: () => void; onBack?: () => void; onMore: () => void; serverExpanded: boolean; setServerExpanded: (expanded: boolean) => void }) {
   const config = useAppStore(state => state.config)
   const busy = useAppStore(state => state.busyAction === 'server')
   const oauthBusy = useAppStore(state => state.busyAction === 'oauth')
+  const selectServer = useAppStore(state => state.selectServer)
   const configure = useAppStore(state => state.configureServer)
   const startOAuth = useAppStore(state => state.startOAuth)
   const startGithubOAuth = useAppStore(state => state.startGithubOAuth)
+  const startGoogleOAuth = useAppStore(state => state.startGoogleOAuth)
+  const listLoginProviders = useAppStore(state => state.listLoginProviders)
   const listQrProviders = useAppStore(state => state.listQrProviders)
   const startQrLogin = useAppStore(state => state.startQrLogin)
   const pollQrLogin = useAppStore(state => state.pollQrLogin)
   const completeQrLogin = useAppStore(state => state.completeQrLogin)
   const [serverUrl, setServerUrl] = useState(config?.baseUrl ?? process.env.EXPO_PUBLIC_DSH_REMOTE_SERVER ?? defaultServerUrl)
+  const [serverDraft, setServerDraft] = useState(serverUrl)
+  const [serverError, setServerError] = useState<string>()
+  const serverDirty = serverDraft.trim() !== serverUrl
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loginMethod, setLoginMethod] = useState<SetupLoginMethod>('oauth')
-  const [qrProviders, setQrProviders] = useState<OAuthProviderInfo[]>([])
-  const [qrProviderId, setQrProviderId] = useState<string>()
+  const [showQr, setShowQr] = useState(false)
+  const [loginProviders, setLoginProviders] = useState<OAuthProviderInfo[]>([])
+  const [providersPhase, setProvidersPhase] = useState<'loading' | 'ready' | 'failed'>('loading')
+  const [providerReload, setProviderReload] = useState(0)
+  const availableMethods: SetupLoginMethod[] = (['oauth', 'github-oauth', 'google-oauth'] as const)
+    .filter(method => loginProviders.some(provider => provider.id === qrProviderFor(method)))
+  availableMethods.push('password')
+  const supportsQr = loginProviders.some(provider => provider.id === qrProviderFor(loginMethod) && provider.qrStartUrl !== undefined)
+
   const [qrLogin, setQrLogin] = useState<QrLoginStart>()
   const [qrPhase, setQrPhase] = useState<'idle' | 'loading' | 'waiting' | 'expired' | 'unsupported' | 'failed'>('idle')
   const qrRun = useRef(0)
@@ -70,24 +91,90 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
     mounted.current = true
     return () => { mounted.current = false }
   }, [])
-  const { width, height } = useResponsiveLayout()
-  // Tablets and other large screens sign in from their own display while the
-  // user scans with a phone; phones keep the browser OAuth tabs by default.
+  const { width, height, sheetMaxHeight } = useResponsiveLayout()
+  // Give tablets a larger code while keeping the same login tabs on all screens.
   const largeScreen = Math.min(width, height) >= 600
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
 
+  useEffect(() => {
+    let cancelled = false
+    qrRun.current += 1
+    setQrLogin(undefined)
+    setShowQr(false)
+    setLoginProviders([])
+    setProvidersPhase('loading')
+    void listLoginProviders(serverUrl).then(result => {
+      if (cancelled) return
+      if (result === undefined) {
+        setProvidersPhase('failed')
+        setLoginMethod('password')
+        return
+      }
+      setLoginProviders(result.providers)
+      setProvidersPhase('ready')
+      setLoginMethod(current => current === 'password' || result.providers.some(provider => provider.id === qrProviderFor(current))
+        ? current
+        : (['oauth', 'github-oauth', 'google-oauth'] as const).find(method => result.providers.some(provider => provider.id === qrProviderFor(method))) ?? 'password')
+    })
+    return () => { cancelled = true }
+  }, [serverUrl, providerReload, listLoginProviders])
+
+  const closeServerEditor = () => {
+    if (busy) return
+    setServerDraft(serverUrl)
+    setServerError(undefined)
+    setServerExpanded(false)
+  }
+
+  const saveServer = async () => {
+    setServerError(undefined)
+    const saved = await selectServer(serverDraft)
+    if (saved === undefined) {
+      setServerError(useAppStore.getState().error ?? zhCN.tools.failed)
+      return
+    }
+    setServerUrl(saved)
+    setServerDraft(saved)
+    setProviderReload(value => value + 1)
+    setPassword('')
+    setServerExpanded(false)
+  }
+
   const submit = async () => {
+    if (serverDirty) return
     if (await configure(serverUrl, email, password)) onComplete()
   }
 
   const signInWithZhihu = async () => {
+    if (serverDirty) return
     const url = await startOAuth(serverUrl)
-    if (url !== undefined) await Linking.openURL(url)
+    if (url === undefined) return
+    if (Platform.OS === 'android') {
+      try {
+        // Zhihu's hybrid route takes zh_url; an unknown route only opens its home screen.
+        // Keep the server OAuth entry and nested return_to intact.
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: `zhihu://hybrid?zh_url=${encodeURIComponent(url)}`,
+          packageName: 'com.zhihu.android',
+        })
+        return
+      } catch {
+        // Zhihu may be missing or unable to handle this link; use the browser.
+      }
+    }
+    await Linking.openURL(url)
   }
 
   const signInWithGithub = async () => {
+    if (serverDirty) return
     const url = await startGithubOAuth(serverUrl)
+    if (url !== undefined) await Linking.openURL(url)
+  }
+
+  const signInWithGoogle = async () => {
+    if (serverDirty) return
+    const url = await startGoogleOAuth(serverUrl)
     if (url !== undefined) await Linking.openURL(url)
   }
 
@@ -104,11 +191,11 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
       return
     }
     setQrLogin(started)
-    setQrProviderId(started.provider.id)
     setQrPhase('waiting')
   }
 
-  const refreshQr = async () => {
+  const refreshQr = async (method = loginMethod) => {
+    if (serverDirty) return
     const run = ++qrRun.current
     qrCompleted.current = false
     setQrPhase('loading')
@@ -119,15 +206,11 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
       setQrPhase('failed')
       return
     }
-    setQrProviders(result.providers)
-    if (result.providers.length === 0) {
+    const preferred = result.providers.find(provider => provider.id === qrProviderFor(method))
+    if (preferred === undefined) {
       setQrPhase('unsupported')
       return
     }
-    const preferred = result.providers.find(provider => provider.id === qrProviderId)
-      ?? result.providers.find(provider => provider.id === 'zhihu')
-      ?? result.providers[0]!
-    setQrProviderId(preferred.id)
     await startQrFor(preferred, run)
   }
 
@@ -137,16 +220,14 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
     lastServerUrl.current = serverUrl
     qrRun.current += 1
     qrCompleted.current = false
-    setQrProviders([])
-    setQrProviderId(undefined)
+    setShowQr(false)
     setQrLogin(undefined)
     setQrPhase('idle')
   }, [serverUrl])
 
-  // Poll only while the QR tab is visible. Leaving the tab keeps the session
-  // but stops timers; returning resumes polling the same session.
+  // Poll only the selected provider while its QR panel is visible.
   useEffect(() => {
-    if (loginMethod !== 'qr' || qrLogin === undefined || qrCompleted.current) return
+    if (serverDirty || !showQr || qrLogin === undefined || qrLogin.provider.id !== qrProviderFor(loginMethod) || qrCompleted.current) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
     let failures = 0
@@ -174,7 +255,8 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
         // registration also re-renders the app, so navigation is read from a
         // ref instead of being an effect dependency.
         qrCompleted.current = true
-        const method = qrLogin.provider.id === 'github' ? 'github-oauth' : 'oauth'
+        const method = loginMethod
+        if (method === 'password') return
         const ok = await completeQrLogin(qrLogin.baseUrl, result.token, method)
         if (ok) {
           // Finish navigation even if this render's tab was switched while the
@@ -193,42 +275,29 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
       cancelled = true
       if (timer !== undefined) clearTimeout(timer)
     }
-  }, [completeQrLogin, loginMethod, pollQrLogin, qrLogin])
+  }, [completeQrLogin, loginMethod, pollQrLogin, qrLogin, showQr, serverDirty])
 
-  const openQrTab = () => {
-    setLoginMethod('qr')
-    if (qrLogin === undefined && qrPhase !== 'loading') void refreshQr()
+  const chooseLoginMethod = (method: SetupLoginMethod) => {
+    if (method === loginMethod) return
+    qrRun.current += 1
+    setLoginMethod(method)
+    setQrLogin(undefined)
+    setQrPhase('idle')
+    if (method === 'password') setShowQr(false)
+    else if (showQr) void refreshQr(method)
   }
 
-  const chooseQrProvider = (provider: OAuthProviderInfo) => {
-    if (provider.id === qrProviderId && qrLogin !== undefined && (qrPhase === 'waiting' || qrPhase === 'loading')) return
-    const run = ++qrRun.current
-    setQrProviderId(provider.id)
-    void startQrFor(provider, run)
+  const toggleQr = () => {
+    qrRun.current += 1
+    setShowQr(!showQr)
+    setQrLogin(undefined)
+    setQrPhase('idle')
+    if (!showQr) void refreshQr()
   }
 
-  const qrContent = loginMethod !== 'qr' ? null : (
+  const qrContent = !showQr ? null : (
     <View style={styles.qrPanel}>
-      <Text style={styles.qrTitle}>{zhCN.setup.qrScanTitle}</Text>
-      {qrProviders.length > 1 && (
-        <View style={styles.qrProviders}>
-          {qrProviders.map(provider => {
-            const selected = provider.id === qrProviderId
-            return (
-              <Pressable
-                key={provider.id}
-                accessibilityRole="button"
-                accessibilityState={{ selected, disabled: qrPhase === 'loading' }}
-                disabled={qrPhase === 'loading'}
-                onPress={() => chooseQrProvider(provider)}
-                style={[styles.qrProvider, selected && styles.qrProviderSelected]}
-              >
-                <Text style={[styles.qrProviderText, selected && styles.qrProviderTextSelected]}>{provider.displayName}</Text>
-              </Pressable>
-            )
-          })}
-        </View>
-      )}
+      <Text style={styles.qrTitle}>{loginMethodLabel(loginMethod)} · {zhCN.setup.qrScanTitle}</Text>
       {qrPhase === 'loading'
         ? <View style={styles.qrPlaceholder}><ActivityIndicator color={colors.primary} accessibilityLabel={zhCN.setup.qrWaiting} /></View>
         : qrPhase === 'unsupported'
@@ -251,80 +320,121 @@ export function ServerSetupScreen({ onComplete, onBack }: { onComplete: () => vo
         variant="secondary"
         onPress={() => void refreshQr()}
         loading={qrPhase === 'loading'}
+        disabled={busy || serverDirty}
       />
     </View>
   )
 
   const credentialContent = loginMethod === 'oauth'
     ? <>
-        <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} />
+        <Button label={zhCN.setup.zhihu} onPress={() => void signInWithZhihu()} loading={oauthBusy} disabled={busy || serverDirty} />
         <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
       </>
     : loginMethod === 'github-oauth'
       ? <>
-          <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} />
+          <Button label={zhCN.setup.github} onPress={() => void signInWithGithub()} loading={oauthBusy} disabled={busy || serverDirty} />
           <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
         </>
+      : loginMethod === 'google-oauth'
+        ? <>
+            <Button label={zhCN.setup.google} onPress={() => void signInWithGoogle()} loading={oauthBusy} disabled={busy || serverDirty} />
+            <Text style={styles.oauthHint}>{zhCN.setup.oauthHint}</Text>
+          </>
       : <>
           <Field label={zhCN.setup.email} value={email} onChangeText={setEmail} autoCapitalize="none" autoCorrect={false} keyboardType="email-address" textContentType="username" placeholder={zhCN.setup.emailPlaceholder} />
           <Field label={zhCN.setup.password} value={password} onChangeText={setPassword} secureTextEntry textContentType="password" returnKeyType="go" onSubmitEditing={() => { if (canSubmit) void submit() }} placeholder={zhCN.setup.passwordPlaceholder} hint={zhCN.setup.passwordHint} />
-          <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit} />
+          <Button label={zhCN.setup.title} onPress={() => void submit()} loading={busy} disabled={!canSubmit || serverDirty} />
         </>
 
   return (
     <View style={styles.flex}>
-      <BlurHeaderFrame header={<TopBar title={zhCN.setup.title} onBack={onBack} />}>
-        <Screen>
-          <Text style={styles.productName}>DeepSeek Harness Remote</Text>
-          <Text style={styles.title}>{config === undefined ? zhCN.setup.signIn : zhCN.setup.signInAgain}</Text>
-          <Text style={styles.lead}>{zhCN.setup.lead}</Text>
+      <BlurHeaderFrame header={<TopBar title="DSH Remote" onBack={onBack} action={<IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />} />}>
+        <Screen fill>
+          <View style={styles.loginIntro}>
+            <Text style={styles.lead}>{zhCN.setup.lead}</Text>
+          </View>
 
           <View style={[styles.form, largeScreen && styles.formLarge]}>
             <View style={styles.methodTabs}>
-              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'oauth' }} onPress={() => setLoginMethod('oauth')} style={[styles.methodTab, loginMethod === 'oauth' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'oauth' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.oauth}</Text>
-              </Pressable>
-              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'github-oauth' }} onPress={() => setLoginMethod('github-oauth')} style={[styles.methodTab, loginMethod === 'github-oauth' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'github-oauth' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.githubOAuth}</Text>
-              </Pressable>
-              <Pressable accessibilityRole="tab" accessibilityState={{ selected: loginMethod === 'password' }} onPress={() => setLoginMethod('password')} style={[styles.methodTab, loginMethod === 'password' && styles.methodTabActive]}>
-                <Text style={[styles.methodTabText, loginMethod === 'password' && styles.methodTabTextActive]} numberOfLines={1}>{zhCN.setup.passwordMethod}</Text>
-              </Pressable>
+              {availableMethods.map(method => (
+                <Pressable key={method} accessibilityRole="tab" accessibilityState={{ selected: loginMethod === method, disabled: busy }} disabled={busy} onPress={() => chooseLoginMethod(method)} style={[styles.methodTab, loginMethod === method && styles.methodTabActive]}>
+                  <Text style={[styles.methodTabText, loginMethod === method && styles.methodTabTextActive]} numberOfLines={1}>{loginMethodLabel(method)}</Text>
+                </Pressable>
+              ))}
             </View>
 
-            {loginMethod !== 'qr' && (
+            {supportsQr && !serverDirty && providersPhase === 'ready' && (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={zhCN.setup.qr}
-                accessibilityState={{ expanded: qrContent !== null }}
-                onPress={openQrTab}
+                accessibilityLabel={showQr ? loginMethodLabel(loginMethod) : zhCN.setup.qr}
+                accessibilityState={{ expanded: showQr, disabled: busy || serverDirty }}
+                disabled={busy || serverDirty}
+                onPress={toggleQr}
                 style={({ pressed }) => [styles.qrEntry, pressed && styles.qrEntryPressed]}
               >
                 <QrCodeIcon size={22} color={colors.primary} />
                 <View style={styles.qrEntryCopy}>
-                  <Text style={styles.qrEntryText}>{zhCN.setup.qr}</Text>
-                  <Text style={styles.qrEntryHint}>{zhCN.setup.qrEntryHint}</Text>
+                  <Text style={styles.qrEntryText}>{showQr ? (loginMethod === 'oauth' ? zhCN.setup.zhihu : loginMethod === 'github-oauth' ? zhCN.setup.github : zhCN.setup.google) : zhCN.setup.qr}</Text>
+                  <Text style={styles.qrEntryHint}>{showQr ? zhCN.setup.oauthHint : zhCN.setup.qrEntryHint}</Text>
                 </View>
                 <ChevronRight size={16} color={colors.muted} />
               </Pressable>
             )}
 
-            {qrContent ?? credentialContent}
+            {providersPhase === 'loading'
+              ? <ActivityIndicator color={colors.primary} />
+              : <>
+                  {providersPhase === 'failed' && <Button label={zhCN.common.retry} variant="secondary" onPress={() => setProviderReload(value => value + 1)} />}
+                  {qrContent ?? credentialContent}
+                </>}
 
-            <View style={styles.serverSection}>
-              <Field label={zhCN.setup.server} value={serverUrl} onChangeText={setServerUrl} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.serverHint} placeholder="https://remote.example.com" />
-            </View>
+
           </View>
 
           <View style={[styles.securityNote, largeScreen && styles.securityNoteLarge]}>
-            <LockKeyhole size={20} color={colors.primary} />
-            <View style={styles.securityCopy}>
+            <View style={styles.securityHeading}>
+              <LockKeyhole size={20} color={colors.primary} />
               <Text style={styles.securityTitle}>{zhCN.setup.trustTitle}</Text>
-              <Text style={styles.securityBody}>{zhCN.setup.trustBody}</Text>
             </View>
+            <Text style={styles.securityBody}>{zhCN.setup.trustBody}</Text>
+          </View>
+          <View style={styles.loginFooter}>
+            <Pressable accessibilityRole="link" accessibilityLabel="GitHub/liguobao"
+              onPress={() => void Linking.openURL('https://github.com/liguobao').catch(() => {
+                Alert.alert(zhCN.settings.linkFailedTitle, zhCN.settings.linkFailedBody)
+              })} style={styles.loginCreditLink}>
+              <Text style={styles.loginCredit}>Power by <Text style={styles.loginCreditName}>GitHub/liguobao</Text></Text>
+            </Pressable>
           </View>
         </Screen>
       </BlurHeaderFrame>
+      <Modal visible={serverExpanded} transparent animationType="fade" onRequestClose={closeServerEditor} statusBarTranslucent>
+        <KeyboardAvoidingView behavior="padding" style={styles.serverBackdrop}>
+          <Pressable style={StyleSheet.absoluteFill} accessibilityRole="button" accessibilityLabel={zhCN.common.close} onPress={closeServerEditor} />
+          <View style={[styles.serverDialog, { maxHeight: sheetMaxHeight }]} accessibilityViewIsModal>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.serverDialogContent}>
+              <Text style={styles.serverDialogTitle} accessibilityRole="header">{zhCN.setup.switchServer}</Text>
+                <Field label={zhCN.setup.server} value={serverDraft} onChangeText={value => {
+                  qrRun.current += 1
+                  setQrLogin(undefined)
+                  setQrPhase('idle')
+                  setShowQr(false)
+                  setServerDraft(value)
+                  setServerError(undefined)
+                }} editable={!busy && !oauthBusy} autoCapitalize="none" autoCorrect={false} keyboardType="url" hint={zhCN.setup.switchServerHint} placeholder="https://remote.example.com" />
+                {serverError !== undefined && <Text accessibilityRole="alert" style={styles.preferenceError}>{serverError}</Text>}
+                <View style={styles.serverActions}>
+                  <View style={styles.flex}>
+                    <Button label={zhCN.setup.saveServer} onPress={() => void saveServer()} loading={busy} disabled={oauthBusy || !serverDirty || serverDraft.trim() === ''} />
+                  </View>
+                  <View style={styles.flex}>
+                    <Button label={zhCN.common.cancel} variant="secondary" disabled={busy} onPress={closeServerEditor} />
+                  </View>
+                </View>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   )
 }
@@ -608,12 +718,13 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
   )
 }
 
-export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices }: {
+export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevices, onSwitchServer }: {
   visible: boolean
   onClose: () => void
   onSettings: () => void
   onAbout: () => void
   onDevices?: () => void
+  onSwitchServer?: () => void
 }) {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
@@ -643,6 +754,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onAbout, onDevic
           {onDevices !== undefined && (
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
           )}
+          {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
           <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} />
           <HomeMenuRow icon={Info} label={zhCN.settings.about} onPress={onAbout} />
           <HomeMenuRow
@@ -896,16 +1008,23 @@ function createStyles(colors: ThemeColors) {
   // Reading cap for wide landscape tablets; the live width style is applied by
   // the screens that opt in (portrait phones never exceed the cap).
   contentColumn: { width: '100%', alignSelf: 'center' },
-  productName: { ...type.smallStrong, color: colors.primary, marginTop: spacing.xxl, marginBottom: spacing.md },
-  title: { ...type.hero, color: colors.ink, maxWidth: 340 },
-  lead: { ...type.body, color: colors.muted, marginTop: spacing.sm, maxWidth: 520 },
+  loginIntro: { width: '100%', maxWidth: 560, alignSelf: 'center', paddingTop: spacing.xl },
+  loginFooter: { marginTop: 'auto', paddingTop: spacing.xxl, flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  loginCredit: { ...type.caption, color: colors.muted },
+  loginCreditLink: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.xs },
+  loginCreditName: { ...type.caption, color: colors.primary, textDecorationLine: 'underline' },
+  lead: { ...type.body, color: colors.muted, marginTop: spacing.sm },
   form: { marginTop: spacing.xxl, gap: spacing.md },
   methodTabs: { flexDirection: 'row', padding: 4, borderRadius: radius.md, backgroundColor: colors.surfaceStrong },
   methodTab: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   methodTabActive: { backgroundColor: colors.surface },
   methodTabText: { ...type.smallStrong, color: colors.muted },
   methodTabTextActive: { color: colors.primary },
-  serverSection: { gap: spacing.sm, marginTop: spacing.sm, paddingTop: spacing.lg, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
+  serverActions: { flexDirection: 'row', gap: spacing.sm },
+  serverBackdrop: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: colors.modalBackdrop },
+  serverDialog: { width: '100%', maxWidth: 560, alignSelf: 'center', backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.lg },
+  serverDialogContent: { gap: spacing.md },
+  serverDialogTitle: { ...type.heading, color: colors.ink },
   serverLabel: { ...type.smallStrong, color: colors.muted },
   oauthHint: { ...type.caption, color: colors.muted, textAlign: 'center' },
   formLarge: { width: '100%', maxWidth: 560, alignSelf: 'center' },
@@ -916,17 +1035,12 @@ function createStyles(colors: ThemeColors) {
   qrEntryHint: { ...type.caption, color: colors.muted },
   qrPanel: { alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   qrTitle: { ...type.heading, color: colors.ink, textAlign: 'center' },
-  qrProviders: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.xs },
-  qrProvider: { minHeight: 40, paddingHorizontal: spacing.md, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, alignItems: 'center', justifyContent: 'center' },
-  qrProviderSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
-  qrProviderText: { ...type.smallStrong, color: colors.muted },
-  qrProviderTextSelected: { color: colors.primary },
   qrPlaceholder: { minHeight: 200, alignItems: 'center', justifyContent: 'center' },
   qrHint: { ...type.caption, color: colors.muted, textAlign: 'center', maxWidth: 420 },
   qrMessage: { ...type.small, color: colors.muted, textAlign: 'center', maxWidth: 420 },
   securityNoteLarge: { width: '100%', maxWidth: 560, alignSelf: 'center' },
-  securityNote: { flexDirection: 'row', gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.surface, marginTop: spacing.xxxl },
-  securityCopy: { flex: 1 },
+  securityNote: { gap: spacing.xs, paddingVertical: spacing.md, marginTop: spacing.xxxl },
+  securityHeading: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   securityTitle: { ...type.smallStrong, color: colors.ink },
   securityBody: { ...type.small, color: colors.muted, marginTop: 2 },
   groupLabel: { ...type.smallStrong, color: colors.muted, marginTop: spacing.xl, marginBottom: spacing.xs },

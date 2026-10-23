@@ -1,3 +1,4 @@
+import { normalizeServerUrl } from '../lib/server-url'
 import * as Haptics from 'expo-haptics'
 import { resolveAutoConnectDevice } from '../lib/auto-connect'
 import { friendlyError, isSessionAuthError } from '../lib/errors'
@@ -7,6 +8,7 @@ import { RemoteServerApi } from '../services/api'
 import type { LoginOutcome } from '../services/login'
 import {
   githubOAuthLoginChannel,
+  googleOAuthLoginChannel,
   loginFlow,
   oauthLoginChannel,
   passwordLoginChannel,
@@ -47,7 +49,7 @@ import { clearBrowseMemory } from '../services/browse-memory'
 import { initialData } from './store-state'
 
 type AccountActions = Pick<AppState,
-  'bootstrap' | 'requireReauth' | 'consumePendingAutoConnect' | 'configureServer' | 'startOAuth' | 'startGithubOAuth' | 'completeOAuth' | 'listQrProviders' | 'startQrLogin' | 'pollQrLogin' | 'completeQrLogin' | 'refreshDevices' | 'trustDevice' | 'renameDevice' | 'forgetDevice' | 'resetLocalData' | 'signOut'>
+  'bootstrap' | 'requireReauth' | 'consumePendingAutoConnect' | 'configureServer' | 'selectServer' | 'startOAuth' | 'startGithubOAuth' | 'startGoogleOAuth' | 'completeOAuth' | 'listQrProviders' | 'listLoginProviders' | 'startQrLogin' | 'pollQrLogin' | 'completeQrLogin' | 'refreshDevices' | 'trustDevice' | 'renameDevice' | 'forgetDevice' | 'resetLocalData' | 'signOut'>
 
 export function createAccountActions({ set, get }: StoreAccess): AccountActions {
   let accountGeneration = 0
@@ -158,6 +160,33 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       })
     },
 
+    async selectServer(input) {
+      set({ busyAction: 'server', error: undefined })
+      try {
+        const baseUrl = normalizeServerUrl(input)
+        await new RemoteServerApi(baseUrl).health()
+        if (baseUrl !== get().config?.baseUrl) {
+          await get().disconnect()
+          await clearDeviceCredentials()
+          for (const host of await loadTrustedHosts()) {
+            await forgetHost(host.deviceId)
+            await clearCodexPermissionPresets(host.deviceId)
+          }
+          await clearLastConnectedDeviceId()
+          const config = { baseUrl }
+          await saveServerConfig(config)
+          set({ config, account: undefined, devices: [], lastConnectedDeviceId: undefined,
+            pendingAutoConnectDeviceId: undefined, pendingOAuthBaseUrl: undefined,
+            pendingOAuthLoginMethod: undefined, reauthRequired: true, authPhase: 'idle' })
+        }
+        set({ busyAction: undefined })
+        return baseUrl
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return undefined
+      }
+    },
+
     async configureServer(input, email, password) {
       set({ busyAction: passwordLoginChannel.busyAction, error: undefined })
       try {
@@ -204,6 +233,24 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       }
     },
 
+    async startGoogleOAuth(input) {
+      set({ busyAction: googleOAuthLoginChannel.prepareBusyAction, error: undefined })
+      try {
+        const identity = get().identity
+        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+        const context = await loginFlow.createContext(input, identity)
+        set({
+          pendingOAuthBaseUrl: context.baseUrl,
+          pendingOAuthLoginMethod: 'google-oauth',
+          busyAction: undefined,
+        })
+        return await loginFlow.prepareRedirect(googleOAuthLoginChannel, context)
+      } catch (error) {
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return undefined
+      }
+    },
+
     async completeOAuth(token) {
       const baseUrl = get().pendingOAuthBaseUrl
       const loginMethod = get().pendingOAuthLoginMethod
@@ -223,6 +270,20 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
       } catch (error) {
         set({ busyAction: undefined, error: friendlyError(error) })
         return false
+      }
+    },
+
+    async listLoginProviders(input) {
+      set({ error: undefined })
+      try {
+        const identity = get().identity
+        if (identity === undefined) throw new Error(zhCN.runtime.identityNotReady)
+        const context = await loginFlow.createContext(input, identity)
+        const providers = (await context.publicApi.oauthProviders())
+        return { baseUrl: context.baseUrl, providers } satisfies QrProviderList
+      } catch (error) {
+        set({ error: friendlyError(error) })
+        return undefined
       }
     },
 
@@ -490,8 +551,10 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
         set({ pendingAutoConnectDeviceId: resolveAutoConnectDevice(get().devices, get().lastConnectedDeviceId)?.deviceId })
       }
     },
+    selectServer: input => redirect(() => actions.selectServer(input)),
     configureServer: (...args) => login(() => actions.configureServer(...args)),
     completeOAuth: token => login(() => actions.completeOAuth(token)),
+    listLoginProviders: input => actions.listLoginProviders(input),
     listQrProviders: async input => {
       const generation = accountGeneration + 1
       const result = await change(() => actions.listQrProviders(input))
@@ -506,6 +569,7 @@ export function createAccountActions({ set, get }: StoreAccess): AccountActions 
     completeQrLogin: (baseUrl, token, method) => login(() => actions.completeQrLogin(baseUrl, token, method)),
     startOAuth: input => redirect(() => actions.startOAuth(input)),
     startGithubOAuth: input => redirect(() => actions.startGithubOAuth(input)),
+    startGoogleOAuth: input => redirect(() => actions.startGoogleOAuth(input)),
     requireReauth: message => change(() => actions.requireReauth(message)),
     signOut: () => change(() => actions.signOut()),
     resetLocalData: () => change(() => actions.resetLocalData()),

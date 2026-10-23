@@ -10,6 +10,15 @@ CodeX App Server domain advertised by the Host.
   `https://dsh.r2049.cn`; override at build time with `EXPO_PUBLIC_DSH_REMOTE_SERVER`); sign in
   with the Server account once to register the Android device and rotate its access/refresh
   tokens in SecureStore.
+- Open “Switch server” from the sign-in page’s three-dot menu to edit the server
+  address in a modal, then save to validate and persist the server used by all login methods.
+  Saving refreshes the available login methods from that server; only configured
+  OAuth providers are shown, and QR entry points follow their advertised support.
+  Switching servers disconnects the old host and clears its credentials and trust.
+- Sign-in tabs offer Zhihu, GitHub, Google, and email. Each OAuth tab can switch
+  between direct authorization and its own QR code when supported by the Server;
+  email uses the password form. Zhihu direct authorization opens the installed
+  Zhihu app first and falls back to the browser if it cannot be launched.
 - Generate a random Android client identity and keep its private key in Keystore-backed
   `expo-secure-store`.
 - List same-account Harness hosts, fetch each host's authorized peer descriptor, verify its

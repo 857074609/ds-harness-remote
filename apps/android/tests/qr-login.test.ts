@@ -2,6 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { RemoteServerApi, type OAuthProviderInfo } from '../src/services/api'
 
+vi.mock('../src/services/server-session', () => ({
+  serverSession: { registerWithAccountToken: vi.fn() },
+}))
+import { redirectLoginChannelFor } from '../src/services/login'
+import { serverSession } from '../src/services/server-session'
+import type { DeviceIdentity, RedirectLoginMethod } from '../src/types'
+
 const baseUrl = 'https://remote.example.com'
 const zhihu: OAuthProviderInfo = {
   id: 'zhihu',
@@ -11,6 +18,36 @@ const zhihu: OAuthProviderInfo = {
 }
 
 describe('QR sign-in Server API', () => {
+  it('uses the selected discovered OAuth entry and preserves its method through registration', async () => {
+    await runScenarios([
+      { id: 'zhihu', method: 'oauth' },
+      { id: 'github', method: 'github-oauth' },
+      { id: 'google', method: 'google-oauth' },
+    ].map(({ id, method }) => ({
+      name: id,
+      run: async () => {
+        vi.mocked(serverSession.registerWithAccountToken).mockReset()
+        vi.mocked(serverSession.registerWithAccountToken).mockResolvedValue({
+          credentials: { account: 'account' },
+        } as Awaited<ReturnType<typeof serverSession.registerWithAccountToken>>)
+        const fetchImplementation = vi.fn<typeof fetch>(async input => String(input).endsWith('/auth/me')
+          ? jsonResponse({ account: 'account' })
+          : jsonResponse({ items: [{ id, displayName: id, startUrl: '/api/v1/auth/custom/start?flow=mobile' }] }))
+        const context = { baseUrl, publicApi: new RemoteServerApi(baseUrl, undefined, fetchImplementation), identity: { deviceId: 'phone' } as DeviceIdentity }
+        const channel = redirectLoginChannelFor(method as RedirectLoginMethod)
+        const url = new URL(await channel.prepareRedirect(context))
+        expect(url.origin).toBe(baseUrl)
+        expect(url.pathname).toBe('/api/v1/auth/custom/start')
+        expect(url.searchParams.get('flow')).toBe('mobile')
+        expect(url.searchParams.get('return_to')).toBe('dshremote://oauth')
+        expect(await channel.completeSignIn(context, 't'.repeat(24))).toEqual({ account: 'account', loginMethod: method })
+        expect(serverSession.registerWithAccountToken).toHaveBeenCalledWith(baseUrl, context.identity, 't'.repeat(24), 'account')
+        const missing = { ...context, publicApi: new RemoteServerApi(baseUrl, undefined, async () => jsonResponse({ items: [] })) }
+        await expect(channel.prepareRedirect(missing)).rejects.toThrow()
+      },
+    })))
+  })
+
   it('discovers Server-owned providers and falls back to legacy status endpoints', async () => {
     const discovery = vi.fn<typeof fetch>(async () => jsonResponse({
       items: [

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import type { AppState, StoreAccess } from '../src/state/store-state'
 import type { AndroidRemoteRuntime } from '../src/services/remote-runtime'
@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
     'loadTrustedHosts', 'forgetHost', 'clearCodexPermissionPresets', 'clearDeviceCredentials',
     'saveServerConfig', 'clearLocalData', 'loadOrCreateIdentity', 'saveLanguagePreference',
     'saveCompactHistory', 'saveThemePreference', 'saveStatusBarVisible', 'saveDefaultPermissionPreset', 'saveFavoriteWorkspaces',
-    'saveRecentWorkspaces', 'loadCodexPermissionPresets',
+    'saveRecentWorkspaces', 'loadCodexPermissionPresets', 'clearLastConnectedDeviceId',
   ].map(name => [name, vi.fn()])),
   createCodex: vi.fn(), loadCodex: vi.fn(), loadAgy: vi.fn(), loadPi: vi.fn(), loadOpencode: vi.fn(), loadClaude: vi.fn(),
 }))
@@ -39,6 +39,7 @@ vi.mock('../src/services/pi', async importOriginal => ({
 vi.mock('../src/services/opencode', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/opencode')>(), loadOpencodeCatalog: mocks.loadOpencode,
 }))
+import { RemoteServerApi } from '../src/services/api'
 import { createAccountActions } from '../src/state/account-actions'
 import { createWorkspaceActions } from '../src/state/workspace-actions'
 import { initialData } from '../src/state/store-state'
@@ -81,8 +82,45 @@ function prepare() {
   mocks.signInWith.mockResolvedValue({ account: 'B', loginMethod: 'password' })
 }
 beforeEach(prepare)
+afterEach(() => vi.restoreAllMocks())
 
 describe('account directory operation isolation', () => {
+  it('saves a validated server and isolates old credentials while rejecting failed switches', async () => {
+    await runScenarios(['new-server', 'same-server', 'unavailable', 'invalid'].map(name => ({
+      name,
+      run: async () => {
+        prepare()
+        const health = vi.spyOn(RemoteServerApi.prototype, 'health').mockResolvedValue(undefined)
+        if (name === 'unavailable') health.mockRejectedValue(new Error('unavailable'))
+        const store = accountFixture()
+        const previous = store.get().config
+        store.set({ pendingOAuthBaseUrl: previous!.baseUrl, pendingOAuthLoginMethod: 'google-oauth' })
+        mocks.storage.loadTrustedHosts!.mockResolvedValue([{ deviceId: 'old-host' }])
+        const target = name === 'same-server' ? previous!.baseUrl : name === 'invalid' ? 'http://public.example.com' : 'https://new.example.com/'
+        const saved = await store.get().selectServer(target)
+        if (name === 'new-server') {
+          expect(saved).toBe('https://new.example.com')
+          expect(mocks.storage.saveServerConfig).toHaveBeenCalledWith({ baseUrl: saved })
+          expect(store.get().disconnect).toHaveBeenCalledOnce()
+          expect(mocks.storage.clearDeviceCredentials).toHaveBeenCalledOnce()
+          expect(mocks.storage.forgetHost).toHaveBeenCalledWith('old-host')
+          expect(mocks.storage.clearCodexPermissionPresets).toHaveBeenCalledWith('old-host')
+          expect(store.get()).toMatchObject({ config: { baseUrl: saved }, reauthRequired: true, devices: [] })
+          expect(store.get().pendingOAuthBaseUrl).toBeUndefined()
+          expect(store.get().pendingOAuthLoginMethod).toBeUndefined()
+          expect(store.get().account).toBeUndefined()
+        } else {
+          expect(saved).toBe(name === 'same-server' ? previous!.baseUrl : undefined)
+          expect(store.get().config).toBe(previous)
+          expect(store.get().disconnect).not.toHaveBeenCalled()
+          expect(mocks.storage.clearDeviceCredentials).not.toHaveBeenCalled()
+          expect(mocks.storage.saveServerConfig).not.toHaveBeenCalled()
+        }
+        health.mockRestore()
+      },
+    })))
+  })
+
   it('ignores old directory success and authentication failures after account or identity replacement', async () => {
     await runScenarios(['config', 'identity'].flatMap(change => ['success', 'auth-error', 'network-error'].map(outcome => ({
       name: `${change}/${outcome}`,

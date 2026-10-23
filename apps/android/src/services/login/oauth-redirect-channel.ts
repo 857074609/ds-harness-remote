@@ -1,5 +1,4 @@
 import type { LoginMethod } from '../../types'
-import type { RemoteServerApi } from '../api'
 import { serverSession } from '../server-session'
 import type { RedirectLoginChannel } from './types'
 
@@ -7,8 +6,7 @@ export const oauthReturnTo = 'dshremote://oauth'
 
 export function createOAuthRedirectChannel(options: {
   method: LoginMethod
-  checkConfigured: (publicApi: RemoteServerApi) => Promise<{ configured: boolean }>
-  startPath: string
+  providerId: string
   unsupportedError: string
 }): RedirectLoginChannel {
   return {
@@ -17,9 +15,11 @@ export function createOAuthRedirectChannel(options: {
     completeBusyAction: 'server',
 
     async prepareRedirect({ baseUrl, publicApi }) {
-      const { configured } = await options.checkConfigured(publicApi)
-      if (!configured) throw new Error(options.unsupportedError)
-      return `${baseUrl}${options.startPath}?return_to=${encodeURIComponent(oauthReturnTo)}`
+      const provider = (await publicApi.oauthProviders()).find(item => item.id === options.providerId)
+      if (provider === undefined) throw new Error(options.unsupportedError)
+      const url = new URL(`${baseUrl}${provider.startUrl}`)
+      url.searchParams.set('return_to', oauthReturnTo)
+      return url.toString()
     },
 
     async completeSignIn({ baseUrl, identity, publicApi }, accountToken) {

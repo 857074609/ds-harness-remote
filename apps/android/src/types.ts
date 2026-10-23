@@ -20,9 +20,9 @@ export type ConnectionStage =
 
 export type ConnectionProbeTransport = 'lan' | 'p2p' | 'turn' | 'relay'
 
-export type LoginMethod = 'oauth' | 'github-oauth' | 'password'
+export type LoginMethod = 'oauth' | 'github-oauth' | 'google-oauth' | 'password'
 
-export type RedirectLoginMethod = Extract<LoginMethod, 'oauth' | 'github-oauth'>
+export type RedirectLoginMethod = Exclude<LoginMethod, 'password'>
 
 export interface ServerConfig {
   baseUrl: string

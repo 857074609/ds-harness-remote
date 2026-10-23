@@ -178,11 +178,13 @@ const zhCN = {
   },
   status: { online: '在线', offline: '离线', disconnected: '未连接', lan: '局域网直连', relay: '服务器转发', p2p: 'P2P 直连', turn: 'TURN 转发', waiting: '连接中', running: '运行中' },
   setup: {
-    title: '登录', signIn: '登录账号', signInAgain: '重新登录', lead: '授权此手机后，即可查看同一账号下的设备并继续对话。',
+    title: '登录', signIn: '登录账号', signInAgain: '重新登录', lead: '请选择与远端设备相同的登录方式，继续你的工作。',
+    switchServer: "切换服务器", saveServer: "保存服务器", switchServerHint: "保存后会断开当前连接，并需要在新服务器重新登录。",
+    google: "使用 Google 账号登录",
     oauth: '知乎', githubOAuth: 'GitHub', passwordMethod: '邮箱', zhihu: '使用知乎账号登录', github: '使用 GitHub 账号登录', oauthHint: '会打开浏览器完成授权，然后自动返回这里。',
     qr: '扫码登录', qrEntryHint: '点击显示二维码，用手机扫码授权', qrScanTitle: '使用手机扫码登录', qrScanHint: '用手机扫描二维码并在授权页确认，完成后会自动登录此设备。', qrWaiting: '等待手机扫码…', qrExpired: '二维码已过期，请刷新后重试。', qrRefresh: '刷新二维码', qrUnsupported: '当前服务器未开启扫码登录，请使用其他方式登录。', qrFailed: '扫码登录未完成，请重试。',
     email: '邮箱', emailPlaceholder: '输入邮箱', password: '密码', passwordPlaceholder: '输入密码', passwordHint: '密码只用于本次登录，不会保存在手机上。',
-    server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: '对话内容会加密传输。只有登录同一账号的可信设备才能访问。',
+    server: '服务地址', serverHint: '请使用 HTTPS 地址。', trustTitle: '保护你的设备和对话', trustBody: 'P2P网络优先，TURN 转发候选，对话内容全程端到端加密。',
   },
   settings: {
     appearance: '外观',
@@ -269,6 +271,7 @@ const zhCN = {
   },
   validation: { serverRequired: '请输入服务地址。', serverInvalid: '服务地址格式不正确。例如：https://remote.example.com', httpsRequired: '请使用 HTTPS 地址。本地开发环境可以使用 HTTP。', serverPartsForbidden: '请只输入服务地址，不要包含账号信息、查询参数或页面锚点。' },
   runtime: {
+    googleUnsupported: "当前服务不支持 Google 授权，请改用其他登录方式。",
     identityNotReady: '此手机尚未准备完成，请稍后重试。', zhihuUnsupported: '当前服务不支持知乎授权，请改用其他登录方式。', githubUnsupported: '当前服务不支持 GitHub 授权，请改用其他登录方式。', hostClosed: '与设备的连接已断开。', openSessionFirst: '请先打开对话，再回答这个请求。', networkUnavailable: '当前没有可用网络，恢复网络后会尝试重新连接。', connectHostFirst: '请先连接电脑端设备。', codexUnavailable: '这台设备没有启用 CodeX Remote，或 CodeX 当前不可用。', codexInvalidResponse: 'CodeX Remote 返回了无法识别的数据。', codexTurnUnavailable: '当前 CodeX 回合不属于此连接，无法从手机停止。', codexWorkspaceReadOnly: 'CodeX 工作区可以新增，但重命名、排序和删除仍由电脑端 CodeX 管理。', cursorUnavailable: '这台设备没有启用 Cursor Remote，或 Cursor ACP 当前不可用。', piUnavailable: '这台设备没有启用 Pi Remote，或 Pi ACP 当前不可用。', antigravityUnavailable: '这台设备没有启用 Antigravity Remote，或 Antigravity ACP 当前不可用。', opencodeUnavailable: '这台设备没有启用 OpenCode Remote，或 OpenCode ACP 当前不可用。', claudeUnavailable: '这台设备没有启用 Claude Remote，或 Claude ACP 当前不可用。', cursorTextOnly: 'Cursor Remote 当前仅支持文本消息，暂不支持图片。', piTextOnly: 'Pi Remote 当前仅支持文本消息，暂不支持图片。', hostMissingKey: '这台设备没有可用的安全密钥，请先重新确认并信任它。', unexpectedRelayDevice: '安全连接对应的设备与所选设备不一致。', secureChannelNotConnected: '安全连接尚未建立。', secureHandshakeTimedOut: '建立安全连接超时，请重试。', secureHandshakeOrder: '安全连接握手顺序无效。', secureHandshakeIncomplete: '安全连接握手未完成。', secureHandshakeFailed: '无法完成安全连接握手。',
   },
   messageActions: {

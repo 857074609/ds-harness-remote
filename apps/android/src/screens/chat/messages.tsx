@@ -47,7 +47,10 @@ import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../../ui/fish-logo'
 import { NativeMarkdown } from '../../ui/markdown'
 import { useTheme } from '../../ui/theme-context'
 import { useThemedStyles } from '../../ui/use-themed-styles'
-import type { ProcessActivity } from '../chat-process'
+import { parseBotReplies } from '../bot/replies'
+import { BotReplies } from '../bot/reply-view'
+import type { BotObject } from '../../services/bot-catalog'
+import type { ProcessActivity, ProcessSegment } from '../chat-process'
 import { completedProcessTitle, processDetail, processSegments, toolActivity, toolDisplayName } from '../chat-process'
 import { MessageActions } from '../message-actions'
 import { IntelligentUiCard } from '../intelligent-ui-card'
@@ -71,20 +74,41 @@ export const ChatProcessGroup = memo(function ChatProcessGroup({ items, artifact
     && last?.kind === 'message' && last.role === 'assistant'
   const end = items.find(item => item.turnEnd !== undefined)?.turnEnd
     ?? (codexClosed ? { reason: 'completed' as const, time: 0 } : undefined)
-  const segments = useMemo(() => processSegments(items), [items])
+  const segments = useMemo(() => processSegments(items).flatMap((segment):
+    (ProcessSegment | { kind: 'botReplies'; key: string; rows: BotObject[]; groupRelay: boolean })[] => {
+    if (segment.kind === 'response') return [segment]
+    const result: (ProcessSegment | { kind: 'botReplies'; key: string; rows: BotObject[]; groupRelay: boolean })[] = []
+    let pending: ChatItem[] = []
+    for (const item of segment.items) {
+      const replies = item.kind === 'tool' && item.state === 'finished'
+        ? parseBotReplies(item.resultDetail?.text) : undefined
+      if (!replies?.length) { pending.push(item); continue }
+      const groupRelay = item.kind === 'tool' && (item.toolKey ?? item.toolName) === 'group_relay'
+      // A completed group relay is conversation content, not a visible tool step.
+      // Unrecognized/failed results and all other tools retain their diagnostics.
+      if (!groupRelay) pending.push(item)
+      if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
+      pending = []
+      result.push({ kind: 'botReplies', key: `bot-replies:${item.id}`, rows: replies, groupRelay })
+    }
+    if (pending.length) result.push({ kind: 'activity', key: `activity:${pending[0]!.id}`, items: pending })
+    return result
+  }), [items])
   const unavailableUi = items.filter(item => item.kind === 'tool' && item.state === 'finished'
     && (item.toolKey === 'ui_render' || item.toolKey === 'ui_render_widget')
     && !availableUiIds.has(item.id)
     && (typeof item.uiResultMeta !== 'object' || item.uiResultMeta === null
       || (item.uiResultMeta as { ok?: unknown }).ok !== false))
+  const hasGroupRelayReplies = segments.some(segment => segment.kind === 'botReplies' && segment.groupRelay)
   const label = end?.reason === 'stopped' ? zhCN.chatProcess.stopped
     : end?.reason === 'failed' ? zhCN.chat.failed : zhCN.chat.completed
   return <View style={styles.processGroup}>
-    {end !== undefined && <View style={styles.turnProcessHeader}>
+    {end !== undefined && !(end.reason === 'completed' && hasGroupRelayReplies) && <View style={styles.turnProcessHeader}>
       <Text style={styles.turnProcessLabel}>{label}{end.reason !== 'completed' && end.detail !== undefined ? ` · ${end.detail}` : ''}</Text>
     </View>}
     {segments.map((segment, index) => segment.kind === 'response'
       ? <MessageBubble key={segment.key} item={segment.item} compact />
+      : segment.kind === 'botReplies' ? <BotReplies key={segment.key} rows={segment.rows} />
       : <ChatActivityGroup key={segment.key} items={segment.items} closed={end !== undefined || index < segments.length - 1}
         busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
     {artifacts.map(ui => <IntelligentUiCard key={ui.hostId + ':' + ui.sessionId + ':' + ui.uiId} artifact={ui} />)}

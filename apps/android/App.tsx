@@ -93,6 +93,7 @@ function AppNavigator() {
   const clearError = useAppStore(state => state.clearError)
   const [routes, setRoutes] = useState<Route[]>([{ name: 'server' }])
   const [homeMenuOpen, setHomeMenuOpen] = useState(false)
+  const [serverEditorOpen, setServerEditorOpen] = useState(false)
   const didChooseInitialRoute = useRef(false)
   const backgrounded = useRef(false)
   const networkRoute = useRef<NetworkRoute | undefined>(undefined)
@@ -357,11 +358,11 @@ function AppNavigator() {
     ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
     : undefined
   const devicesIsRoot = route.name === 'devices' && routes.length === 1
-  const homeMenuVisible = homeMenuOpen && (route.name === 'workspaces' || devicesIsRoot)
+  const homeMenuVisible = homeMenuOpen && (route.name === 'server' || route.name === 'workspaces' || devicesIsRoot)
 
   return (
     <View style={styles.flex}>
-      {route.name === 'server' && <ServerSetupScreen onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
+      {route.name === 'server' && <ServerSetupScreen serverExpanded={serverEditorOpen} setServerExpanded={setServerEditorOpen} onMore={openHomeMenu} onBack={routes.length > 1 ? pop : undefined} onComplete={() => reset({ name: 'devices' })} />}
       {route.name === 'devices' && (
         <DevicesScreen
           onDevice={openDevice}
@@ -419,6 +420,10 @@ function AppNavigator() {
       )}
       <HomeActionsMenu
         visible={homeMenuVisible}
+        onSwitchServer={route.name === 'server' ? () => {
+          setHomeMenuOpen(false)
+          setServerEditorOpen(true)
+        } : undefined}
         onClose={() => setHomeMenuOpen(false)}
         onDevices={route.name === 'workspaces'
           ? () => {

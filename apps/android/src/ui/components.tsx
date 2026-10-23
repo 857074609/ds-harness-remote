@@ -21,9 +21,10 @@ import { useTheme, type ThemeColors } from './theme-context'
 import { useThemedStyles } from './use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 
-export function Screen({ children, scroll = true, refreshing = false, onRefresh, scrollRef }: {
+export function Screen({ children, scroll = true, refreshing = false, onRefresh, scrollRef, fill = false }: {
   children: ReactNode
   scroll?: boolean
+  fill?: boolean
   refreshing?: boolean
   onRefresh?: () => void
   scrollRef?: RefObject<ScrollView | null>
@@ -39,6 +40,7 @@ export function Screen({ children, scroll = true, refreshing = false, onRefresh,
       style={styles.screen}
       contentContainerStyle={[
         styles.screenContent,
+        fill && { flexGrow: 1 },
         { paddingTop: inset, paddingBottom: styles.screenContent.paddingBottom + insets.bottom },
       ]}
       keyboardShouldPersistTaps="handled"

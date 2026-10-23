@@ -658,3 +658,15 @@ Mutation 不重试，后台停止团队/群聊进度轮询；UI 卡片纯原生�
 测试保护 Bot operation allowlist、单次审批、当前 Session authority、错误/取消和连接
 替换/能力撤回，不增加纯 UI 断言。原生工程重新按当前 0.5.15 / versionCode 59 生成。
 后续 Xiaomi 2304FPN6DC 真机检查发现 React Native AbortSignal 不支持 throwIfAborted，已改为检查 aborted 并增加原生 polyfill 取消契约回归。类型检查、14 个 Bot/connection 测试及 arm64 Release 重构建通过，已重装并确认 DSH-046 Bot 列表与 Chief 既有历史加载正常；完整交互验收仍待完成。noble/hashes exports fallback 警告保留。
+
+
+## DS Bot 0.2.1 compatibility (2026-10-24)
+
+固定 `api/bot` 白名单增加 `btw`、`btw-cancel`、`room-continue`。Android 在普通发送前识别
+`/btw`，空问题/群聊/旧版不支持时拒绝，不退回普通 Prompt；旁问仅来自 `state.btwCards`
+及 `earlier.btw`，不写入 Harness 历史或本机持久化。群聊继续由 Host 原生操作执行。
+原生卡片复用固定版本的上游 schema/公式解释器（`apps/android/src/vendor/ds-bot`，Apache-2.0），
+增加图表与本地计算输入；HTML 仅显示摘要，不执行模型 HTML/脚本。上游文件保持原样并保留
+来源/许可证，升级时审查 schema 和解释器边界。真机/跨设备验收见 TODO，未发布。
+
+验证：Android check 与 33 文件 / 195 tests、Plugin check 与 19 个 route 契约测试、共享包/Plugin build、DSH bundle 校验及 Android production Hermes export 通过。保留既有 noble/hashes exports fallback 警告；本机无连接设备，未验证本次 APK/真机、TalkBack 或加密跨设备交互。

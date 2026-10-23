@@ -130,7 +130,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.18
 
 ### Android 客户端
 
-主机工作区标题栏「＋」左侧的 Bot 按钮可切换到原生 DS Bot 团队模式，包含 Bot、群聊、管理、问答与交互卡片；Bot 模式右上角三点菜单左侧提供工作区切换图标，新建操作收在菜单内。需在所连接的主机中启用 ds-bot；功能边界和验收状态见 [Bot 模式说明](apps/android/README.md#bot-mode)。
+主机工作区标题栏「＋」左侧的 Bot 按钮可切换到原生 DS Bot 团队模式，包含 Bot、群聊、管理、问答与交互卡片，支持 DS Bot 0.2.1 旁问（`/btw`）、群聊继续及原生图表/计算卡片（HTML 仅显示摘要）；Bot 模式右上角三点菜单左侧提供工作区切换图标，新建操作收在菜单内。需在所连接的主机中启用 ds-bot；功能边界和验收状态见 [Bot 模式说明](apps/android/README.md#bot-mode)。
 
 从 [GitHub Releases](https://github.com/liguobao/ds-harness-remote/releases/latest)
 

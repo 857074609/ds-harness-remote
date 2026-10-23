@@ -242,12 +242,26 @@ editing, duplication/deletion, model/effort selection, group membership, text ch
 live Harness history, questions, one-time approvals, and declarative interactive
 cards. Usage and schedules are read-only. Memory, connectors, credentials, browser
 control and Host preferences remain Host-local; this does not expose arbitrary
-plugin endpoints. Bot messages use DS Bot's own `send` operation; opening a Bot or
+plugin endpoints. Ordinary Bot messages use DS Bot's own `send` operation; opening a Bot or
 group resolves its current identity against the official Harness Session catalog.
 Older Host responses, disconnects and replaced connections fail closed. Mutations
 are never automatically retried. Team state remains in memory and polling pauses
 when the app is backgrounded. New Bot labels support Chinese/English (other locales
 currently fall back to English).
+
+DS Bot 0.2.1 support adds `/btw <question>` in private Bot chats, answer/cancel cards,
+side questions from earlier parts, and **Continue group** when Bot relays reach the
+Host's limit. Update Remote on the Host as well as the Android app. Side questions
+use dedicated operations and never fall back to ordinary queued messages on failure
+or older Hosts. The Host remains responsible for running and storing these cards;
+Android keeps them in memory, outside the Harness transcript.
+
+Cards support native charts (bar, horizontal bar, line, area and donut), sliders,
+numbers, choices, toggles and local formulas, with validated input submission.
+Charts also offer an exact data table. HTML views show their summary and a notice
+to open them on the Host; no model HTML or scripts run in Android. Local calculator
+inputs remain usable on display-only history cards, while submissions require a
+current pending card. Validation: Android type checks and 195 tests, Plugin type checks and 19 route tests, shared/Plugin builds, bundle verification and production Hermes export passed. No device was connected; APK/device, TalkBack and encrypted cross-device acceptance remain pending. The existing noble/hashes exports fallback warning remains.
 
 Device smoke checks on Xiaomi 2304FPN6DC against DSH-046 confirmed Bot roster and existing Chief conversation history loading. Full interaction and cross-device acceptance remain pending.
 

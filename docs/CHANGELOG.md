@@ -1,3 +1,8 @@
+## Unreleased
+
+- Adapt Remote to DS Bot 0.2.1: allow dedicated side-question/cancel and group-continuation operations; Android claims `/btw` without falling back to ordinary prompts, restores current/earlier aside cards, and shows paused-group continuation. Add validated native chart/calculator cards using the upstream bounded formula interpreter; HTML remains summary-only. No release or cross-device acceptance is implied.
+- 适配 DS Bot 0.2.1：放行旁问/取消与群聊继续操作，Android 独立处理 `/btw`、恢复当前/旧分段旁问卡片及群聊暂停入口；使用上游受限公式解释器显示原生图表与计算卡片，HTML 仅显示摘要。尚未发布或完成跨设备验收。
+
 ## 0.5.18 — 2026-10-23
 
 - Harden reply parsing against deeply nested untrusted tool output and restrict truncated-result recovery to direct entries inside the replies array, preventing render-time stack overflow and unrelated-object attribution.

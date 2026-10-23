@@ -1,5 +1,23 @@
 const zhCN = {
   bots: {
+    btw: "旁问",
+    btwHint: "输入 /btw 提问，不打断任务，也不加入 Bot 上下文。",
+    btwEmpty: "请在 /btw 后输入问题。",
+    btwPrivate: "旁问仅可用于 Bot 的专属对话。",
+    btwUnsupported: "请更新主机上的 DS Bot 后使用旁问。",
+    btwNote: "根据当前对话回答，不运行工具，也不加入上下文。",
+    btwAnswering: "正在回答…",
+    btwCancelled: "已取消",
+    btwFailed: "此次旁问未能完成。",
+    roomPaused: "Bot 接力已达到群聊上限。可以继续接力或发送新消息。",
+    roomContinue: "继续群聊",
+    htmlFallback: "此 HTML 视图需在主机打开，这里显示其摘要。",
+    chartData: "图表数据",
+    decrease: "减少",
+    increase: "增加",
+    invalidNumber: "请输入所示范围内的数值。",
+    invalidViewAnswer: "请检查卡片输入后再提交。",
+
     inputTokens: '输入 Token', outputTokens: '输出 Token', calls: '调用次数',
     "mode": "Bot 模式",
     "agent": "Agent 模式",

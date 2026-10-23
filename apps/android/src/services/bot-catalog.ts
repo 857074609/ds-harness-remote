@@ -15,11 +15,13 @@ export interface BotEntry {
   preview?: string
   main: boolean
 }
-export interface BotRoom { preview?: string; id: string; name: string; members: string[]; notice: string; admin: string }
+export interface BotRoom { preview?: string; id: string; name: string; members: string[]; notice: string; admin: string; paused?: boolean }
 export interface BotState {
   bots: BotEntry[]
   rooms: BotRoom[]
   exchangeTurns: BotObject
+  btwCards: BotObject
+  btwSupported: boolean
   activity: BotObject
   questions: BotObject
   views: BotObject
@@ -32,7 +34,7 @@ export interface BotState {
 export const BOT_OPERATIONS = [
   'state', 'models', 'efforts', 'earlier', 'exchange', 'usage', 'room-progress', 'schedules',
   'create-bot', 'duplicate-bot', 'update-bot', 'delete-bot', 'set-main', 'set-flags',
-  'create-room', 'update-room', 'delete-room', 'send', 'answer-question', 'dismiss-question',
+  'create-room', 'update-room', 'delete-room', 'send', 'btw', 'btw-cancel', 'room-continue', 'answer-question', 'dismiss-question',
   'view-reply', 'approval-answer', 'stop-member-work',
 ] as const
 export type BotOperation = typeof BOT_OPERATIONS[number]
@@ -106,11 +108,11 @@ export function parseBotState(value: unknown): BotState {
   })
   const rooms = value.rooms.map(entry => {
     if (!isBotObject(entry) || !nonempty(entry.id) || !Array.isArray(entry.members) || !entry.members.every(nonempty)) throw new Error(strings.bots.invalid)
-    return { preview: compactPreview(text(entry.preview)), id: entry.id, name: text(entry.name) || entry.id, members: entry.members as string[], notice: text(entry.notice), admin: text(entry.admin) }
+    return { preview: compactPreview(text(entry.preview)), id: entry.id, name: text(entry.name) || entry.id, members: entry.members as string[], notice: text(entry.notice), admin: text(entry.admin), paused: objects(entry.paused).length > 0 }
   })
   const ids = [...bots, ...rooms].map(entry => entry.id)
   if (new Set(ids).size !== ids.length) throw new Error(strings.bots.invalid)
-  return { bots, rooms, exchangeTurns: object(value.exchangeTurns), activity: object(value.activity), questions: object(value.questions), views: object(value.views),
+  return { bots, rooms, btwCards: object(value.btwCards), btwSupported: isBotObject(value.btwCards), exchangeTurns: object(value.exchangeTurns), activity: object(value.activity), questions: object(value.questions), views: object(value.views),
     approvals: objects(object(value.work).approvals), models: objects(value.models),
     ...(typeof value.readOnly === 'string' ? { readOnly: value.readOnly } : {}) }
 }
@@ -138,3 +140,20 @@ function sessionPreview(session?: RemoteSession, hiddenTurns: unknown = []): str
   return ''
 }
 function compactPreview(value: string): string { return value.replace(/\s+/g, ' ').trim().slice(0, 240) }
+
+/** Claim /btw before normal sending; refusals never become queued prompts. */
+export function botMessageRequest(state: BotState, targetId: string, draft: string): { endpoint: BotOperation; payload: BotObject } {
+  const message = draft.trim()
+  const bot = state.bots.find(entry => entry.id === targetId)
+  const room = state.rooms.find(entry => entry.id === targetId)
+  if ((!bot && !room) || state.readOnly !== undefined || !message) throw new Error(strings.bots.sessionUnavailable)
+  const aside = /^\/btw(?:\s|$)/.test(message)
+  if (aside) {
+    if (!bot) throw new Error(strings.bots.btwPrivate)
+    if (!state.btwSupported) throw new Error(strings.bots.btwUnsupported)
+    const question = message.slice(4).trim()
+    if (!question) throw new Error(strings.bots.btwEmpty)
+    return { endpoint: 'btw', payload: { sessionId: bot.id, text: question } }
+  }
+  return { endpoint: 'send', payload: { sessionId: targetId, text: message } }
+}

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native'
 import { ArrowUp, Square } from 'lucide-react-native'
 import { strings as s } from '../../locales/i18n'
-import { object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject } from '../../services/bot-catalog'
+import { botMessageRequest, object, objects, text, type BotEntry, type BotRoom, type BotState, type BotRemoteClient, type BotObject } from '../../services/bot-catalog'
 import { useAppStore } from '../../state/store'
 import type { ChatItem, RemoteSession } from '../../types'
 import { Button, IconButton } from '../../ui/components'
@@ -15,6 +15,7 @@ import { processSegments } from '../chat-process'
 import { BotQuestion, BotViewCard } from './cards'
 import { parseBotReplies } from './replies'
 import { BotReplies } from './reply-view'
+import { BotAsideCard } from './aside'
 import type { BotPerform } from './editor'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
@@ -71,8 +72,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   }, [state.bots, bot?.id, onSelectBot, ready, connected])
   useEffect(() => { setFileLinkPath(undefined) }, [session.sessionId])
   const disabled = busy || !active || !ready || (bot !== undefined && bot.sessionId !== session.sessionId) || state.readOnly !== undefined
-  useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current.abort() } }, [])
+  useEffect(() => { setEarlier([]); setCursor(undefined); setProgress([]); setOlderBusy(false); setError(undefined); atEnd.current = true; scrolling.current = false; followEnd() }, [session.sessionId])
+  useEffect(() => { mounted.current = true; request.current = new AbortController(); return () => { mounted.current = false; request.current.abort() } }, [session.sessionId])
   useEffect(() => {
     if (room === undefined || !active) return
     const control = new AbortController()
@@ -92,22 +93,52 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
     if (!submitted || disabled) return
     atEnd.current = true
     followEnd()
-    const result = await perform('send', { sessionId: bot?.id ?? room!.id, text: submitted })
-    if (mounted.current && result.ok) setDraft(current => current.trim() === submitted ? '' : current)
+    setError(undefined)
+    try {
+      const message = botMessageRequest(state, bot?.id ?? room?.id ?? '', submitted)
+      const result = await perform(message.endpoint, message.payload)
+      if (mounted.current && result.ok) setDraft(current => current.trim() === submitted ? '' : current)
+    } catch (reason) { setError(reason instanceof Error ? reason.message : s.bots.unavailable) }
   }
   const earlierPage = async () => {
     if (olderBusy || bot === undefined || cursor === null) return
     atEnd.current = false
     setOlderBusy(true)
     setError(undefined)
+    const signal = request.current.signal
     try {
-      const value = object(await client.call('earlier', { sessionId: session.sessionId, ...(cursor === undefined ? {} : { cursor }) }, request.current.signal))
-      if (!mounted.current) return
-      setEarlier(current => [...objects(value.items), ...current])
+      const value = object(await client.call('earlier', { sessionId: session.sessionId, ...(cursor === undefined ? {} : { cursor }) }, signal))
+      if (!mounted.current || signal.aborted) return
+      setEarlier(current => {
+        const known = new Set(current.filter(entry => entry.kind === 'btw').map(entry => entry.id))
+        const cards = objects(value.btw).filter(entry => entry.botId === bot.id && !known.has(entry.id)).map(entry => ({ ...entry, kind: 'btw', pageCursor: cursor }))
+        return [...objects(value.items), ...cards.reverse(), ...current]
+      })
       setCursor(value.cursor ?? null)
-    } catch { if (mounted.current) setError(s.bots.earlierUnavailable) }
-    finally { if (mounted.current) setOlderBusy(false) }
+    } catch { if (mounted.current && !signal.aborted) setError(s.bots.earlierUnavailable) }
+    finally { if (mounted.current && !signal.aborted) setOlderBusy(false) }
   }
+  // A part can roll over while its aside is still answering. Current roster polls
+  // no longer include it, so refresh only historical pages with a pending aside.
+  const pendingAsidePages = JSON.stringify([...new Map(earlier.filter(entry => entry.kind === 'btw' && entry.status === 'answering').map(entry => [JSON.stringify(entry.pageCursor ?? null), entry.pageCursor ?? null])).values()])
+  useEffect(() => {
+    if (!active || !bot || pendingAsidePages === '[]') return
+    const control = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const tick = async () => {
+      try {
+        for (const pageCursor of JSON.parse(pendingAsidePages) as unknown[]) {
+          const value = object(await client.call('earlier', { sessionId: session.sessionId, ...(pageCursor === null ? {} : { cursor: pageCursor }) }, control.signal))
+          if (control.signal.aborted) return
+          const cards = new Map(objects(value.btw).filter(card => card.botId === bot.id).map(card => [card.id, card]))
+          setEarlier(current => current.map(entry => entry.kind === 'btw' && cards.has(entry.id) ? { ...cards.get(entry.id), kind: 'btw', pageCursor: entry.pageCursor } : entry))
+        }
+      } catch { /* Preserve the snapshot; the parent reports connection failures. */ }
+      if (!control.signal.aborted) timer = setTimeout(() => void tick(), 3000)
+    }
+    void tick()
+    return () => { control.abort(); clearTimeout(timer) }
+  }, [active, bot?.id, client, session.sessionId, pendingAsidePages])
   const question = object(state.questions[session.sessionId])
   const view = object(state.views[session.sessionId])
   const approvals = state.approvals.filter(entry => entry.answerable === true && (room ? entry.roomId === room.id : entry.sessionId === session.sessionId))
@@ -178,16 +209,19 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       ListEmptyComponent={<Text style={styles.muted}>{s.bots.noMessages}</Text>}
       ListHeaderComponent={<View style={styles.section}>
         {bot && !hasMore && cursor !== null && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderBusy} onPress={() => void earlierPage()} />}
-        {earlier.map((entry, i) => <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
+        {earlier.map((entry, i) => entry.kind === 'btw' ? <BotAsideCard key={`btw:${text(entry.id)}`} card={entry} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot!.id, id: entry.id })} /> : entry.kind === 'view' ? <BotViewCard key={i} pending={entry} busy reply={() => {}} /> : <View key={i} style={styles.card}><Text style={styles.muted}>{entry.kind === 'user' ? s.bots.yourAnswer : bot?.name}</Text><NativeMarkdown text={text(entry.text)} /></View>)}
         {hasMore && <Button variant="quiet" label={s.bots.loadOlder} disabled={olderLoading || !ready} onPress={() => { atEnd.current = false; void loadOlder() }} />}
-        {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
       </View>}
       ListFooterComponent={<View style={styles.section}>
         {room && progress.length > 0 && <BotReplies rows={progress} />}
+        {room?.paused && <View style={styles.section}><Text style={styles.body}>{s.bots.roomPaused}</Text><Button label={s.bots.roomContinue} disabled={disabled} onPress={() => void perform('room-continue', { roomId: room.id })} /></View>}
+        {bot && objects(state.btwCards[bot.id]).filter(card => card.botId === bot.id && card.partId === session.sessionId).slice().reverse().map(card => <BotAsideCard key={text(card.id)} card={card} busy={disabled} cancel={() => void perform('btw-cancel', { sessionId: bot.id, id: card.id })} />)}
         {approvals.map(approval => <View key={text(approval.id)} style={styles.card}><Text style={styles.heading}>{state.bots.find(entry => entry.id === approval.botId)?.name} · {text(approval.tool)}</Text><Text style={styles.body}>{text(approval.reason)}</Text><View style={styles.actions}><Button variant="secondary" label={s.bots.reject} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'reject' })} /><Button label={s.bots.allow} disabled={disabled} onPress={() => void perform('approval-answer', { id: approval.id, choice: 'allow' })} /></View></View>)}
         {text(question.id) !== '' && <BotQuestion key={text(question.id)} question={question} busy={disabled} answer={answer => void perform('answer-question', { sessionId: session.sessionId, questionId: question.id, answer })} dismiss={() => void perform('dismiss-question', { sessionId: session.sessionId })} />}
         {text(view.id) !== '' && <BotViewCard key={text(view.id)} pending={view} busy={disabled} reply={(action, values) => void perform('view-reply', { sessionId: session.sessionId, viewId: view.id, action, values })} />}
       </View>} />
+    {error && <Text accessibilityRole="alert" style={styles.error}>{error}</Text>}
+    {bot && state.btwSupported && <Text style={[styles.muted, { paddingHorizontal: 12 }]}>{s.bots.btwHint}</Text>}
     <View style={styles.composer}>
       <TextInput accessibilityLabel={room ? s.bots.groupMessage : s.bots.message} placeholder={room ? s.bots.groupMessage : s.bots.message} placeholderTextColor={colors.muted} style={[styles.input, styles.draft]} multiline editable={!disabled} value={draft} onChangeText={setDraft} />
       {selected?.running && <IconButton label={s.bots.stop} icon={Square} disabled={disabled} onPress={() => void stopSession()} />}

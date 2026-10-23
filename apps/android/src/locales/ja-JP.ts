@@ -2,6 +2,24 @@ import type { Messages } from './types'
 
 const jaJP = {
   bots: {
+    btw: "Side question",
+    btwHint: "Use /btw to ask without interrupting or adding to the Bot’s context.",
+    btwEmpty: "Write a question after /btw.",
+    btwPrivate: "Side questions are only available in a Bot’s private chat.",
+    btwUnsupported: "Update DS Bot on the Host to use side questions.",
+    btwNote: "Answered from the conversation so far; no tools run and no context added.",
+    btwAnswering: "Answering…",
+    btwCancelled: "Cancelled",
+    btwFailed: "Could not answer this side question.",
+    roomPaused: "Bot relays are paused at the group limit. Continue them or send a message.",
+    roomContinue: "Continue group",
+    htmlFallback: "This HTML view opens on the Host. Its summary is shown here.",
+    chartData: "Chart data",
+    decrease: "Decrease",
+    increase: "Increase",
+    invalidNumber: "Enter a number within the shown range.",
+    invalidViewAnswer: "Check the card inputs before submitting.",
+
     inputTokens: 'Input tokens', outputTokens: 'Output tokens', calls: 'Calls',
     "mode": "Bot mode",
     "agent": "Agent mode",

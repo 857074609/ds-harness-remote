@@ -1,7 +1,7 @@
 import { AbortController as NativeAbortController } from 'abort-controller'
 import { describe, expect, it, vi } from 'vitest'
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
-import { BotRemoteClient, type BotOperation } from '../src/services/bot-catalog'
+import { BotRemoteClient, botMessageRequest, parseBotState, type BotOperation } from '../src/services/bot-catalog'
 import type { RemoteSession } from '../src/types'
 
 const botState = () => ({ bots: [{ id: 'bot', sessionId: 'part-2', name: 'Bot' }], rooms: [{ id: 'room', name: 'Team', members: ['bot', 'other'] }], mainBotIds: ['bot'] })
@@ -28,6 +28,38 @@ describe('Android Bot client authority', () => {
       expect(dispatch).toHaveBeenCalledTimes(stage === 'before' ? 0 : 1)
       expect(readSessions).toHaveBeenCalledTimes(stage === 'active' || stage === 'during-catalog' ? 1 : 0)
     } })))
+  })
+
+  it('claims side questions without ever falling back to a queued prompt', async () => {
+    await runScenarios([
+      { name: 'aside', draft: '/btw progress?', target: 'bot', supported: true, endpoint: 'btw', text: 'progress?' },
+      { name: 'multiline', draft: ' /btw\nprogress? ', target: 'bot', supported: true, endpoint: 'btw', text: 'progress?' },
+      { name: 'empty aside', draft: '/btw  ', target: 'bot', supported: true },
+      { name: 'group aside', draft: '/btw progress?', target: 'room', supported: true },
+      { name: 'older Bot', draft: '/btw progress?', target: 'bot', supported: false },
+      { name: 'ordinary message on older Bot', draft: 'hello', target: 'bot', supported: false, endpoint: 'send', text: 'hello' },
+      { name: 'not the command', draft: '/btwquestion', target: 'bot', supported: true, endpoint: 'send', text: '/btwquestion' },
+      { name: 'read only', draft: '/btw progress?', target: 'bot', supported: true, readOnly: 'locked' },
+      { name: 'unknown session', draft: '/btw progress?', target: 'unlisted', supported: true },
+    ].map(row => ({ name: row.name, run: async () => {
+      const state = parseBotState({ ...botState(), ...(row.supported ? { btwCards: {} } : {}), readOnly: row.readOnly })
+      const dispatch = vi.fn(async () => envelope({ id: 'aside' }))
+      const client = new BotRemoteClient(dispatch, async () => [], () => {})
+      const send = async () => {
+        const request = botMessageRequest(state, row.target, row.draft)
+        return client.call(request.endpoint, request.payload)
+      }
+      if (row.endpoint) {
+        await send()
+        expect(dispatch).toHaveBeenCalledTimes(1)
+        expect(dispatch).toHaveBeenCalledWith({ endpoint: row.endpoint, payload: { sessionId: row.target, text: row.text } }, undefined)
+      } else { await expect(send()).rejects.toThrow(); expect(dispatch).not.toHaveBeenCalled() }
+    } })))
+    // Unknown outcome is never retried as either a side question or a prompt.
+    const dispatch = vi.fn(async () => { throw new Error('disconnected') })
+    const client = new BotRemoteClient(dispatch, async () => [], () => {})
+    await expect(client.call('btw', { sessionId: 'bot', text: 'progress?' })).rejects.toThrow('disconnected')
+    expect(dispatch).toHaveBeenCalledTimes(1)
   })
 
   it('opens only current Bot/group sessions from the same official Harness catalog', async () => {
@@ -63,6 +95,9 @@ describe('Android Bot client authority', () => {
 
   it('forwards native Bot answers once and rejects unreviewed operations and broad approval', async () => {
     await runScenarios([
+      { name: 'aside', endpoint: 'btw', payload: { sessionId: 'bot', text: 'progress?' }, allowed: true },
+      { name: 'cancel aside', endpoint: 'btw-cancel', payload: { sessionId: 'bot', id: 'aside' }, allowed: true },
+      { name: 'continue group', endpoint: 'room-continue', payload: { roomId: 'room' }, allowed: true },
       { name: 'send', endpoint: 'send', payload: { sessionId: 'bot', text: 'hello' }, allowed: true },
       { name: 'card', endpoint: 'view-reply', payload: { sessionId: 'part-2', viewId: 'view', action: 'form', values: { fields: { name: 'value' } } }, allowed: true },
       { name: 'one time', endpoint: 'approval-answer', payload: { id: 'approval', choice: 'allow' }, allowed: true },

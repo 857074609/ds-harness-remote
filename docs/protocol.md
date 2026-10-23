@@ -764,13 +764,23 @@ Connection handler。不得通过该入口绕过 Harness Remote allowlist、Remo
 
 - 查询：`state`、`models`、`efforts`、`exchange`、`earlier`、`usage`、`room-progress`、`schedules`。
 - Bot 管理：`create-bot`、`duplicate-bot`、`update-bot`、`delete-bot`、`set-main`、`set-flags`。
-- 群聊管理：`create-room`、`update-room`、`delete-room`。
+- 群聊管理：`create-room`、`update-room`、`delete-room`、`room-continue`。
 - Agent 会话管理：`add-agent`、`agent-session`、`agent-adopt`、`agent-archive`、`agent-rename`、`remove-agent`。
-- 会话交互：`send`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
+- 会话交互：`send`、`btw`、`btw-cancel`、`answer-question`、`dismiss-question`、`view-reply`、`approval-answer`、`stop-member-work`。
 
-`view-reply` 转发 DS Bot 0.2.0 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
-用于选择、确认和表单提交。待答卡片身份、答案合法性及重复提交由 Host 上 DS Bot 原生
+`view-reply` 转发 DS Bot 0.2.0 / 0.2.1 交互卡片的 `sessionId`、`viewId`、`action`、`values`，
+用于选择、确认、表单及 0.2.1 的 `submit` 提交；公式输入通过 `values.inputs` 传递。
+待答卡片身份、答案合法性及重复提交由 Host 上 DS Bot 原生
 handler 校验；Remote 保留既有认证、消息大小与超时边界，不重放提交。
+
+DS Bot 0.2.1 旁问：`btw { sessionId, text }` 返回卡片 ID，`btw-cancel { sessionId, id }`
+只取消该旁问；不调用 Harness interrupt。答案通过 `state.btwCards[botId]` 刷新，旧分段
+由 `earlier.btw` 返回，均不投影为 Harness 对话事件或写入本机历史。Android 在普通 `send`
+前识别精确的 `/btw` 命令；空问题、群聊或旧 Bot 不支持时保留草稿并拒绝，不降级为普通 Prompt。
+`room-continue { roomId }` 由原生 Host 恢复达到接力上限的群聊，Android 依据 `room.paused`
+展示继续入口；不在 Client 实现接力计数或重放。所有 mutation 继续遵循原有不自动重试规则。
+Android 卡片使用固定 0.2.1 schema 和受限表达式解释器，支持本地计算与 SVG 图表；
+HTML 仅展示摘要和主机打开提示，不执行 HTML/脚本，不增加网络访问或通用 RPC。
 
 `approval-answer` 只接受 DS Bot 的 `allow`（单次）或 `reject`，不开放 session-wide 审批。
 安装/升级、日程增删、凭据和 connector 管理、能力脚本、memory 写入、浏览器控制、诊断

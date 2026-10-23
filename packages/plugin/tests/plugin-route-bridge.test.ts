@@ -39,7 +39,7 @@ describe('PluginRouteBridge', () => {
 
   it('admits reviewed Bot operations and refuses local administration before dispatch', async () => {
     await runScenarios([
-      ...['state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules'].map(endpoint => ({
+      ...['state', 'send', 'create-bot', 'update-room', 'agent-session', 'schedules', 'btw', 'btw-cancel', 'room-continue'].map(endpoint => ({
         name: `admit ${endpoint}`, body: { endpoint, payload: {} }, allowed: true,
       })),
       { name: 'one-time approval', body: { endpoint: 'approval-answer', payload: { choice: 'allow' } }, allowed: true },
@@ -48,6 +48,7 @@ describe('PluginRouteBridge', () => {
         { name: 'choice', values: { selected: ['first'] } },
         { name: 'confirmation', values: { confirmed: true } },
         { name: 'form', values: { fields: { title: 'Remote answer' } } },
+        { name: 'calculator inputs', values: { inputs: { quantity: 3, enabled: true, size: 'large' } } },
       ].map(({ name, values }) => ({
         name: `admit card ${name}`,
         body: { endpoint: 'view-reply', payload: { sessionId: 'bot-session', viewId: 'pending-view', action: 'card-component', values } },

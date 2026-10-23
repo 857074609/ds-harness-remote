@@ -14,7 +14,7 @@
     },
     "android": {
       "package": "io.github.liguobao.dshremote",
-      "versionCode": 61,
+      "versionCode": 62,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES",

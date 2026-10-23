@@ -128,6 +128,12 @@ export function WorkspaceFilesPanel({ sessionId, initialFile, onClose }: { sessi
       } else if (kind === 'image' || kind === 'pdf' || kind === 'office') {
         const result = await loadWorkspacePreview(tools, sessionId, file, kind, controller.signal)
         if (!controller.signal.aborted) setBinary(result)
+      } else if (kind === 'unsupported') {
+        // Linked paths can be folders; the stat endpoint does not report the
+        // type, so an unclassifiable path falls back to a directory listing.
+        const result = await tools.listFiles(sessionId, file, controller.signal)
+        // listFiles only succeeds for a directory; reopen it as the listing path.
+        if (!controller.signal.aborted && result !== undefined) { setPath(file.replace(/\/+$/u, '')); setFile(undefined) }
       }
     }
     void run().catch(e => { if (!controller.signal.aborted) setError(sessionToolsError(e)) })

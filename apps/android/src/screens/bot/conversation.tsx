@@ -13,6 +13,7 @@ import { ChatActivityGroup, ChatItemView } from '../chat/messages'
 import { chatSections } from '../../state/message-helpers'
 import { processSegments } from '../chat-process'
 import { BotQuestion, BotViewCard } from './cards'
+import { parseBotReplies } from './replies'
 import type { BotPerform } from './editor'
 import { createBotStyles } from './styles'
 import { linkBotMentions, botMentionTarget } from './mentions'
@@ -116,9 +117,7 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
   const isDisplayTool = (item: ChatItem): boolean => {
     if (item.kind !== 'tool') return false
     if (item.toolKey === 'show_view') return true
-    if (room && item.state === 'finished') {
-      try { return Array.isArray(object(JSON.parse(item.resultDetail?.text ?? 'null')).replies) } catch { return false }
-    }
+    if (room && item.state === 'finished') return parseBotReplies(item.resultDetail?.text) !== undefined
     return false
   }
   const rows: BotChatRow[] = chatSections(visible).flatMap((section): BotChatRow[] => {
@@ -159,10 +158,8 @@ export function BotConversation({ bot, room, state, client, session, busy, activ
       } catch { /* Retain the native tool row if its args are unavailable. */ }
     }
     if (room && item.kind === 'tool' && item.state === 'finished') {
-      try {
-        const result = object(JSON.parse(item.resultDetail?.text ?? 'null'))
-        if (Array.isArray(result.replies)) return <Replies rows={objects(result.replies)} />
-      } catch { /* Ordinary tool output uses the existing native renderer. */ }
+      const rows = parseBotReplies(item.resultDetail?.text)
+      if (rows !== undefined) return <Replies rows={rows} />
     }
     return <ChatItemView item={item} compact={false} busyAction={storeBusy} onApproval={onApproval} onQuestion={onQuestion} />
   }

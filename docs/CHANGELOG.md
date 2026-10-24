@@ -6,6 +6,9 @@
 - Keep the local Host connection stopped at startup when device control is disabled, allowing an authorized outbound Client to discover remote Hosts after restart without enabling inbound control.
 - 关闭“允许控制设备”时，启动阶段不再连接本机 Host，避免重启后未授权的 Host 状态阻止已授权 Client 发现远端主机。
 
+- Normalize self-hosted Docker runtime file permissions so restrictive source modes do not prevent the non-root user from loading protocol packages; document public-origin configuration and JS/CSS 403 blank-page recovery (#146).
+- 规范化自部署 Docker 运行时文件权限，避免源码异常权限导致非 root 用户无法加载 protocol；补充公开域名配置与 JS/CSS 403 白屏排查（#146）。
+
 - Add offline LaTeX formulas to Android shared Markdown: `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` display blocks, rendered as native SVG with horizontal scrolling for wide display formulas. Keep code literal and fall back to source for unsupported or oversized formulas. No WebView, remote fonts or network math service. Native device rendering remains to be verified.
 - Android 共享 Markdown 新增离线 LaTeX 公式：行内与独立公式块使用原生 SVG，较宽公式块可横向滚动；代码保持原样，不支持或超限公式回退源码。不使用 WebView、远程字体或网络公式服务；真机显示仍待验证。
 

@@ -8,6 +8,8 @@
   &nbsp;·&nbsp;
   <a href="README.zh.md">中文</a>
   &nbsp;·&nbsp;
+  <a href="README.ja.md">日本語</a>
+  &nbsp;·&nbsp;
   <a href="docs/README.md">Documentation</a>
   &nbsp;·&nbsp;
   <a href="https://dsh.r2049.cn/app">Web</a>

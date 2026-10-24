@@ -537,34 +537,43 @@ export function createRemoteWorkspaceAction(React: ClientReact) {
                 .then(w => setClaudeWorkspaces(w)).catch(() => undefined)
             }
           }
-        } catch {
-          setDevices([])
-          setNeedsAuthorization(true)
-          setSelectedHost(undefined)
-          setWorkspaces([])
-          setCodexWorkspaces([])
-          setCursorWorkspaces([])
-          setAntigravityWorkspaces([])
-          setPiWorkspaces([])
-          setOpencodeWorkspaces([])
-          setClaudeWorkspaces([])
-          setShowAllWorkspaces(false)
-          setShowAllCodexWorkspaces(false)
-          setShowAllCursorWorkspaces(false)
-          setShowAllAntigravityWorkspaces(false)
-          setShowAllPiWorkspaces(false)
-          setShowAllOpencodeWorkspaces(false)
-          setShowAllClaudeWorkspaces(false)
-          setWorkspaceBackend('harness')
-          setCodexWorkspaceId(undefined)
-          setCursorWorkspaceId(undefined)
-          setAntigravityWorkspaceId(undefined)
-          setPiWorkspaceId(undefined)
-          setOpencodeWorkspaceId(undefined)
-          setClaudeWorkspaceId(undefined)
-          setPath('')
-          setAddingWorkspace(false)
-          setDirectory(undefined)
+        } catch (reason) {
+          // A transient Server outage is not a sign-out. Keep the last known
+          // device/session view and only show login for explicit auth failures.
+          const code = typeof reason === 'object' && reason !== null && 'code' in reason
+            ? String((reason as { code: unknown }).code)
+            : ''
+          if (['ACCOUNT_AUTH_REQUIRED', 'AUTH_INVALID', 'AUTH_REQUIRED', 'TOKEN_EXPIRED', 'DEVICE_REVOKED', 'DEVICE_OWNERSHIP_REQUIRED'].includes(code)) {
+            setDevices([])
+            setNeedsAuthorization(true)
+            setSelectedHost(undefined)
+            setWorkspaces([])
+            setCodexWorkspaces([])
+            setCursorWorkspaces([])
+            setAntigravityWorkspaces([])
+            setPiWorkspaces([])
+            setOpencodeWorkspaces([])
+            setClaudeWorkspaces([])
+            setShowAllWorkspaces(false)
+            setShowAllCodexWorkspaces(false)
+            setShowAllCursorWorkspaces(false)
+            setShowAllAntigravityWorkspaces(false)
+            setShowAllPiWorkspaces(false)
+            setShowAllOpencodeWorkspaces(false)
+            setShowAllClaudeWorkspaces(false)
+            setWorkspaceBackend('harness')
+            setCodexWorkspaceId(undefined)
+            setCursorWorkspaceId(undefined)
+            setAntigravityWorkspaceId(undefined)
+            setPiWorkspaceId(undefined)
+            setOpencodeWorkspaceId(undefined)
+            setClaudeWorkspaceId(undefined)
+            setPath('')
+            setAddingWorkspace(false)
+            setDirectory(undefined)
+          } else {
+            setError(messageOf(reason))
+          }
         }
       } catch (reason) {
         setError(messageOf(reason))

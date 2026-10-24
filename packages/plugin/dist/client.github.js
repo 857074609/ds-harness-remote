@@ -3334,8 +3334,9 @@ Minimum version required to store current data is: ` + bestVersion + `.
               }), props.control("claude.workspaces.list", { targetDeviceId: nextSelectedHost.deviceId }).then((w) => setClaudeWorkspaces(w)).catch(() => {
               }));
             }
-          } catch {
-            setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0);
+          } catch (reason) {
+            let code = typeof reason == "object" && reason !== null && "code" in reason ? String(reason.code) : "";
+            ["ACCOUNT_AUTH_REQUIRED", "AUTH_INVALID", "AUTH_REQUIRED", "TOKEN_EXPIRED", "DEVICE_REVOKED", "DEVICE_OWNERSHIP_REQUIRED"].includes(code) ? (setDevices([]), setNeedsAuthorization(!0), setSelectedHost(void 0), setWorkspaces([]), setCodexWorkspaces([]), setCursorWorkspaces([]), setAntigravityWorkspaces([]), setPiWorkspaces([]), setOpencodeWorkspaces([]), setClaudeWorkspaces([]), setShowAllWorkspaces(!1), setShowAllCodexWorkspaces(!1), setShowAllCursorWorkspaces(!1), setShowAllAntigravityWorkspaces(!1), setShowAllPiWorkspaces(!1), setShowAllOpencodeWorkspaces(!1), setShowAllClaudeWorkspaces(!1), setWorkspaceBackend("harness"), setCodexWorkspaceId(void 0), setCursorWorkspaceId(void 0), setAntigravityWorkspaceId(void 0), setPiWorkspaceId(void 0), setOpencodeWorkspaceId(void 0), setClaudeWorkspaceId(void 0), setPath(""), setAddingWorkspace(!1), setDirectory(void 0)) : setError(messageOf(reason));
           }
         } catch (reason) {
           setError(messageOf(reason));

@@ -216,7 +216,7 @@ export class HostPluginRuntime {
       this.serverApi.setHarnessVersion(this.harnessVersion)
       this.serverApi.bindIdentity(this.identity)
       this.serverConnection = this.createServerConnection(this.identity)
-      this.serverConnection.start()
+      if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
     }
   }
 

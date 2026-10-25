@@ -162,7 +162,9 @@ export class RpcRouter {
     switch (method) {
       case 'harness.transport.describe': {
         emptyParamsSchema.parse(params)
-        const capabilities = [...new Set([...this.capabilities(), 'remote.history.compact.v1'])]
+        const capabilities = [...new Set([...this.capabilities(), 'remote.history.compact.v1',
+          ...(this.harnessRemote === undefined ? [] : ['harness.remote.stream.transfer.v1']),
+        ])]
         let workspaceTypes: RemoteWorkspaceTypeDescription[] | undefined
         if (this.workspaceTypes !== undefined) {
           try {

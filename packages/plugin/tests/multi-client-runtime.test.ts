@@ -10,12 +10,28 @@ import type { ResolvedConfig } from '../src/config.js'
 import type { HostIdentity, IdentityStore } from '../src/identity-store.js'
 import type { SafeLogger } from '../src/logging.js'
 import { HostPluginRuntime } from '../src/service.js'
+import { HostServerConnection } from '../src/server-connection.js'
 import { CodexRemoteDomain } from '../src/codex/domain.js'
 import { CodexAppServerError, type CodexAppServerLike } from '../src/codex/app-server.js'
 import type { AuthenticatedPeerChannel } from '../src/types.js'
 import type { LocalTypertGateway } from '../src/typert-gateway-contract.js'
 
 describe('HostPluginRuntime multi-Client routing', () => {
+  it('does not start inbound Host authorization when control is disabled at startup', async () => {
+    const start = vi.spyOn(HostServerConnection.prototype, 'start').mockImplementation(() => undefined)
+    try {
+      await runScenarios([false, true].map(enabled => ({ name: 'hostControl=' + enabled, run: async () => {
+        start.mockClear()
+        const runtime = new HostPluginRuntime({ ...config(), serverUrl: 'https://server.example', hostControl: { enabled } }, Object.assign(identities(), { directory: '/fixture/host-identity' }), apiProxy({}), logger())
+        try {
+          await runtime.start()
+          expect(start).toHaveBeenCalledTimes(enabled ? 1 : 0)
+          if (!enabled) expect(runtime.hostStatus()).toMatchObject({ online: false, authorized: false, accountRequired: false })
+        } finally { await runtime.close() }
+      } })))
+    } finally { start.mockRestore() }
+  })
+
   it('advertises CodeX readiness over the authenticated channel', async () => {
     const rows = [
       'ready',

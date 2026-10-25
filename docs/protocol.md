@@ -833,6 +833,7 @@ Host handshake 的 capability 例子：
   "harness.api.transfer.v1",
   "harness.remote.v1",
   "harness.remote.transfer.v1",
+  "harness.remote.stream.transfer.v1",
   "fileviewer.read.v1",
   "workspace.upload.v1",
   "codex.appserver.v1",
@@ -1135,6 +1136,29 @@ Host 对每个 item 发送 `harness.remote.frame`：
 不能把它解释成流结束。终止通过 `harness.remote.stream.closed` 单独发送，reason 为
 `cancelled|completed|failed|peer-disconnected`；`failed` 可携带 Gateway 归一化后的
 `failure: { code, message, details }`。
+
+支持 `harness.remote.stream.transfer.v1` 的 Host 允许 Client 在 open 中显式附加
+`transferFrames: true`。Client 必须先通过 `harness.transport.describe` 确认该能力；
+旧 Host 不接收该字段，未选择此能力的 Client 继续收到原有 inline 帧。
+选中后，超过 4 MiB secure-message 上限的单个 item 使用以下描述帧，不能同时含 `value`：
+
+```json
+{ "streamId": "...", "hasValue": true, "transfer": {
+  "kind": "chunked", "transferId": "UUID", "totalBytes": 6000000, "totalChunks": 12
+} }
+```
+
+`harness.remote.transfer.read/close` 按既有 512 KiB 分块规则读取并释放该输出 transfer；
+拼回的 UTF-8 JSON 是完整原帧 `{ streamId, hasValue: true, value? }`，禁止嵌套 transfer，
+必须核对 streamId、总大小、块数、逐块序号/字节数及 canonical base64。单项最多 288 MiB，
+与 unary response 共用每连接最多两个输出 transfer 的限额。Host 在 Client 完成读取并
+close 前暂停该 source，后续 delta 和 closed 不能越过它；Client 按序重组后才交给原生 UI。
+Client 的 256 项/4 MiB 等待队列只存小描述，同一 stream 同时只重组一项；不截断消息、
+工具结果或游标，不修改 SessionStore。取消、断线、提前 close、乱序读取及 2 分钟 idle
+均终止该 stream 并释放 transfer；失败不重放 prompt 或其他操作。
+
+当前 Desktop Plugin 已实现此可选能力。其他 Client 未显式启用时沿用原协议；此扩展
+不要求 Server 变更，也不提高单条加密消息或 Relay 帧上限。
 
 `$events` 是官方 alpha Gateway 的 Host-to-Client Cordis event stream。Client 对 waterfall
 事件的结果必须经 allowlisted `$events/result` unary endpoint 返回原 Host；Plugin 不创造

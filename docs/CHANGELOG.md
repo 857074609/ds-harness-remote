@@ -1,5 +1,11 @@
 ## 0.5.19 — Unreleased
 
+- Load oversized Harness history frames in the Plugin Remote client through negotiated, bounded 512 KiB transfers while preserving stream ordering and the 4 MiB secure-message limit. Cancelled, disconnected, incomplete and idle transfers release their resources; legacy clients keep the existing frame behavior.
+- Plugin Remote 客户端通过能力协商和有界的 512 KiB 分片传输加载超大 Harness 历史帧，保留流事件顺序与 4 MiB 安全消息上限；取消、断连、未完整读取和空闲超时均释放传输资源，旧客户端保持原有行为。
+
+- Keep the local Host connection stopped at startup when device control is disabled, allowing an authorized outbound Client to discover remote Hosts after restart without enabling inbound control.
+- 关闭“允许控制设备”时，启动阶段不再连接本机 Host，避免重启后未授权的 Host 状态阻止已授权 Client 发现远端主机。
+
 - Add offline LaTeX formulas to Android shared Markdown: `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` display blocks, rendered as native SVG with horizontal scrolling for wide display formulas. Keep code literal and fall back to source for unsupported or oversized formulas. No WebView, remote fonts or network math service. Native device rendering remains to be verified.
 - Android 共享 Markdown 新增离线 LaTeX 公式：行内与独立公式块使用原生 SVG，较宽公式块可横向滚动；代码保持原样，不支持或超限公式回退源码。不使用 WebView、远程字体或网络公式服务；真机显示仍待验证。
 

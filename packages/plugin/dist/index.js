@@ -26876,6 +26876,7 @@ var RemoteTypertGateway2 = class {
     this.compatibility = compatibility;
     this.harnessVersion = harnessVersion;
   }
+  frameTransfers;
   async invoke(request) {
     const result = await this.dispatch(
       `${request.namespace}/${request.method}`,
@@ -26925,30 +26926,70 @@ var RemoteTypertGateway2 = class {
     return { ok: true, value };
   }
   async open(endpoint, payload, signal) {
+    if (this.frameTransfers === void 0) {
+      const description = await this.client.rpc("harness.transport.describe", {}, signal);
+      this.frameTransfers = isRecord9(description) && Array.isArray(description.capabilities) && description.capabilities.includes("harness.remote.stream.transfer.v1");
+    }
+    signal.throwIfAborted();
     const streamId = uuidV7();
     const queue = new AsyncValueQueue4();
+    const lifetime = new AbortController();
+    const transferSignal = AbortSignal.any([signal, lifetime.signal]);
     const unsubscribe = this.client.onEvent((event) => routeStreamEvent2(event, streamId, queue));
     const unsubscribeClose = this.client.onClose(() => {
+      lifetime.abort();
       queue.fail(new RemoteClientError("TRANSPORT_CLOSED", "The remote Harness stream transport closed."));
     });
-    const onAbort = () => queue.close();
+    const onAbort = () => {
+      lifetime.abort();
+      queue.close();
+      unsubscribe();
+      unsubscribeClose();
+      void this.client.rpc("harness.remote.stream.close", { streamId }, void 0, { timeoutMs: 5e3 }).catch(() => void 0);
+    };
     signal.addEventListener("abort", onAbort, { once: true });
     try {
-      await this.client.rpc("harness.remote.stream.open", { streamId, endpoint, payload }, signal);
+      await this.client.rpc("harness.remote.stream.open", {
+        streamId,
+        endpoint,
+        payload,
+        ...this.frameTransfers ? { transferFrames: true } : {}
+      }, signal);
     } catch (error) {
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
       unsubscribeClose();
+      lifetime.abort();
+      void this.client.rpc("harness.remote.stream.close", { streamId }).catch(() => void 0);
       throw error;
     }
-    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort);
+    return this.iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal);
   }
-  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort) {
+  async *iterate(streamId, endpoint, queue, unsubscribe, unsubscribeClose, signal, onAbort, lifetime, transferSignal) {
     try {
-      for await (const value of queue) {
+      for await (const item of queue) {
+        let frame = item;
+        if (frame.transfer !== void 0) {
+          if (!this.frameTransfers || Object.hasOwn(frame, "value")) throw new Error("Unnegotiated or ambiguous Harness Remote stream transfer");
+          const descriptor = frame.transfer;
+          try {
+            const decoded = await this.readTransferred(descriptor, transferSignal);
+            if (!isRecord9(decoded) || decoded.streamId !== streamId || decoded.hasValue !== true || Object.hasOwn(decoded, "transfer")) {
+              throw new Error("Invalid Harness Remote transferred stream frame");
+            }
+            frame = decoded;
+          } finally {
+            if (typeof descriptor.transferId === "string") {
+              await this.client.rpc("harness.remote.transfer.close", { transferId: descriptor.transferId }, void 0, { timeoutMs: 5e3 }).catch(() => void 0);
+            }
+          }
+        }
+        transferSignal.throwIfAborted();
+        const value = frame.value;
         yield this.compatibility === "legacy-to-v3" ? normalizeLegacySessionGatewayValue(endpoint, value) : normalizeAssistantMessageStreamValue(endpoint, value);
       }
     } finally {
+      lifetime.abort();
       signal.removeEventListener("abort", onAbort);
       unsubscribe();
       unsubscribeClose();
@@ -26985,32 +27026,40 @@ var RemoteTypertGateway2 = class {
         signal
       );
       if (committed.kind === "inline") return committed.response;
-      if (committed.transferId !== transferId || committed.totalBytes <= 0 || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
+      if (committed.transferId !== transferId) {
         throw new Error("The remote Host returned an invalid Harness Remote transfer descriptor.");
       }
-      const responseBytes = new Uint8Array(committed.totalBytes);
-      let offset = 0;
-      for (let index = 0; index < committed.totalChunks; index += 1) {
-        const result = await this.client.rpc(
-          "harness.remote.transfer.read",
-          { transferId, index },
-          signal
-        );
-        if (result.transferId !== transferId || result.index !== index) {
-          throw new Error("The remote Host returned an out-of-order Harness Remote transfer chunk.");
-        }
-        const chunk = base64ToBytes3(result.data);
-        const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
-        if (chunk.byteLength !== expectedBytes) {
-          throw new Error("The remote Host returned an invalid Harness Remote transfer chunk.");
-        }
-        responseBytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
+      return await this.readTransferred(committed, signal);
     } finally {
       if (opened) await this.client.rpc("harness.remote.transfer.close", { transferId }).catch(() => void 0);
     }
+  }
+  async readTransferred(committed, signal) {
+    if (committed.kind !== "chunked" || typeof committed.transferId !== "string" || !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(committed.transferId) || !Number.isSafeInteger(committed.totalBytes) || committed.totalBytes <= 0 || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
+      throw new Error("The remote Host returned an invalid Harness Remote transfer descriptor.");
+    }
+    signal.throwIfAborted();
+    const { transferId } = committed;
+    const responseBytes = new Uint8Array(committed.totalBytes);
+    let offset = 0;
+    for (let index = 0; index < committed.totalChunks; index += 1) {
+      const result = await this.client.rpc(
+        "harness.remote.transfer.read",
+        { transferId, index },
+        signal
+      );
+      if (result.transferId !== transferId || result.index !== index) {
+        throw new Error("The remote Host returned an out-of-order Harness Remote transfer chunk.");
+      }
+      const chunk = base64ToBytes3(result.data);
+      const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
+      if (chunk.byteLength !== expectedBytes) {
+        throw new Error("The remote Host returned an invalid Harness Remote transfer chunk.");
+      }
+      responseBytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
   }
 };
 var AsyncValueQueue4 = class {
@@ -27070,7 +27119,7 @@ var AsyncValueQueue4 = class {
 function routeStreamEvent2(event, streamId, queue) {
   if (event.event === "harness.remote.frame") {
     const data3 = event.data;
-    if (data3.streamId === streamId && data3.hasValue === true) queue.push(data3.value);
+    if (data3.streamId === streamId && data3.hasValue === true) queue.push(data3);
     return;
   }
   if (event.event !== "harness.remote.stream.closed") return;
@@ -38614,7 +38663,7 @@ function unavailable2() {
 }
 
 // src/service.ts
-import { randomUUID as randomUUID7 } from "node:crypto";
+import { randomUUID as randomUUID8 } from "node:crypto";
 
 // src/connection-controller.ts
 var ConnectionController = class {
@@ -38936,7 +38985,11 @@ var RpcRouter = class {
     switch (method) {
       case "harness.transport.describe": {
         emptyParamsSchema.parse(params);
-        const capabilities = [.../* @__PURE__ */ new Set([...this.capabilities(), "remote.history.compact.v1"])];
+        const capabilities = [.../* @__PURE__ */ new Set([
+          ...this.capabilities(),
+          "remote.history.compact.v1",
+          ...this.harnessRemote === void 0 ? [] : ["harness.remote.stream.transfer.v1"]
+        ])];
         let workspaceTypes;
         if (this.workspaceTypes !== void 0) {
           try {
@@ -41009,12 +41062,14 @@ function concatChunks3(chunks, totalBytes) {
 }
 
 // src/harness-remote-bridge.ts
+import { randomUUID as randomUUID7 } from "node:crypto";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
 var callSchema4 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
 var streamOpenSchema4 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
-  payload: external_exports.unknown()
+  payload: external_exports.unknown(),
+  transferFrames: external_exports.boolean().optional()
 }).strict();
 var streamCloseSchema4 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var commandExecuteArgsSchema = external_exports.object({
@@ -41318,6 +41373,7 @@ var HarnessRemoteBridge = class {
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
       this.outgoingTransfers.delete(params.transferId);
+      transfer.finish?.(new Error("Invalid Harness Remote stream transfer order"));
       throw new RpcError("INVALID_MESSAGE", "Harness Remote response chunks must be read exactly once and in order.");
     }
     const start = params.index * HARNESS_API_TRANSFER_CHUNK_BYTES;
@@ -41332,6 +41388,8 @@ var HarnessRemoteBridge = class {
   }
   closeTransfer(input3) {
     const params = transferIdSchema4.parse(input3);
+    const transfer = this.outgoingTransfers.get(params.transferId);
+    transfer?.finish?.(transfer.nextIndex === transfer.totalChunks ? void 0 : new Error("Incomplete Harness Remote stream transfer"));
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
@@ -41357,7 +41415,7 @@ var HarnessRemoteBridge = class {
       controller.abort();
       throw error;
     }
-    void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow");
+    void this.pump(params.streamId, source, controller.signal, params.endpoint === "session/follow", params.transferFrames);
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input3) {
@@ -41404,7 +41462,7 @@ var HarnessRemoteBridge = class {
       throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not support Remote event transport.");
     }
   }
-  async pump(streamId, source, signal, historyFollow = false) {
+  async pump(streamId, source, signal, historyFollow = false, transferFrames = false) {
     let reason = "completed";
     let failure4;
     try {
@@ -41416,9 +41474,11 @@ var HarnessRemoteBridge = class {
           ...value === void 0 ? {} : { value: historyFollow && this.compactHistoryEnabled && isCompactSnapshot(value) ? compactHistory(value) : value }
         };
         if (encodeMessage(createEvent("harness.remote.frame", frame)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
-          throw new Error("Oversized Harness Remote frame");
+          if (!transferFrames) throw new Error("Oversized Harness Remote frame");
+          await this.transferStreamFrame(frame, signal);
+        } else {
+          await this.publish("harness.remote.frame", frame);
         }
-        await this.publish("harness.remote.frame", frame);
       }
       if (signal.aborted) reason = "cancelled";
     } catch (error) {
@@ -41433,10 +41493,48 @@ var HarnessRemoteBridge = class {
       }).catch(() => void 0);
     }
   }
+  /** Keep the source paused until the Client reads and releases this exact item. */
+  async transferStreamFrame(frame, signal) {
+    signal.throwIfAborted();
+    this.pruneTransfers();
+    const bytes = new TextEncoder().encode(JSON.stringify(frame));
+    if (bytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) throw new Error("Harness Remote stream item exceeds the bounded transfer limit");
+    if (this.outgoingTransfers.size >= MAX_ACTIVE_TRANSFERS3) throw new Error("Too many Harness Remote response transfers are active");
+    const transferId = randomUUID7();
+    const totalChunks = Math.ceil(bytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
+    let finish;
+    const completed = new Promise((resolve6, reject) => {
+      finish = (error) => error === void 0 ? resolve6() : reject(error);
+    });
+    void completed.catch(() => void 0);
+    const transfer = { bytes, totalChunks, nextIndex: 0, touchedAt: Date.now(), finish };
+    this.outgoingTransfers.set(transferId, transfer);
+    const onAbort = () => finish(new Error("Harness Remote stream transfer cancelled"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setInterval(() => {
+      if (Date.now() - transfer.touchedAt >= TRANSFER_IDLE_MS) finish(new Error("Harness Remote stream transfer timed out"));
+    }, 1e3);
+    timer.unref();
+    try {
+      await this.publish("harness.remote.frame", {
+        streamId: frame.streamId,
+        hasValue: true,
+        transfer: { kind: "chunked", transferId, totalBytes: bytes.byteLength, totalChunks }
+      });
+      await completed;
+    } finally {
+      clearInterval(timer);
+      signal.removeEventListener("abort", onAbort);
+      this.outgoingTransfers.delete(transferId);
+    }
+  }
   pruneTransfers() {
     const cutoff = Date.now() - TRANSFER_IDLE_MS;
     for (const [id5, transfer] of this.incomingTransfers) if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(id5);
-    for (const [id5, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(id5);
+    for (const [id5, transfer] of this.outgoingTransfers) if (transfer.touchedAt < cutoff) {
+      this.outgoingTransfers.delete(id5);
+      transfer.finish?.(new Error("Harness Remote stream transfer timed out"));
+    }
   }
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
@@ -41728,7 +41826,7 @@ var HostPluginRuntime = class {
       this.serverApi.setHarnessVersion(this.harnessVersion);
       this.serverApi.bindIdentity(this.identity);
       this.serverConnection = this.createServerConnection(this.identity);
-      this.serverConnection.start();
+      if (this.config.hostControl?.enabled !== false) this.serverConnection.start();
     }
   }
   currentIdentity() {
@@ -41963,7 +42061,7 @@ var HostPluginRuntime = class {
     let reportedVersion;
     let errorCode6;
     try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID7(), payload: {} });
+      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID8(), payload: {} });
       if (response === void 0) throw new Error("ApiProxy is unavailable");
       if (!response.result.ok) {
         errorCode6 = response.result.error.code;

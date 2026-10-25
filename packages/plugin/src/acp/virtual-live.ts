@@ -45,7 +45,6 @@ export interface AcpLiveProjectionContext {
   readonly pendingApprovals: Map<string, PendingApproval>
   readonly emitApproval: (input: { eventId: string; agentId: string; request: JsonRecord; }) => void
   readonly modelSelection: (sessionId: string) => AcpModelSelection
-  readonly broadcastRcMux: (payload: unknown, rpcId?: string) => void
 }
 
 export class AcpLiveProjection {
@@ -549,11 +548,6 @@ export class AcpLiveProjection {
         f.nextSeq = seq + 1
       }
     }
-    this.context.broadcastRcMux({
-      type: 'session/event',
-      sessionId: follow.sessionId,
-      event,
-    })
     return seq
   }
 }

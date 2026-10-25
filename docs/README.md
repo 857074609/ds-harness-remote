@@ -5,7 +5,7 @@
 本仓库只实现以下内容：
 
 - DeepSeek Harness Plugin（常驻 Host + 本地 Remote 工作区入口，无用户可见的 Client 模式）
-- Android Client（账号授权 + Adaptive transport + rc.2 ApiProxy / v0.1.2 Typert Remote 双数据面 + 可选 Codex Remote）
+- Android Client（账号授权 + Adaptive transport + Typert Remote 数据面 + 可选 Codex Remote）
 - VS Code Client（账号授权 + Host 信任固定 + rc.2 ApiProxy / v0.1.2 Typert Remote 会话/Prompt）
 - Browser Chrome/Edge MV3 入口（独立设备凭据、在线 Host 列表、打开 Remote Web）
 - `protocol`、`crypto`、`webrtc`、`client-core` 等共享包
@@ -29,7 +29,7 @@
 - [更新记录](CHANGELOG.md)：记录版本变更。
 - [隐私说明](PRIVACY.md)：说明数据处理与隐私边界。
 - [插件安装指南](installation.zh.md)（[English](installation.md)）：已有 Harness 插件安装、Desktop 插件管理、profile 选择与插件卸载。
-- [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、ApiProxy/Typert carrier 兼容与排障。
+- [dsh-TUI Remote 使用指南](dsh-tui.md)：介绍 dsh-TUI profile 安装、`/remote` 命令、扫码登录、状态查询、Typert carrier 兼容与排障。
 - [Codex Remote 技术说明](codex-remote.md)：说明 Codex 工作区展示、数据边界、配置、安全限制和当前验证状态。
 - [Agent 工作区接入指南](acp-integration.md)：启用 Cursor / AGY / Codex，以及新增 ACP adapter 的接入点。
 - [ACP Remote / Agent adapters](acp-remote.md)：说明 #65 Agent ACP gateway、Cursor adapter、allowlist 与配置。

@@ -169,7 +169,7 @@ export interface SessionModels {
   failures: ModelCatalogFailure[]
 }
 
-/** Native ApiProxy session row projection (mirrors @deepseek-ai/dsh-host-apiproxy). */
+/** Native Harness session row projection. */
 /** One durable roster row from the session's `agentTeam` projection. */
 export interface TeamMemberSnapshot {
   id: string

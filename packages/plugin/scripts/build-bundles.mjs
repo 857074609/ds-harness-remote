@@ -1,9 +1,18 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { build } from 'esbuild'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+// tsc does not remove outputs for deleted sources. Keep retired rc.2 modules
+// out of npm's dist directory when rebuilding an existing checkout.
+await Promise.all(
+  ['api-proxy-switch', 'harness-api-bridge', 'harness-api-history', 'remote-api-proxy']
+    .flatMap(name => ['.js', '.js.map', '.d.ts', '.d.ts.map'].map(extension =>
+      rm(join(root, 'dist', `${name}${extension}`), { force: true }),
+    )),
+)
 
 async function buildBundle(options) {
   const result = await build({ ...options, write: false })

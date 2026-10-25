@@ -1,8 +1,10 @@
 # DSH Remote for Android
 
 React Native / Expo SDK 57 client for controlling a trusted DeepSeek Harness host over the
-[Remote Protocol v1](../../docs/protocol.md) ApiProxy / Typert Remote tunnel, including the optional
+[Remote Protocol v1](../../docs/protocol.md) Typert Remote tunnel, including the optional
 CodeX App Server domain advertised by the Host.
+
+Harness `0.1.1-rc.2` ApiProxy-only Hosts are no longer supported; capability discovery and a Typert Remote carrier are required.
 
 ## Implemented flow
 
@@ -30,16 +32,16 @@ CodeX App Server domain advertised by the Host.
   show an error and keep the original name.
 - Establish a Noise IK channel over an adaptive transport (WebRTC P2P/TURN with Relay fallback) and
   reject tampered, replayed, or wrong-identity frames.
-- Drive the Host through the rc.2 ApiProxy bridge or the v0.1.2 Typert Remote Gateway after
+- Drive the Host through the official Typert Remote Gateway after
   encrypted capability probing:
-  browse sessions (including archived ones), create sessions, stream live mux frames, send
+  browse sessions (including archived ones), create sessions, stream live session frames, send
   text/image prompts, cancel generation, page older history, switch the active model and its
   declared reasoning effort from the host's catalog, manage host workspaces (create with a
   read-only directory browser, rename, delete,
-  reorder), and answer approval / question requests with the native `client-response` envelope.
+  reorder), and answer approval / question requests through the official Typert event result endpoints.
 - Select PNG/JPEG/WebP/GIF images from Android's system picker, preflight the Host-projected image
-  limits, preview them in the composer, and carry large native `session.prompt` envelopes through
-  the bounded `harness.api.transfer.*` path. Image processing and provider upload remain on the Host.
+  limits, preview them in the composer, and carry large native `session/prompt` envelopes through
+  the bounded `harness.remote.transfer.*` path. Image processing and provider upload remain on the Host.
 - When the Host advertises `codex.appserver.v1`, merge CodeX `project/list` roots into the workspace
   screen without creating local workspaces, show their allowlisted Threads as conversations, page
   `dsh/sessionHistory`, reduce live reasoning/plan/tool frames, send text or system-picker image
@@ -106,7 +108,7 @@ pnpm --filter @dsh-remote/android android
 
 The Android `start`, `android`, `ios`, and `build` commands rebuild the shared protocol, crypto,
 WebRTC, and client-core packages first, then verify that the compiled client contains the
-rc.2 ApiProxy, v0.1.2 Typert Remote, and CodeX Remote capability paths. This prevents Metro or Gradle from
+Typert Remote, CodeX Remote, and Agent ACP capability paths. This prevents Metro or Gradle from
 silently packaging stale workspace `dist` files.
 
 Android Emulator reaches a server on the development machine at `http://10.0.2.2:8080`. Cleartext
@@ -135,7 +137,7 @@ cd android
 src/
   lib/       URL validation and user-facing errors
   screens/   server sign-in, devices, sessions, chat, settings
-  services/  REST, secure storage, secure transport, Remote Runtime, ApiProxy and CodeX clients
+  services/  REST, secure storage, secure transport, Remote Runtime, Typert and CodeX clients
   state/     Zustand store plus Harness mux and CodeX frame reducers
   ui/        tokens and reusable mobile components
 ```

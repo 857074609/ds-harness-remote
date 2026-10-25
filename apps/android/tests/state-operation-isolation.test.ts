@@ -22,7 +22,7 @@ vi.mock('../src/services/login', () => ({
   loginFlow: { createContext: mocks.createContext, signInWith: mocks.signInWith },
   passwordLoginChannel: { busyAction: 'login' },
 }))
-vi.mock('../src/services/api-proxy', () => ({ createNativeRpcId: () => 'test-rpc' }))
+vi.mock('../src/services/rpc-id', () => ({ createNativeRpcId: () => 'test-rpc' }))
 vi.mock('../src/services/codex', async importOriginal => ({
   ...await importOriginal<typeof import('../src/services/codex')>(),
   createCodexWorkspace: mocks.createCodex, loadCodexCatalog: mocks.loadCodex,

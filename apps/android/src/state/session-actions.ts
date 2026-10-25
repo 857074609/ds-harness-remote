@@ -354,7 +354,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }
           // session.history is read-only, so it is safe to recover the stale
           // path with a fresh Relay-only connection and retry exactly once.
-          // Mutating ApiProxy calls deliberately do not use this path because a
+          // Mutating Harness calls deliberately do not use this path because a
           // timeout leaves their result unknown.
           const recovered = await get().reconnect({ forceRelay: true, restoreSession: false })
           if (runtime.sessionReadAbort !== readAbort || get().selectedDevice?.deviceId !== hostId) return false

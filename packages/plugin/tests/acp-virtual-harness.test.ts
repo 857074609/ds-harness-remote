@@ -453,7 +453,7 @@ describe('AcpVirtualHarness', () => {
     await target.close()
   })
 
-  it('maps ApiProxy approval outcomes to ACP respond decisions', async () => {
+  it('maps Typert approval outcomes to ACP respond decisions', async () => {
     const client = fakeAcp()
     const target = new AcpVirtualHarness(client, { deviceId: 'host-1', name: 'Host' })
     await target.selectOrCreateWorkspace('/workspace/repo')
@@ -465,12 +465,8 @@ describe('AcpVirtualHarness', () => {
     ;(target as unknown as { pendingApprovals: Map<string, { requestHandle: string; sessionId: string }> })
       .pendingApprovals.set('req_1', { requestHandle: 'req_1', sessionId: 'cursor:acp_1' })
 
-    await expect(target.api.respond({
-      type: 'client-response',
-      rpcId: 'req_1' as never,
-      result: { ok: true, value: 'allowed-once' },
-    })).resolves.toEqual({ accepted: true })
-    expect(client.respond).toHaveBeenCalledWith('req_1', 'allow-once')
+    await expect(target.dispatch('$events/result', { args: { eventId: 'req_1', outcome: { kind: 'result', value: 'allowed-once' } } }, new AbortController().signal)).resolves.toMatchObject({ ok: true })
+    expect(client.respond).toHaveBeenCalledWith('req_1', 'allow-once', undefined, expect.any(AbortSignal))
     await target.close()
   })
 

@@ -1,7 +1,6 @@
 import { RemoteClientCore } from '@dsh-remote/client-core'
 import type { RtcPeerConnectionFactory } from '@dsh-remote/webrtc'
 import { AdaptiveTransport } from '@dsh-remote/webrtc'
-import { ApiProxySwitch } from './api-proxy-switch.js'
 import { probeRemoteHostFeatures } from './client-capabilities.js'
 import type {
   ConnectedRemote,
@@ -45,7 +44,6 @@ export interface ClientConnectionContext {
   pendingWorkspaceSelection: RemoteWorkspaceSelection | undefined
   readonly closeCodexVirtual: (invalidatePending?: boolean) => Promise<void>
   readonly closeCursorVirtual: () => Promise<void>
-  readonly proxySwitch: ApiProxySwitch | undefined
   readonly gatewaySwitch: TypertGatewaySwitch
   readonly identities: IdentityStore
 }
@@ -164,7 +162,6 @@ export class ClientConnection {
         this.context.pendingWorkspaceSelection = undefined
         void this.context.closeCodexVirtual()
         void this.context.closeCursorVirtual()
-        this.context.proxySwitch?.disconnectRemote()
         this.context.gatewaySwitch.disconnectRemote()
         void connectedClient.close().catch(() => undefined)
         this.context.logger.warn('remote Harness transport closed; keeping Remote authority disconnected', {

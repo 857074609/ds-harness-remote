@@ -1,4 +1,3 @@
-import type { ApiProxy } from '@deepseek-ai/dsh-host-apiproxy/api'
 import { AgentAcpClient } from '@dsh-remote/client-core'
 import type { AcpSessionModels } from '@dsh-remote/protocol'
 import { ACP_TOOL_CALL_ENDPOINTS, ACP_TOOL_STREAM_ENDPOINTS } from '@dsh-remote/protocol'
@@ -50,15 +49,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly events: AcpEventCarrier
   private readonly titles: AcpSessionTitles
 
-  readonly api: ApiProxy
 
   private readonly workspaceById = new Map<string, AcpVirtualWorkspaceView>()
   private readonly sessions = new Map<string, AcpSessionState>()
   private readonly workspaceStreams = new Set<AsyncValueQueue>()
   private readonly controlStreams = new Set<AsyncValueQueue>()
   private readonly eventStreams = new Map<string, AsyncValueQueue>()
-  private readonly rcMuxStreams = new Set<AsyncValueQueue>()
-  private readonly rcHostStreams = new Set<AsyncValueQueue>()
   private readonly follows = new Set<FollowState>()
   private readonly pendingApprovals = new Map<string, PendingApproval>()
   private readonly pendingHistory = new Map<string, Promise<void>>()
@@ -102,7 +98,6 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       get pendingApprovals() { return owner.pendingApprovals },
       emitApproval: (...args) => owner.events.emitApproval(...args),
       modelSelection: (...args) => owner.modelSelection(...args),
-      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args),
     })
     this.events = new AcpEventCarrier({
       get archivedSessionIds() { return owner.archivedSessionIds },
@@ -115,16 +110,12 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       backendLabel: (...args) => owner.backendLabel(...args),
       get pendingApprovals() { return owner.pendingApprovals },
       get client() { return owner.client },
-      dispatch: (...args) => owner.dispatch(...args),
-      get rcMuxStreams() { return owner.rcMuxStreams },
       get sessions() { return owner.sessions },
-      get rcHostStreams() { return owner.rcHostStreams },
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args),
     })
 
     this.titles = new AcpSessionTitles(backend, client, this.sessions,
       (sessionId, title) => this.events.publishProjection(sessionId, 'title', title))
-    this.api = this.events.createApiProxy()
     this.unsubscribeArchived = client.onSessionArchived?.(data => {
       if (this.closed || data.backend !== this.backend) return
       this.applyArchived(`${sessionPrefix(this.backend)}${data.sessionId}`)
@@ -316,13 +307,9 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
     for (const stream of this.workspaceStreams) stream.close()
     for (const stream of this.controlStreams) stream.close()
     for (const stream of this.eventStreams.values()) stream.close()
-    for (const stream of this.rcMuxStreams) stream.close()
-    for (const stream of this.rcHostStreams) stream.close()
     this.workspaceStreams.clear()
     this.controlStreams.clear()
     this.eventStreams.clear()
-    this.rcMuxStreams.clear()
-    this.rcHostStreams.clear()
     const follows = [...this.follows]
     this.follows.clear()
     for (const follow of follows) {

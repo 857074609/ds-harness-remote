@@ -6,7 +6,6 @@
 
 | 领域 | Remote 接口 | Host authority |
 | --- | --- | --- |
-| Harness legacy | `harness.api.*` | 官方 ApiProxy、原生流和权限响应 |
 | Harness Typert | `harness.remote.*` | 官方 Gateway endpoint 与事件关联 |
 | CodeX | `codex.app.*` | stdio App Server、Project / Thread 根目录 |
 | Cursor / AGY | `agent.acp.*` | backend adapter、Host 会话/catalog |
@@ -24,7 +23,7 @@
 | `index.ts` / `config.ts` | Cordis 装配、配置解析、settings 兼容和热更新 |
 | `service.ts` / `server-connection.ts` | Host、Control/Relay、每连接业务桥 |
 | `identity-store.ts` / `server-credentials.ts` | 按 Server origin/角色隔离身份、信任和凭据 |
-| `harness-api-bridge.ts` / `harness-remote-bridge.ts` | 官方 Harness 固定 allowlist、原生流与有界 transfer |
+| `harness-remote-bridge.ts` | 官方 Harness 固定 allowlist、原生流与有界 transfer |
 | `api-proxy-switch.ts` / `typert-gateway-switch.ts` | Local / Remote carrier 切换 |
 | `client-runtime.ts` / `client.ts` | 加密 capability、工作区类型、选择与内存 carrier |
 | `workspace-bridge.ts` / `codex-workspace-bridge.ts` | 有界只读文件和按会话隔离的 CodeX 工具 scope |

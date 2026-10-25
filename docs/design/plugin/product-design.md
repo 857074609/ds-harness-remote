@@ -5,7 +5,7 @@
 ## 定位
 
 一个 Plugin 同时提供 Host runtime 与本地 Remote 工作区入口，无用户可见的 Client 模式。
-Harness 通过官方 ApiProxy / Typert Remote carrier 接入；CodeX、Cursor、AGY 保留各自独立的数据面，Desktop 以内存载体复用原生 Workspace / Session / Conversation UI。
+Harness 通过官方 Typert Remote carrier 接入；CodeX、Cursor、AGY 保留各自独立的数据面，Desktop 以内存载体复用原生 Workspace / Session / Conversation UI。
 
 ## 用户路径
 

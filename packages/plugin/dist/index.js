@@ -11324,10 +11324,6 @@ function carrierArgs(payload) {
 function requestArg(args) {
   return record(args.request ?? args._request ?? args);
 }
-function rcEndpoint(endpoint) {
-  if (endpoint === "workspace.list") return "workspace/list";
-  return endpoint.replace(".", "/");
-}
 function success(value) {
   return { ok: true, value };
 }
@@ -11485,20 +11481,6 @@ var AcpEventCarrier = class {
   }
   emitRemoteEvent(event, args) {
     for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
-    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
-    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
-      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
-    } else if (event === "api-session/removed" && sessionId !== void 0) {
-      this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord3(args[0])) {
-      const summary2 = args[0];
-      this.broadcastRcHost({
-        type: "host/session-added",
-        sessionId: summary2.sessionId,
-        blank: summary2.blank === true,
-        ...typeof summary2.cwd === "string" ? { cwd: summary2.cwd } : {}
-      });
-    }
   }
   emitApproval(input3) {
     for (const queue of this.context.eventStreams.values()) queue.push({
@@ -11508,13 +11490,6 @@ var AcpEventCarrier = class {
       agentId: input3.agentId,
       request: input3.request
     });
-    this.broadcastRcMux({
-      type: "approval/requested",
-      sessionId: input3.agentId,
-      approvalId: input3.eventId,
-      toolName: string(input3.request.toolName) ?? this.context.backendLabel(),
-      ...typeof input3.request.reason === "string" ? { reason: input3.request.reason } : {}
-    }, input3.eventId);
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string(args.eventId);
@@ -11527,105 +11502,10 @@ var AcpEventCarrier = class {
     await this.context.client.respond(pending.requestHandle, decision, void 0, signal);
     return void 0;
   }
-  createApiProxy() {
-    const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord3(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
-      const result = await this.context.dispatch(rcEndpoint(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
-      return {
-        rpcId: request.rpcId,
-        result: result.ok ? success(result.value) : failure(result.error.code, result.error.message, result.error.details)
-      };
-    };
-    return {
-      sessions: {
-        list: call("session.list"),
-        search: call("session.search"),
-        create: call("session.create"),
-        history: call("session.history"),
-        models: call("session.models"),
-        selectModel: call("session.selectModel"),
-        rename: call("session.rename"),
-        fork: call("session.fork"),
-        prompt: call("session.prompt"),
-        attachment: call("session.attachment"),
-        updateQueue: call("session.updateQueue"),
-        cancel: call("session.cancel")
-      },
-      workspace: {
-        list: call("workspace.list"),
-        create: call("workspace.create"),
-        rename: call("workspace.rename"),
-        delete: call("workspace.delete"),
-        insertBefore: call("workspace.insertBefore"),
-        insertSessionBefore: call("workspace.insertSessionBefore"),
-        archiveSession: call("workspace.archiveSession")
-      },
-      subagents: {},
-      host: {
-        describe: call("host.describe"),
-        listDirectory: call("host.listDirectory")
-      },
-      skills: { list: call("skills.list") },
-      agentPresets: {},
-      goals: {},
-      settings: {},
-      credentials: {},
-      llm: {},
-      events: {
-        mux: ((request, signal) => this.rcMux(request, signal)),
-        host: ((request, signal) => this.rcHost(request, signal))
-      },
-      downloads: {},
-      respond: async (message) => {
-        const pending = this.context.pendingApprovals.get(String(message.rpcId)) ?? [...this.context.pendingApprovals.values()].find((item) => item.requestHandle === String(message.rpcId));
-        if (pending === void 0) return { accepted: false, reason: "not-pending" };
-        const result = message.result;
-        const outcome = result.ok ? result.value : void 0;
-        const decision = outcome === "allowed-once" ? "allow-once" : outcome === "cancelled" ? "cancel" : "reject-once";
-        await this.context.client.respond(pending.requestHandle, decision);
-        this.context.pendingApprovals.delete(pending.requestHandle);
-        return { accepted: true };
-      }
-    };
-  }
-  async *rcMux(request, signal) {
-    const queue = new AsyncValueQueue(signal);
-    this.context.rcMuxStreams.add(queue);
-    for (const session of this.context.sessions.values()) {
-      queue.push({
-        rpcId: `${String(request.rpcId)}:${session.sessionId}:subscribed`,
-        payload: { type: "session/subscribed", sessionId: session.sessionId, lastSeq: -1 }
-      });
-    }
-    try {
-      yield* queue;
-    } finally {
-      this.context.rcMuxStreams.delete(queue);
-      queue.close();
-    }
-  }
-  async *rcHost(_request, signal) {
-    const queue = new AsyncValueQueue(signal);
-    this.context.rcHostStreams.add(queue);
-    try {
-      yield* queue;
-    } finally {
-      this.context.rcHostStreams.delete(queue);
-      queue.close();
-    }
-  }
-  broadcastRcMux(payload, rpcId2 = `cursor-mux:${Date.now()}:${Math.random()}`) {
-    for (const queue of this.context.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
-  }
-  broadcastRcHost(payload) {
-    const frame = { rpcId: `cursor-host:${Date.now()}:${Math.random()}`, payload };
-    for (const queue of this.context.rcHostStreams) queue.push(frame);
-  }
   publishProjection(sessionId, key, value, seq = this.context.nextProjectionSeq()) {
     for (const queue of this.context.controlStreams) {
       queue.push({ type: "projection", sessionId, key, value, asOfSeq: seq, seq });
     }
-    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
   }
 };
 
@@ -12127,11 +12007,6 @@ var AcpLiveProjection = class {
         f.nextSeq = seq + 1;
       }
     }
-    this.context.broadcastRcMux({
-      type: "session/event",
-      sessionId: follow.sessionId,
-      event
-    });
     return seq;
   }
 };
@@ -12254,8 +12129,7 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
         return owner.pendingApprovals;
       },
       emitApproval: (...args) => owner.events.emitApproval(...args),
-      modelSelection: (...args) => owner.modelSelection(...args),
-      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args)
+      modelSelection: (...args) => owner.modelSelection(...args)
     });
     this.events = new AcpEventCarrier({
       get archivedSessionIds() {
@@ -12284,15 +12158,8 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       get client() {
         return owner.client;
       },
-      dispatch: (...args) => owner.dispatch(...args),
-      get rcMuxStreams() {
-        return owner.rcMuxStreams;
-      },
       get sessions() {
         return owner.sessions;
-      },
-      get rcHostStreams() {
-        return owner.rcHostStreams;
       },
       nextProjectionSeq: (...args) => owner.nextProjectionSeq(...args)
     });
@@ -12302,7 +12169,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
       this.sessions,
       (sessionId, title) => this.events.publishProjection(sessionId, "title", title)
     );
-    this.api = this.events.createApiProxy();
     this.unsubscribeArchived = client.onSessionArchived?.((data2) => {
       if (this.closed || data2.backend !== this.backend) return;
       this.applyArchived(`${sessionPrefix(this.backend)}${data2.sessionId}`);
@@ -12311,14 +12177,11 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   live;
   events;
   titles;
-  api;
   workspaceById = /* @__PURE__ */ new Map();
   sessions = /* @__PURE__ */ new Map();
   workspaceStreams = /* @__PURE__ */ new Set();
   controlStreams = /* @__PURE__ */ new Set();
   eventStreams = /* @__PURE__ */ new Map();
-  rcMuxStreams = /* @__PURE__ */ new Set();
-  rcHostStreams = /* @__PURE__ */ new Set();
   follows = /* @__PURE__ */ new Set();
   pendingApprovals = /* @__PURE__ */ new Map();
   pendingHistory = /* @__PURE__ */ new Map();
@@ -12526,13 +12389,9 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
     for (const stream of this.workspaceStreams) stream.close();
     for (const stream of this.controlStreams) stream.close();
     for (const stream of this.eventStreams.values()) stream.close();
-    for (const stream of this.rcMuxStreams) stream.close();
-    for (const stream of this.rcHostStreams) stream.close();
     this.workspaceStreams.clear();
     this.controlStreams.clear();
     this.eventStreams.clear();
-    this.rcMuxStreams.clear();
-    this.rcHostStreams.clear();
     const follows = [...this.follows];
     this.follows.clear();
     for (const follow of follows) {
@@ -13039,110 +12898,6 @@ var AcpVirtualHarness = class _AcpVirtualHarness {
   nextProjectionSeq() {
     this.lastProjectionSeq += 1;
     return this.lastProjectionSeq;
-  }
-};
-
-// src/api-proxy-switch.ts
-var SWITCHED_DOMAINS = [
-  "sessions",
-  "subagents",
-  "host",
-  "workspace",
-  "skills",
-  "agentPresets",
-  "events",
-  "goals",
-  "llm",
-  "settings",
-  "credentials"
-];
-var ApiProxySwitch = class {
-  remote;
-  target;
-  mode = "local";
-  installed = false;
-  disconnected = false;
-  local;
-  originals;
-  localRespond;
-  constructor(local) {
-    this.local = local;
-    this.originals = new Map(SWITCHED_DOMAINS.map((domain) => [domain, local[domain]]));
-    this.localRespond = local.respond.bind(local);
-  }
-  install() {
-    if (this.installed) return;
-    for (const domain of SWITCHED_DOMAINS) {
-      const localDomain = this.local[domain];
-      const forwarder = new Proxy({}, {
-        get: (_target, key) => {
-          const selected = this.selected(domain);
-          const value = selected[key];
-          return typeof value === "function" ? value.bind(selected) : value;
-        }
-      });
-      Object.defineProperty(this.local, domain, {
-        configurable: true,
-        enumerable: true,
-        writable: true,
-        value: forwarder
-      });
-    }
-    Object.defineProperty(this.local, "respond", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: (...args) => this.mode === "remote" ? this.requireRemote().respond(...args) : this.localRespond(...args)
-    });
-    this.installed = true;
-  }
-  selectRemote(api, target2) {
-    if (!this.installed) throw new Error("The Harness API switch is not installed.");
-    this.remote = api;
-    this.disconnected = false;
-    this.target = { ...target2 };
-    this.mode = "remote";
-  }
-  selectLocal() {
-    this.disconnected = false;
-    this.mode = "local";
-    this.remote = void 0;
-    this.target = void 0;
-  }
-  disconnectRemote() {
-    if (this.mode === "remote") this.disconnected = true;
-  }
-  status() {
-    return { mode: this.mode, ...this.target === void 0 ? {} : { target: { ...this.target } } };
-  }
-  restore() {
-    if (!this.installed) return;
-    this.selectLocal();
-    for (const [domain, value] of this.originals) Object.defineProperty(this.local, domain, {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value
-    });
-    Object.defineProperty(this.local, "respond", {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-      value: this.localRespond
-    });
-    this.installed = false;
-  }
-  selected(domain) {
-    if (this.mode === "local") return this.originalDomain(domain);
-    return this.requireRemote()[domain];
-  }
-  originalDomain(domain) {
-    return this.originals.get(domain);
-  }
-  requireRemote() {
-    if (this.disconnected) throw Object.assign(new Error("The Remote connection was lost. Reconnect to continue."), { code: "remote/disconnected" });
-    if (this.remote === void 0) throw new Error("No remote Harness target is selected.");
-    return this.remote;
   }
 };
 
@@ -14906,14 +14661,11 @@ function iceServersForAttempt(attempt, iceServers) {
 }
 
 // src/client-capabilities.ts
-var REMOTE_COMMAND_LIST_MIN_VERSION = [0, 3, 16];
-var REMOTE_FILE_VIEWER_MIN_VERSION = [0, 3, 17];
 function remoteHostFeatures(clientVersion) {
   return {
-    commandList: isVersionAtLeast(clientVersion, REMOTE_COMMAND_LIST_MIN_VERSION),
-    fileViewer: isVersionAtLeast(clientVersion, REMOTE_FILE_VIEWER_MIN_VERSION),
+    commandList: false,
+    fileViewer: false,
     terminal: false,
-    apiProxy: true,
     remoteGateway: false,
     codex: false,
     cursor: false,
@@ -14923,19 +14675,19 @@ function remoteHostFeatures(clientVersion) {
   };
 }
 async function probeRemoteHostFeatures(client, clientVersion) {
-  const fallback = remoteHostFeatures(clientVersion);
   let value;
   try {
     value = await client.rpc("harness.transport.describe", {});
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") return fallback;
+    if (error instanceof Error && "code" in error && error.code === "METHOD_NOT_FOUND") {
+      throw new ClientModeError("FEATURE_NOT_SUPPORTED", "This Host predates Typert Remote capability discovery. Upgrade the Host.");
+    }
     throw error;
   }
   if (!isRecord4(value) || !Array.isArray(value.capabilities) || value.capabilities.some((capability) => typeof capability !== "string")) {
     throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned invalid transport capabilities.");
   }
   const capabilities = new Set(value.capabilities);
-  const apiProxy = capabilities.has("harness.api.v1");
   const remoteV1 = capabilities.has("harness.remote.v1");
   const remoteV3 = capabilities.has("harness.remote.v3");
   const terminal = capabilities.has("harness.terminal.v1");
@@ -14952,14 +14704,13 @@ async function probeRemoteHostFeatures(client, clientVersion) {
   }
   const sessionFormat = remoteV3 ? 3 : void 0;
   const remoteGateway = remoteV3 || remoteV1;
-  if (!apiProxy && !remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode && !claude) {
+  if (!remoteGateway && !codex && !cursor2 && !antigravity && !pi && !opencode && !claude) {
     throw new ClientModeError("FEATURE_NOT_SUPPORTED", "The remote Host exposes no supported Harness transport.");
   }
   return {
-    commandList: remoteGateway || apiProxy && fallback.commandList,
+    commandList: remoteGateway,
     fileViewer: capabilities.has("fileviewer.read.v1"),
     terminal,
-    apiProxy,
     remoteGateway,
     ...sessionFormat === void 0 ? {} : { sessionFormat },
     codex,
@@ -14972,18 +14723,6 @@ async function probeRemoteHostFeatures(client, clientVersion) {
     ...workspaceTypes === void 0 ? {} : { workspaceTypes },
     pluginRoute: capabilities.has("plugin.route.v1")
   };
-}
-function isVersionAtLeast(value, minimum) {
-  const match = value?.match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
-  if (match === void 0 || match === null) return false;
-  const version = match.slice(1, 4).map((part) => Number(part));
-  for (let index = 0; index < minimum.length; index += 1) {
-    const part = version[index] ?? 0;
-    const expected = minimum[index] ?? 0;
-    if (part > expected) return true;
-    if (part < expected) return false;
-  }
-  return true;
 }
 
 // src/client-codex-streams.ts
@@ -22381,7 +22120,6 @@ var ClientConnection = class {
         this.context.pendingWorkspaceSelection = void 0;
         void this.context.closeCodexVirtual();
         void this.context.closeCursorVirtual();
-        this.context.proxySwitch?.disconnectRemote();
         this.context.gatewaySwitch.disconnectRemote();
         void connectedClient.close().catch(() => void 0);
         this.context.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
@@ -23343,37 +23081,7 @@ var ClientControl = class {
   }
 };
 
-// src/ids.ts
-import { randomBytes as randomBytes7 } from "node:crypto";
-function uuidV7(now = Date.now()) {
-  if (!Number.isSafeInteger(now) || now < 0 || now > 281474976710655) {
-    throw new RangeError("UUIDv7 timestamp must be a non-negative 48-bit integer");
-  }
-  const bytes = randomBytes7(16);
-  let timestamp = BigInt(now);
-  for (let index = 5; index >= 0; index -= 1) {
-    bytes[index] = Number(timestamp & 0xffn);
-    timestamp >>= 8n;
-  }
-  bytes[6] = 112 | bytes[6] & 15;
-  bytes[8] = 128 | bytes[8] & 63;
-  const hex = bytes.toString("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 // src/client-workspace-queries.ts
-async function invokeRemoteCommand(client, request) {
-  const rpcId2 = uuidV7();
-  const response = await client.rpc("harness.api.call", {
-    method: `${request.namespace}.${request.method}`,
-    rpcId: rpcId2,
-    payload: request.args
-  }, request.signal);
-  if (response.rpcId !== rpcId2) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid command response.");
-  }
-  return unwrapNativeResult(response);
-}
 async function readRemoteWorkspaceBaseline(gateway, signal) {
   const lifetime = new AbortController();
   const activeSignal = signal === void 0 ? lifetime.signal : AbortSignal.any([signal, lifetime.signal]);
@@ -23394,17 +23102,6 @@ async function readRemoteWorkspaceBaseline(gateway, signal) {
     lifetime.abort("workspace-baseline-read");
     await iterator.return?.();
   }
-}
-function unwrapNativeResult(response) {
-  const result = response.result;
-  if (typeof result !== "object" || result === null || !("ok" in result)) {
-    throw new ClientModeError("INVALID_MESSAGE", "The remote Host returned an invalid response.");
-  }
-  if (result.ok !== true || !("value" in result)) {
-    const message = "error" in result && typeof result.error === "object" && result.error !== null && "message" in result.error && typeof result.error.message === "string" ? result.error.message : "The remote Host rejected the request.";
-    throw new ClientModeError("REMOTE_API_ERROR", message);
-  }
-  return result.value;
 }
 function workspaceRecordId(value) {
   if (typeof value !== "object" || value === null || !("workspaceId" in value) || typeof value.workspaceId !== "string" || value.workspaceId.length === 0) {
@@ -24092,10 +23789,6 @@ function carrierArgs2(payload) {
 function requestArg2(args) {
   return record4(args.request ?? args._request ?? args);
 }
-function rcEndpoint2(endpoint) {
-  if (endpoint === "workspace.list") return "workspace/list";
-  return endpoint.replace(".", "/");
-}
 function success2(value) {
   return { ok: true, value };
 }
@@ -24227,20 +23920,6 @@ var CodexEventCarrier = class {
   }
   emitRemoteEvent(event, args) {
     for (const queue of this.context.eventStreams.values()) queue.push({ type: "emit", event, args });
-    const sessionId = typeof args[0] === "string" ? args[0] : void 0;
-    if (event === "api-session/status" && sessionId !== void 0 && typeof args[1] === "boolean") {
-      this.broadcastRcHost({ type: "host/session-status", sessionId, running: args[1] });
-    } else if (event === "api-session/removed" && sessionId !== void 0) {
-      this.broadcastRcHost({ type: "host/session-removed", sessionId });
-    } else if (event === "api-session/added" && isRecord5(args[0])) {
-      const summary2 = args[0];
-      this.broadcastRcHost({
-        type: "host/session-added",
-        sessionId: summary2.sessionId,
-        blank: summary2.blank === true,
-        ...typeof summary2.cwd === "string" ? { cwd: summary2.cwd } : {}
-      });
-    }
   }
   emitApproval(input3) {
     for (const queue of this.context.eventStreams.values()) queue.push({
@@ -24250,13 +23929,6 @@ var CodexEventCarrier = class {
       agentId: input3.agentId,
       request: input3.request
     });
-    this.broadcastRcMux({
-      type: "approval/requested",
-      sessionId: input3.agentId,
-      approvalId: input3.eventId,
-      toolName: string2(input3.request.toolName) ?? "CodeX",
-      ...typeof input3.request.reason === "string" ? { reason: input3.request.reason } : {}
-    }, input3.eventId);
   }
   async answerRemoteEvent(args, signal) {
     const eventId = string2(args.eventId);
@@ -24269,102 +23941,8 @@ var CodexEventCarrier = class {
     await this.context.client.respond(pending.requestHandle, decision, signal);
     return void 0;
   }
-  createApiProxy() {
-    const call = (endpoint) => async (request, signal) => {
-      const payload = endpoint === "session.prompt" && isRecord5(request.payload) ? { ...request.payload, requestId: String(request.rpcId) } : request.payload;
-      const result = await this.context.dispatch(rcEndpoint2(endpoint), { args: { request: payload } }, signal ?? new AbortController().signal);
-      return {
-        rpcId: request.rpcId,
-        result: result.ok ? success2(result.value) : failure2(result.error.code, result.error.message, result.error.details)
-      };
-    };
-    return {
-      sessions: {
-        list: call("session.list"),
-        search: call("session.search"),
-        create: call("session.create"),
-        history: call("session.history"),
-        models: call("session.models"),
-        selectModel: call("session.selectModel"),
-        rename: call("session.rename"),
-        fork: call("session.fork"),
-        prompt: call("session.prompt"),
-        attachment: call("session.attachment"),
-        updateQueue: call("session.updateQueue"),
-        cancel: call("session.cancel")
-      },
-      workspace: {
-        list: call("workspace.list"),
-        create: call("workspace.create"),
-        rename: call("workspace.rename"),
-        delete: call("workspace.delete"),
-        insertBefore: call("workspace.insertBefore"),
-        insertSessionBefore: call("workspace.insertSessionBefore"),
-        archiveSession: call("workspace.archiveSession")
-      },
-      subagents: {},
-      host: {
-        describe: call("host.describe"),
-        listDirectory: call("host.listDirectory")
-      },
-      skills: { list: call("skills.list") },
-      agentPresets: {},
-      goals: {},
-      settings: {},
-      credentials: {},
-      llm: {},
-      events: {
-        mux: ((request, signal) => this.rcMux(request, signal)),
-        host: ((request, signal) => this.rcHost(request, signal))
-      },
-      downloads: {},
-      respond: async (message) => {
-        const pending = this.context.pendingApprovals.get(String(message.rpcId));
-        if (pending === void 0) return { accepted: false, reason: "not-pending" };
-        const result = message.result;
-        const outcome = result.ok ? result.value : void 0;
-        const decision = outcome === "allowed-once" ? "accept" : outcome === "cancelled" ? "cancel" : "decline";
-        await this.context.client.respond(pending.requestHandle, decision);
-        this.context.pendingApprovals.delete(pending.requestHandle);
-        return { accepted: true };
-      }
-    };
-  }
-  async *rcMux(request, signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.context.rcMuxStreams.add(queue);
-    const catalog = await this.context.currentCatalog(signal);
-    for (const session of catalog.sessions) queue.push({
-      rpcId: `${String(request.rpcId)}:${session.id}:subscribed`,
-      payload: { type: "session/subscribed", sessionId: session.id, lastSeq: -1 }
-    });
-    try {
-      yield* queue;
-    } finally {
-      this.context.rcMuxStreams.delete(queue);
-      queue.close();
-    }
-  }
-  async *rcHost(_request, signal) {
-    const queue = new AsyncValueQueue2(signal);
-    this.context.rcHostStreams.add(queue);
-    try {
-      yield* queue;
-    } finally {
-      this.context.rcHostStreams.delete(queue);
-      queue.close();
-    }
-  }
-  broadcastRcMux(payload, rpcId2 = `codex-mux:${Date.now()}:${Math.random()}`) {
-    for (const queue of this.context.rcMuxStreams) queue.push({ rpcId: rpcId2, payload });
-  }
-  broadcastRcHost(payload) {
-    const frame = { rpcId: `codex-host:${Date.now()}:${Math.random()}`, payload };
-    for (const queue of this.context.rcHostStreams) queue.push(frame);
-  }
   publishProjection(sessionId, key, value, seq) {
     for (const queue of this.context.controlStreams) queue.push({ type: "projection", sessionId, key, value, seq });
-    this.broadcastRcMux({ type: "session/projection", sessionId, key, value, seq });
   }
 };
 
@@ -25018,13 +24596,6 @@ var CodexLiveProjection = class {
       const status2 = record4(params.status);
       const running = status2.type === "active";
       this.context.emitRemoteEvent("api-session/status", [follow.sessionId, running]);
-      if (status2.type === "systemError") {
-        this.context.broadcastRcHost({
-          type: "host/agent-error",
-          sessionId: follow.sessionId,
-          message: "CodeX reported a thread system error."
-        });
-      }
       return;
     }
     if (frame.method === "model/rerouted") {
@@ -25136,16 +24707,8 @@ var CodexLiveProjection = class {
       } : {}
     };
     this.cacheImageBlocks(follow.sessionId, event.data);
-    if (!follow.rcOnly) {
-      follow.queue.push({
-        type: "event",
-        event,
-        ...view === void 0 ? {} : { view }
-      });
-    }
-    this.context.broadcastRcMux({
-      type: "session/event",
-      sessionId: follow.sessionId,
+    follow.queue.push({
+      type: "event",
       event,
       ...view === void 0 ? {} : { view }
     });
@@ -25205,7 +24768,7 @@ var CodexLiveProjection = class {
     follow.streamActive = false;
   }
   pushAssistantChunk(follow, chunk) {
-    if (this.context.sessionGeneration !== "v3" || follow.rcOnly === true) {
+    if (this.context.sessionGeneration !== "v3") {
       this.pushEvent(follow, "assistant/chunk", { turn: follow.turn, step: 1, chunk });
       return;
     }
@@ -25252,7 +24815,7 @@ var CodexLiveProjection = class {
     if (attempt === void 0) return;
     follow.assistantAttempt = void 0;
     follow.assistantStreamRevision += 1;
-    if (this.context.sessionGeneration === "v3" && follow.rcOnly !== true) {
+    if (this.context.sessionGeneration === "v3") {
       follow.queue.push({
         type: "assistant-stream",
         frame: {
@@ -25313,65 +24876,6 @@ var CodexLiveProjection = class {
     follow.liveToolResultSeq.clear();
     follow.pendingToolImages = [];
   }
-  async ensureRcFollow(sessionId, seedHistory) {
-    if (this.followsHas(sessionId)) return;
-    const threadId = nativeThreadId(sessionId);
-    const stale = [...this.context.follows].filter((follow2) => follow2.rcOnly && follow2.sessionId !== sessionId);
-    for (const follow2 of stale) {
-      this.context.follows.delete(follow2);
-      follow2.queue.close();
-      await follow2.close?.().catch(() => void 0);
-    }
-    const history = seedHistory ?? await this.context.readHistoryPage(threadId, {}, void 0);
-    const controller = new AbortController();
-    const follow = {
-      sessionId,
-      threadId,
-      queue: new AsyncValueQueue2(controller.signal),
-      nextSeq: history.cursor + 1,
-      turn: history.nextTurn,
-      stepOpen: history.activeTurnId !== void 0,
-      startedItems: /* @__PURE__ */ new Set(),
-      completedItems: /* @__PURE__ */ new Set(),
-      streamedBlocks: /* @__PURE__ */ new Map(),
-      nextBlockIndex: 0,
-      streamActive: false,
-      assistantStreamRevision: 0,
-      liveItems: /* @__PURE__ */ new Map(),
-      liveToolOutput: /* @__PURE__ */ new Map(),
-      liveToolResultSeq: /* @__PURE__ */ new Map(),
-      pendingToolImages: [],
-      requestId: this.context.pendingRequestIds.get(sessionId),
-      rcOnly: true,
-      ...history.activeTurnId === void 0 ? {} : { activeTurnId: history.activeTurnId }
-    };
-    this.context.follows.add(follow);
-    try {
-      const stream = await this.context.client.subscribe(
-        threadId,
-        (frame) => this.acceptCodexFrame(follow, frame),
-        controller.signal,
-        () => this.closeFollowAfterRemoteStreamClosed(follow)
-      );
-      if (this.context.closed || !this.context.follows.has(follow)) {
-        await stream.close().catch(() => void 0);
-        throw new Error("The CodeX follow was closed before it opened.");
-      }
-      follow.close = async () => {
-        controller.abort();
-        await stream.close();
-      };
-    } catch (error) {
-      this.context.follows.delete(follow);
-      controller.abort();
-      follow.queue.close();
-      throw error;
-    }
-  }
-  followsHas(sessionId) {
-    for (const follow of this.context.follows) if (follow.sessionId === sessionId) return true;
-    return false;
-  }
   closeFollowAfterRemoteStreamClosed(follow) {
     this.context.follows.delete(follow);
     follow.queue.close();
@@ -25414,7 +24918,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       publishProjection: (...args) => owner.events.publishProjection(...args),
       setPermissionSelection: (...args) => owner.setPermissionSelection(...args),
       emitRemoteEvent: (...args) => owner.events.emitRemoteEvent(...args),
-      broadcastRcHost: (...args) => owner.events.broadcastRcHost(...args),
       get selectedModels() {
         return owner.selectedModels;
       },
@@ -25423,7 +24926,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
         return owner.pendingApprovals;
       },
       emitApproval: (...args) => owner.events.emitApproval(...args),
-      broadcastRcMux: (...args) => owner.events.broadcastRcMux(...args),
       get imageAttachments() {
         return owner.imageAttachments;
       }
@@ -25451,26 +24953,15 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
       },
       get client() {
         return owner.client;
-      },
-      dispatch: (...args) => owner.dispatch(...args),
-      get rcMuxStreams() {
-        return owner.rcMuxStreams;
-      },
-      get rcHostStreams() {
-        return owner.rcHostStreams;
       }
     });
-    this.api = this.events.createApiProxy();
   }
   live;
   events;
-  api;
   catalog;
   workspaceStreams = /* @__PURE__ */ new Set();
   controlStreams = /* @__PURE__ */ new Set();
   eventStreams = /* @__PURE__ */ new Map();
-  rcMuxStreams = /* @__PURE__ */ new Set();
-  rcHostStreams = /* @__PURE__ */ new Set();
   follows = /* @__PURE__ */ new Set();
   pendingRequestIds = /* @__PURE__ */ new Map();
   pendingApprovals = /* @__PURE__ */ new Map();
@@ -25668,13 +25159,9 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     for (const stream of this.workspaceStreams) stream.close();
     for (const stream of this.controlStreams) stream.close();
     for (const stream of this.eventStreams.values()) stream.close();
-    for (const stream of this.rcMuxStreams) stream.close();
-    for (const stream of this.rcHostStreams) stream.close();
     this.workspaceStreams.clear();
     this.controlStreams.clear();
     this.eventStreams.clear();
-    this.rcMuxStreams.clear();
-    this.rcHostStreams.clear();
     const follows = [...this.follows];
     this.follows.clear();
     for (const follow of follows) {
@@ -25981,7 +25468,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     const threadId = nativeThreadId(sessionId);
     const selection = this.modelSelection(sessionId, await this.models(signal));
     const isFreshBlankThread = this.blankThreads.has(threadId) || this.pendingThreads.has(threadId);
-    await this.live.ensureRcFollow(sessionId);
     if (!isFreshBlankThread) {
       const resumeResult = await this.client.request("thread/resume", {
         threadId,
@@ -26127,7 +25613,6 @@ var CodexVirtualHarness = class _CodexVirtualHarness {
     }, signal);
     const directory = await this.models(signal).catch(() => void 0);
     if (beforeSeq === void 0) {
-      await this.live.ensureRcFollow(sessionId, history);
       signal.throwIfAborted();
       if (this.closed) throw new Error("The CodeX virtual Harness is closed.");
       this.rememberOpenedSession(sessionId);
@@ -26294,17 +25779,12 @@ function writeText(res, status2, body) {
 import { readFile, realpath as realpathEntrypoint } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, isAbsolute, join } from "node:path";
-var LEGACY_PLACEHOLDER_VERSION = "0.0.1";
 var HARNESS_PACKAGE_NAME = "@deepseek-ai/dsh";
 function normalizeHarnessVersion(value) {
   if (typeof value !== "string") return void 0;
   const version = value.trim();
   if (version.length === 0 || version.length > 64 || /[\u0000-\u001f]/u.test(version)) return void 0;
   return version;
-}
-function selectHarnessVersion(reportedVersion, distributionVersion) {
-  if (reportedVersion !== void 0 && reportedVersion !== LEGACY_PLACEHOLDER_VERSION) return reportedVersion;
-  return distributionVersion;
 }
 function harnessSessionGeneration(version) {
   if (version === void 0) return "legacy";
@@ -26347,354 +25827,22 @@ async function readHarnessDistributionVersion(entrypoint = process.argv[1]) {
   }
 }
 
-// src/remote-api-proxy.ts
-var DIRECT_API_CALL_BYTES = 2 * 1024 * 1024;
-var AGENT_PRESET_SETTINGS_NS = "agent-presets";
-var LEGACY_AGENT_PRESET_ALIASES = {
-  code: "ptc"
-};
-var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
-var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
-var WELCOME_NOTICE_VERSION = "2026-08-13.1";
-var RemoteHarnessApiProxy = class {
-  constructor(client, harnessVersion) {
-    this.client = client;
-    this.harnessVersion = harnessVersion;
-    const call = (method) => (request, signal) => this.call(method, request, signal);
-    this.api = {
-      sessions: {
-        list: call("session.list"),
-        search: call("session.search"),
-        create: call("session.create"),
-        history: call("session.history"),
-        models: call("session.models"),
-        selectModel: call("session.selectModel"),
-        rename: call("session.rename"),
-        fork: call("session.fork"),
-        prompt: call("session.prompt"),
-        attachment: call("session.attachment"),
-        updateQueue: call("session.updateQueue"),
-        cancel: call("session.cancel")
-      },
-      subagents: {
-        list: call("subagent.list"),
-        history: call("subagent.history"),
-        prompt: call("subagent.prompt"),
-        interrupt: call("subagent.interrupt")
-      },
-      host: {
-        describe: call("host.describe"),
-        pickDirectory: call("host.pickDirectory"),
-        listDirectory: call("host.listDirectory"),
-        createDirectory: call("host.createDirectory"),
-        openPath: call("host.openPath")
-      },
-      workspace: {
-        list: call("workspace.list"),
-        create: call("workspace.create"),
-        rename: call("workspace.rename"),
-        delete: call("workspace.delete"),
-        insertBefore: call("workspace.insertBefore"),
-        insertSessionBefore: call("workspace.insertSessionBefore"),
-        archiveSession: call("workspace.archiveSession")
-      },
-      skills: { list: call("skill.list") },
-      agentPresets: {
-        list: call("agentPreset.list"),
-        select: call("agentPreset.select"),
-        read: call("agentPreset.read"),
-        copy: call("agentPreset.copy"),
-        openDocument: call("agentPreset.openDocument"),
-        remove: call("agentPreset.remove")
-      },
-      goals: {
-        create: call("goal.create"),
-        edit: call("goal.edit"),
-        pause: call("goal.pause"),
-        resume: call("goal.resume"),
-        complete: call("goal.complete"),
-        clear: call("goal.clear")
-      },
-      settings: {
-        describe: call("settings.describe"),
-        openDocument: call("settings.openDocument"),
-        update: call("settings.update"),
-        replace: call("settings.replace"),
-        mutate: call("settings.mutate")
-      },
-      credentials: {
-        describe: call("credentials.describe"),
-        set: call("credentials.set"),
-        unset: call("credentials.unset")
-      },
-      llm: {
-        providers: call("llm.providers"),
-        models: call("llm.models"),
-        discoverModels: call("llm.discoverModels")
-      },
-      events: {
-        mux: (request, signal) => this.stream("mux", request, signal),
-        host: (request, signal) => this.stream("host", request, signal)
-      },
-      downloads: {},
-      respond: (message) => this.respond(message)
-    };
+// src/ids.ts
+import { randomBytes as randomBytes7 } from "node:crypto";
+function uuidV7(now = Date.now()) {
+  if (!Number.isSafeInteger(now) || now < 0 || now > 281474976710655) {
+    throw new RangeError("UUIDv7 timestamp must be a non-negative 48-bit integer");
   }
-  api;
-  legacyWelcomeAcknowledged = false;
-  settingsDescribeValue;
-  async call(method, request, signal) {
-    const params = {
-      method,
-      rpcId: String(request.rpcId),
-      payload: normalizeLegacyRequest(method, request.payload)
-    };
-    const encoded = new TextEncoder().encode(JSON.stringify(params));
-    const response = method === "session.attachment" || encoded.byteLength > DIRECT_API_CALL_BYTES ? await this.callTransferred(encoded, signal) : await this.client.rpc("harness.api.call", params, signal);
-    if (String(response.rpcId) !== String(request.rpcId) || typeof response.result !== "object" || response.result === null) {
-      throw new Error("The remote Host returned an invalid Harness API response.");
-    }
-    const normalized = normalizeLegacyResponse(method, response);
-    return this.normalizeLegacyWelcomeSettings(method, params.payload, normalized);
+  const bytes = randomBytes7(16);
+  let timestamp = BigInt(now);
+  for (let index = 5; index >= 0; index -= 1) {
+    bytes[index] = Number(timestamp & 0xffn);
+    timestamp >>= 8n;
   }
-  normalizeLegacyWelcomeSettings(method, payload, response) {
-    if (!isLegacyRemoteHost(this.harnessVersion)) return response;
-    if (method === "settings.describe" && response.result.ok && isRecord7(response.result.value)) {
-      this.settingsDescribeValue = response.result.value;
-      return this.legacyWelcomeAcknowledged ? patchWelcomeDescribe(response) : response;
-    }
-    if (method !== "settings.mutate" || !isWelcomeNoticeRequest(payload)) return response;
-    this.legacyWelcomeAcknowledged = true;
-    return patchWelcomeMutate(this.settingsDescribeValue ?? { namespaces: [] }, response.rpcId);
-  }
-  async callTransferred(encoded, signal) {
-    if (encoded.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
-      throw new Error("The Harness API request exceeds the remote image transfer limit.");
-    }
-    const transferId = uuidV7();
-    const totalChunks = Math.ceil(encoded.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
-    let opened = false;
-    try {
-      await this.client.rpc("harness.api.transfer.open", {
-        transferId,
-        totalBytes: encoded.byteLength,
-        totalChunks
-      }, signal);
-      opened = true;
-      for (let index = 0; index < totalChunks; index += 1) {
-        const start = index * HARNESS_API_TRANSFER_CHUNK_BYTES;
-        const chunk = encoded.subarray(start, Math.min(start + HARNESS_API_TRANSFER_CHUNK_BYTES, encoded.byteLength));
-        await this.client.rpc("harness.api.transfer.chunk", {
-          transferId,
-          index,
-          data: bytesToBase642(chunk)
-        }, signal);
-      }
-      const committed = await this.client.rpc(
-        "harness.api.transfer.commit",
-        { transferId },
-        signal
-      );
-      if (committed.kind === "inline") return committed.response;
-      if (committed.transferId !== transferId || committed.totalBytes <= 0 || committed.totalBytes > MAX_HARNESS_API_TRANSFER_BYTES || committed.totalChunks !== Math.ceil(committed.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
-        throw new Error("The remote Host returned an invalid Harness API transfer descriptor.");
-      }
-      const responseBytes = new Uint8Array(committed.totalBytes);
-      let offset = 0;
-      for (let index = 0; index < committed.totalChunks; index += 1) {
-        const result = await this.client.rpc(
-          "harness.api.transfer.read",
-          { transferId, index },
-          signal
-        );
-        if (result.transferId !== transferId || result.index !== index) {
-          throw new Error("The remote Host returned an out-of-order Harness API transfer chunk.");
-        }
-        const chunk = base64ToBytes2(result.data);
-        const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
-        if (chunk.byteLength !== expectedBytes) {
-          throw new Error("The remote Host returned an invalid Harness API transfer chunk.");
-        }
-        responseBytes.set(chunk, offset);
-        offset += chunk.byteLength;
-      }
-      return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(responseBytes));
-    } finally {
-      if (opened) {
-        await this.client.rpc("harness.api.transfer.close", { transferId }).catch(() => void 0);
-      }
-    }
-  }
-  async respond(message) {
-    return this.client.rpc("harness.api.respond", { message });
-  }
-  async *stream(stream, request, signal) {
-    const streamId = uuidV7();
-    const queue = new AsyncFrameQueue();
-    const unsubscribe = this.client.onEvent((event) => routeStreamEvent(event, streamId, queue));
-    const unsubscribeClose = this.client.onClose(() => queue.close());
-    const onAbort = () => queue.close();
-    signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      try {
-        await this.client.rpc("harness.api.stream.open", {
-          streamId,
-          stream,
-          rpcId: String(request.rpcId),
-          payload: request.payload
-        }, signal);
-        for await (const frame of queue) yield frame;
-      } catch (error) {
-        if (!isRemoteDisconnect(error)) throw error;
-      }
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-      unsubscribe();
-      unsubscribeClose();
-      queue.close();
-      await this.client.rpc("harness.api.stream.close", { streamId }).catch(() => void 0);
-    }
-  }
-};
-function normalizeLegacyResponse(method, response) {
-  if (method !== "host.describe" || !response.result.ok) return response;
-  const value = response.result.value;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return response;
-  const description = value;
-  if (typeof description.home === "string" || typeof description.cwd !== "string") return response;
-  return {
-    ...response,
-    result: {
-      ...response.result,
-      value: { ...description, home: description.cwd }
-    }
-  };
-}
-function normalizeLegacyRequest(method, payload) {
-  if (!isRecord7(payload)) return payload;
-  if (method === "agentPreset.read") return replaceAgentPreset(payload, "agentPreset");
-  if (method === "agentPreset.select") return replaceAgentPreset(payload, "agentPreset");
-  if (method === "agentPreset.copy") return replaceAgentPreset(payload, "from");
-  if (method === "settings.update" || method === "settings.replace" || method === "settings.mutate") {
-    return replaceAgentPresetSettings(payload);
-  }
-  return payload;
-}
-function replaceAgentPreset(payload, key) {
-  const value = payload[key];
-  const replacement = typeof value === "string" ? LEGACY_AGENT_PRESET_ALIASES[value] : void 0;
-  return replacement === void 0 ? payload : { ...payload, [key]: replacement };
-}
-function replaceAgentPresetSettings(payload) {
-  if (payload.ns !== AGENT_PRESET_SETTINGS_NS || !isRecord7(payload.patch)) return payload;
-  const patch = replaceAgentPreset(payload.patch, "default");
-  return patch === payload.patch ? payload : { ...payload, patch };
-}
-function isLegacyRemoteHost(version) {
-  if (version === void 0) return false;
-  const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim());
-  return match !== null && Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
-}
-function isWelcomeNoticeRequest(payload) {
-  if (!isRecord7(payload) || payload.ns !== WELCOME_NOTICE_NAMESPACE || !Array.isArray(payload.ops)) return false;
-  return payload.ops.some((operation) => isRecord7(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
-}
-function patchWelcomeDescribe(response) {
-  if (!response.result.ok || !isRecord7(response.result.value) || !Array.isArray(response.result.value.namespaces)) return response;
-  return {
-    ...response,
-    result: {
-      ...response.result,
-      value: {
-        ...response.result.value,
-        namespaces: response.result.value.namespaces.map((namespace) => {
-          if (!isRecord7(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-          const value = isRecord7(namespace.value) ? namespace.value : {};
-          return { ...namespace, value: { ...value, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
-        })
-      }
-    }
-  };
-}
-function patchWelcomeMutate(value, rpcId2) {
-  const response = {
-    rpcId: rpcId2,
-    result: { ok: true, value: { ...value, namespaces: [] } }
-  };
-  const namespaces = Array.isArray(value.namespaces) ? value.namespaces : [];
-  response.result.value.namespaces = namespaces.map((namespace) => {
-    if (!isRecord7(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
-    const current = isRecord7(namespace.value) ? namespace.value : {};
-    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
-  });
-  return response;
-}
-function isRemoteDisconnect(error) {
-  return error instanceof RemoteClientError && (error.code === "TRANSPORT_CLOSED" || error.code === "CLIENT_CLOSED");
-}
-function isRecord7(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-var AsyncFrameQueue = class {
-  values = [];
-  waiters = [];
-  closed = false;
-  push(value) {
-    if (this.closed) return;
-    const waiter = this.waiters.shift();
-    if (waiter === void 0) this.values.push(value);
-    else waiter({ done: false, value });
-  }
-  close() {
-    if (this.closed) return;
-    this.closed = true;
-    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: void 0 });
-  }
-  async *[Symbol.asyncIterator]() {
-    while (true) {
-      const value = this.values.shift();
-      if (value !== void 0) {
-        yield value;
-        continue;
-      }
-      if (this.closed) return;
-      const next = await new Promise((resolve6) => this.waiters.push(resolve6));
-      if (next.done) return;
-      yield next.value;
-    }
-  }
-};
-function routeStreamEvent(event, streamId, queue) {
-  if (event.event === "harness.api.frame") {
-    const data2 = event.data;
-    if (data2.streamId !== streamId || typeof data2.frame !== "object" || data2.frame === null || typeof data2.frame.rpcId !== "string" || !("payload" in data2.frame)) return;
-    queue.push(data2.frame);
-  }
-  if (event.event === "harness.api.stream.closed") {
-    const data2 = event.data;
-    if (data2.streamId === streamId) queue.close();
-  }
-}
-function bytesToBase642(bytes) {
-  let binary = "";
-  for (let offset = 0; offset < bytes.byteLength; offset += 32768) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 32768, bytes.byteLength)));
-  }
-  return btoa(binary);
-}
-function base64ToBytes2(value) {
-  let binary;
-  try {
-    binary = atob(value);
-  } catch {
-    throw new Error("The remote Host returned a malformed Harness API transfer chunk.");
-  }
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  if (bytesToBase642(bytes) !== value) {
-    throw new Error("The remote Host returned a non-canonical Harness API transfer chunk.");
-  }
-  return bytes;
+  bytes[6] = 112 | bytes[6] & 15;
+  bytes[8] = 128 | bytes[8] & 63;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 // src/session-format-compat.ts
@@ -26704,15 +25852,15 @@ function normalizeLegacySessionGatewayValue(endpoint, value) {
   return value;
 }
 function normalizeAssistantMessageStreamValue(endpoint, value) {
-  if (endpoint === "session/page" && isRecord8(value)) return { ...value, records: normalizeRecords(value.records) };
-  if (endpoint === "session/follow" && isRecord8(value) && value.type === "snapshot") {
+  if (endpoint === "session/page" && isRecord7(value)) return { ...value, records: normalizeRecords(value.records) };
+  if (endpoint === "session/follow" && isRecord7(value) && value.type === "snapshot") {
     return { ...value, records: normalizeRecords(value.records) };
   }
   if (endpoint === "session/follow") return normalizeEntry(value);
   return value;
 }
 function normalizeFollowFrame(value) {
-  if (!isRecord8(value)) return value;
+  if (!isRecord7(value)) return value;
   if (value.type === "snapshot") {
     return {
       ...value,
@@ -26724,7 +25872,7 @@ function normalizeFollowFrame(value) {
   return normalizeEntry(value);
 }
 function normalizePage(value) {
-  if (!isRecord8(value)) return value;
+  if (!isRecord7(value)) return value;
   return { ...value, records: normalizeRecords(value.records) };
 }
 function normalizeRecords(value) {
@@ -26769,10 +25917,10 @@ function eventTime(value) {
   return typeof value.event.time === "number" && Number.isSafeInteger(value.event.time) ? value.event.time : 0;
 }
 function isEventEntry(value) {
-  return isRecord8(value) && value.type === "event" && isRecord8(value.event);
+  return isRecord7(value) && value.type === "event" && isRecord7(value.event);
 }
 function normalizeHeader(value) {
-  if (!isRecord8(value)) return value;
+  if (!isRecord7(value)) return value;
   const next = {
     ...value,
     version: 3,
@@ -26781,7 +25929,7 @@ function normalizeHeader(value) {
   return next.agentPreset === "code" ? { ...next, agentPreset: "ptc" } : next;
 }
 function normalizeEvent(value) {
-  if (!isRecord8(value)) return value;
+  if (!isRecord7(value)) return value;
   let next = value;
   const type = normalizeEventType(value.type);
   if (type !== value.type) next = { ...next, type };
@@ -26801,7 +25949,7 @@ function normalizeEventType(value) {
   return value;
 }
 function normalizeEventData(type, value) {
-  if (!isRecord8(value)) return value;
+  if (!isRecord7(value)) return value;
   if (type === "assistant/message" && Object.hasOwn(value, "stream") && !Array.isArray(value.stream)) {
     const { stream: _stream, ...rest } = value;
     return rest;
@@ -26818,7 +25966,7 @@ function normalizeEventData(type, value) {
   return value;
 }
 function normalizeRequestHeaderData(value) {
-  if (!isRecord8(value.header)) return value;
+  if (!isRecord7(value.header)) return value;
   const header = normalizeRequestHeader(value.header);
   return header === value.header ? value : { ...value, header };
 }
@@ -26834,7 +25982,7 @@ function normalizeRequestHeader(value) {
       changed = true;
       continue;
     }
-    if (key === "adapterDefaults" && isRecord8(field) && Object.keys(field).length === 0) {
+    if (key === "adapterDefaults" && isRecord7(field) && Object.keys(field).length === 0) {
       changed = true;
       continue;
     }
@@ -26843,12 +25991,12 @@ function normalizeRequestHeader(value) {
   return changed ? next : value;
 }
 function normalizeMessage(value) {
-  if (!isRecord8(value) || !isRecord8(value.source)) return value;
+  if (!isRecord7(value) || !isRecord7(value.source)) return value;
   if (value.source.kind !== "plugin" || value.source.plugin !== "tools-code-mode") return value;
   return { ...value, source: { ...value.source, plugin: "tools-ptc" } };
 }
 function normalizeSurfaceOp(value) {
-  if (!isRecord8(value) || value.op !== "replace") return value;
+  if (!isRecord7(value) || value.op !== "replace") return value;
   const { start, end, ...rest } = value;
   if (start === void 0 && end === void 0) return value;
   return {
@@ -26858,7 +26006,7 @@ function normalizeSurfaceOp(value) {
     ...end === void 0 ? {} : { endSeq: end }
   };
 }
-function isRecord8(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isEventSeq(value) {
@@ -26867,9 +26015,9 @@ function isEventSeq(value) {
 
 // src/remote-typert-gateway.ts
 var DIRECT_REMOTE_CALL_BYTES2 = 2 * 1024 * 1024;
-var WELCOME_NOTICE_NAMESPACE2 = "ui-settings-general";
-var WELCOME_NOTICE_FIELD2 = "welcomeNoticeVersion";
-var WELCOME_NOTICE_VERSION2 = "2026-08-13.1";
+var WELCOME_NOTICE_NAMESPACE = "ui-settings-general";
+var WELCOME_NOTICE_FIELD = "welcomeNoticeVersion";
+var WELCOME_NOTICE_VERSION = "2026-08-13.1";
 var RemoteTypertGateway2 = class {
   constructor(client, compatibility, harnessVersion) {
     this.client = client;
@@ -26913,29 +26061,29 @@ var RemoteTypertGateway2 = class {
   settingsDescribeValue;
   /** DSH <=0.1.6 cannot persist the 0.1.7 welcome acknowledgement remotely. */
   normalizeLegacyWelcomeSettings(endpoint, payload, result) {
-    if (!isLegacyRemoteHost2(this.harnessVersion)) return void 0;
-    if (endpoint === "settings/describe" && result.ok && isRecord9(result.value)) {
+    if (!isLegacyRemoteHost(this.harnessVersion)) return void 0;
+    if (endpoint === "settings/describe" && result.ok && isRecord8(result.value)) {
       this.settingsDescribeValue = result.value;
-      return this.legacyWelcomeAcknowledged ? { ...result, value: patchWelcomeDescribe2(result.value) } : void 0;
+      return this.legacyWelcomeAcknowledged ? { ...result, value: patchWelcomeDescribe(result.value) } : void 0;
     }
-    if (endpoint !== "settings/mutate" || !isRecord9(payload) || !isRecord9(payload.args)) return void 0;
+    if (endpoint !== "settings/mutate" || !isRecord8(payload) || !isRecord8(payload.args)) return void 0;
     const args = payload.args;
-    if (args.ns !== WELCOME_NOTICE_NAMESPACE2 || !isWelcomeNoticeOperation(args.ops)) return void 0;
-    const value = patchWelcomeDescribe2(this.settingsDescribeValue ?? { namespaces: [] });
+    if (args.ns !== WELCOME_NOTICE_NAMESPACE || !isWelcomeNoticeOperation(args.ops)) return void 0;
+    const value = patchWelcomeDescribe(this.settingsDescribeValue ?? { namespaces: [] });
     this.legacyWelcomeAcknowledged = true;
     return { ok: true, value };
   }
   async open(endpoint, payload, signal) {
     if (this.frameTransfers === void 0) {
       const description = await this.client.rpc("harness.transport.describe", {}, signal);
-      this.frameTransfers = isRecord9(description) && Array.isArray(description.capabilities) && description.capabilities.includes("harness.remote.stream.transfer.v1");
+      this.frameTransfers = isRecord8(description) && Array.isArray(description.capabilities) && description.capabilities.includes("harness.remote.stream.transfer.v1");
     }
     signal.throwIfAborted();
     const streamId = uuidV7();
     const queue = new AsyncValueQueue4();
     const lifetime = new AbortController();
     const transferSignal = AbortSignal.any([signal, lifetime.signal]);
-    const unsubscribe = this.client.onEvent((event) => routeStreamEvent2(event, streamId, queue));
+    const unsubscribe = this.client.onEvent((event) => routeStreamEvent(event, streamId, queue));
     const unsubscribeClose = this.client.onClose(() => {
       lifetime.abort();
       queue.fail(new RemoteClientError("TRANSPORT_CLOSED", "The remote Harness stream transport closed."));
@@ -26974,7 +26122,7 @@ var RemoteTypertGateway2 = class {
           const descriptor = frame.transfer;
           try {
             const decoded = await this.readTransferred(descriptor, transferSignal);
-            if (!isRecord9(decoded) || decoded.streamId !== streamId || decoded.hasValue !== true || Object.hasOwn(decoded, "transfer")) {
+            if (!isRecord8(decoded) || decoded.streamId !== streamId || decoded.hasValue !== true || Object.hasOwn(decoded, "transfer")) {
               throw new Error("Invalid Harness Remote transferred stream frame");
             }
             frame = decoded;
@@ -27017,7 +26165,7 @@ var RemoteTypertGateway2 = class {
         await this.client.rpc("harness.remote.transfer.chunk", {
           transferId,
           index,
-          data: bytesToBase643(chunk)
+          data: bytesToBase642(chunk)
         }, signal);
       }
       const committed = await this.client.rpc(
@@ -27051,7 +26199,7 @@ var RemoteTypertGateway2 = class {
       if (result.transferId !== transferId || result.index !== index) {
         throw new Error("The remote Host returned an out-of-order Harness Remote transfer chunk.");
       }
-      const chunk = base64ToBytes3(result.data);
+      const chunk = base64ToBytes2(result.data);
       const expectedBytes = Math.min(HARNESS_API_TRANSFER_CHUNK_BYTES, committed.totalBytes - offset);
       if (chunk.byteLength !== expectedBytes) {
         throw new Error("The remote Host returned an invalid Harness Remote transfer chunk.");
@@ -27116,7 +26264,7 @@ var AsyncValueQueue4 = class {
     }
   }
 };
-function routeStreamEvent2(event, streamId, queue) {
+function routeStreamEvent(event, streamId, queue) {
   if (event.event === "harness.remote.frame") {
     const data3 = event.data;
     if (data3.streamId === streamId && data3.hasValue === true) queue.push(data3);
@@ -27130,16 +26278,16 @@ function routeStreamEvent2(event, streamId, queue) {
     queue.fail(remoteFailure({
       code: typeof failure4?.code === "string" ? failure4.code : "internal",
       message: typeof failure4?.message === "string" ? failure4.message : "The remote Harness stream failed.",
-      details: isRecord9(failure4?.details) ? failure4.details : {}
+      details: isRecord8(failure4?.details) ? failure4.details : {}
     }));
   } else {
     queue.close();
   }
 }
 function parseRpcResult(value) {
-  if (!isRecord9(value)) throw new Error("The remote Host returned an invalid Gateway result.");
+  if (!isRecord8(value)) throw new Error("The remote Host returned an invalid Gateway result.");
   if (value.ok === true) return Object.hasOwn(value, "value") ? { ok: true, value: value.value } : { ok: true };
-  if (value.ok !== false || !isRecord9(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord9(value.error.details)) {
+  if (value.ok !== false || !isRecord8(value.error) || typeof value.error.code !== "string" || typeof value.error.message !== "string" || !isRecord8(value.error.details)) {
     throw new Error("The remote Host returned an invalid Gateway failure.");
   }
   return {
@@ -27154,14 +26302,14 @@ function remoteFailure(failure4) {
     details: failure4.details
   });
 }
-function bytesToBase643(bytes) {
+function bytesToBase642(bytes) {
   let binary = "";
   for (let offset = 0; offset < bytes.byteLength; offset += 32768) {
     binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 32768, bytes.byteLength)));
   }
   return btoa(binary);
 }
-function base64ToBytes3(value) {
+function base64ToBytes2(value) {
   let binary;
   try {
     binary = atob(value);
@@ -27170,44 +26318,44 @@ function base64ToBytes3(value) {
   }
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  if (bytesToBase643(bytes) !== value) throw new Error("The remote Host returned non-canonical Harness Remote transfer data.");
+  if (bytesToBase642(bytes) !== value) throw new Error("The remote Host returned non-canonical Harness Remote transfer data.");
   return bytes;
 }
 function normalizeWorkspaceBinaryResult(endpoint, value) {
   if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return value;
-  if (!isRecord9(value) || typeof value.data !== "string") return value;
-  return { ...value, data: base64ToBytes3(value.data) };
+  if (!isRecord8(value) || typeof value.data !== "string") return value;
+  return { ...value, data: base64ToBytes2(value.data) };
 }
-function isRecord9(value) {
+function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasErrorCode(error, code) {
   return error instanceof Error && "code" in error && error.code === code;
 }
-function isLegacyRemoteHost2(version) {
+function isLegacyRemoteHost(version) {
   if (version === void 0) return false;
   const match = /^(?:dsh-)?v?(\d+)\.(\d+)\.(\d+)(?:-|$)/u.exec(version.trim());
   if (match === null) return false;
   return Number(match[1]) === 0 && Number(match[2]) === 1 && Number(match[3]) < 7;
 }
 function isWelcomeNoticeOperation(value) {
-  return Array.isArray(value) && value.some((operation) => isRecord9(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD2 && operation.value === WELCOME_NOTICE_VERSION2);
+  return Array.isArray(value) && value.some((operation) => isRecord8(operation) && operation.op === "set" && Array.isArray(operation.path) && operation.path.length === 1 && operation.path[0] === WELCOME_NOTICE_FIELD && operation.value === WELCOME_NOTICE_VERSION);
 }
-function patchWelcomeDescribe2(value) {
+function patchWelcomeDescribe(value) {
   if (!Array.isArray(value.namespaces)) return value;
   const namespaces = value.namespaces.map((namespace) => {
-    if (!isRecord9(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE2) return namespace;
-    const current = isRecord9(namespace.value) ? namespace.value : {};
-    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD2]: WELCOME_NOTICE_VERSION2 } };
+    if (!isRecord8(namespace) || namespace.ns !== WELCOME_NOTICE_NAMESPACE) return namespace;
+    const current = isRecord8(namespace.value) ? namespace.value : {};
+    return { ...namespace, value: { ...current, [WELCOME_NOTICE_FIELD]: WELCOME_NOTICE_VERSION } };
   });
   return { ...value, namespaces };
 }
 function normalizeProjectionResult(endpoint, value) {
-  if (endpoint !== "session/projections" || !isRecord9(value) || value.kind !== void 0) return value;
-  return Number.isSafeInteger(value.asOfSeq) && isRecord9(value.values) ? { ...value, kind: "sequenced" } : value;
+  if (endpoint !== "session/projections" || !isRecord8(value) || value.kind !== void 0) return value;
+  return Number.isSafeInteger(value.asOfSeq) && isRecord8(value.values) ? { ...value, kind: "sequenced" } : value;
 }
 function normalizeThemeSettingsResult(endpoint, result) {
-  if (!result.ok || !isRecord9(result.value)) return result;
+  if (!result.ok || !isRecord8(result.value)) return result;
   const value = result.value;
   if (endpoint === "settings/describe" && Array.isArray(value.namespaces)) {
     const original = value.namespaces;
@@ -27221,7 +26369,7 @@ function normalizeThemeSettingsResult(endpoint, result) {
   return result;
 }
 function normalizeThemeNamespace(namespace) {
-  if (!isRecord9(namespace) || namespace.ns !== "ui-theme" || !isRecord9(namespace.value)) return namespace;
+  if (!isRecord8(namespace) || namespace.ns !== "ui-theme" || !isRecord8(namespace.value)) return namespace;
   const section = namespace.value;
   const defaults = {
     codeFontSize: 11,
@@ -28076,13 +27224,13 @@ var TerminalCarrierCompat = class {
       try {
         for await (const value of source) {
           if (lifetime.aborted) break;
-          if (isRecord10(value) && value.type === "ack") {
+          if (isRecord9(value) && value.type === "ack") {
             const pending = entry.pending.get(Number(value.sequence));
             if (!pending) throw new RpcError("INVALID_MESSAGE", "Unexpected terminal input acknowledgement.");
             entry.pending.delete(Number(value.sequence));
             if (value.refusal) pending.reject(new RpcError("PERMISSION_DENIED", "Terminal input was refused."));
             else pending.resolve();
-          } else if (isRecord10(value) && (value.type === "snapshot" || value.type === "state") && isRecord10(value.info)) {
+          } else if (isRecord9(value) && (value.type === "snapshot" || value.type === "state") && isRecord9(value.info)) {
             entry.writable = value.writable === true;
             yield { ...value, info: { ...value.info, ...entry.writable ? { controllerId: args.attachmentId } : {} } };
           } else yield value;
@@ -28156,7 +27304,7 @@ async function openRemoteTerminal(target2, payload, signal, uplink) {
     try {
       for await (const value of source) {
         if (lifetime.aborted) break;
-        if (isRecord10(value) && (value.type === "snapshot" || value.type === "state") && isRecord10(value.info)) {
+        if (isRecord9(value) && (value.type === "snapshot" || value.type === "state") && isRecord9(value.info)) {
           writable = value.info.controllerId === attachmentId;
           output.push({ ...value, writable });
           if (value.type === "snapshot") startInput();
@@ -28204,7 +27352,7 @@ async function openRemoteTerminal(target2, payload, signal, uplink) {
     }
   })();
 }
-function isRecord10(value) {
+function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -28357,14 +27505,14 @@ var TypertGatewaySwitch = class {
     if (normalized !== void 0) return normalized;
     const source = error instanceof Error ? error : new Error("The Harness Gateway rejected the request.");
     const code = "code" in source && typeof source.code === "string" ? source.code : "internal";
-    const details2 = "details" in source && isRecord11(source.details) ? source.details : {};
+    const details2 = "details" in source && isRecord10(source.details) ? source.details : {};
     return { code, message: source.message, details: details2 };
   }
 };
 function workspaceConnectionResult(endpoint, result) {
   if (endpoint === "terminal/environment" && result.ok) return { ...result, value: normalizeTerminalEnvironment(endpoint, result.value) };
   if (endpoint !== "workspaceFiles/readBytes" && endpoint !== "officeToPdf/render") return result;
-  if (!result.ok || !isRecord11(result.value) || !(result.value.data instanceof Uint8Array)) return result;
+  if (!result.ok || !isRecord10(result.value) || !(result.value.data instanceof Uint8Array)) return result;
   return {
     ...result,
     value: { ...result.value, data: null },
@@ -28410,7 +27558,7 @@ function requestFromCarrier(endpoint, payload, signal) {
   if (segments.length !== 2 || segments.some((segment) => segment.length === 0)) {
     throw new Error("The Harness Gateway endpoint is invalid.");
   }
-  if (!isRecord11(payload) || !isRecord11(payload.args)) {
+  if (!isRecord10(payload) || !isRecord10(payload.args)) {
     throw new Error("The Harness Gateway payload is invalid.");
   }
   return { namespace: segments[0], method: segments[1], args: payload.args, signal };
@@ -28425,11 +27573,11 @@ function isLocalOnlyEndpoint(endpoint) {
 function isRemoteCommandMethod(method) {
   return REMOTE_COMMAND_METHODS.includes(method);
 }
-function isRecord11(value) {
+function isRecord10(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function normalizeTerminalEnvironment(endpoint, value) {
-  if (endpoint !== "terminal/environment" || !isRecord11(value) || value.maxBufferedBytes !== void 0) return value;
+  if (endpoint !== "terminal/environment" || !isRecord10(value) || value.maxBufferedBytes !== void 0) return value;
   return { ...value, maxBufferedBytes: 256 * 1024 };
 }
 
@@ -29498,7 +28646,7 @@ function isPrivate(ip) {
 
 // src/client-runtime.ts
 var ClientModeRuntime = class {
-  constructor(config, identities, server, apiProxy, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory) {
+  constructor(config, identities, server, typertGateway, logger, host, rtcFactoryProvider = loadNodeRtcFactory) {
     this.config = config;
     this.identities = identities;
     this.server = server;
@@ -29547,9 +28695,6 @@ var ClientModeRuntime = class {
       },
       closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
       closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
-      get proxySwitch() {
-        return owner.proxySwitch;
-      },
       get gatewaySwitch() {
         return owner.gatewaySwitch;
       },
@@ -29606,7 +28751,6 @@ var ClientModeRuntime = class {
         return owner.host;
       }
     });
-    this.proxySwitch = apiProxy === void 0 ? void 0 : new ApiProxySwitch(apiProxy);
     this.gatewaySwitch = new TypertGatewaySwitch(typertGateway);
   }
   async connect(targetDeviceId, signal) {
@@ -29636,7 +28780,6 @@ var ClientModeRuntime = class {
   codexOpenGeneration = 0;
   cursorVirtual;
   acpVirtualBackend = "cursor";
-  proxySwitch;
   gatewaySwitch;
   codexStreams = /* @__PURE__ */ new Map();
   connectionProgress;
@@ -29647,7 +28790,6 @@ var ClientModeRuntime = class {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
     this.server.bindIdentity(this.identity);
-    this.proxySwitch?.install();
     this.gatewaySwitch.install();
     this.logger.info("client remote-mode identity ready", {
       deviceId: shortId(this.identity.deviceId),
@@ -29679,7 +28821,7 @@ var ClientModeRuntime = class {
     return registerControlRoute(connection, (endpoint, payload, signal) => this.control.handleControl(endpoint, payload, signal), webServer);
   }
   status() {
-    const targetStatus = this.gatewaySwitch.supportsCarrier() ? this.gatewaySwitch.status() : this.proxySwitch?.status() ?? this.gatewaySwitch.status();
+    const targetStatus = this.gatewaySwitch.status();
     return {
       available: this.config.serverUrl !== void 0,
       identityReady: this.identity !== void 0,
@@ -29843,61 +28985,34 @@ var ClientModeRuntime = class {
   }
   async listRemoteDirectory(targetDeviceId, path, signal) {
     const remote = await this.ensureConnected(targetDeviceId, signal);
-    if (remote.features.remoteGateway) {
-      const value = await new RemoteTypertGateway2(remote.client).invoke({
-        namespace: "directoryPicker",
-        method: "list",
-        args: path === void 0 ? {} : { path },
-        ...signal === void 0 ? {} : { signal }
-      });
-      return value;
-    }
-    const api = new RemoteHarnessApiProxy(remote.client).api;
-    const response = await api.host.listDirectory({
-      rpcId: `remote-directory-${Date.now()}`,
-      payload: path === void 0 ? {} : { path }
-    }, signal ?? new AbortController().signal);
-    return unwrapNativeResult(response);
+    const value = await new RemoteTypertGateway2(remote.client).invoke({
+      namespace: "directoryPicker",
+      method: "list",
+      args: path === void 0 ? {} : { path },
+      ...signal === void 0 ? {} : { signal }
+    });
+    return value;
   }
   async listRemoteWorkspaces(targetDeviceId, signal) {
     const remote = await this.ensureConnected(targetDeviceId, signal);
-    if (remote.features.remoteGateway) {
-      return readRemoteWorkspaceBaseline(new RemoteTypertGateway2(remote.client), signal);
-    }
-    const api = new RemoteHarnessApiProxy(remote.client).api;
-    const response = await api.workspace.list({
-      rpcId: `remote-workspaces-${Date.now()}`,
-      payload: {}
-    });
-    const value = unwrapNativeResult(response);
-    return value.items;
+    return readRemoteWorkspaceBaseline(new RemoteTypertGateway2(remote.client), signal);
   }
   async openRemoteWorkspace(targetDeviceId, path, signal) {
     if (path.trim() === "") throw new ClientModeError("INVALID_MESSAGE", "A remote working directory is required.");
     const remote = await this.ensureConnected(targetDeviceId, signal);
-    const transport = this.selectHarnessRemoteTransport(remote);
-    let workspace;
-    if (transport === "remoteGateway") {
-      workspace = await new RemoteTypertGateway2(remote.client).invoke({
-        namespace: "workspace",
-        method: "create",
-        args: { request: { path } },
-        ...signal === void 0 ? {} : { signal }
-      });
-    } else {
-      const api = new RemoteHarnessApiProxy(remote.client).api;
-      const response = await api.workspace.create({
-        rpcId: `remote-workspace-${Date.now()}`,
-        payload: { path }
-      });
-      workspace = unwrapNativeResult(response);
-    }
+    this.assertRemoteCompatible(remote);
+    const workspace = await new RemoteTypertGateway2(remote.client).invoke({
+      namespace: "workspace",
+      method: "create",
+      args: { request: { path } },
+      ...signal === void 0 ? {} : { signal }
+    });
     this.assertRemoteCurrent(remote, signal);
     await this.closeCodexVirtual();
     this.assertRemoteCurrent(remote, signal);
     await this.closeCursorVirtual();
     this.assertRemoteCurrent(remote, signal);
-    this.selectRemoteTarget(remote, transport);
+    this.selectRemoteTarget(remote);
     const workspaceId = workspaceRecordId(workspace.workspace);
     this.pendingWorkspaceSelection = { targetDeviceId: remote.target.deviceId, workspaceId };
     this.logger.info("Remote workspace opened", { targetDeviceId: shortId(remote.target.deviceId) });
@@ -30088,7 +29203,6 @@ var ClientModeRuntime = class {
     try {
       await this.leaveRemote();
     } finally {
-      this.proxySwitch?.restore();
       this.gatewaySwitch.restore();
     }
   }
@@ -30099,7 +29213,6 @@ var ClientModeRuntime = class {
     this.connected = void 0;
     this.connectionProgress = void 0;
     this.pendingWorkspaceSelection = void 0;
-    this.proxySwitch?.selectLocal();
     this.gatewaySwitch.selectLocal();
     const results = await Promise.allSettled([
       this.closeCodexVirtual(),
@@ -30134,17 +29247,10 @@ var ClientModeRuntime = class {
   activeRemote() {
     return this.connected;
   }
-  selectRemoteTarget(remote, transport = this.selectHarnessRemoteTransport(remote)) {
+  selectRemoteTarget(remote) {
+    this.assertRemoteCompatible(remote);
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
-    if (transport === "remoteGateway") {
-      this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target2);
-      return;
-    }
-    this.proxySwitch?.selectRemote(new RemoteHarnessApiProxy(remote.client, remote.harnessVersion).api, target2);
-    this.gatewaySwitch.selectRemote((request) => invokeRemoteCommand(remote.client, request), {
-      execute: true,
-      list: remote.features.commandList
-    }, target2);
+    this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target2);
   }
   remoteTypertGateway(remote) {
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
@@ -30156,12 +29262,7 @@ var ClientModeRuntime = class {
   }
   selectCodexTarget(virtual, remote) {
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
-    if (this.gatewaySwitch.supportsCarrier()) {
-      this.gatewaySwitch.selectRemote(virtual, void 0, target2);
-      return;
-    }
-    this.proxySwitch.selectRemote(virtual.api, target2);
-    this.gatewaySwitch.selectRemote((request) => virtual.invoke(request), { execute: true, list: true }, target2);
+    this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
   async closeCodexVirtual(invalidatePending = true) {
     if (invalidatePending) this.codexOpenGeneration += 1;
@@ -30188,34 +29289,25 @@ var ClientModeRuntime = class {
   }
   selectCursorTarget(virtual, remote) {
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
-    if (this.gatewaySwitch.supportsCarrier()) {
-      this.gatewaySwitch.selectRemote(virtual, void 0, target2);
-      return;
-    }
-    this.proxySwitch.selectRemote(virtual.api, target2);
-    this.gatewaySwitch.selectRemote((request) => virtual.invoke(request), { execute: true, list: true }, target2);
+    this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
   assertRemoteCompatible(remote) {
-    this.selectHarnessRemoteTransport(remote);
-  }
-  selectHarnessRemoteTransport(remote) {
     const localRemoteGateway = this.gatewaySwitch.supportsCarrier();
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
     if (localRemoteGateway && remote.features.remoteGateway) {
-      if (localSessionGeneration === "v3" || remote.features.sessionFormat !== 3) return "remoteGateway";
+      if (localSessionGeneration === "v3" || remote.features.sessionFormat !== 3) return;
       throw new ClientModeError(
         "HARNESS_VERSION_INCOMPATIBLE",
         "The selected Host uses Harness Session V3, but this Client uses the legacy Typert Remote session format."
       );
     }
-    if (this.proxySwitch !== void 0 && remote.features.apiProxy) return "apiProxy";
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",
-      localRemoteGateway ? "The selected Host does not provide a compatible Harness Typert Remote Gateway transport." : "The selected Host does not provide the legacy Harness ApiProxy transport."
+      "Both this Client and the selected Host must provide a compatible Harness Typert Remote Gateway transport."
     );
   }
   assertLocalHarnessCarrierAvailable() {
-    if (this.gatewaySwitch.supportsCarrier() || this.proxySwitch !== void 0) return;
+    if (this.gatewaySwitch.supportsCarrier()) return;
     throw new ClientModeError(
       "HARNESS_VERSION_INCOMPATIBLE",
       "This Client does not provide a compatible Harness carrier for the selected remote workspace."
@@ -30771,7 +29863,7 @@ var CodexAppServerClient = class {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted invalid JSON."));
       return;
     }
-    if (!isRecord12(value)) {
+    if (!isRecord11(value)) {
       this.handleProcessFailure("CODEX_INVALID_RESPONSE", new Error("Codex App Server emitted an invalid message."));
       return;
     }
@@ -30818,7 +29910,7 @@ var CodexAppServerClient = class {
 var CODEX_THREAD_UNMATERIALIZED = "CODEX_THREAD_UNMATERIALIZED";
 var CODEX_UNMATERIALIZED_THREAD_MESSAGE = "Codex thread has no turns yet.";
 function safeUpstreamError(value) {
-  if (!isRecord12(value) || typeof value.message !== "string") {
+  if (!isRecord11(value) || typeof value.message !== "string") {
     return new CodexAppServerError("CODEX_UPSTREAM_ERROR", "Codex App Server rejected the request.");
   }
   const message = value.message.toLowerCase();
@@ -30836,7 +29928,7 @@ function safeUpstreamError(value) {
     message.includes("not initialized") ? "Codex App Server is not initialized." : "Codex App Server rejected the request."
   );
 }
-function isRecord12(value) {
+function isRecord11(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -31328,15 +30420,15 @@ function decodeCanonicalBase64(value) {
   }
   return decoded;
 }
-function isRecord13(value) {
+function isRecord12(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode2(error) {
-  if (isRecord13(error) && typeof error.code === "string") return error.code;
+  if (isRecord12(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod(input3) {
-  return isRecord13(input3) && typeof input3.method === "string" ? input3.method : "invalid";
+  return isRecord12(input3) && typeof input3.method === "string" ? input3.method : "invalid";
 }
 function concatChunks(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -31849,14 +30941,14 @@ var CodexRemoteDomain = class {
       if (codexPermissionPresetFromResponse(result) !== params.permissionPreset) {
         await this.callUpstream("thread/settings/update", { threadId, ...settings });
         assertCurrent();
-        result = { ...isRecord14(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
+        result = { ...isRecord13(result) ? result : {}, ...settings, sandbox: settings.sandboxPolicy };
       }
     }
     await this.publishPermission(threadId, result);
     return result;
   }
   async publishPermission(threadId, value) {
-    const source = isRecord14(value) ? value : {};
+    const source = isRecord13(value) ? value : {};
     const threadSettings = { approvalPolicy: source.approvalPolicy, sandboxPolicy: source.sandboxPolicy ?? source.sandbox };
     await this.handleInbound({ kind: "notification", method: "thread/settings/updated", params: { threadId, threadSettings } });
   }
@@ -31935,7 +31027,7 @@ var CodexRemoteDomain = class {
       if (legacyThread === void 0 || legacyThread.id !== threadId || !Array.isArray(legacyThread.turns)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Thread history.");
       }
-      if (legacyThread.turns.some((turn) => !isRecord14(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord14(item)))) {
+      if (legacyThread.turns.some((turn) => !isRecord13(turn) || typeof turn.id !== "string" || !Array.isArray(turn.items) || turn.items.some((item) => !isRecord13(item)))) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid Thread history content.");
       }
       return legacyThread;
@@ -31969,17 +31061,17 @@ var CodexRemoteDomain = class {
         }
         throw error;
       }
-      if (!isRecord14(result) || !Array.isArray(result.data)) {
+      if (!isRecord13(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Turn page.");
       }
       const pageResult = result;
       for (const rawTurn of result.data) {
-        if (!isRecord14(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
+        if (!isRecord13(rawTurn) || typeof rawTurn.id !== "string" || rawTurn.id.length === 0 || rawTurn.itemsView === "full" && !Array.isArray(rawTurn.items)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Turn.");
         }
         const inlineFull = rawTurn.itemsView === "full" || rawTurn.itemsView === void 0 && itemsView === "full" && Array.isArray(rawTurn.items);
         const items = inlineFull ? rawTurn.items : await this.readThreadItems(threadId, rawTurn.id);
-        if (items.some((item) => !isRecord14(item))) {
+        if (items.some((item) => !isRecord13(item))) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         turns.push({ ...rawTurn, items });
@@ -32000,11 +31092,11 @@ var CodexRemoteDomain = class {
         sortDirection: "asc",
         ...cursor2 === void 0 ? {} : { cursor: cursor2 }
       });
-      if (!isRecord14(result) || !Array.isArray(result.data)) {
+      if (!isRecord13(result) || !Array.isArray(result.data)) {
         throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid Item page.");
       }
       for (const entry of result.data) {
-        if (!isRecord14(entry) || !isRecord14(entry.item)) {
+        if (!isRecord13(entry) || !isRecord13(entry.item)) {
           throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid history Item.");
         }
         items.push(entry.item);
@@ -32072,7 +31164,7 @@ var CodexRemoteDomain = class {
     return [...this.peers.values()].some((peer) => peer.hasThreadSubscription(threadId));
   }
   resolveUpstreamApproval(params) {
-    if (!isRecord14(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
+    if (!isRecord13(params) || typeof params.requestId !== "string" && typeof params.requestId !== "number") return;
     for (const [handle, approval] of this.approvals) {
       if (approval.upstreamId === params.requestId) this.approvals.delete(handle);
     }
@@ -32300,8 +31392,8 @@ function findImageBlock(value, attachmentId) {
     }
     return void 0;
   }
-  if (!isRecord14(value)) return void 0;
-  if (value.type === "image" && isRecord14(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
+  if (!isRecord13(value)) return void 0;
+  if (value.type === "image" && isRecord13(value.attachment) && value.attachment.attachmentId === attachmentId && typeof value.data === "string") {
     return { attachment: value.attachment, data: value.data };
   }
   for (const child of Object.values(value)) {
@@ -32319,7 +31411,7 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
     const codexCli = join5(chatGptApp, "Contents", "Resources", "codex-cli");
     try {
       const manifest = JSON.parse(readFileSync(join5(codexCli, "codex-package.json"), "utf8"));
-      if (!isRecord14(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
+      if (!isRecord13(manifest) || typeof manifest.entrypoint !== "string" || manifest.entrypoint.length === 0) {
         return [];
       }
       const candidate = join5(codexCli, manifest.entrypoint);
@@ -32338,24 +31430,24 @@ function codexBinaryCandidates(configured, hostPlatform = process.platform, user
   ])];
 }
 function parseCallEnvelope(input3) {
-  if (!isRecord14(input3) || typeof input3.method !== "string" || !("params" in input3) || Object.keys(input3).some((key) => key !== "method" && key !== "params")) {
+  if (!isRecord13(input3) || typeof input3.method !== "string" || !("params" in input3) || Object.keys(input3).some((key) => key !== "method" && key !== "params")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex call envelope is invalid.");
   }
   return { method: input3.method, params: input3.params };
 }
 function parseRespond(input3) {
-  if (!isRecord14(input3) || typeof input3.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input3.decision)) || Object.keys(input3).some((key) => key !== "requestHandle" && key !== "decision")) {
+  if (!isRecord13(input3) || typeof input3.requestHandle !== "string" || !["accept", "decline", "cancel"].includes(String(input3.decision)) || Object.keys(input3).some((key) => key !== "requestHandle" && key !== "decision")) {
     throw new RpcError("INVALID_MESSAGE", "The Codex approval response is invalid.");
   }
   return input3;
 }
 function accountCanRun(result) {
-  if (!isRecord14(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
-  return result.requiresOpenaiAuth === false || isRecord14(result.account);
+  if (!isRecord13(result) || typeof result.requiresOpenaiAuth !== "boolean") return false;
+  return result.requiresOpenaiAuth === false || isRecord13(result.account);
 }
 function sanitizeAccount(result) {
-  if (!isRecord14(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
-  const account = isRecord14(result.account) ? result.account : void 0;
+  if (!isRecord13(result)) throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned invalid account state.");
+  const account = isRecord13(result.account) ? result.account : void 0;
   return {
     authenticated: account !== void 0 || result.requiresOpenaiAuth === false,
     requiresOpenaiAuth: result.requiresOpenaiAuth === true,
@@ -32368,11 +31460,11 @@ function sanitizeAccount(result) {
   };
 }
 function sanitizeThreadList(result) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   const data2 = result.data.flatMap((value) => {
-    if (!isRecord14(value) || typeof value.id !== "string") return [];
+    if (!isRecord13(value) || typeof value.id !== "string") return [];
     return [{
       id: value.id,
       ...typeof value.sessionId === "string" ? { sessionId: value.sessionId } : {},
@@ -32384,7 +31476,7 @@ function sanitizeThreadList(result) {
       ...typeof value.updatedAt === "number" && Number.isFinite(value.updatedAt) ? { updatedAt: value.updatedAt } : {},
       ...typeof value.archived === "boolean" ? { archived: value.archived } : {},
       ...typeof value.isPinned === "boolean" ? { isPinned: value.isPinned } : {},
-      ...isRecord14(value.status) ? { status: value.status } : {}
+      ...isRecord13(value.status) ? { status: value.status } : {}
     }];
   });
   return {
@@ -32394,18 +31486,18 @@ function sanitizeThreadList(result) {
   };
 }
 function filterThreadListByWorkspaceAuthority(result, authority) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid thread list.");
   }
   return {
     ...result,
-    data: result.data.map((record9) => isRecord14(record9) ? record9 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
+    data: result.data.map((record9) => isRecord13(record9) ? record9 : void 0).filter((thread) => thread !== void 0 && isThreadAllowedByWorkspaceAuthority(thread, authority))
   };
 }
 function sanitizeProject(value) {
-  if (!isRecord14(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
+  if (!isRecord13(value) || typeof value.id !== "string" || typeof value.name !== "string") return void 0;
   const roots = Array.isArray(value.roots) ? value.roots.flatMap((root) => {
-    const path = isRecord14(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
+    const path = isRecord13(root) && typeof root.path === "string" && root.path.length > 0 ? root.path : void 0;
     return path === void 0 || !isAbsolute2(path) ? [] : [{ path }];
   }) : [];
   if (roots.length === 0) return void 0;
@@ -32419,7 +31511,7 @@ function sanitizeProject(value) {
   };
 }
 function sanitizeProjectList(result) {
-  if (!isRecord14(result) || !Array.isArray(result.data)) {
+  if (!isRecord13(result) || !Array.isArray(result.data)) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid project list.");
   }
   const data2 = result.data.flatMap((value) => sanitizeProject(value) ?? []);
@@ -32429,7 +31521,7 @@ function sanitizeProjectList(result) {
   };
 }
 function sanitizeProjectCreate(result) {
-  const project2 = isRecord14(result) ? sanitizeProject(result.project) : void 0;
+  const project2 = isRecord13(result) ? sanitizeProject(result.project) : void 0;
   if (project2 === void 0) {
     throw new RpcError("CODEX_INVALID_RESPONSE", "Codex App Server returned an invalid created project.");
   }
@@ -32461,19 +31553,19 @@ function codexDirectoryCrumbs(root, path) {
   return crumbs2;
 }
 function extractThread(result) {
-  return isRecord14(result) && isRecord14(result.thread) ? result.thread : void 0;
+  return isRecord13(result) && isRecord13(result.thread) ? result.thread : void 0;
 }
 function extractTurnId(result) {
-  if (!isRecord14(result)) return void 0;
+  if (!isRecord13(result)) return void 0;
   if (typeof result.turnId === "string" && result.turnId.length > 0) return result.turnId;
-  if (isRecord14(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
+  if (isRecord13(result.turn) && typeof result.turn.id === "string" && result.turn.id.length > 0) return result.turn.id;
   return void 0;
 }
 function extractThreadId(params) {
-  if (!isRecord14(params)) return void 0;
+  if (!isRecord13(params)) return void 0;
   if (typeof params.threadId === "string") return params.threadId;
-  if (isRecord14(params.thread) && typeof params.thread.id === "string") return params.thread.id;
-  if (isRecord14(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
+  if (isRecord13(params.thread) && typeof params.thread.id === "string") return params.thread.id;
+  if (isRecord13(params.turn) && typeof params.turn.threadId === "string") return params.turn.threadId;
   return void 0;
 }
 function optionalInteger3(value) {
@@ -32515,13 +31607,13 @@ function mapCodexImageInputs(params) {
   return {
     ...params,
     input: params.input.map((value) => {
-      if (!isRecord14(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
+      if (!isRecord13(value) || value.type !== "image" || typeof value.mediaType !== "string" || typeof value.data !== "string") return value;
       return { type: "image", url: `data:${value.mediaType};base64,${value.data}` };
     })
   };
 }
 function sanitizeApprovalParams(params, requestHandle) {
-  if (!isRecord14(params)) return { requestHandle };
+  if (!isRecord13(params)) return { requestHandle };
   const safe = { ...params };
   delete safe.proposedExecpolicyAmendment;
   delete safe.additionalPermissions;
@@ -32562,7 +31654,7 @@ function isProjectListFallbackError(error) {
 function canTryNextBinary(error) {
   return !(error instanceof RpcError) || !["CODEX_AUTH_REQUIRED", "CODEX_CLOSED"].includes(error.code);
 }
-function isRecord14(value) {
+function isRecord13(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function maskId(value) {
@@ -32711,7 +31803,7 @@ var CursorAcpClient = class {
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new CursorAcpError("CURSOR_UNAVAILABLE", "Cursor ACP is not ready.");
     const backend = this.options.modelBackend ?? (this.options.authenticationMethod === null ? void 0 : "cursor");
-    const id5 = isRecord15(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
+    const id5 = isRecord14(params) && typeof params.sessionId === "string" ? params.sessionId : void 0;
     if (backend && (method === "dsh/sessionModels" || method === "dsh/selectModel")) {
       const state = id5 ? this.modelStates.get(id5) : void 0;
       if (!state || !id5) throw new CursorAcpError("ACP_SESSION_NOT_LOADED", "Load the ACP session before selecting a model.");
@@ -32752,7 +31844,7 @@ var CursorAcpClient = class {
     const budget = timeoutMs ?? (method === "session/prompt" ? ACP_PROMPT_TIMEOUT_MS : ACP_REQUEST_TIMEOUT_MS);
     const result = await this.request(method, params, budget);
     if (backend && (method === "session/new" || method === "session/load")) {
-      const returnedId = isRecord15(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+      const returnedId = isRecord14(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
       const sessionId = method === "session/load" ? id5 : returnedId;
       if (!this.ready || !sessionId || returnedId && returnedId !== sessionId) throw new CursorAcpError("ACP_INVALID_SESSION", "ACP returned an invalid session.");
       const state = new AcpSessionModelState(backend);
@@ -32916,7 +32008,7 @@ var CursorAcpClient = class {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord15(value)) {
+    if (!isRecord14(value)) {
       this.handleProcessFailure("CURSOR_INVALID_RESPONSE", new Error("Cursor ACP emitted an invalid message."));
       return;
     }
@@ -32933,7 +32025,7 @@ var CursorAcpClient = class {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord15(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord14(params) && typeof params.sessionId === "string") {
       this.modelStates.get(params.sessionId)?.update(params.update);
     }
     for (const handler of this.inboundHandlers) handler(inbound);
@@ -32965,7 +32057,7 @@ var CursorAcpClient = class {
   }
 };
 function safeUpstreamError2(value) {
-  if (!isRecord15(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
+  if (!isRecord14(value) || typeof value.message !== "string") return "Cursor ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "Cursor ACP authentication failed.";
@@ -32973,7 +32065,7 @@ function safeUpstreamError2(value) {
   if (message.includes("not initialized")) return "Cursor ACP is not initialized.";
   return "Cursor ACP rejected the request.";
 }
-function isRecord15(value) {
+function isRecord14(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -34170,8 +33262,8 @@ var WorkspaceBridge = class {
   }
 };
 function argsOf(payload) {
-  const value = isRecord16(payload) ? payload : {};
-  return isRecord16(value.args) ? value.args : value;
+  const value = isRecord15(payload) ? payload : {};
+  return isRecord15(value.args) ? value.args : value;
 }
 function toolScope(endpoint, args) {
   const session = args.agentId ?? args.sessionId;
@@ -34181,13 +33273,13 @@ function toolScope(endpoint, args) {
   }
   return session;
 }
-function isRecord16(value) {
+function isRecord15(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function byteOrLineRange(args) {
-  const options = isRecord16(args.options) ? args.options : void 0;
-  if (options !== void 0 && isRecord16(options.range)) return options.range;
-  return isRecord16(args.range) ? args.range : args;
+  const options = isRecord15(args.options) ? args.options : void 0;
+  if (options !== void 0 && isRecord15(options.range)) return options.range;
+  return isRecord15(args.range) ? args.range : args;
 }
 function readOffset(args) {
   const range = byteOrLineRange(args);
@@ -35714,7 +34806,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   busy = /* @__PURE__ */ new Set();
   async call(method, params, timeoutMs) {
     if (!this.ready) throw new OpencodeAcpError("OPENCODE_UNAVAILABLE", "OpenCode ACP is not ready.");
-    const p = isRecord17(params) ? params : {};
+    const p = isRecord16(params) ? params : {};
     const id5 = typeof p.sessionId === "string" ? p.sessionId : void 0;
     if (id5 && this.archivingSessions.has(id5)) throw new OpencodeAcpError("ACP_SESSION_BUSY", "The OpenCode session is being archived.");
     if (id5 && this.archivedSessions.has(id5) && ["session/load", "session/prompt", "dsh/selectModel"].includes(method)) throw new OpencodeAcpError("ACP_SESSION_ARCHIVED", "This OpenCode session is archived.");
@@ -35760,7 +34852,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     }
     const result = await this.request(method, params, budget);
     const nativeApi = this.nativeApi;
-    if (method === "session/list" && nativeApi && isRecord17(result) && Array.isArray(result.sessions)) {
+    if (method === "session/list" && nativeApi && isRecord16(result) && Array.isArray(result.sessions)) {
       if (result.sessions.length > 1e3) throw new OpencodeAcpError("INVALID_MESSAGE", "The OpenCode catalog page is too large.");
       const items = result.sessions;
       const archivedItems = /* @__PURE__ */ new Map();
@@ -35770,7 +34862,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
           const index = next++;
           if (index >= items.length) return;
           const item = items[index];
-          if (!isRecord17(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+          if (!isRecord16(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
           const cwd2 = await realpath4(item.cwd).catch(() => void 0);
           if (!cwd2) continue;
           const archived = await nativeApi.isArchived(item.sessionId, cwd2);
@@ -35786,7 +34878,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
   async loadSession(method, params, budget, sessionId) {
     const result = await this.request(method, params, budget);
-    const returnedId = isRecord17(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
+    const returnedId = isRecord16(result) && typeof result.sessionId === "string" ? result.sessionId : void 0;
     const id5 = sessionId ?? returnedId;
     if (!this.ready || !id5 || sessionId && returnedId && returnedId !== sessionId) {
       throw new OpencodeAcpError("ACP_INVALID_SESSION", "OpenCode returned an invalid session.");
@@ -35964,7 +35056,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted invalid JSON."));
       return;
     }
-    if (!isRecord17(value)) {
+    if (!isRecord16(value)) {
       this.handleProcessFailure("OPENCODE_INVALID_RESPONSE", new Error("OpenCode ACP emitted an invalid message."));
       return;
     }
@@ -35981,11 +35073,11 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
     if (typeof value.method !== "string" || value.method.length === 0 || value.method.length > 160) return;
     const params = value.params ?? {};
     const inbound = value.method !== "session/update" && (typeof value.id === "string" || typeof value.id === "number") ? { kind: "request", id: value.id, method: value.method, params } : { kind: "notification", method: value.method, params };
-    if (inbound.kind === "request" && isRecord17(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
+    if (inbound.kind === "request" && isRecord16(params) && typeof params.sessionId === "string" && this.loads.has(params.sessionId)) {
       void this.respondError(inbound.id, -32600, "OpenCode session is not loaded.").catch(() => void 0);
       return;
     }
-    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord17(params) && typeof params.sessionId === "string") {
+    if (inbound.kind === "notification" && inbound.method === "session/update" && isRecord16(params) && typeof params.sessionId === "string") {
       this.models.get(params.sessionId)?.update(params.update);
       if (this.loads.has(params.sessionId) && !this.options.historyReader) return;
     }
@@ -36021,7 +35113,7 @@ var OpencodeAcpClient = class _OpencodeAcpClient {
   }
 };
 function safeUpstreamError3(value) {
-  if (!isRecord17(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
+  if (!isRecord16(value) || typeof value.message !== "string") return "OpenCode ACP rejected the request.";
   const message = value.message.toLowerCase();
   if (message.includes("auth") || message.includes("login") || message.includes("api key")) {
     return "OpenCode ACP authentication failed.";
@@ -36029,7 +35121,7 @@ function safeUpstreamError3(value) {
   if (message.includes("not initialized")) return "OpenCode ACP is not initialized.";
   return "OpenCode ACP rejected the request.";
 }
-function isRecord17(value) {
+function isRecord16(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -36766,15 +35858,15 @@ function decodeCanonicalBase642(value) {
   }
   return decoded;
 }
-function isRecord18(value) {
+function isRecord17(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function safeErrorCode3(error) {
-  if (isRecord18(error) && typeof error.code === "string") return error.code;
+  if (isRecord17(error) && typeof error.code === "string") return error.code;
   return "UNKNOWN";
 }
 function safeMethod2(input3) {
-  return isRecord18(input3) && typeof input3.method === "string" ? input3.method : "invalid";
+  return isRecord17(input3) && typeof input3.method === "string" ? input3.method : "invalid";
 }
 function concatChunks2(chunks, totalBytes) {
   const output = new Uint8Array(totalBytes);
@@ -37165,7 +36257,7 @@ var AcpRemoteGateway = class {
       const requested = typeof call.params.backend === "string" ? call.params.backend : selected ?? this.defaultBackend();
       if (selected !== void 0 && selected !== requested) throw new RpcError("INVALID_MESSAGE", "The ACP session backend does not match.");
       this.requireAcp(requested);
-      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord19(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
+      if (Array.isArray(call.params.prompt) && call.params.prompt.some((part) => isRecord18(part) && part.type === "image") && requested !== "antigravity") throw new RpcError("METHOD_NOT_ALLOWED", "This ACP backend does not accept image prompts.");
       this.sessionBackends.set(sessionId, requested);
     }
     if (call.method === "session/load") {
@@ -37279,7 +36371,7 @@ var AcpRemoteGateway = class {
       const result = await task.client.call("session/prompt", params);
       await this.inboundChain;
       if (!current()) return;
-      const stopReason = isRecord19(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
+      const stopReason = isRecord18(result) && typeof result.stopReason === "string" ? result.stopReason : "end_turn";
       const catchUp = takeTurnCatchUp(this.turnCatchUp, sessionId);
       this.logger.info("ACP prompt finished", {
         sessionId: shortSessionId(sessionId),
@@ -37611,7 +36703,7 @@ var AcpRemoteGateway = class {
       await peer.publishInbound(sessionId, {
         method: message.method,
         params: {
-          ...isRecord19(message.params) ? message.params : {},
+          ...isRecord18(message.params) ? message.params : {},
           requestHandle,
           sessionId,
           upstreamMethod: message.method
@@ -37646,8 +36738,8 @@ var AcpRemoteGateway = class {
   recordTurnCatchUp(sessionId, frame) {
     const list = this.turnCatchUp.get(sessionId);
     if (list === void 0 || frame.method !== "session/update") return;
-    const params = isRecord19(frame.params) ? frame.params : void 0;
-    const update = params !== void 0 && isRecord19(params.update) ? params.update : params;
+    const params = isRecord18(frame.params) ? frame.params : void 0;
+    const update = params !== void 0 && isRecord18(params.update) ? params.update : params;
     const kind = update !== void 0 && typeof update.sessionUpdate === "string" ? update.sessionUpdate : void 0;
     if (kind === void 0 || !CATCH_UP_SESSION_UPDATES.has(kind)) return;
     list.push({ method: frame.method, params: frame.params });
@@ -37783,11 +36875,11 @@ var AcpRemoteGateway = class {
     for (let page = 0; page < 100; page++) {
       const result = await client.call("session/list", { ...cwd2 ? { cwd: cwd2 } : {}, ...cursor2 ? { cursor: cursor2 } : {} });
       assertCurrent();
-      if (!isRecord19(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
+      if (!isRecord18(result) || !Array.isArray(result.sessions) || result.nextCursor != null && (typeof result.nextCursor !== "string" || result.nextCursor.length === 0)) {
         throw new RpcError("INVALID_MESSAGE", "The ACP session catalog response is invalid.");
       }
       for (const item of result.sessions) {
-        if (!isRecord19(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
+        if (!isRecord18(item) || typeof item.sessionId !== "string" || typeof item.cwd !== "string") continue;
         const canonical = await this.requireExistingDirectory(item.cwd).catch(() => void 0);
         assertCurrent();
         if (!canonical || cwd2 && canonical !== cwd2) continue;
@@ -37884,24 +36976,24 @@ var AcpRemoteGateway = class {
   }
 };
 function parseCallEnvelope2(input3) {
-  if (!isRecord19(input3) || typeof input3.method !== "string") {
+  if (!isRecord18(input3) || typeof input3.method !== "string") {
     throw new RpcError("INVALID_MESSAGE", "The Cursor call envelope is invalid.");
   }
   return { method: input3.method, params: input3.params ?? {} };
 }
 function parseRespondEnvelope(input3) {
-  if (!isRecord19(input3) || typeof input3.requestHandle !== "string" || input3.requestHandle.length === 0 || Object.keys(input3).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input3.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input3.decision)) {
+  if (!isRecord18(input3) || typeof input3.requestHandle !== "string" || input3.requestHandle.length === 0 || Object.keys(input3).some((key) => !["requestHandle", "decision", "result"].includes(key)) || typeof input3.decision !== "string" || !["allow-once", "reject-once", "cancel"].includes(input3.decision)) {
     throw new RpcError("INVALID_MESSAGE", "The ACP respond envelope is invalid.");
   }
   return input3;
 }
 function permissionOptions(params) {
-  if (!isRecord19(params) || !Array.isArray(params.options) || params.options.length === 0) {
+  if (!isRecord18(params) || !Array.isArray(params.options) || params.options.length === 0) {
     throw new Error("Missing permission options");
   }
   const ids = /* @__PURE__ */ new Set();
   const options = params.options.map((option) => {
-    if (!isRecord19(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
+    if (!isRecord18(option) || typeof option.optionId !== "string" || !option.optionId || typeof option.kind !== "string" || !["allow_once", "allow_always", "reject_once", "reject_always"].includes(option.kind) || ids.has(option.optionId)) throw new Error("Invalid permission option");
     ids.add(option.optionId);
     return { kind: option.kind, optionId: option.optionId };
   });
@@ -37922,21 +37014,21 @@ function mapPermissionDecision(params, pending) {
   }
   const outcome = pending.method === "cursor/create_plan" ? params.decision === "allow-once" ? "accepted" : params.decision === "cancel" ? "cancelled" : "rejected" : "cancelled";
   if (params.result !== void 0) {
-    if (!isRecord19(params.result) || Object.keys(params.result).length !== 1 || !isRecord19(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
+    if (!isRecord18(params.result) || Object.keys(params.result).length !== 1 || !isRecord18(params.result.outcome) || Object.keys(params.result.outcome).length !== 1 || params.result.outcome.outcome !== outcome) throw invalid();
   }
   return { outcome: { outcome } };
 }
 function readSessionId(value) {
-  if (!isRecord19(value)) return void 0;
+  if (!isRecord18(value)) return void 0;
   return typeof value.sessionId === "string" ? value.sessionId : void 0;
 }
 function readNestedSessionId(value) {
-  if (!isRecord19(value)) return void 0;
-  if (isRecord19(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
+  if (!isRecord18(value)) return void 0;
+  if (isRecord18(value.update) && typeof value.update.sessionId === "string") return value.update.sessionId;
   return void 0;
 }
 function sanitizeSessionResult(value) {
-  if (!isRecord19(value)) return value;
+  if (!isRecord18(value)) return value;
   const next = {};
   for (const [key, entry] of Object.entries(value)) {
     if (key === "sessionId" || key === "stopReason" || key === "mode") next[key] = entry;
@@ -37996,7 +37088,7 @@ function takeTurnCatchUp(turnCatchUp, sessionId) {
   turnCatchUp.delete(sessionId);
   return list;
 }
-function isRecord19(value) {
+function isRecord18(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -38391,11 +37483,11 @@ function editableConfig(config) {
     ...config.acp === void 0 ? {} : { acp: { enabled: config.acp.enabled, backends: config.acp.backends } }
   };
 }
-function isRecord20(value) {
+function isRecord19(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function record7(value) {
-  if (!isRecord20(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
+  if (!isRecord19(value)) throw new ClientModeError("INVALID_MESSAGE", "The control request payload is invalid.");
   return value;
 }
 function ok3(value) {
@@ -38662,9 +37754,6 @@ function unavailable2() {
   return new RpcError("UPLOAD_WORKSPACE_UNAVAILABLE", "The session workspace is unavailable.");
 }
 
-// src/service.ts
-import { randomUUID as randomUUID8 } from "node:crypto";
-
 // src/connection-controller.ts
 var ConnectionController = class {
   constructor(identities, createRouter, logger) {
@@ -38861,15 +37950,6 @@ var historyConfigureSchema = external_exports.object({ compact: external_exports
 var apiMethods = /* @__PURE__ */ new Set([
   "harness.transport.describe",
   "remote.history.configure",
-  "harness.api.call",
-  "harness.api.transfer.open",
-  "harness.api.transfer.chunk",
-  "harness.api.transfer.commit",
-  "harness.api.transfer.read",
-  "harness.api.transfer.close",
-  "harness.api.respond",
-  "harness.api.stream.open",
-  "harness.api.stream.close",
   "harness.remote.call",
   "harness.remote.transfer.open",
   "harness.remote.transfer.chunk",
@@ -38905,8 +37985,6 @@ var apiMethods = /* @__PURE__ */ new Set([
   "workspace.upload.abort"
 ]);
 var HOST_CAPABILITIES = [
-  "harness.api.v1",
-  "harness.api.transfer.v1",
   "harness.remote.v1",
   "harness.remote.transfer.v1",
   "fileviewer.read.v1",
@@ -38917,8 +37995,7 @@ var HOST_CAPABILITIES = [
   "agent.acp.transfer.v1"
 ];
 var RpcRouter = class {
-  constructor(harnessApi, maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload) {
-    this.harnessApi = harnessApi;
+  constructor(maxPending = 128, logger, fileViewer, harnessRemote, capabilities = () => HOST_CAPABILITIES, codex, acp, loopback, workspaceTypes, pluginRoute, workspaceUpload) {
     this.maxPending = maxPending;
     this.logger = logger;
     this.fileViewer = fileViewer;
@@ -38935,7 +38012,6 @@ var RpcRouter = class {
   async closePeerStreams() {
     this.loopback?.closeAll();
     await Promise.all([
-      this.harnessApi?.closeAll(),
       this.harnessRemote?.closeAll(),
       this.codex?.closeAll(),
       this.acp?.closeAll(),
@@ -39005,29 +38081,11 @@ var RpcRouter = class {
       }
       case "remote.history.configure": {
         const { compact } = historyConfigureSchema.parse(params);
-        for (const bridge of [this.harnessApi, this.harnessRemote, this.codex, this.acp]) {
+        for (const bridge of [this.harnessRemote, this.codex, this.acp]) {
           if (bridge !== void 0) bridge.compactHistoryEnabled = compact;
         }
         return { compact };
       }
-      case "harness.api.call":
-        return this.requireApiProxy().call(params);
-      case "harness.api.transfer.open":
-        return this.requireApiProxy().openTransfer(params);
-      case "harness.api.transfer.chunk":
-        return this.requireApiProxy().appendTransfer(params);
-      case "harness.api.transfer.commit":
-        return this.requireApiProxy().commitTransfer(params);
-      case "harness.api.transfer.read":
-        return this.requireApiProxy().readTransfer(params);
-      case "harness.api.transfer.close":
-        return this.requireApiProxy().closeTransfer(params);
-      case "harness.api.respond":
-        return this.requireApiProxy().respond(params);
-      case "harness.api.stream.open":
-        return this.requireApiProxy().openStream(params);
-      case "harness.api.stream.close":
-        return this.requireApiProxy().closeStream(params);
       case "harness.remote.call":
         return this.requireRemoteGateway().call(params);
       case "harness.remote.transfer.open":
@@ -39102,12 +38160,6 @@ var RpcRouter = class {
       default:
         throw new RpcError("METHOD_NOT_FOUND", "The requested method does not exist.");
     }
-  }
-  requireApiProxy() {
-    if (this.harnessApi === void 0) {
-      throw new RpcError("FEATURE_NOT_SUPPORTED", "This Harness version does not provide the legacy ApiProxy transport.");
-    }
-    return this.harnessApi;
   }
   requireRemoteGateway() {
     if (this.harnessRemote === void 0) {
@@ -39267,7 +38319,7 @@ function isOversizedListing(value) {
 // src/server-connection.ts
 var DEFAULT_WEBRTC_NEGOTIATE_TIMEOUT_MS = 12e3;
 var HostServerConnection = class {
-  constructor(config, identity2, identities, api, connections, logger, createWebSocket = (url) => new WebSocket(url), rtcFactoryProvider, hostCapabilities = () => ["harness.api.v1"], harnessVersion) {
+  constructor(config, identity2, identities, api, connections, logger, createWebSocket = (url) => new WebSocket(url), rtcFactoryProvider, hostCapabilities = () => [], harnessVersion) {
     this.config = config;
     this.identity = identity2;
     this.identities = identities;
@@ -40184,6 +39236,9 @@ function closeCode(code) {
   return "CONNECTION_FAILED";
 }
 
+// src/harness-remote-bridge.ts
+import { randomUUID as randomUUID7 } from "node:crypto";
+
 // src/remote-directory-browser.ts
 import { mkdir as mkdir3, readdir as readdir4, stat as stat7 } from "node:fs/promises";
 import { homedir as homedir6, platform as platform2 } from "node:os";
@@ -40235,843 +39290,16 @@ function crumbs(path) {
   return result;
 }
 
-// src/harness-api-history.ts
-var SESSION_HISTORY_PAGE_SIZES = [50, 30, 20, 12, 6, 3, 1];
-function callSessionHistory(callWithTimeout, payload, rpcId2) {
-  const fallbackPageSizes = sessionHistoryFallbackPageSizes(payloadMaxMessages(payload));
-  return callHistoryWithRetry(callWithTimeout, payload, rpcId2, fallbackPageSizes);
-}
-async function callHistoryWithRetry(callWithTimeout, payload, rpcId2, pageSizes) {
-  for (const maxMessages of pageSizes) {
-    const requestPayload = historyRequestPayload(payload, maxMessages);
-    const response = await callWithTimeout(requestPayload);
-    const request = createRpcResponse(rpcId2, response.result);
-    if (encodeMessage(request).byteLength <= MAX_SECURE_MESSAGE_BYTES) return response;
-    if (maxMessages === pageSizes[pageSizes.length - 1]) {
-      throw new RpcError(
-        "RESPONSE_TOO_LARGE",
-        "The Host response is too large for the remote channel. Request a smaller page.",
-        { maxBytes: MAX_SECURE_MESSAGE_BYTES },
-        true
-      );
-    }
-  }
-  throw new RpcError("INTERNAL_ERROR", "Failed to load session history with a fallback page size.");
-}
-function sessionHistoryFallbackPageSizes(requestedMaxMessages) {
-  const requested = normalizeSessionHistoryPageSize(requestedMaxMessages);
-  const sizes = [];
-  if (requested === void 0) {
-    sizes.push(...SESSION_HISTORY_PAGE_SIZES);
-    return sizes;
-  }
-  sizes.push(requested);
-  for (const value of SESSION_HISTORY_PAGE_SIZES) {
-    if (value < requested && !sizes.includes(value)) sizes.push(value);
-  }
-  return sizes;
-}
-function normalizeSessionHistoryPageSize(value) {
-  if (value === void 0) return void 0;
-  if (!Number.isInteger(value)) return void 0;
-  if (value <= 0) return void 0;
-  return Math.max(1, value);
-}
-function payloadMaxMessages(payload) {
-  if (payload === null || typeof payload !== "object") return void 0;
-  const value = payload.maxMessages;
-  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : void 0;
-}
-function historyRequestPayload(payload, maxMessages) {
-  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return { maxMessages };
-  return { ...payload, maxMessages };
-}
-
-// src/harness-api-bridge.ts
-var callSchema3 = external_exports.object({
-  method: external_exports.string().min(1).max(80),
-  rpcId: external_exports.string().min(1).max(128),
-  payload: external_exports.unknown()
-}).strict();
-var respondSchema = external_exports.object({
-  message: external_exports.object({
-    type: external_exports.literal("client-response"),
-    rpcId: external_exports.string().min(1).max(128),
-    result: external_exports.unknown()
-  }).strict()
-}).strict();
-var streamOpenSchema3 = external_exports.object({
-  streamId: external_exports.string().min(1).max(128),
-  stream: external_exports.enum(["mux", "host"]),
-  rpcId: external_exports.string().min(1).max(128),
-  payload: external_exports.object({
-    // Optional focus for a mux stream: only frames belonging to this session
-    // are forwarded. The Remote Web selects one session at a time, so without
-    // this every active session's events (potentially megabytes) would be
-    // pushed over the tunnel and stall the WebRTC data channel.
-    sessionId: external_exports.string().min(1).max(128).optional()
-  }).strict()
-}).strict();
-var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
-var transferIdSchema3 = external_exports.string().min(1).max(128);
-var transferOpenSchema3 = external_exports.object({
-  transferId: transferIdSchema3,
-  totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
-  totalChunks: external_exports.number().int().positive().max(Math.ceil(MAX_HARNESS_API_TRANSFER_BYTES / HARNESS_API_TRANSFER_CHUNK_BYTES))
-}).strict();
-var transferChunkSchema3 = external_exports.object({
-  transferId: transferIdSchema3,
-  index: external_exports.number().int().nonnegative(),
-  data: external_exports.string().max(Math.ceil(HARNESS_API_TRANSFER_CHUNK_BYTES / 3) * 4)
-}).strict();
-var transferCommitSchema = external_exports.object({ transferId: transferIdSchema3 }).strict();
-var transferReadSchema3 = external_exports.object({ transferId: transferIdSchema3, index: external_exports.number().int().nonnegative() }).strict();
-var transferCloseSchema = external_exports.object({ transferId: transferIdSchema3 }).strict();
-var commandExecuteSchema = external_exports.object({
-  agentId: external_exports.string().min(1).max(128),
-  line: external_exports.string().min(1).max(2048),
-  // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
-  // renamed it to `submittedAttachments` and expanded its element type to
-  // include staged file receipts. Remote command execution keeps attachments
-  // out of scope, so either compatibility field is restricted to an empty
-  // list. The dispatcher below chooses the matching Host descriptor.
-  images: external_exports.array(external_exports.never()).length(0).optional(),
-  submittedAttachments: external_exports.array(external_exports.never()).length(0).optional()
-}).strict().superRefine((value, context) => {
-  if (value.images !== void 0 && value.submittedAttachments !== void 0) {
-    context.addIssue({
-      code: external_exports.ZodIssueCode.custom,
-      message: "Use either images or submittedAttachments, not both.",
-      path: ["submittedAttachments"]
-    });
-  }
-});
-var commandListSchema = external_exports.object({
-  agentId: external_exports.string().min(1).max(128)
-}).strict();
-var directoryListSchema = external_exports.object({
-  path: external_exports.string().min(1).max(4096).optional()
-}).strict();
-var credentialRefSchema = external_exports.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Invalid credential reference name").max(128);
-var CONFIG_PLANE_SETTINGS_BYTES = 64 * 1024;
-var CONFIG_PLANE_MAX_OPS = 64;
-var CONFIG_PLANE_MAX_PATH_SEGMENTS = 8;
-var CONFIG_PLANE_MAX_PATH_SEGMENT_BYTES = 64;
-var CONFIG_PLANE_MAX_CREDENTIAL_VALUE_BYTES = 8 * 1024;
-var CONFIG_PLANE_MAX_BASE_URL_BYTES = 2048;
-var CONFIG_PLANE_MAX_NS_BYTES = 128;
-var settingsDescribeSchema = external_exports.object({}).strict();
-var settingsWriteBase = {
-  ns: external_exports.string().min(1).max(CONFIG_PLANE_MAX_NS_BYTES),
-  expectedRevision: external_exports.number().int().nonnegative().optional()
-};
-var settingsUpdateSchema = external_exports.object({
-  ...settingsWriteBase,
-  patch: external_exports.record(external_exports.string().min(1).max(CONFIG_PLANE_MAX_PATH_SEGMENT_BYTES), external_exports.unknown())
-}).strict();
-var settingsReplaceSchema = external_exports.object({
-  ...settingsWriteBase,
-  section: external_exports.record(external_exports.string().min(1).max(CONFIG_PLANE_MAX_PATH_SEGMENT_BYTES), external_exports.unknown())
-}).strict();
-var settingsOpSchema = external_exports.union([
-  external_exports.object({
-    op: external_exports.literal("set"),
-    path: external_exports.array(external_exports.string().min(1).max(CONFIG_PLANE_MAX_PATH_SEGMENT_BYTES)).max(CONFIG_PLANE_MAX_PATH_SEGMENTS),
-    value: external_exports.unknown()
-  }).strict(),
-  external_exports.object({
-    op: external_exports.literal("unset"),
-    path: external_exports.array(external_exports.string().min(1).max(CONFIG_PLANE_MAX_PATH_SEGMENT_BYTES)).max(CONFIG_PLANE_MAX_PATH_SEGMENTS)
-  }).strict()
-]);
-var settingsMutateSchema = external_exports.object({
-  ...settingsWriteBase,
-  ops: external_exports.array(settingsOpSchema).min(1).max(CONFIG_PLANE_MAX_OPS)
-}).strict();
-var credentialsDescribeSchema = external_exports.object({
-  refs: external_exports.array(credentialRefSchema).max(CONFIG_PLANE_MAX_OPS)
-}).strict();
-var credentialsSetSchema = external_exports.object({
-  ref: credentialRefSchema,
-  value: external_exports.string().min(1).max(CONFIG_PLANE_MAX_CREDENTIAL_VALUE_BYTES)
-}).strict();
-var credentialsUnsetSchema = external_exports.object({
-  ref: credentialRefSchema
-}).strict();
-var discoverModelsSchema = external_exports.object({
-  settingsNs: external_exports.string().min(1).max(CONFIG_PLANE_MAX_NS_BYTES),
-  provider: external_exports.string().min(1).max(CONFIG_PLANE_MAX_NS_BYTES).optional(),
-  baseURL: external_exports.string().max(CONFIG_PLANE_MAX_BASE_URL_BYTES).optional(),
-  api: external_exports.string().min(1).max(CONFIG_PLANE_MAX_NS_BYTES).optional(),
-  apiKey: external_exports.string().min(1).max(CONFIG_PLANE_MAX_CREDENTIAL_VALUE_BYTES).optional()
-}).strict();
-var HARNESS_API_ALLOWLIST = [
-  "session.list",
-  "session.search",
-  "session.create",
-  "session.history",
-  "session.models",
-  "session.selectModel",
-  "session.rename",
-  "session.fork",
-  "session.prompt",
-  "session.attachment",
-  "session.updateQueue",
-  "session.cancel",
-  "subagent.list",
-  "subagent.history",
-  "subagent.prompt",
-  "subagent.interrupt",
-  "host.describe",
-  "host.listDirectory",
-  "workspace.list",
-  "workspace.create",
-  "workspace.rename",
-  "workspace.delete",
-  "workspace.insertBefore",
-  "workspace.insertSessionBefore",
-  "workspace.archiveSession",
-  "skill.list",
-  "agentPreset.list",
-  "agentPreset.select",
-  "agentPreset.read",
-  "goal.create",
-  "goal.edit",
-  "goal.pause",
-  "goal.resume",
-  "goal.complete",
-  "goal.clear",
-  "commands.execute",
-  "commands.list",
-  "llm.providers",
-  "llm.models",
-  "llm.discoverModels",
-  "settings.describe",
-  "settings.update",
-  "settings.replace",
-  "settings.mutate",
-  "credentials.describe",
-  "credentials.set",
-  "credentials.unset"
-];
-var NATIVE_CALL_TIMEOUT_MS = 3e4;
-var MAX_ACTIVE_API_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var API_TRANSFER_IDLE_MS = TRANSFER_IDLE_MS;
-var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
-var HarnessApiBridge = class {
-  constructor(api, publish, maxStreams = 8, logger, typertGateway, harnessVersion) {
-    this.api = api;
-    this.publish = publish;
-    this.maxStreams = maxStreams;
-    this.logger = logger;
-    this.harnessVersion = harnessVersion;
-    this.methods = createMethodMap(api, typertGateway, harnessVersion);
-    this.mux = api.events.mux.bind(api.events);
-    this.host = api.events.host.bind(api.events);
-    this.answer = api.respond.bind(api);
-  }
-  compactHistoryEnabled = false;
-  methods;
-  streams = /* @__PURE__ */ new Map();
-  respondable = /* @__PURE__ */ new Map();
-  incomingTransfers = /* @__PURE__ */ new Map();
-  outgoingTransfers = /* @__PURE__ */ new Map();
-  mux;
-  host;
-  answer;
-  async call(input3) {
-    const params = callSchema3.parse(input3);
-    const signal = AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS);
-    const method = this.methods.get(params.method);
-    if (method === void 0) {
-      if (params.method === "host.listDirectory") {
-        return this.callDirectoryFallback(params, signal);
-      }
-      if (params.method === "host.describe") {
-        return this.describeFallback(params.rpcId);
-      }
-      throw deniedMethod(params.method);
-    }
-    const startedAt = performance.now();
-    const request = { rpcId: params.rpcId, payload: params.payload };
-    try {
-      const callWithTimeout = (overridePayload) => withTimeout(
-        method({ rpcId: params.rpcId, payload: overridePayload }, signal),
-        NATIVE_CALL_TIMEOUT_MS,
-        `Harness API call ${params.method} timed out after ${NATIVE_CALL_TIMEOUT_MS}ms`
-      );
-      let response;
-      if (params.method === "session.history") {
-        response = await callSessionHistory(async (payload) => {
-          const result = await callWithTimeout(payload);
-          return this.compactHistoryEnabled ? { ...result, result: compactHistory(result.result) } : result;
-        }, params.payload, params.rpcId);
-      } else {
-        response = await callWithTimeout(request.payload);
-      }
-      if (params.method === "host.listDirectory" && needsRemoteDirectoryFallback(response)) {
-        response = await this.callDirectoryFallback(params, signal);
-      }
-      if (params.method === "host.describe") {
-        response = normalizeHostDescribe(response, this.harnessVersion, true);
-      }
-      this.logger?.debug("harness api call ok", {
-        method: params.method,
-        durationMs: Math.round(performance.now() - startedAt)
-      });
-      return this.compactHistoryEnabled && params.method === "subagent.history" ? { ...response, result: compactHistory(response.result) } : response;
-    } catch (error) {
-      const durationMs = Math.round(performance.now() - startedAt);
-      this.logger?.warn("harness api call failed", {
-        method: params.method,
-        durationMs,
-        timedOut: signal.aborted,
-        code: safeErrorCode(error)
-      });
-      throw error;
-    }
-  }
-  async callDirectoryFallback(params, signal) {
-    const payload = directoryListSchema.parse(params.payload);
-    const value = await listRemoteDirectory(payload.path, signal);
-    return { rpcId: params.rpcId, result: { ok: true, value } };
-  }
-  describeFallback(rpcId2) {
-    return {
-      rpcId: rpcId2,
-      result: {
-        ok: true,
-        value: {
-          version: this.harnessVersion ?? "0.0.1",
-          cwd: "",
-          home: "",
-          attachedSessions: 0,
-          canOpenPath: true
-        }
-      }
-    };
-  }
-  openTransfer(input3) {
-    this.pruneTransfers();
-    const params = transferOpenSchema3.parse(input3);
-    if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
-      throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk count is invalid.");
-    }
-    if (this.incomingTransfers.has(params.transferId) || this.outgoingTransfers.has(params.transferId)) {
-      throw new RpcError("REQUEST_CONFLICT", "The Harness API transfer id is already active.");
-    }
-    if (this.incomingTransfers.size >= MAX_ACTIVE_API_TRANSFERS) {
-      throw new RpcError("RATE_LIMITED", "Too many Harness API transfers are active.", void 0, true);
-    }
-    this.incomingTransfers.set(params.transferId, {
-      totalBytes: params.totalBytes,
-      totalChunks: params.totalChunks,
-      chunks: [],
-      receivedBytes: 0,
-      touchedAt: Date.now()
-    });
-    return { opened: true, transferId: params.transferId };
-  }
-  appendTransfer(input3) {
-    this.pruneTransfers();
-    const params = transferChunkSchema3.parse(input3);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
-    if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Harness API transfer chunks must arrive exactly once and in order.");
-    }
-    let chunk;
-    try {
-      chunk = decodeCanonicalBase643(params.data);
-    } catch (error) {
-      this.incomingTransfers.delete(params.transferId);
-      throw error;
-    }
-    const expectedBytes = Math.min(
-      HARNESS_API_TRANSFER_CHUNK_BYTES,
-      transfer.totalBytes - params.index * HARNESS_API_TRANSFER_CHUNK_BYTES
-    );
-    if (chunk.byteLength !== expectedBytes) {
-      this.incomingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk size is invalid.");
-    }
-    transfer.chunks.push(chunk);
-    transfer.receivedBytes += chunk.byteLength;
-    transfer.touchedAt = Date.now();
-    return { accepted: true, transferId: params.transferId, index: params.index };
-  }
-  async commitTransfer(input3) {
-    this.pruneTransfers();
-    const params = transferCommitSchema.parse(input3);
-    const transfer = this.incomingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API transfer is not active.");
-    this.incomingTransfers.delete(params.transferId);
-    if (transfer.chunks.length !== transfer.totalChunks || transfer.receivedBytes !== transfer.totalBytes) {
-      throw new RpcError("INVALID_MESSAGE", "The Harness API transfer is incomplete.");
-    }
-    let request;
-    try {
-      const bytes = concatChunks3(transfer.chunks, transfer.totalBytes);
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    } catch {
-      throw new RpcError("INVALID_MESSAGE", "The Harness API transfer does not contain a valid request.");
-    }
-    const nativeRequest = callSchema3.parse(request);
-    const response = await this.call(nativeRequest);
-    const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) {
-      return { kind: "inline", response };
-    }
-    if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
-      throw new RpcError("RESPONSE_TOO_LARGE", "The Harness API response exceeds the bounded transfer limit.");
-    }
-    this.pruneTransfers();
-    if (this.outgoingTransfers.size >= MAX_ACTIVE_API_TRANSFERS) {
-      throw new RpcError("RATE_LIMITED", "Too many Harness API response transfers are active.", void 0, true);
-    }
-    const totalChunks = Math.ceil(responseBytes.byteLength / HARNESS_API_TRANSFER_CHUNK_BYTES);
-    this.outgoingTransfers.set(params.transferId, {
-      bytes: responseBytes,
-      totalChunks,
-      nextIndex: 0,
-      touchedAt: Date.now()
-    });
-    return { kind: "chunked", transferId: params.transferId, totalBytes: responseBytes.byteLength, totalChunks };
-  }
-  readTransfer(input3) {
-    this.pruneTransfers();
-    const params = transferReadSchema3.parse(input3);
-    const transfer = this.outgoingTransfers.get(params.transferId);
-    if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness API response transfer is not active.");
-    if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
-      this.outgoingTransfers.delete(params.transferId);
-      throw new RpcError("INVALID_MESSAGE", "Harness API response chunks must be read exactly once and in order.");
-    }
-    const start = params.index * HARNESS_API_TRANSFER_CHUNK_BYTES;
-    const end = Math.min(start + HARNESS_API_TRANSFER_CHUNK_BYTES, transfer.bytes.byteLength);
-    transfer.nextIndex += 1;
-    transfer.touchedAt = Date.now();
-    return {
-      transferId: params.transferId,
-      index: params.index,
-      data: Buffer.from(transfer.bytes.subarray(start, end)).toString("base64")
-    };
-  }
-  closeTransfer(input3) {
-    const params = transferCloseSchema.parse(input3);
-    const incoming = this.incomingTransfers.delete(params.transferId);
-    const outgoing = this.outgoingTransfers.delete(params.transferId);
-    return { closed: incoming || outgoing, transferId: params.transferId };
-  }
-  async respond(input3) {
-    const params = respondSchema.parse(input3);
-    this.logger?.debug("harness api respond", { rpcId: shortId4(params.message.rpcId) });
-    if (!this.respondable.has(params.message.rpcId)) {
-      throw new RpcError("PERMISSION_NOT_PENDING", "The response id was not emitted on this peer connection.");
-    }
-    const receipt = await this.answer(params.message);
-    if (receipt.accepted || receipt.reason === "not-pending") this.respondable.delete(params.message.rpcId);
-    return receipt;
-  }
-  openStream(input3) {
-    const params = streamOpenSchema3.parse(input3);
-    if (this.streams.has(params.streamId)) throw new RpcError("REQUEST_CONFLICT", "The Harness event stream is already open.");
-    if (this.streams.size >= this.maxStreams) throw new RpcError("RATE_LIMITED", "Too many Harness event streams are open.", void 0, true);
-    const controller = new AbortController();
-    const request = { rpcId: params.rpcId, payload: params.payload };
-    const stream = params.stream === "mux" ? this.mux(request, controller.signal) : this.host(request, controller.signal);
-    const focusSessionId = params.stream === "mux" ? params.payload.sessionId : void 0;
-    const task = this.pump(params.streamId, stream, controller.signal, focusSessionId);
-    this.streams.set(params.streamId, { controller, task, ...focusSessionId === void 0 ? {} : { focusSessionId } });
-    this.logger?.debug("harness api stream open", {
-      stream: params.stream,
-      streamId: shortId4(params.streamId),
-      ...focusSessionId === void 0 ? {} : { focusSessionId: shortId4(focusSessionId) }
-    });
-    return { opened: true, streamId: params.streamId };
-  }
-  closeStream(input3) {
-    const params = streamCloseSchema3.parse(input3);
-    const active = this.streams.get(params.streamId);
-    if (active !== void 0) {
-      this.streams.delete(params.streamId);
-      active.controller.abort();
-    }
-    this.logger?.debug("harness api stream close", { streamId: shortId4(params.streamId), closed: active !== void 0 });
-    return { closed: active !== void 0, streamId: params.streamId };
-  }
-  async closeAll(reason = "peer-disconnected") {
-    const streams = [...this.streams.values()];
-    this.streams.clear();
-    this.respondable.clear();
-    this.incomingTransfers.clear();
-    this.outgoingTransfers.clear();
-    for (const stream of streams) stream.controller.abort(reason);
-  }
-  pruneTransfers() {
-    const cutoff = Date.now() - API_TRANSFER_IDLE_MS;
-    for (const [transferId, transfer] of this.incomingTransfers) {
-      if (transfer.touchedAt < cutoff) this.incomingTransfers.delete(transferId);
-    }
-    for (const [transferId, transfer] of this.outgoingTransfers) {
-      if (transfer.touchedAt < cutoff) this.outgoingTransfers.delete(transferId);
-    }
-  }
-  async pump(streamId, stream, signal, focusSessionId) {
-    let reason = "completed";
-    try {
-      for await (const frame of stream) {
-        if (signal.aborted) break;
-        if (focusSessionId !== void 0 && frameSessionId(frame) !== void 0 && frameSessionId(frame) !== focusSessionId) {
-          continue;
-        }
-        this.trackRespondable(frame);
-        const data2 = { streamId, frame };
-        if (encodeMessage(createEvent("harness.api.frame", data2)).byteLength > MAX_SECURE_MESSAGE_BYTES) {
-          throw new Error("Oversized Harness API frame");
-        }
-        await this.publish("harness.api.frame", data2);
-      }
-      if (signal.aborted) reason = "cancelled";
-    } catch {
-      reason = signal.aborted ? "cancelled" : "failed";
-    } finally {
-      this.streams.delete(streamId);
-      await this.publish("harness.api.stream.closed", { streamId, reason }).catch(() => void 0);
-    }
-  }
-  trackRespondable(frame) {
-    const payload = frame.payload;
-    if (payload.type === "approval/requested") {
-      this.respondable.set(String(frame.rpcId), `approval:${String(payload.approvalId)}`);
-      return;
-    }
-    if (payload.type === "question/requested") {
-      this.respondable.set(String(frame.rpcId), `question:${String(frame.rpcId)}`);
-      return;
-    }
-    if (payload.type === "approval/resolved") {
-      this.deleteRespondable(`approval:${String(payload.approvalId)}`);
-      return;
-    }
-    if (payload.type === "question/resolved") {
-      this.respondable.delete(String(payload.questionRpcId));
-    }
-  }
-  deleteRespondable(value) {
-    for (const [rpcId2, correlation] of this.respondable) {
-      if (correlation === value) this.respondable.delete(rpcId2);
-    }
-  }
-};
-function needsRemoteDirectoryFallback(response) {
-  const result = response.result;
-  return typeof result === "object" && result !== null && "ok" in result && result.ok === false && "error" in result && typeof result.error === "object" && result.error !== null && "code" in result.error && result.error.code === "directory-picker-unavailable";
-}
-function normalizeHostDescribe(response, harnessVersion, canListDirectory) {
-  if (!response.result.ok) return response;
-  const value = response.result.value;
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return response;
-  const description = value;
-  const selectedVersion = selectHarnessVersion(
-    normalizeHarnessVersion(description.version),
-    harnessVersion
-  );
-  const versionChanged = selectedVersion !== void 0 && description.version !== selectedVersion;
-  const canOpenPathChanged = canListDirectory && description.canOpenPath !== true;
-  if (!versionChanged && !canOpenPathChanged) return response;
-  const normalized = {
-    ...description,
-    ...versionChanged ? { version: selectedVersion } : {},
-    ...canOpenPathChanged ? { canOpenPath: true } : {}
-  };
-  return {
-    ...response,
-    result: {
-      ...response.result,
-      value: normalized
-    }
-  };
-}
-function createMethodMap(api, typertGateway, harnessVersion) {
-  const domains = api;
-  const methods = /* @__PURE__ */ new Map();
-  for (const method of HARNESS_API_ALLOWLIST) {
-    if (method === "commands.execute" || method === "commands.list") {
-      if (typertGateway === void 0) continue;
-      const [namespace, commandMethod] = method.split(".");
-      const implementation2 = async (request, signal) => {
-        if (commandMethod === "execute") {
-          const payload = commandExecuteSchema.parse(request.payload);
-          const legacyArgs = {
-            agentId: payload.agentId,
-            line: payload.line,
-            images: payload.images ?? []
-          };
-          const currentArgs = {
-            agentId: payload.agentId,
-            line: payload.line,
-            submittedAttachments: payload.submittedAttachments ?? []
-          };
-          const args2 = harnessSessionGeneration(harnessVersion) === "v3" ? currentArgs : legacyArgs;
-          const value2 = await typertGateway.invoke({
-            namespace,
-            method: "execute",
-            args: args2,
-            ...signal === void 0 ? {} : { signal }
-          });
-          return { rpcId: request.rpcId, result: { ok: true, value: value2 } };
-        }
-        const args = commandListSchema.parse(request.payload);
-        const value = await typertGateway.invoke({
-          namespace,
-          method: "list",
-          args,
-          ...signal === void 0 ? {} : { signal }
-        });
-        return { rpcId: request.rpcId, result: { ok: true, value } };
-      };
-      methods.set(method, implementation2);
-      continue;
-    }
-    const [wireDomain, action] = method.split(".");
-    const domain = domainProperty(wireDomain);
-    const implementation = domains[domain]?.[action];
-    if (typeof implementation !== "function") continue;
-    const scoped = CONFIG_PLANE_METHODS.includes(method) ? scopeConfigPlaneMethod(api, method, implementation) : void 0;
-    methods.set(method, scoped ?? implementation.bind(domains[domain]));
-  }
-  return methods;
-}
-function domainProperty(wireDomain) {
-  if (wireDomain === "session") return "sessions";
-  if (wireDomain === "subagent") return "subagents";
-  if (wireDomain === "skill") return "skills";
-  if (wireDomain === "agentPreset") return "agentPresets";
-  if (wireDomain === "goal") return "goals";
-  return wireDomain;
-}
-var CONFIG_PLANE_METHODS = [
-  "llm.discoverModels",
-  "settings.describe",
-  "settings.update",
-  "settings.replace",
-  "settings.mutate",
-  "credentials.describe",
-  "credentials.set",
-  "credentials.unset"
-];
-function scopeConfigPlaneMethod(api, method, native) {
-  switch (method) {
-    case "llm.discoverModels":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(discoverModelsSchema, request.payload, "llm.discoverModels");
-        if (payload.baseURL !== void 0) validateDiscoverBaseUrl(payload.baseURL);
-        try {
-          const response = await native({ rpcId: request.rpcId, payload }, signal);
-          return sanitizeModelDiscoveryResponse(response, payload.settingsNs);
-        } catch {
-          return modelDiscoveryFailure(request.rpcId, payload.settingsNs);
-        }
-      };
-    case "settings.describe":
-      return async (request, signal) => {
-        parseConfigPlane(settingsDescribeSchema, request.payload, "settings.describe");
-        const response = await native({ rpcId: request.rpcId, payload: {} }, signal);
-        return disableRemoteSettingsDocument(response);
-      };
-    case "settings.update":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(settingsUpdateSchema, request.payload, "settings.update");
-        await assertRegisteredSettingsNamespace(api, payload.ns);
-        assertSerializedBytes(payload.patch, CONFIG_PLANE_SETTINGS_BYTES, "settings.update patch");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-    case "settings.replace":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(settingsReplaceSchema, request.payload, "settings.replace");
-        await assertRegisteredSettingsNamespace(api, payload.ns);
-        assertSerializedBytes(payload.section, CONFIG_PLANE_SETTINGS_BYTES, "settings.replace section");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-    case "settings.mutate":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(settingsMutateSchema, request.payload, "settings.mutate");
-        await assertRegisteredSettingsNamespace(api, payload.ns);
-        assertSerializedBytes(payload.ops, CONFIG_PLANE_SETTINGS_BYTES, "settings.mutate ops");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-    case "credentials.describe":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(credentialsDescribeSchema, request.payload, "credentials.describe");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-    case "credentials.set":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(credentialsSetSchema, request.payload, "credentials.set");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-    case "credentials.unset":
-      return async (request, signal) => {
-        const payload = parseConfigPlane(credentialsUnsetSchema, request.payload, "credentials.unset");
-        return native({ rpcId: request.rpcId, payload }, signal);
-      };
-  }
-}
-function parseConfigPlane(schema, payload, label) {
-  try {
-    return schema.parse(payload);
-  } catch (error) {
-    if (error instanceof external_exports.ZodError) {
-      throw new RpcError("INVALID_MESSAGE", `The ${label} payload is invalid for the remote channel.`);
-    }
-    throw error;
-  }
-}
-function validateDiscoverBaseUrl(value) {
-  let url;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new RpcError("INVALID_MESSAGE", "The model discovery baseURL is invalid.");
-  }
-  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) {
-    throw new RpcError("INVALID_MESSAGE", "The model discovery baseURL must use HTTPS (HTTP is allowed only for localhost).");
-  }
-  if (url.username !== "" || url.password !== "") {
-    throw new RpcError("INVALID_MESSAGE", "The model discovery baseURL must not contain credentials.");
-  }
-  if (url.hash !== "") {
-    throw new RpcError("INVALID_MESSAGE", "The model discovery baseURL must not contain a fragment.");
-  }
-}
-function assertSerializedBytes(value, maxBytes, label) {
-  const bytes = new TextEncoder().encode(JSON.stringify(value)).byteLength;
-  if (bytes > maxBytes) {
-    throw new RpcError("INVALID_MESSAGE", `The ${label} exceeds the ${maxBytes}-byte remote limit.`);
-  }
-}
-function sanitizeModelDiscoveryResponse(response, settingsNs) {
-  const result = response.result;
-  if (typeof result === "object" && result !== null && "ok" in result && result.ok === true) return response;
-  return modelDiscoveryFailure(response.rpcId, settingsNs);
-}
-function modelDiscoveryFailure(rpcId2, settingsNs) {
-  return {
-    rpcId: rpcId2,
-    result: {
-      ok: false,
-      error: {
-        code: "model-discovery-failed",
-        message: "Model discovery failed.",
-        details: { settingsNs }
-      }
-    }
-  };
-}
-function disableRemoteSettingsDocument(response) {
-  const result = response.result;
-  if (typeof result !== "object" || result === null || !("ok" in result) || result.ok !== true) return response;
-  const value = result.value;
-  if (typeof value !== "object" || value === null) return response;
-  return { ...response, result: { ...result, value: { ...value, hasDocument: false } } };
-}
-var EMPTY_SETTINGS_NAMESPACES = /* @__PURE__ */ new Set();
-async function assertRegisteredSettingsNamespace(api, ns) {
-  if (ns === "ds-harness-remote" || ns === "dsh-remote") {
-    throw new RpcError("PERMISSION_DENIED", "Remote access settings can only be changed locally on the Host.");
-  }
-  const allowed = await registeredSettingsNamespaces(api);
-  if (!allowed.has(ns)) throw deniedSettingsNamespace(ns);
-}
-async function registeredSettingsNamespaces(api) {
-  const settings = api.settings;
-  const describe = settings?.describe;
-  if (typeof describe !== "function") return EMPTY_SETTINGS_NAMESPACES;
-  const response = await withTimeout(
-    describe.call(settings, { rpcId: "bridge-settings-scope", payload: {} }, AbortSignal.timeout(NATIVE_CALL_TIMEOUT_MS)),
-    NATIVE_CALL_TIMEOUT_MS,
-    "The Host settings.describe call timed out."
-  );
-  const value = unwrapNativeValue(response, "settings.describe");
-  const list = typeof value === "object" && value !== null ? value.namespaces : void 0;
-  if (!Array.isArray(list)) return EMPTY_SETTINGS_NAMESPACES;
-  const namespaces = /* @__PURE__ */ new Set();
-  for (const item of list) {
-    if (typeof item !== "object" || item === null) continue;
-    const ns = item.ns;
-    if (typeof ns === "string" && ns.length > 0) namespaces.add(ns);
-  }
-  return namespaces;
-}
-function unwrapNativeValue(response, method) {
-  const result = response.result;
-  if (typeof result !== "object" || result === null || !("ok" in result) || result.ok !== true || !("value" in result)) {
-    throw new RpcError("INTERNAL_ERROR", `The Host ${method} call did not succeed.`);
-  }
-  return result.value;
-}
-function deniedSettingsNamespace(ns) {
-  return new RpcError("METHOD_NOT_ALLOWED", `Harness settings namespace ${JSON.stringify(ns)} is not registered on the Host.`);
-}
-function deniedMethod(method) {
-  return new RpcError("METHOD_NOT_ALLOWED", `Harness API method ${JSON.stringify(method)} is not available in remote mode.`);
-}
-function frameSessionId(frame) {
-  const payload = frame.payload;
-  return typeof payload.sessionId === "string" && payload.sessionId.length > 0 ? payload.sessionId : void 0;
-}
-function withTimeout(promise, ms, message) {
-  return new Promise((resolve6, reject) => {
-    const timer = setTimeout(() => {
-      reject(new RpcError("TIMEOUT", message, void 0, true));
-    }, ms);
-    timer.unref?.();
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve6(value);
-      },
-      (error) => {
-        clearTimeout(timer);
-        reject(error);
-      }
-    );
-  });
-}
-function shortId4(value) {
-  return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
-}
-function decodeCanonicalBase643(value) {
-  const bytes = Buffer.from(value, "base64");
-  if (bytes.toString("base64") !== value) {
-    throw new RpcError("INVALID_MESSAGE", "The Harness API transfer chunk is not canonical base64.");
-  }
-  return bytes;
-}
-function concatChunks3(chunks, totalBytes) {
-  const result = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return result;
-}
-
 // src/harness-remote-bridge.ts
-import { randomUUID as randomUUID7 } from "node:crypto";
 var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
-var callSchema4 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
-var streamOpenSchema4 = external_exports.object({
+var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
+var streamOpenSchema3 = external_exports.object({
   streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
   payload: external_exports.unknown(),
   transferFrames: external_exports.boolean().optional()
 }).strict();
-var streamCloseSchema4 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
 var commandExecuteArgsSchema = external_exports.object({
   agentId: external_exports.string().min(1).max(128),
   line: external_exports.string().min(1).max(2048),
@@ -41090,27 +39318,27 @@ var commandExecuteArgsSchema = external_exports.object({
   }
 });
 var commandExecutePayloadSchema = external_exports.object({ args: commandExecuteArgsSchema }).strict();
-var transferOpenSchema4 = external_exports.object({
+var transferOpenSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
   totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema4 = external_exports.object({
+var transferChunkSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative(),
   data: external_exports.string().min(1)
 }).strict();
-var transferIdSchema4 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
-var transferReadSchema4 = external_exports.object({
+var transferIdSchema3 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema3 = external_exports.object({
   transferId: external_exports.string().uuid(),
   index: external_exports.number().int().nonnegative()
 }).strict();
-var directoryListSchema2 = external_exports.object({
+var directoryListSchema = external_exports.object({
   path: external_exports.string().min(1).max(4096).optional()
 }).strict();
 var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
-var INLINE_TRANSFER_RESPONSE_BYTES4 = 2 * 1024 * 1024;
+var INLINE_TRANSFER_RESPONSE_BYTES3 = 2 * 1024 * 1024;
 var HARNESS_REMOTE_ALLOWLIST = [
   "$events",
   "$events/result",
@@ -41219,7 +39447,7 @@ var HarnessRemoteBridge = class {
   outgoingTransfers = /* @__PURE__ */ new Map();
   terminalCarrier;
   async call(input3) {
-    const params = callSchema4.parse(input3);
+    const params = callSchema3.parse(input3);
     this.assertAllowed(params.endpoint);
     if (TERMINAL_STREAMS.has(params.endpoint)) throw new RpcError("METHOD_NOT_ALLOWED", "Use a stream for this terminal endpoint.");
     if (["settings/update", "settings/replace", "settings/mutate"].includes(params.endpoint)) {
@@ -41286,12 +39514,12 @@ var HarnessRemoteBridge = class {
   }
   async directoryList(payload, signal) {
     const args = requestArgs(payload);
-    const params = directoryListSchema2.parse(args);
+    const params = directoryListSchema.parse(args);
     return { ok: true, value: await listRemoteDirectory(params.path, signal) };
   }
   openTransfer(input3) {
     this.pruneTransfers();
-    const params = transferOpenSchema4.parse(input3);
+    const params = transferOpenSchema3.parse(input3);
     if (params.totalChunks !== Math.ceil(params.totalBytes / HARNESS_API_TRANSFER_CHUNK_BYTES)) {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk count is invalid.");
     }
@@ -41312,14 +39540,14 @@ var HarnessRemoteBridge = class {
   }
   appendTransfer(input3) {
     this.pruneTransfers();
-    const params = transferChunkSchema4.parse(input3);
+    const params = transferChunkSchema3.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     if (params.index !== transfer.chunks.length || params.index >= transfer.totalChunks) {
       this.incomingTransfers.delete(params.transferId);
       throw new RpcError("INVALID_MESSAGE", "Harness Remote transfer chunks must arrive exactly once and in order.");
     }
-    const chunk = decodeCanonicalBase644(params.data);
+    const chunk = decodeCanonicalBase643(params.data);
     const expectedBytes = Math.min(
       HARNESS_API_TRANSFER_CHUNK_BYTES,
       transfer.totalBytes - params.index * HARNESS_API_TRANSFER_CHUNK_BYTES
@@ -41335,7 +39563,7 @@ var HarnessRemoteBridge = class {
   }
   async commitTransfer(input3) {
     this.pruneTransfers();
-    const params = transferIdSchema4.parse(input3);
+    const params = transferIdSchema3.parse(input3);
     const transfer = this.incomingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote transfer is not active.");
     this.incomingTransfers.delete(params.transferId);
@@ -41344,13 +39572,13 @@ var HarnessRemoteBridge = class {
     }
     let request;
     try {
-      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks4(transfer.chunks, transfer.totalBytes)));
+      request = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(concatChunks3(transfer.chunks, transfer.totalBytes)));
     } catch {
       throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer does not contain a valid request.");
     }
-    const response = await this.call(callSchema4.parse(request));
+    const response = await this.call(callSchema3.parse(request));
     const responseBytes = new TextEncoder().encode(JSON.stringify(response));
-    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES4) return { kind: "inline", response };
+    if (responseBytes.byteLength <= INLINE_TRANSFER_RESPONSE_BYTES3) return { kind: "inline", response };
     if (responseBytes.byteLength > MAX_HARNESS_API_TRANSFER_BYTES) {
       throw new RpcError("RESPONSE_TOO_LARGE", "The Harness Remote response exceeds the bounded transfer limit.");
     }
@@ -41368,7 +39596,7 @@ var HarnessRemoteBridge = class {
   }
   readTransfer(input3) {
     this.pruneTransfers();
-    const params = transferReadSchema4.parse(input3);
+    const params = transferReadSchema3.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     if (transfer === void 0) throw new RpcError("TRANSFER_NOT_FOUND", "The Harness Remote response transfer is not active.");
     if (params.index !== transfer.nextIndex || params.index >= transfer.totalChunks) {
@@ -41387,14 +39615,14 @@ var HarnessRemoteBridge = class {
     };
   }
   closeTransfer(input3) {
-    const params = transferIdSchema4.parse(input3);
+    const params = transferIdSchema3.parse(input3);
     const transfer = this.outgoingTransfers.get(params.transferId);
     transfer?.finish?.(transfer.nextIndex === transfer.totalChunks ? void 0 : new Error("Incomplete Harness Remote stream transfer"));
     const closed = this.incomingTransfers.delete(params.transferId) || this.outgoingTransfers.delete(params.transferId);
     return { closed, transferId: params.transferId };
   }
   async openStream(input3) {
-    const params = streamOpenSchema4.parse(input3);
+    const params = streamOpenSchema3.parse(input3);
     this.assertAllowed(params.endpoint);
     if (params.endpoint.startsWith("pluginManager/")) throw new RpcError("METHOD_NOT_ALLOWED", "Plugin management endpoints are not streams.");
     if (params.endpoint.startsWith("settings/")) throw new RpcError("METHOD_NOT_ALLOWED", "Settings endpoints are not streams.");
@@ -41419,7 +39647,7 @@ var HarnessRemoteBridge = class {
     return { opened: true, streamId: params.streamId };
   }
   closeStream(input3) {
-    const params = streamCloseSchema4.parse(input3);
+    const params = streamCloseSchema3.parse(input3);
     const active = this.streams.get(params.streamId);
     if (active !== void 0) {
       this.streams.delete(params.streamId);
@@ -41447,10 +39675,10 @@ var HarnessRemoteBridge = class {
     const args = parsed.data.args;
     const result = await this.gateway.dispatch(plugin ? "pluginManager/listPlugins" : "pluginManager/listBundles", { args: {} }, AbortSignal.timeout(6e4));
     if (!result.ok || !Array.isArray(result.value)) throw new RpcError("PERMISSION_DENIED", "Cannot verify the Host plugin inventory.");
-    const row = result.value.find((value) => isRecord21(value) && value[plugin ? "entryId" : "name"] === args[key]);
-    if (!isRecord21(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
+    const row = result.value.find((value) => isRecord20(value) && value[plugin ? "entryId" : "name"] === args[key]);
+    if (!isRecord20(row) || row.readOnlyReason !== void 0) throw new RpcError("PERMISSION_DENIED", "The Host plugin cannot be changed remotely.");
     const remoteModule = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-    if (remoteModule(plugin ? row.moduleName : row.name) || !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord21(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value) || value === "ds-harness-remote-tui"))) {
+    if (remoteModule(plugin ? row.moduleName : row.name) || !plugin && (!Array.isArray(row.rows) || row.rows.some((value) => !isRecord20(value) || remoteModule(value.moduleName)) || Array.isArray(row.overrides) && row.overrides.some((value) => remoteModule(value) || value === "ds-harness-remote-tui"))) {
       throw new RpcError("PERMISSION_DENIED", "The Remote plugin can only be enabled or disabled locally on the Host.");
     }
   }
@@ -41539,11 +39767,11 @@ var HarnessRemoteBridge = class {
 };
 function normalizeWorkspaceChangesPayload(endpoint, payload, harnessVersion) {
   if (endpoint !== "workspaceFiles/changes" || !requiresWorkspaceChangePath(harnessVersion)) return payload;
-  if (!isRecord21(payload) || !isRecord21(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
+  if (!isRecord20(payload) || !isRecord20(payload.args) || Object.hasOwn(payload.args, "path")) return payload;
   return { ...payload, args: { ...payload.args, path: "." } };
 }
 function normalizeWorkspaceRequestPayload(endpoint, payload, harnessVersion) {
-  if (!isRecord21(payload) || !isRecord21(payload.args)) return payload;
+  if (!isRecord20(payload) || !isRecord20(payload.args)) return payload;
   const args = payload.args;
   if (endpoint === "workspaceFiles/readBytes" && requiresWorkspaceChangePath(harnessVersion)) {
     if (!Object.hasOwn(args, "range") || Object.hasOwn(args, "options")) return payload;
@@ -41589,7 +39817,7 @@ async function dispatchCommandForHost(gateway, payload, signal, harnessVersion) 
     signal
   );
 }
-function decodeCanonicalBase644(value) {
+function decodeCanonicalBase643(value) {
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) throw new RpcError("INVALID_MESSAGE", "The Harness Remote transfer chunk is invalid.");
   return bytes;
@@ -41624,7 +39852,7 @@ function isBinary(value) {
 function isJsonRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
-function concatChunks4(chunks, totalBytes) {
+function concatChunks3(chunks, totalBytes) {
   const result = new Uint8Array(totalBytes);
   let offset = 0;
   for (const chunk of chunks) {
@@ -41642,27 +39870,27 @@ function needsDirectoryFallback(result) {
 function filterRemotePluginInventory(endpoint, result) {
   if (!result.ok) return result;
   const isRemote = (value) => typeof value === "string" && /^(?:ds-harness-remote|dsh-remote)(?:\/|$)/.test(value);
-  const filterEntries = (entries) => entries.filter((entry) => !isRecord21(entry) || !isRemote(entry.moduleName));
+  const filterEntries = (entries) => entries.filter((entry) => !isRecord20(entry) || !isRemote(entry.moduleName));
   if (endpoint === "pluginManager/listPlugins" && Array.isArray(result.value)) {
     return { ...result, value: filterEntries(result.value) };
   }
   if (endpoint === "pluginManager/listBundles" && Array.isArray(result.value)) {
-    return { ...result, value: result.value.filter((bundle) => !isRecord21(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord21(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
+    return { ...result, value: result.value.filter((bundle) => !isRecord20(bundle) || !isRemote(bundle.name)).map((bundle) => isRecord20(bundle) && Array.isArray(bundle.rows) ? { ...bundle, rows: filterEntries(bundle.rows) } : bundle) };
   }
-  if (endpoint === "pluginInventory/list" && isRecord21(result.value) && Array.isArray(result.value.entries)) {
+  if (endpoint === "pluginInventory/list" && isRecord20(result.value) && Array.isArray(result.value.entries)) {
     return { ...result, value: { ...result.value, entries: filterEntries(result.value.entries) } };
   }
   return result;
 }
 function requestArgs(payload) {
   const root = record8(payload);
-  const args = isRecord21(root.args) ? root.args : root;
+  const args = isRecord20(root.args) ? root.args : root;
   return record8(args.request ?? args._request ?? args);
 }
 function record8(value) {
-  return isRecord21(value) ? value : {};
+  return isRecord20(value) ? value : {};
 }
-function isRecord21(value) {
+function isRecord20(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function isCompactSnapshot(value) {
@@ -41692,10 +39920,9 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config, identities, apiProxy, logger, localGateway, fileViewerHost, terminalSpawner, pluginRoutes) {
+  constructor(config, identities, logger, localGateway, fileViewerHost, terminalSpawner, pluginRoutes) {
     this.config = config;
     this.identities = identities;
-    this.apiProxy = apiProxy;
     this.logger = logger;
     this.localGateway = localGateway;
     this.fileViewerHost = fileViewerHost;
@@ -41707,14 +39934,6 @@ var HostPluginRuntime = class {
     this.acp = new AcpRemoteGateway(config.acp ?? { enabled: false, backends: [] }, logger, void 0, void 0, () => this.terminalEnabled, this.terminalSpawner);
     this.connections = new ConnectionController(this.identities, (context, send) => {
       const peerGateway = this.localGateway?.createPeer?.() ?? this.localGateway;
-      const harnessApi = this.apiProxy === void 0 ? void 0 : new HarnessApiBridge(
-        this.apiProxy,
-        (event, data2) => send(createEvent(event, data2)),
-        void 0,
-        this.logger,
-        peerGateway,
-        this.harnessVersion
-      );
       const harnessRemote = peerGateway?.supportsCarrier === true ? new HarnessRemoteBridge(
         peerGateway,
         (event, data2) => send(createEvent(event, data2)),
@@ -41743,7 +39962,6 @@ var HostPluginRuntime = class {
       const dispatcher = this.pluginRoutes?.(peerGateway?.peer);
       const pluginRoute = dispatcher === void 0 ? void 0 : new PluginRouteBridge(dispatcher, this.logger);
       return new RpcRouter(
-        harnessApi,
         void 0,
         this.logger,
         fileViewer,
@@ -41813,7 +40031,7 @@ var HostPluginRuntime = class {
     if (this.closed) throw new Error("remote runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
     this.logger.info("host identity ready", {
-      deviceId: shortId5(this.identity.deviceId),
+      deviceId: shortId4(this.identity.deviceId),
       fingerprint: this.identity.fingerprint,
       server: this.config.serverUrl ?? "not configured"
     });
@@ -42027,15 +40245,15 @@ var HostPluginRuntime = class {
   diagnostics() {
     return {
       loaded: this.identity !== void 0,
-      deviceId: this.identity === void 0 ? void 0 : shortId5(this.identity.deviceId),
+      deviceId: this.identity === void 0 ? void 0 : shortId4(this.identity.deviceId),
       identityValid: this.identity !== void 0,
       serverConfigured: this.config.serverUrl !== void 0,
       serverOnline: this.serverConnection?.isOnline() ?? false,
       serverError: this.serverConnection?.lastError(),
       online: this.connections.isOnline(),
       activeConnections: this.connections.connectionCount(),
-      peerDeviceId: this.connections.peerDeviceId() === void 0 ? void 0 : shortId5(this.connections.peerDeviceId()),
-      peerDeviceIds: this.connections.peerDeviceIds().map(shortId5),
+      peerDeviceId: this.connections.peerDeviceId() === void 0 ? void 0 : shortId4(this.connections.peerDeviceId()),
+      peerDeviceIds: this.connections.peerDeviceIds().map(shortId4),
       trustedPeers: this.identities.listTrustedPeers().length,
       capabilities: this.hostCapabilities(),
       workspaceTypes: this.hostWorkspaceTypes(),
@@ -42058,23 +40276,9 @@ var HostPluginRuntime = class {
     );
   }
   async readHarnessVersion() {
-    let reportedVersion;
-    let errorCode6;
-    try {
-      const response = await this.apiProxy?.host.describe({ rpcId: randomUUID8(), payload: {} });
-      if (response === void 0) throw new Error("ApiProxy is unavailable");
-      if (!response.result.ok) {
-        errorCode6 = response.result.error.code;
-      } else {
-        reportedVersion = normalizeHarnessVersion(response.result.value.version);
-      }
-    } catch {
-    }
-    const distributionVersion = reportedVersion === void 0 || reportedVersion === "0.0.1" ? await readHarnessDistributionVersion() : void 0;
-    const version = selectHarnessVersion(reportedVersion, distributionVersion);
-    if (version !== void 0) return version;
-    this.logger.warn("Harness version is unavailable", errorCode6 === void 0 ? void 0 : { code: errorCode6 });
-    return void 0;
+    const version = await readHarnessDistributionVersion();
+    if (version === void 0) this.logger.warn("Harness version is unavailable");
+    return version;
   }
   hostCapabilities() {
     const capabilities = ["workspace.upload.v1"];
@@ -42086,9 +40290,6 @@ var HostPluginRuntime = class {
       );
     }
     if (this.localGateway?.supportsCarrier && this.terminalEnabled) capabilities.push("harness.terminal.v1");
-    if (this.apiProxy !== void 0) {
-      capabilities.push("harness.api.v1", "harness.api.transfer.v1");
-    }
     if (this.fileViewerHost?.() !== void 0) capabilities.push("fileviewer.read.v1");
     if (this.pluginRoutes?.() !== void 0) capabilities.push("plugin.route.v1");
     if (this.codex.isAvailable()) capabilities.push("codex.appserver.v1", "codex.appserver.transfer.v1");
@@ -42171,7 +40372,7 @@ var HostPluginRuntime = class {
     return peer;
   }
 };
-function shortId5(value) {
+function shortId4(value) {
   return value.length <= 12 ? value : `${value.slice(0, 8)}\u2026${value.slice(-4)}`;
 }
 function isPlainRecord(value) {
@@ -42687,7 +40888,7 @@ function remoteStatusLines(target2) {
     `Server connection: ${connection}`,
     ...status2.error === void 0 ? [] : [`Connection error: ${status2.error}`],
     ...status2.error === "CONNECTION_REPLACED" ? ["Another instance is using this Host identity. Stop it or use a separate DSH_HOME before reconnecting."] : status2.error === "SERVER_CREDENTIALS_BUSY" ? ["Credential refresh is locked. Stop all instances before removing an orphaned server-credentials.json.refresh-lock and authorizing again."] : status2.accountRequired ? ["Authorize again with /remote login [provider|list]."] : [],
-    `Harness Remote API: ${capabilities.has("harness.api.v1") ? "available (ApiProxy)" : capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
+    `Harness Remote API: ${capabilities.has("harness.remote.v3") ? "available (Typert Remote Session V3)" : capabilities.has("harness.remote.v1") ? "available (Typert Remote)" : "unavailable"}`,
     `Remote clients: ${diagnostics.activeConnections}`,
     `Codex Remote: ${codex.enabled ? codex.state : "disabled"}`,
     `Agent ACP: ${cursor2.enabled ? cursor2.state : "disabled"}`,
@@ -43058,11 +41259,10 @@ function apply(ctx, entry = void 0) {
       disposePendingControl = void 0;
       await activate(activeContext, readConfig, entryId, tuiBinding);
     };
-    if (tuiCommandsAvailable || runtimeContext.get("apiProxy") !== void 0 || new TypertGatewaySwitch(gateway).supportsCarrier()) {
+    if (tuiCommandsAvailable || new TypertGatewaySwitch(gateway).supportsCarrier()) {
       return startActiveRuntime(runtimeContext);
     }
     installPendingControl();
-    runtimeContext.inject(["apiProxy"], (legacyContext) => startActiveRuntime(legacyContext));
   };
   if (tuiCommandsAvailable) {
     ctx.inject(["settings", "typertGateway"], activateWhenCarrierReady);
@@ -43103,7 +41303,6 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
       console.error(message);
     }
   }, config.logLevel);
-  const apiProxy = ctx.get("apiProxy");
   const nativeTypertGateway = ctx.get("typertGateway");
   const hostGateway = new TypertGatewaySwitch(nativeTypertGateway);
   const localTypertGateway = hostGateway.local();
@@ -43128,7 +41327,6 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
     const runtime2 = new HostPluginRuntime(
       config2,
       hostIdentities,
-      apiProxy,
       logger,
       localTypertGateway,
       () => ctx.get("fileViewerHost"),
@@ -43148,7 +41346,6 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
         config2,
         clientIdentities,
         new ClientServerApi(config2.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
-        apiProxy,
         nativeTypertGateway,
         logger,
         runtime2
@@ -43211,7 +41408,6 @@ async function activate(ctx, readConfig, entryId, tuiBinding) {
         } else {
           logger.warn("client remote mode is unavailable", {
             serverConfigured: config.serverUrl !== void 0,
-            apiProxyAvailable: apiProxy !== void 0,
             remoteGatewayAvailable: localTypertGateway.supportsCarrier,
             connectionAvailable: connection !== void 0
           });
@@ -43340,7 +41536,6 @@ export {
   AcpGateway,
   AcpPeerBridge,
   AcpRemoteGateway,
-  ApiProxySwitch,
   CODEX_APP_ALLOWLIST,
   ClientModeError,
   ClientModeRuntime,
@@ -43355,10 +41550,8 @@ export {
   ConnectionRejectedError,
   CursorAcpClient,
   CursorAcpError,
-  HARNESS_API_ALLOWLIST,
   HARNESS_REMOTE_ALLOWLIST,
   HOST_CAPABILITIES,
-  HarnessApiBridge,
   HarnessRemoteBridge,
   HostPluginRuntime,
   HostServerApi,
@@ -43367,7 +41560,6 @@ export {
   IdentityStore,
   PluginControlRuntime,
   RemoteFileViewerBridge,
-  RemoteHarnessApiProxy,
   RemoteTypertGateway2 as RemoteTypertGateway,
   RpcError,
   RpcRouter,

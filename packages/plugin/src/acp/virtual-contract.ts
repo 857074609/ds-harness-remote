@@ -196,11 +196,6 @@ export function requestArg(args: JsonRecord): JsonRecord {
   return record(args.request ?? args._request ?? args)
 }
 
-export function rcEndpoint(endpoint: string): string {
-  if (endpoint === 'workspace.list') return 'workspace/list'
-  return endpoint.replace('.', '/')
-}
-
 export function success(value: unknown): { ok: true; value: unknown } {
   return { ok: true, value }
 }

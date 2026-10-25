@@ -1,7 +1,10 @@
 ## 0.5.19 — Unreleased
 
-- Restore Android Harness history image attachments through the official session-scoped ApiProxy/Typert lookup, including bounded legacy attachment transfers. Keep assistant/tool image content visible and render Markdown workspace images through the existing authorized preview reader. Add memory-only thumbnails, full-screen viewing and retry; validate image bytes/pixel limits and discard cancelled or stale connection results. External network images remain inert; this does not establish a fix for the separately reported PNG-send error (#159).
-- 修复 Android Harness 历史附件图片读取：复用官方按会话鉴权的 ApiProxy/Typert 接口，旧 ApiProxy 大图响应走有界分块；保留 AI/工具图片内容，Markdown 工作区图片复用现有授权预览。新增内存缩略图、全屏查看与失败重试，校验图片字节/像素上限并丢弃取消或旧连接结果。外部网络图片保持不自动加载；尚未确认评论中单独反馈的 PNG 发送错误（#159）。
+- Harness `0.1.1-rc.2` ApiProxy support has been removed from the Host plugin, its bundled Remote client, and Android. Use a Host with the official Typert Remote carrier; ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP keep their independent data planes and use Typert for Desktop projection. This change does not update the standalone VS Code client or the independent Remote Web repository.
+- Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。
+
+- Restore Android Harness history image attachments through the official session-scoped Typert lookup with bounded transfers. Keep assistant/tool image content visible and render Markdown workspace images through the existing authorized preview reader. Add memory-only thumbnails, full-screen viewing and retry; validate image bytes/pixel limits and discard cancelled or stale connection results. External network images remain inert; this does not establish a fix for the separately reported PNG-send error (#159).
+- 修复 Android Harness 历史附件图片读取：复用官方按会话鉴权的 Typert 接口，大图响应走有界分块；保留 AI/工具图片内容，Markdown 工作区图片复用现有授权预览。新增内存缩略图、全屏查看与失败重试，校验图片字节/像素上限并丢弃取消或旧连接结果。外部网络图片保持不自动加载；尚未确认评论中单独反馈的 PNG 发送错误（#159）。
 
 - Probe WebRTC helper candidates with Electron's Node mode enabled, then reject Electron before loading native WebRTC. Connecting to a Desktop Host no longer launches another Desktop through runtime detection and leaves it writing to a closed probe pipe (`EPIPE`).
 - WebRTC helper 探测显式启用 Electron Node 模式，并在加载原生 WebRTC 前拒绝 Electron；修复连接 Desktop Host 时运行时探测误启动另一个 Desktop、探测管道关闭后触发 `EPIPE` 的问题。

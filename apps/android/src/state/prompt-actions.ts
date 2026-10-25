@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics'
 import { friendlyError, isRecoverableTransportError, isRpcTimeoutError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
-import { createNativeRpcId } from '../services/api-proxy'
+import { createNativeRpcId } from '../services/rpc-id'
 import {
   codexPermissionPresetFromResponse,
   codexThreadId,

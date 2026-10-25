@@ -1,5 +1,15 @@
 # Repository Guide for Agents
 
+## WebRTC runtime probe isolation (2026-10-25)
+
+外部原生 WebRTC helper 的候选探测必须显式设置 `ELECTRON_RUN_AS_NODE=1`，不能删除该标记：
+候选可能是 Desktop 的 Electron 可执行程序或其 launcher，否则连接触发探测时会误启动另一个
+Desktop，探测超时关闭 stdout 后可能触发 `write EPIPE`。探测脚本仍须在加载原生 WebRTC 前
+拒绝 Electron，最终 helper 使用独立 Node。核心回归使用真实子进程覆盖 Node 接受、Electron
+拒绝及不进入 GUI 模式；旧探测行为会失败。Plugin check、相关 10 tests、build、DSH bundle
+校验、真实安装版 Electron → Node → native WebRTC offer，以及 Web → 测试 Host 的 LAN
+加密连接通过。未验证本次 Windows/Linux runtime 探测。
+
 本文件面向在当前仓库工作的编码 Agent，记录仓库边界、项目结构、实现状态、验证命令和协作约束。用户产品说明与 Plugin 使用方式见 `README.md`。
 
 ## Repository Boundary

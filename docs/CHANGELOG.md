@@ -1,5 +1,8 @@
 ## 0.5.19 — Unreleased
 
+- Probe WebRTC helper candidates with Electron's Node mode enabled, then reject Electron before loading native WebRTC. Connecting to a Desktop Host no longer launches another Desktop through runtime detection and leaves it writing to a closed probe pipe (`EPIPE`).
+- WebRTC helper 探测显式启用 Electron Node 模式，并在加载原生 WebRTC 前拒绝 Electron；修复连接 Desktop Host 时运行时探测误启动另一个 Desktop、探测管道关闭后触发 `EPIPE` 的问题。
+
 - Load oversized Harness history frames in the Plugin Remote client through negotiated, bounded 512 KiB transfers while preserving stream ordering and the 4 MiB secure-message limit. Cancelled, disconnected, incomplete and idle transfers release their resources; legacy clients keep the existing frame behavior.
 - Plugin Remote 客户端通过能力协商和有界的 512 KiB 分片传输加载超大 Harness 历史帧，保留流事件顺序与 4 MiB 安全消息上限；取消、断连、未完整读取和空闲超时均释放传输资源，旧客户端保持原有行为。
 

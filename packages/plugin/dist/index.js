@@ -28513,7 +28513,7 @@ function nvmNodeCandidates() {
 function isUsableExternalNode(candidate, requireFrom) {
   if (!isExecutableFile(candidate)) return false;
   const env = { ...process.env, DSH_REMOTE_RTC_HELPER_REQUIRE_FROM: requireFrom };
-  delete env.ELECTRON_RUN_AS_NODE;
+  env.ELECTRON_RUN_AS_NODE = "1";
   const probe = spawnSync(candidate, [
     "--input-type=module",
     "--eval",

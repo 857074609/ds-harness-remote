@@ -334,8 +334,10 @@ export interface PromptImage {
   name?: string
 }
 
-/** Image presentation retained in the local optimistic chat row. */
+/** Image presentation; durable references remain bound to their owning session. */
 export interface ChatImage {
+  attachmentId?: string
+  sessionId?: string
   uri?: string
   name?: string
 }

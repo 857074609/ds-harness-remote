@@ -131,7 +131,7 @@ export function mergeHistoryAndLive(history: ChatItem[], live: ChatItem[], throu
       const authoritative = liveSeq > historySeq ? cached : item
       return authoritative.kind === 'message' && cached.kind === 'message'
         ? { ...authoritative, ...(authoritative.feedback === undefined && cached.feedback !== undefined ? { feedback: cached.feedback } : {}),
-            ...(authoritative.role === 'user' && cached.images !== undefined ? { images: cached.images } : {}) }
+            ...(authoritative.role === 'user' && authoritative.images === undefined && cached.images !== undefined ? { images: cached.images } : {}) }
         : authoritative
     }),
     ...live.filter(item => {
@@ -227,7 +227,7 @@ export function mergeReplyReasoning(items: ChatItem[]): ChatItem[] {
 
     const group = groups.get(item.replyGroup) ?? { reasoning: [] }
     groups.set(item.replyGroup, group)
-    const textVisible = hasVisibleText(item.text)
+    const textVisible = hasVisibleText(item.text) || (item.images?.length ?? 0) > 0
     const reasoningVisible = hasVisibleText(item.reasoning ?? '')
 
     if (reasoningVisible) group.reasoning.push(item.reasoning!)

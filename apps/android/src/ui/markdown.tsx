@@ -1,3 +1,5 @@
+import { ChatImageView } from './chat-image'
+import { chatImageWorkspacePath } from '../services/chat-image-loader'
 import { createContext, memo, useContext, useMemo, useRef, type ReactNode } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import MarkdownIt, { type Token } from 'markdown-it'
@@ -233,7 +235,10 @@ function renderInline(tokens: Token[], styles: MarkdownStyles, prefix: string, o
     }
     else if (token.type === 'image') {
       const alt = token.content || token.children?.map(child => child.content).join('') || '图片'
-      output.push(<Text key={key} style={styles.imageAlt}>{`[${alt}]`}</Text>)
+      const src = token.attrGet('src') ?? ''
+      output.push(src.startsWith('data:') || chatImageWorkspacePath(src) !== undefined
+        ? <ChatImageView key={key} image={{ uri: src, name: alt }} remoteSource />
+        : <Text key={key} style={styles.imageAlt}>{`[${alt}]`}</Text>)
     } else if (token.nesting === 1) {
       const closing = findClosingToken(tokens, index)
       if (closing < 0) continue

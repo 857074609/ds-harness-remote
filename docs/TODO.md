@@ -349,6 +349,7 @@ ApiProxy / Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、
 - [x] Harness 会话工作区目录浏览、UTF-8 分页只读预览；不支持的 Host 显示更新提示
 - [x] Android 本地 xterm 终端、创建/恢复/结束、归属与输入权隔离、序号检查和断线不重放
 - [ ] 真机验证新旧 DSH 权限切换、Host 热开启/关闭终端、跨机重连、Windows 路径与 shell、长输出、IME/TalkBack/大字体
+- [ ] #159 Android 历史附件与 Markdown 工作区图片真机/跨设备验收：ApiProxy/Typert 大图、AI/工具图片、全屏、取消与重连；单独复现并定位 PNG 发送报错。
 - [ ] Android 图片/PDF/Office 只读预览真实 Host 与真机验收：大文件、转换超时/字体缺失、取消与断线、内存峰值、分页缩放
 - [ ] PDF 文本选择与 TalkBack 验收（当前已有受限文本叠层，真机未验证）
 

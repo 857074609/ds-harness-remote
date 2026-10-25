@@ -82,7 +82,7 @@ export class RemoteApiProxy {
       payload,
     } satisfies HarnessApiCallParams
     const encoded = new TextEncoder().encode(JSON.stringify(params))
-    const response = encoded.byteLength > DIRECT_API_CALL_BYTES
+    const response = method === 'session.attachment' || encoded.byteLength > DIRECT_API_CALL_BYTES
       ? await this.callTransferred<TResult>(encoded, signal)
       : await this.core.rpc<NativeRpcResponse<TResult>>('harness.api.call', params, signal)
     if (String(response.rpcId) !== rpcId) {

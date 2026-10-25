@@ -1,3 +1,4 @@
+import { ChatImageView } from '../../ui/chat-image'
 import {
   ArrowUp,
   Bot,
@@ -6,7 +7,6 @@ import {
   ChevronRight,
   ChevronUp,
   Code2,
-  Images,
   ListTree,
   RefreshCw,
   ShieldAlert,
@@ -20,7 +20,6 @@ import {
   AccessibilityInfo,
   Alert,
   Animated,
-  Image,
   Pressable,
   ScrollView,
   Text,
@@ -180,7 +179,7 @@ export const ChatActivityGroup = memo(function ChatActivityGroup({ items, closed
       keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag"
       onLayout={() => { if (running) body.current?.scrollToEnd({ animated: false }) }}
       contentContainerStyle={styles.processBody}>
-      {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text)
+      {items.map(item => item.kind === 'message' && item.role === 'assistant' && !hasVisibleMessageText(item.text) && !item.images?.length
         ? <View key={item.id} style={styles.activityReasoning}><NativeMarkdown text={item.reasoning ?? ''} /></View>
         : <ChatItemView key={item.id} item={item} compact={false} busyAction={busyAction} onApproval={onApproval} onQuestion={onQuestion} />)}
     </ScrollView>}
@@ -198,7 +197,7 @@ export const ChatItemView = memo(function ChatItemView({ item, busyAction, compa
   if (item.kind === 'question') return <QuestionCard item={item} busy={busyAction === `question:${item.id}`} onRespond={onQuestion} />
   if (item.kind === 'tool') return <ToolRow item={item} compact={compact} />
   if (!compact && item.role === 'assistant'
-    && !hasVisibleMessageText(item.text)
+    && !hasVisibleMessageText(item.text) && !item.images?.length
     && hasVisibleMessageText(item.reasoning ?? '')) return <ReasoningDisclosure item={item} />
   return <MessageBubble item={item} compact={compact} />
 })
@@ -401,18 +400,10 @@ function ToolRow({ item: original, compact }: { item: ToolActivity; compact: boo
 }
 
 export function ChatImages({ images, alignEnd = false, tool = false }: { images: ChatImage[]; alignEnd?: boolean; tool?: boolean }) {
-  const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
   return (
     <View style={[styles.messageImages, alignEnd && styles.messageImagesUser, tool && styles.toolImages]}>
-      {images.map((image, index) => image.uri !== undefined
-        ? <Image key={`${image.uri}:${index}`} source={{ uri: image.uri }} style={styles.messageImage} resizeMode="cover" />
-        : (
-          <View key={`${image.name ?? 'image'}:${index}`} style={styles.messageImagePlaceholder}>
-            <Images size={20} color={colors.primary} />
-            <Text style={styles.messageImageName} numberOfLines={1}>{image.name ?? zhCN.chat.unnamedImage}</Text>
-          </View>
-        ))}
+      {images.map((image, index) => <ChatImageView key={`${image.attachmentId ?? image.name ?? 'image'}:${index}`} image={image} />)}
     </View>
   )
 }

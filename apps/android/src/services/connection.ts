@@ -227,6 +227,25 @@ export class AndroidRemoteConnection {
     return this.proxy
   }
 
+  /** Read an existing session reference through its native carrier; never accept a filesystem path. */
+  async readSessionImageAttachment(sessionId: string, attachmentId: string, signal: AbortSignal): Promise<unknown> {
+    const core = this.core
+    const proxy = this.requireProxy()
+    if (core === undefined) throw new Error(strings.runtime.connectHostFirst)
+    const value = proxy instanceof RemoteApiProxy
+      ? await proxy.call('session.attachment', { sessionId, attachmentId }, signal)
+      : await new RemoteTypertGateway(core).call<unknown>('session/attachment', {
+          args: { request: { sessionId, attachmentId } },
+        }, signal, { maxResponseBytes: 12 * 1024 * 1024 })
+    if (this.core !== core || this.proxy !== proxy || signal.aborted) throw new Error(strings.runtime.connectHostFirst)
+    // Typert versions may preserve the official business Result inside the carrier result.
+    if (typeof value === 'object' && value !== null && 'ok' in value) {
+      if (value.ok === true && 'value' in value) return value.value
+      throw new Error(strings.common.unavailable)
+    }
+    return value
+  }
+
   requireBotClient(): BotRemoteClient {
     const core = this.core
     const proxy = this.proxy

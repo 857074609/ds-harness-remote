@@ -110,6 +110,32 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 
+  it('uses the native Typert attachment contract and rejects late images from retired connections', async () => {
+    await runScenarios(['direct', 'business-result', 'denied', 'disconnected', 'cancelled'].map(mode => ({ name: mode, run: async () => {
+      prepareScenario1()
+      testState.capabilities = ['harness.remote.v1', 'harness.remote.transfer.v1']
+      const connection = new AndroidRemoteConnection()
+      await connection.connect('https://server.example.com', identity, host, 'synthetic', () => undefined)
+      const core = testState.cores[0]!
+      const controller = new AbortController()
+      const value = { attachment: { attachmentId: 'a1', mediaType: 'image/png' }, data: 'synthetic' }
+      const rpc = core.rpc.bind(core)
+      vi.spyOn(core, 'rpc').mockImplementation(async (method, params) => {
+        if (method !== 'harness.remote.call') return rpc(method, params)
+        expect(params).toEqual({ endpoint: 'session/attachment', payload: { args: { request: { sessionId: 's1', attachmentId: 'a1' } } } })
+        if (mode === 'disconnected') await connection.close()
+        if (mode === 'cancelled') controller.abort()
+        return { ok: true, value: mode === 'business-result' ? { ok: true, value }
+          : mode === 'denied' ? { ok: false, error: { code: 'not-found' } } : value }
+      })
+      try {
+        const result = connection.readSessionImageAttachment('s1', 'a1', controller.signal)
+        if (mode === 'direct' || mode === 'business-result') await expect(result).resolves.toEqual(value)
+        else await expect(result).rejects.toThrow()
+      } finally { await connection.close() }
+    } })))
+  })
+
   it('binds Bot requests to the advertised encrypted Host and rejects retired clients', async () => {
     await runScenarios(['unsupported', 'current', 'replaced', 'revoked'].map(outcome => ({ name: outcome, run: async () => {
       prepareScenario1()

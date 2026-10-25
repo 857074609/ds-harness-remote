@@ -1,3 +1,4 @@
+import { ChatImageProvider } from '../ui/chat-image'
 import { isSubagentSession } from '../lib/session-kind'
 import * as ImagePicker from 'expo-image-picker'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
@@ -56,7 +57,7 @@ import {
   LATEST_EDGE_PX,
   mergeReplyReasoning,
 } from '../state/message-helpers'
-import { requireSessionTools, useAppStore } from '../state/store'
+import { chatImageConnectionGeneration, requireSessionTools, sessionChatImageLoader, useAppStore } from '../state/store'
 import { placeUiArtifacts, projectUiArtifacts, type UiArtifact } from '../state/ui-artifacts'
 import type {
   ChatItem,
@@ -167,6 +168,9 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
   const busy = useAppStore(state => state.busyAction)
   const codexReadySessionId = useAppStore(state => state.codexReadySessionId)
   const connection = useAppStore(state => state.connection)
+  const imageGeneration = chatImageConnectionGeneration()
+  const imageLoader = useMemo(() => session === undefined || connection.phase !== 'connected'
+    ? undefined : sessionChatImageLoader(session), [session?.sessionId, session?.backend, hostId, imageGeneration, connection.phase])
   const historyHasMore = useAppStore(state => state.historyHasMore)
   const historyLoadingOlder = useAppStore(state => state.historyLoadingOlder)
   const sessionModels = useAppStore(state => state.sessionModels)
@@ -1351,7 +1355,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
       )}
     </>
   return (
-    <MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
+    <ChatImageProvider value={imageLoader}><MarkdownLinkProvider onLinkPress={openFileLink}><KeyboardInset>
       {memoryError !== undefined && <Text accessibilityRole="alert" style={{color: colors.danger, padding: 8}}>{memoryError}</Text>}
       <View style={[styles.splitRoot, tabletSplit && styles.splitRootWide]}>
         {tabletSplit && (
@@ -1800,7 +1804,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         onClose={() => setPromptEditing(null)}
         onSave={(title, text) => void savePromptEdit(title, text)}
       />
-    </KeyboardInset></MarkdownLinkProvider>
+    </KeyboardInset></MarkdownLinkProvider></ChatImageProvider>
   )
 }
 

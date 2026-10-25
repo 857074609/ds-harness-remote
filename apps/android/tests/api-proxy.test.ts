@@ -1,6 +1,7 @@
 import { runScenarios } from '../../../scripts/test-scenarios.mjs'
 import { describe, expect, it, vi } from 'vitest'
 import type { RemoteClientCore } from '@dsh-remote/client-core'
+import { HARNESS_API_TRANSFER_CHUNK_BYTES } from '@dsh-remote/protocol'
 import { ApiProxyError, RemoteApiProxy } from '../src/services/api-proxy'
 
 type CoreRpc = (method: string, params: unknown, signal?: AbortSignal) => Promise<unknown>
@@ -109,6 +110,39 @@ function fakeCore(): RemoteClientCore & { rpcCalls: CoreRpcMock; emitEvent(event
 }
 
 describe('Remote ApiProxy tunnel client', () => {
+  it('reads large attachments via bounded transfers and cleans up rejected responses', async () => {
+    await runScenarios(['complete', 'wrong-rpc', 'wrong-chunk', 'cancelled'].map(mode => ({ name: mode, run: async () => {
+      const core = fakeCore()
+      const chunks: Buffer[] = []
+      const controller = new AbortController()
+      let response = Buffer.alloc(0)
+      const value = { attachment: { attachmentId: 'a1', mediaType: 'image/png' }, data: 'A'.repeat(3 * 1024 * 1024) }
+      core.rpcCalls.mockImplementation(async (method, params, signal) => {
+        const request = params as { data: string; index: number; transferId: string }
+        if (method === 'harness.api.call') throw new Error('Attachments must use transfer even with small requests')
+        if (method === 'harness.api.transfer.chunk') chunks.push(Buffer.from(request.data, 'base64'))
+        if (method === 'harness.api.transfer.commit') {
+          const envelope = JSON.parse(Buffer.concat(chunks).toString())
+          expect(envelope).toMatchObject({ method: 'session.attachment', payload: { sessionId: 's1', attachmentId: 'a1' } })
+          response = Buffer.from(JSON.stringify({ rpcId: mode === 'wrong-rpc' ? 'wrong' : envelope.rpcId, result: { ok: true, value } }))
+          return { kind: 'chunked', transferId: request.transferId, totalBytes: response.length,
+            totalChunks: Math.ceil(response.length / HARNESS_API_TRANSFER_CHUNK_BYTES) }
+        }
+        if (method === 'harness.api.transfer.read') {
+          expect(signal).toBe(controller.signal)
+          if (mode === 'cancelled') { controller.abort(); throw new Error('cancelled') }
+          return { transferId: request.transferId, index: mode === 'wrong-chunk' ? request.index + 1 : request.index,
+            data: response.subarray(request.index * HARNESS_API_TRANSFER_CHUNK_BYTES, (request.index + 1) * HARNESS_API_TRANSFER_CHUNK_BYTES).toString('base64') }
+        }
+        return {}
+      })
+      const result = new RemoteApiProxy(core).call('session.attachment', { sessionId: 's1', attachmentId: 'a1' }, controller.signal)
+      if (mode === 'complete') await expect(result).resolves.toEqual(value)
+      else await expect(result).rejects.toThrow()
+      expect(core.rpcCalls.mock.calls.at(-1)?.[0]).toBe('harness.api.transfer.close')
+    } })))
+  })
+
   it('validates native RPC response correlation and structured errors', async () => {
     await runScenarios([
       {

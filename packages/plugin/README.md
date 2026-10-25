@@ -16,13 +16,13 @@ In DeepSeek Harness Desktop, open **Extensions / Plugin management**, choose ins
 from **npm**, and enter:
 
 ```text
-ds-harness-remote@0.5.2
+ds-harness-remote@0.5.19
 ```
 
 Restart Desktop after installation. Its official `dsh` launcher can also install the package:
 
 ```sh
-dsh plugin --profile desktop add -w ds-harness-remote@0.5.2
+dsh plugin --profile desktop add -w ds-harness-remote@0.5.19
 ```
 
 Use Desktop's official launcher to manage its reserved `desktop` profile.
@@ -32,7 +32,7 @@ Use Desktop's official launcher to manage its reserved `desktop` profile.
 Add the current package version to the `web` profile, then restart Harness:
 
 ```sh
-dsh plugin --profile web add -w ds-harness-remote@0.5.2
+dsh plugin --profile web add -w ds-harness-remote@0.5.19
 ```
 
 ### dsh-TUI Host
@@ -40,7 +40,7 @@ dsh plugin --profile web add -w ds-harness-remote@0.5.2
 Remote can also run as a Host in a terminal-only [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI) profile:
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.2
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.19
 ```
 
 After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote status`, and `/remote logout`.
@@ -60,7 +60,7 @@ After starting dsh-TUI, manage Remote with `/remote`, `/remote login`, `/remote 
 
 The development baseline is DeepSeek Harness `dsh-v0.2.1-rc.1`, retaining the official Typert Remote / Session V3 carrier from `0.2.0` RC. Earlier Typert carrier support remains capability-based.
 
-Unreleased `0.5.19` removes Harness `0.1.1-rc.2` ApiProxy support from the Host and bundled Remote client. ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP Desktop projection also uses Typert only.
+`0.5.19` removes Harness `0.1.1-rc.2` ApiProxy support from the Host and bundled Remote client. ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP Desktop projection also uses Typert only.
 
 The same package feature-detects the older settings registry and the `0.1.7-rc.1` and `0.2.0-rc.2` Volatile settings entry. Remote Web/Desktop and Android normalize released sessions that still report the retired `code` agent preset to `ptc`. The Host reads the running Harness version from the CLI entrypoint, or from the 0.2.0 Desktop shell's `@deepseek-ai/dsh-desktop-host` entrypoint when the Harness CLI package is only a sibling of that entrypoint inside `app.asar`.
 

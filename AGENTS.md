@@ -146,7 +146,7 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。当前内部源码版本为 `0.5.19`，Android `versionCode` / Expo iOS `buildNumber` 为 `64`，未创建该版本 Tag 或 Release；Desktop npm 安装说明保留 `ds-harness-remote@0.5.18`。
+凭据或迁移旧 service。当前待发布版本为 `0.5.19`，Android `versionCode` / Expo iOS `buildNumber` 为 `64`；发版准备已将安装说明同步到 `ds-harness-remote@0.5.19`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
 
 ## Validation Baseline
 
@@ -224,6 +224,7 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 
 ## Documentation Rules
 
+- 对外发布说明与新版本 Changelog 只写用户可感知的功能、修复、兼容性变化和贡献者；不附测试数量、构建命令、bundle 校验、未验收清单或构建警告等验证流水账。内部验证结果与边界保留在 AGENTS.md / TODO。
 - `README.md`：面向用户的默认英文入口，也是 GitHub 默认 README；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
 - `README.en.md`：保留的英文入口，与默认 `README.md` 保持内容一致。
 - `README.zh.md`：保留的中文入口，与默认 `README.md` 保持功能和版本信息一致。
@@ -687,3 +688,18 @@ Mutation 不重试，后台停止团队/群聊进度轮询；UI 卡片纯原生�
 来源/许可证，升级时审查 schema 和解释器边界。真机/跨设备验收见 TODO，未发布。
 
 验证：Android check 与 33 文件 / 195 tests、Plugin check 与 19 个 route 契约测试、共享包/Plugin build、DSH bundle 校验及 Android production Hermes export 通过。保留既有 noble/hashes exports fallback 警告；本机无连接设备，未验证本次 APK/真机、TalkBack 或加密跨设备交互。
+
+
+## 0.5.19 release preparation (2026-10-26)
+
+发布候选维持 `0.5.19`，Android `versionCode` / Expo iOS `buildNumber` 均为 `64`。
+中英文发布说明补齐 Android 滚动/阅读密度、CodeX 权限继承、图片预览与 ApiProxy
+退役等改动及贡献者；安装入口与 npm README 同步版本。CI/Release 扩展 ZIP 补齐
+manifest 所需的 `_locales`，实际打包核验默认语言、消息键、入口与图标。
+
+全仓 check 与 796 tests 通过（Plugin 57 文件 / 397，Android 36 文件 / 207），
+串行生产 build（Android Hermes，包含 CI 固定哈希的 Intelligent UI renderer）、
+版本一致性、DSH bundle、根 GitHub 入口加载、npm 实际打包与 diff check 通过。
+两份已提交 Plugin bundle 重建无差异；npm 包不含退役 rc.2 模块。
+未构建本轮 APK、未新增原生真机、Windows/Linux helper 或加密跨设备验收。
+Metro noble/hashes exports fallback 警告仍存在；发布以 Tag 工作流实际结果为准。

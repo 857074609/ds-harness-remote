@@ -1,28 +1,37 @@
-## 0.5.19 — Unreleased
+## 0.5.19 — 2026-10-26
 
-- Harness `0.1.1-rc.2` ApiProxy support has been removed from the Host plugin, its bundled Remote client, and Android. Use a Host with the official Typert Remote carrier; ApiProxy-only Hosts and missing capability discovery are rejected. CodeX/ACP keep their independent data planes and use Typert for Desktop projection. This change does not update the standalone VS Code client or the independent Remote Web repository.
-- Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。
+Android build 64.
 
-- Restore Android Harness history image attachments through the official session-scoped Typert lookup with bounded transfers. Keep assistant/tool image content visible and render Markdown workspace images through the existing authorized preview reader. Add memory-only thumbnails, full-screen viewing and retry; validate image bytes/pixel limits and discard cancelled or stale connection results. External network images remain inert; this does not establish a fix for the separately reported PNG-send error (#159).
-- 修复 Android Harness 历史附件图片读取：复用官方按会话鉴权的 Typert 接口，大图响应走有界分块；保留 AI/工具图片内容，Markdown 工作区图片复用现有授权预览。新增内存缩略图、全屏查看与失败重试，校验图片字节/像素上限并丢弃取消或旧连接结果。外部网络图片保持不自动加载；尚未确认评论中单独反馈的 PNG 发送错误（#159）。
+- **Compatibility:** the Host plugin, bundled client and Android no longer support legacy ApiProxy. Upgrade to a Host with Typert Remote support.
+- **兼容性变更：** Host 插件、随包客户端和 Android 不再支持旧版 ApiProxy，请升级到支持 Typert Remote 的 Host。
 
-- Probe WebRTC helper candidates with Electron's Node mode enabled, then reject Electron before loading native WebRTC. Connecting to a Desktop Host no longer launches another Desktop through runtime detection and leaves it writing to a closed probe pipe (`EPIPE`).
-- WebRTC helper 探测显式启用 Electron Node 模式，并在加载原生 WebRTC 前拒绝 Electron；修复连接 Desktop Host 时运行时探测误启动另一个 Desktop、探测管道关闭后触发 `EPIPE` 的问题。
+- Fix Android conversation image previews, with full-screen viewing and retry (#159).
+- 修复 Android 会话图片预览，支持全屏查看和重试（#159）。
 
-- Load oversized Harness history frames in the Plugin Remote client through negotiated, bounded 512 KiB transfers while preserving stream ordering and the 4 MiB secure-message limit. Cancelled, disconnected, incomplete and idle transfers release their resources; legacy clients keep the existing frame behavior.
-- Plugin Remote 客户端通过能力协商和有界的 512 KiB 分片传输加载超大 Harness 历史帧，保留流事件顺序与 4 MiB 安全消息上限；取消、断连、未完整读取和空闲超时均释放传输资源，旧客户端保持原有行为。
+- Improve Android auto-scrolling during replies; add reading-density settings and offline LaTeX formulas (#156, #157, #162, #164).
+- 优化 Android 流式回复自动滚动，新增阅读密度设置和离线 LaTeX 公式显示（#156、#157、#162、#164）。
 
-- Keep the local Host connection stopped at startup when device control is disabled, allowing an authorized outbound Client to discover remote Hosts after restart without enabling inbound control.
-- 关闭“允许控制设备”时，启动阶段不再连接本机 Host，避免重启后未授权的 Host 状态阻止已授权 Client 发现远端主机。
+- Fix Android overriding remote permissions when continuing CodeX conversations (#160).
+- 修复 Android 继续 CodeX 会话时覆盖远端权限的问题（#160）。
 
-- Normalize self-hosted Docker runtime file permissions so restrictive source modes do not prevent the non-root user from loading protocol packages; document public-origin configuration and JS/CSS 403 blank-page recovery (#146).
-- 规范化自部署 Docker 运行时文件权限，避免源码异常权限导致非 root 用户无法加载 protocol；补充公开域名配置与 JS/CSS 403 白屏排查（#146）。
+- Support DS Bot 0.2.1 side questions (`/btw`), group continuation, charts and calculator cards.
+- 适配 DS Bot 0.2.1，支持旁问 `/btw`、群聊继续、图表和计算卡片。
 
-- Add offline LaTeX formulas to Android shared Markdown: `$…$` / `\(…\)` inline and `$$…$$` / `\[…\]` display blocks, rendered as native SVG with horizontal scrolling for wide display formulas. Keep code literal and fall back to source for unsupported or oversized formulas. No WebView, remote fonts or network math service. Native device rendering remains to be verified.
-- Android 共享 Markdown 新增离线 LaTeX 公式：行内与独立公式块使用原生 SVG，较宽公式块可横向滚动；代码保持原样，不支持或超限公式回退源码。不使用 WebView、远程字体或网络公式服务；真机显示仍待验证。
+- Fix oversized conversation history loading and connections launching a second Desktop (#161).
+- 修复超大会话历史加载，以及连接时误启动第二个 Desktop 的问题（#161）。
 
-- Adapt Remote to DS Bot 0.2.1: allow dedicated side-question/cancel and group-continuation operations; Android claims `/btw` without falling back to ordinary prompts, restores current/earlier aside cards, and shows paused-group continuation. Add validated native chart/calculator cards using the upstream bounded formula interpreter; HTML remains summary-only. No release or cross-device acceptance is implied.
-- 适配 DS Bot 0.2.1：放行旁问/取消与群聊继续操作，Android 独立处理 `/btw`、恢复当前/旧分段旁问卡片及群聊暂停入口；使用上游受限公式解释器显示原生图表与计算卡片，HTML 仅显示摘要。尚未发布或完成跨设备验收。
+- Keep users signed in during temporary outages, fix startup with device control disabled, and tidy the sidebar layout.
+- 临时断网时保留登录状态，修复关闭设备控制后的启动行为，优化侧栏布局。
+
+- Fix self-hosted Server Docker file permissions and browser extension localization packaging (#146).
+- 修复自部署 Server Docker 文件权限和浏览器扩展多语言资源打包（#146）。
+
+- Add a Japanese README and update installation instructions.
+- 新增日文 README，更新安装说明。
+
+Thanks @dreamfarer-space, @xiongyuyang, and @bluesmilery for their contributions.
+
+感谢 @dreamfarer-space、@xiongyuyang 和 @bluesmilery 的贡献。
 
 ## 0.5.18 — 2026-10-23
 

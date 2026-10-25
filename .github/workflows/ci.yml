@@ -156,7 +156,7 @@ jobs:
           mkdir -p artifacts/browser
           cd apps/browser
           zip -qr "$GITHUB_WORKSPACE/artifacts/browser/dsh-remote-browser-${GITHUB_SHA}.zip" \
-            manifest.json popup.html styles.css media dist
+            manifest.json popup.html styles.css media _locales dist
 
       - name: Upload browser extension
         uses: actions/upload-artifact@v7

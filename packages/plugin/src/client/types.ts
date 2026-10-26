@@ -24,6 +24,7 @@ export interface RemoteStatus {
   deviceId?: string
   serverUrl?: string
   connected?: boolean
+  recoveryGeneration?: number
   connectedTargetDeviceId?: string
   transport?: 'LAN' | 'P2P' | 'TURN' | 'Relay' | 'Disconnected'
   preferredTransports?: RemoteTransportPreference[]

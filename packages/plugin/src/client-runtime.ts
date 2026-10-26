@@ -8,6 +8,7 @@ import type { HarnessMode } from './harness-target.js'
 import { probeRemoteHostFeatures, remoteHostFeatures } from './client-capabilities.js'
 import { ClientCodexStreams } from './client-codex-streams.js'
 import { ClientConnection } from './client-connection.js'
+import { ClientReconnect } from './client-reconnect.js'
 import { ClientControl } from './client-control.js'
 import type {
   CodexLoopbackStream,
@@ -60,6 +61,11 @@ export class ClientModeRuntime {
       await remote.client.close().catch(() => undefined)
       throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
     }
+    if (!remote.client.getStats().connected) {
+      await remote.client.close().catch(() => undefined)
+      throw new ClientModeError('TRANSPORT_CLOSED', 'The Remote connection closed before it became ready.', true)
+    }
+    remote.client.onClose(error => this.handleRemoteClose(remote, error))
     return remote
   }
 
@@ -86,6 +92,10 @@ export class ClientModeRuntime {
   private connectionProgressRun = 0
   private closed = false
   private remoteLifetime = new AbortController()
+  private selectionLifetime = new AbortController()
+  private readonly reconnect: ClientReconnect
+  private recoverable?: ConnectedRemote
+  private recoveryGeneration = 0
 
   constructor(
     private readonly config: ResolvedConfig,
@@ -97,6 +107,7 @@ export class ClientModeRuntime {
     private readonly rtcFactoryProvider: (options?: WeriftFactoryOptions) => Promise<RtcPeerConnectionFactory | undefined> = loadNodeRtcFactory,
   ) {
     const owner = this
+    this.reconnect = new ClientReconnect(config.reconnect)
     this.connection = new ClientConnection({
       get connectionProgressRun() { return owner.connectionProgressRun },
       set connectionProgressRun(value) { owner.connectionProgressRun = value },
@@ -107,14 +118,6 @@ export class ClientModeRuntime {
       get config() { return owner.config },
       get rtcFactoryProvider() { return owner.rtcFactoryProvider },
       get logger() { return owner.logger },
-      get connected() { return owner.connected },
-      set connected(value) { owner.connected = value },
-      closePreview: (...args) => owner.closePreview(...args),
-      get pendingWorkspaceSelection() { return owner.pendingWorkspaceSelection },
-      set pendingWorkspaceSelection(value) { owner.pendingWorkspaceSelection = value },
-      closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
-      closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
-      get gatewaySwitch() { return owner.gatewaySwitch },
       get identities() { return owner.identities },
     })
     this.control = new ClientControl({
@@ -211,6 +214,7 @@ export class ClientModeRuntime {
       serverUrl: this.config.serverUrl,
       ...targetStatus,
       connected: this.connected !== undefined,
+      recoveryGeneration: this.recoveryGeneration,
       transport: this.connected?.client.getStats().mode ?? 'Disconnected',
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ['relay'] : ['lan', 'p2p', 'turn', 'relay'],
@@ -354,6 +358,7 @@ export class ClientModeRuntime {
     if (targetDeviceId === undefined || targetDeviceId.length === 0) {
       throw new ClientModeError('INVALID_MESSAGE', 'A targetDeviceId is required for remote mode.')
     }
+    signal = this.beginSelection(signal)
     const lifetime = this.remoteLifetime.signal
     const next = await this.connect(targetDeviceId, signal)
     try {
@@ -365,7 +370,7 @@ export class ClientModeRuntime {
     }
     const previous = this.connected
     await this.closePreview()
-    if (lifetime.aborted || this.closed) {
+    if (signal.aborted || lifetime.aborted || this.closed) {
       await next.client.close().catch(() => undefined)
       throw new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.')
     }
@@ -636,6 +641,7 @@ export class ClientModeRuntime {
   }
 
   private async leaveRemote(): Promise<void> {
+    this.beginSelection()
     this.remoteLifetime.abort(new ClientModeError('CANCELLED', 'The Remote connection was closed.'))
     this.remoteLifetime = new AbortController()
     const previous = this.connected
@@ -690,6 +696,7 @@ export class ClientModeRuntime {
     this.assertRemoteCompatible(remote)
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), undefined, target)
+    this.recoverable = remote
   }
 
   private remoteTypertGateway(remote: ConnectedRemote): RemoteTypertGateway {
@@ -702,6 +709,7 @@ export class ClientModeRuntime {
   }
 
   private selectCodexTarget(virtual: CodexVirtualHarness, remote: ConnectedRemote): void {
+    this.recoverable = undefined
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     this.gatewaySwitch.selectRemote(virtual, undefined, target)
   }
@@ -734,6 +742,7 @@ export class ClientModeRuntime {
   }
 
   private selectCursorTarget(virtual: AcpVirtualHarness, remote: ConnectedRemote): void {
+    this.recoverable = undefined
     const target = { deviceId: remote.target.deviceId, name: remote.target.name }
     this.gatewaySwitch.selectRemote(virtual, undefined, target)
   }
@@ -769,6 +778,7 @@ export class ClientModeRuntime {
   ): Promise<ConnectedRemote> {
     const lifetime = this.remoteLifetime.signal
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected
+    signal = this.beginSelection(signal)
     const next = await this.connect(targetDeviceId, signal)
     const assertCurrent = (): void => {
       signal?.throwIfAborted()
@@ -804,6 +814,47 @@ export class ClientModeRuntime {
   private requireIdentity(): HostIdentity {
     if (this.identity === undefined) throw new ClientModeError('IDENTITY_INVALID', 'The client identity is not ready.')
     return this.identity
+  }
+
+  private beginSelection(signal?: AbortSignal): AbortSignal {
+    this.reconnect.cancel()
+    this.recoverable = undefined
+    this.selectionLifetime.abort(new ClientModeError('CANCELLED', 'The Remote connection request was superseded or closed.'))
+    this.selectionLifetime = new AbortController()
+    return AbortSignal.any([this.selectionLifetime.signal, this.remoteLifetime.signal, ...(signal === undefined ? [] : [signal])])
+  }
+
+  private handleRemoteClose(remote: ConnectedRemote, error?: Error): void {
+    if (this.connected !== remote) return
+    const recover = this.recoverable === remote
+    this.recoverable = undefined
+    this.connected = undefined
+    this.connectionProgress = undefined
+    this.pendingWorkspaceSelection = undefined
+    this.gatewaySwitch.disconnectRemote()
+    const cleanup = Promise.allSettled([
+      this.closePreview(), this.closeCodexVirtual(), this.closeCursorVirtual(),
+      this.codexStreamBridge.closeCodexStreams(remote.client), remote.client.close(),
+    ])
+    this.logger.warn('remote Harness transport closed', { targetDeviceId: shortId(remote.target.deviceId) })
+    // CodeX/ACP have separate virtual workspace lifetimes; never replace them
+    // with Harness authority after a disconnect.
+    if (!recover || this.closed) return
+    this.reconnect.start(async signal => {
+      await cleanup
+      signal.throwIfAborted()
+      const next = await this.connect(remote.target.deviceId, signal)
+      try {
+        signal.throwIfAborted()
+        this.selectRemoteTarget(next)
+        this.connected = next
+        this.connection.clearConnectionProgress(next.progressRunId)
+        this.recoveryGeneration += 1
+      } catch (error) {
+        await next.client.close().catch(() => undefined)
+        throw error
+      }
+    }, error)
   }
 }
 

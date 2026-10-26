@@ -30,6 +30,7 @@ import {
 } from './remote-file-content-provider.js'
 import type { StatusFeed } from './status-stream.js'
 import { createStatusFeed } from './status-stream.js'
+import { subscribeRemoteRecovery } from './client-recovery.js'
 
 declare global {
   interface Window {
@@ -285,7 +286,7 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx: {
-      connection: { rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<ControlResult> } }
+      connection: { rpc: { call(channel: string, endpoint: string, payload: unknown): Promise<ControlResult> }; reconnect?(): void }
       effect(effect: () => (() => void), label: string): void
       inject(services: string[], callback: (ctx: {
         effect(effect: () => (() => void), label: string): void
@@ -346,6 +347,7 @@ window.__ModuleLoader__.load({
         },
       })
       ctx.effect(() => () => statusFeed.close(), 'ds-harness-remote: status stream')
+      ctx.effect(() => subscribeRemoteRecovery(statusFeed, () => ctx.connection.reconnect?.()), 'ds-harness-remote: carrier recovery')
       ctx.effect(() => {
         let disposed = false
         let unsubscribeWorkspaces: (() => void) | undefined

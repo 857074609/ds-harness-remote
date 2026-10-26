@@ -4556,6 +4556,15 @@ Minimum version required to store current data is: ` + bestVersion + `.
     };
   }
 
+  // src/client-recovery.ts
+  function subscribeRemoteRecovery(feed, reconnect) {
+    let previous;
+    return feed.subscribe((status) => {
+      let recovered = status.mode === "remote" && status.connected === !0 && previous?.mode === "remote" && previous.target?.deviceId === status.target?.deviceId && status.recoveryGeneration !== void 0 && status.recoveryGeneration !== previous.recoveryGeneration;
+      previous = status, recovered && reconnect();
+    });
+  }
+
   // src/client.ts
   var clientModuleId = "ds-harness-remote", controlRouteBackoffStepsMs = [1e3, 2e3, 5e3, 1e4, 3e4], ControlRouteUnavailableError = class extends Error {
     constructor(message) {
@@ -4764,7 +4773,7 @@ Minimum version required to store current data is: ` + bestVersion + `.
             console.warn("ds-harness-remote: status event stream unavailable, polling status instead:", reason);
           }
         });
-        ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => {
+        ctx.effect(() => () => statusFeed.close(), "ds-harness-remote: status stream"), ctx.effect(() => subscribeRemoteRecovery(statusFeed, () => ctx.connection.reconnect?.()), "ds-harness-remote: carrier recovery"), ctx.effect(() => {
           let disposed = !1, unsubscribeWorkspaces, unsubscribeSessions, selection, opening = !1, reconcile = () => {
             if (disposed || opening || selection === void 0) return;
             let pending = selection, workspaceSnapshot = ctx.workspaces.list.getSnapshot();

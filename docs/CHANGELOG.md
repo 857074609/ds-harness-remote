@@ -1,3 +1,8 @@
+## Unreleased
+
+- Automatically reconnect Desktop Harness Remote after transient transport loss, revalidate the Host identity and membership, and ask the native Connection to reopen subscriptions. Cancel retries on exit/sign-out/Host switch; stop on terminal authorization/security errors or connection replacement. Never replay mutations. CodeX/ACP virtual workspaces still require manual reopening.
+- 修复 Desktop Harness Remote 临时断线后不会自动恢复的问题：重连重新校验 Host 身份和授权，并通知原生 Connection 重开订阅；退出、注销或切换主机时取消重试，权限/安全异常或连接被替换时停止。不会重发操作；CodeX/ACP 虚拟工作区仍需手动重新打开。
+
 ## 0.5.19 — 2026-10-26
 
 Android build 64.

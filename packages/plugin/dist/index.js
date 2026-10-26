@@ -60234,7 +60234,7 @@ var RemoteClientCore = class {
       return;
     this.closeNotified = false;
     this.unsubscribeTransport = this.transport.onMessage((data2) => this.handleMessage(data2));
-    this.unsubscribeClose = this.transport.onClose?.(() => this.handleTransportClose());
+    this.unsubscribeClose = this.transport.onClose?.((error) => this.handleTransportClose(error));
     try {
       await this.transport.connect();
     } catch (error) {
@@ -60298,12 +60298,12 @@ var RemoteClientCore = class {
     this.unsubscribeClose?.();
     this.unsubscribeClose = void 0;
     this.rejectAllPending((pending) => new RemoteClientError("CLIENT_CLOSED", `RPC ${pending.method} terminated because the remote client closed`));
-    this.notifyClose();
+    this.notifyClose(new RemoteClientError("CLIENT_CLOSED", "The remote client was closed."));
     await this.transport.close();
   }
-  handleTransportClose() {
+  handleTransportClose(error) {
     this.rejectAllPending((pending) => new RemoteClientError("TRANSPORT_CLOSED", `RPC ${pending.method} terminated because the remote transport closed`));
-    this.notifyClose();
+    this.notifyClose(error);
   }
   handleMessage(data2) {
     const message = decodeMessage(data2);
@@ -60352,12 +60352,12 @@ var RemoteClientCore = class {
         pending.reject(createError(pending));
     }
   }
-  notifyClose() {
+  notifyClose(error) {
     if (this.closeNotified)
       return;
     this.closeNotified = true;
     for (const handler of this.closeHandlers)
-      handler();
+      handler(error);
   }
 };
 function rpcAbortedError(method, reason) {
@@ -62288,9 +62288,9 @@ var BaseTransport = class {
     for (const handler of this.handlers)
       handler(data2);
   }
-  emitClose() {
+  emitClose(error) {
     for (const handler of this.closeHandlers)
-      handler();
+      handler(error);
   }
 };
 
@@ -63575,7 +63575,7 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "connect.rejected" || frame.type === "error") {
         const payload = frame.payload;
         const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        throw Object.assign(new Error(message), { code: payload.code });
+        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
       }
       if (frame.type === "relay") {
         if (this.dataMode !== "relay")
@@ -63612,7 +63612,10 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "ping")
         this.sendControl("pong", frame.payload);
     } catch (error) {
-      this.failConnection(error instanceof Error ? error : new Error("Invalid adaptive control frame"), { reason: "invalid-control-frame" });
+      const failure4 = error instanceof Error ? error : new Error("Invalid adaptive control frame");
+      if (!("code" in failure4))
+        Object.assign(failure4, { code: "INVALID_MESSAGE" });
+      this.failConnection(failure4, { reason: "invalid-control-frame" });
     }
   }
   handleRelay(payload) {
@@ -63805,7 +63808,7 @@ var AdaptiveTransport = class extends BaseTransport {
   }
   sendControl(type, payload) {
     if (this.socket?.readyState !== WebSocket.OPEN)
-      throw new Error("adaptive control socket is not open");
+      throw Object.assign(new Error("adaptive control socket is not open"), { code: "TRANSPORT_CLOSED" });
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
     this.lastControlSentAt = Date.now();
   }
@@ -63845,7 +63848,7 @@ var AdaptiveTransport = class extends BaseTransport {
       }
     }
     if (socket !== void 0)
-      this.emitClose();
+      this.emitClose(error);
   }
   clearHandshake() {
     if (this.handshakeTimer !== void 0)
@@ -63856,7 +63859,10 @@ var AdaptiveTransport = class extends BaseTransport {
 function adaptiveControlCloseError(event) {
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
-  return new Error(`Adaptive control channel closed before it was ready: ${detail}`);
+  return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
+    code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
+    retryable: event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
+  });
 }
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -70062,10 +70068,12 @@ var ClientSecureTransport = class {
   closed = false;
   lifetime;
   sends = new SerialSend();
+  closeError;
   async connect() {
     const lifetime = new AbortController();
     this.lifetime = lifetime;
     this.closed = false;
+    this.closeError = void 0;
     this.incoming.reset();
     this.outgoing.reset();
     await this.inner.connect();
@@ -70073,7 +70081,7 @@ var ClientSecureTransport = class {
     const info = this.inner.connectionInfo();
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
       await this.inner.close();
-      throw new Error("The relay connection is bound to an unexpected device.");
+      throw Object.assign(new Error("The relay connection is bound to an unexpected device."), { code: "PEER_IDENTITY_MISMATCH" });
     }
     const noise = new NoiseIkSession({
       role: "initiator",
@@ -70116,6 +70124,7 @@ var ClientSecureTransport = class {
         const message = this.incoming.decode(noise.decrypt(data2));
         if (message !== void 0) handler(message);
       } catch {
+        this.closeError = Object.assign(new Error("The authenticated Remote channel rejected a frame."), { code: "SECURE_CHANNEL_FAILED" });
         void this.close();
       }
     });
@@ -70125,7 +70134,7 @@ var ClientSecureTransport = class {
     };
   }
   onClose(handler) {
-    return this.inner.onClose?.(handler) ?? (() => void 0);
+    return this.inner.onClose?.((error) => handler(this.closeError ?? error)) ?? (() => void 0);
   }
   async close() {
     if (this.closed) return;
@@ -70177,10 +70186,10 @@ async function waitForResponder(inner, noise, signal) {
         if (!noise.complete) throw new Error("Noise IK handshake did not complete.");
         finish();
       } catch (error) {
-        finish(error instanceof Error ? error : new Error("Noise IK handshake failed."));
+        finish(Object.assign(error instanceof Error ? error : new Error("Noise IK handshake failed."), { code: "SECURE_CHANNEL_FAILED" }));
       }
     });
-    unsubscribeClose = inner.onClose?.(() => finish(new Error("Control channel closed during Noise IK handshake."))) ?? (() => {
+    unsubscribeClose = inner.onClose?.((error) => finish(error ?? new Error("Control channel closed during Noise IK handshake."))) ?? (() => {
     });
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) {
@@ -70205,6 +70214,8 @@ var ClientConnection = class {
     this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
     const identity2 = this.context.requireIdentity();
     let client;
+    let closed = false;
+    let closeError;
     const onAbort = () => {
       void client?.close().catch(() => void 0);
     };
@@ -70267,6 +70278,12 @@ var ClientConnection = class {
         try {
           transport = createTransport(attempt);
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity2, target2), 6e4);
+          closed = false;
+          closeError = void 0;
+          client.onClose((error) => {
+            closed = true;
+            closeError = error;
+          });
           const attemptClient = client;
           signal?.throwIfAborted();
           await attemptClient.connect();
@@ -70295,20 +70312,6 @@ var ClientConnection = class {
         "connected",
         connectedPreference === void 0 ? void 0 : [connectedPreference]
       );
-      connectedClient.onClose(() => {
-        if (this.context.connected?.client !== connectedClient) return;
-        void this.context.closePreview();
-        this.context.connected = void 0;
-        this.context.connectionProgress = void 0;
-        this.context.pendingWorkspaceSelection = void 0;
-        void this.context.closeCodexVirtual();
-        void this.context.closeCursorVirtual();
-        this.context.gatewaySwitch.disconnectRemote();
-        void connectedClient.close().catch(() => void 0);
-        this.context.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
-          targetDeviceId: shortId(target2.deviceId)
-        });
-      });
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
       this.context.logger.info("remote Harness transport ready", {
         targetDeviceId: shortId(target2.deviceId),
@@ -70327,6 +70330,7 @@ var ClientConnection = class {
       }
       const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion);
       signal?.throwIfAborted();
+      if (closed) throw closeError ?? new ClientModeError("TRANSPORT_CLOSED", "The Remote connection closed during discovery.", true);
       return {
         client: connectedClient,
         target: target2,
@@ -70338,8 +70342,9 @@ var ClientConnection = class {
       };
     } catch (error) {
       this.clearConnectionProgress(progressRunId);
+      const failure4 = closed && closeError !== void 0 ? closeError : error;
       await client?.close().catch(() => void 0);
-      throw error;
+      throw failure4;
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
@@ -70388,6 +70393,68 @@ var ClientConnection = class {
     });
   }
 };
+
+// src/client-reconnect.ts
+var ClientReconnect = class {
+  constructor(config) {
+    this.config = config;
+  }
+  pending;
+  cancel() {
+    this.pending?.abort();
+    this.pending = void 0;
+  }
+  start(connect4, error) {
+    this.cancel();
+    if (!this.config.enabled || !canReconnect(error)) return;
+    const pending = new AbortController();
+    this.pending = pending;
+    void this.run(connect4, pending).finally(() => {
+      if (this.pending === pending) this.pending = void 0;
+    });
+  }
+  async run(connect4, pending) {
+    let delay = this.config.initialDelayMs;
+    while (!pending.signal.aborted) {
+      const jitter = delay * this.config.jitter * (Math.random() * 2 - 1);
+      await new Promise((resolve6) => {
+        const finish = () => {
+          clearTimeout(timer2);
+          pending.signal.removeEventListener("abort", finish);
+          resolve6();
+        };
+        const timer2 = setTimeout(finish, Math.max(0, delay + jitter));
+        pending.signal.addEventListener("abort", finish, { once: true });
+      });
+      if (pending.signal.aborted) return;
+      try {
+        await connect4(pending.signal);
+        return;
+      } catch (error) {
+        if (!canReconnect(error)) return;
+      }
+      delay = Math.min(this.config.maxDelayMs, delay * 2);
+    }
+  }
+};
+function canReconnect(error) {
+  if (typeof error !== "object" || error === null) return true;
+  const failure4 = error;
+  if (failure4.code !== void 0 && ![
+    "HOST_OFFLINE",
+    "CONNECTION_FAILED",
+    "CONNECTION_NOT_FOUND",
+    "TRANSPORT_CLOSED",
+    "RPC_TIMEOUT",
+    "P2P_FAILED",
+    "TURN_UNAVAILABLE",
+    "RELAY_UNAVAILABLE",
+    "RATE_LIMITED",
+    "SLOW_CONSUMER",
+    "INTERNAL_ERROR"
+  ].includes(String(failure4.code))) return false;
+  return failure4.retryable !== false;
+}
 
 // src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
@@ -76837,6 +76904,7 @@ var ClientModeRuntime = class {
     this.host = host;
     this.rtcFactoryProvider = rtcFactoryProvider;
     const owner = this;
+    this.reconnect = new ClientReconnect(config.reconnect);
     this.connection = new ClientConnection({
       get connectionProgressRun() {
         return owner.connectionProgressRun;
@@ -76862,24 +76930,6 @@ var ClientModeRuntime = class {
       },
       get logger() {
         return owner.logger;
-      },
-      get connected() {
-        return owner.connected;
-      },
-      set connected(value) {
-        owner.connected = value;
-      },
-      closePreview: (...args) => owner.closePreview(...args),
-      get pendingWorkspaceSelection() {
-        return owner.pendingWorkspaceSelection;
-      },
-      set pendingWorkspaceSelection(value) {
-        owner.pendingWorkspaceSelection = value;
-      },
-      closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
-      closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
-      get gatewaySwitch() {
-        return owner.gatewaySwitch;
       },
       get identities() {
         return owner.identities;
@@ -76945,6 +76995,11 @@ var ClientModeRuntime = class {
       await remote.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
+    if (!remote.client.getStats().connected) {
+      await remote.client.close().catch(() => void 0);
+      throw new ClientModeError("TRANSPORT_CLOSED", "The Remote connection closed before it became ready.", true);
+    }
+    remote.client.onClose((error) => this.handleRemoteClose(remote, error));
     return remote;
   }
   handleControl(endpoint, payload, signal) {
@@ -76969,6 +77024,10 @@ var ClientModeRuntime = class {
   connectionProgressRun = 0;
   closed = false;
   remoteLifetime = new AbortController();
+  selectionLifetime = new AbortController();
+  reconnect;
+  recoverable;
+  recoveryGeneration = 0;
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
@@ -77013,6 +77072,7 @@ var ClientModeRuntime = class {
       serverUrl: this.config.serverUrl,
       ...targetStatus,
       connected: this.connected !== void 0,
+      recoveryGeneration: this.recoveryGeneration,
       transport: this.connected?.client.getStats().mode ?? "Disconnected",
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ["relay"] : ["lan", "p2p", "turn", "relay"],
@@ -77138,6 +77198,7 @@ var ClientModeRuntime = class {
     if (targetDeviceId === void 0 || targetDeviceId.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "A targetDeviceId is required for remote mode.");
     }
+    signal = this.beginSelection(signal);
     const lifetime = this.remoteLifetime.signal;
     const next = await this.connect(targetDeviceId, signal);
     try {
@@ -77149,7 +77210,7 @@ var ClientModeRuntime = class {
     }
     const previous = this.connected;
     await this.closePreview();
-    if (lifetime.aborted || this.closed) {
+    if (signal.aborted || lifetime.aborted || this.closed) {
       await next.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
@@ -77390,6 +77451,7 @@ var ClientModeRuntime = class {
     }
   }
   async leaveRemote() {
+    this.beginSelection();
     this.remoteLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection was closed."));
     this.remoteLifetime = new AbortController();
     const previous = this.connected;
@@ -77434,6 +77496,7 @@ var ClientModeRuntime = class {
     this.assertRemoteCompatible(remote);
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target2);
+    this.recoverable = remote;
   }
   remoteTypertGateway(remote) {
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
@@ -77444,6 +77507,7 @@ var ClientModeRuntime = class {
     );
   }
   selectCodexTarget(virtual, remote) {
+    this.recoverable = void 0;
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
@@ -77471,6 +77535,7 @@ var ClientModeRuntime = class {
     await virtual?.close();
   }
   selectCursorTarget(virtual, remote) {
+    this.recoverable = void 0;
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
@@ -77499,6 +77564,7 @@ var ClientModeRuntime = class {
   async ensureConnected(targetDeviceId, signal, isCurrent) {
     const lifetime = this.remoteLifetime.signal;
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
+    signal = this.beginSelection(signal);
     const next = await this.connect(targetDeviceId, signal);
     const assertCurrent = () => {
       signal?.throwIfAborted();
@@ -77530,6 +77596,46 @@ var ClientModeRuntime = class {
   requireIdentity() {
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
     return this.identity;
+  }
+  beginSelection(signal) {
+    this.reconnect.cancel();
+    this.recoverable = void 0;
+    this.selectionLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed."));
+    this.selectionLifetime = new AbortController();
+    return AbortSignal.any([this.selectionLifetime.signal, this.remoteLifetime.signal, ...signal === void 0 ? [] : [signal]]);
+  }
+  handleRemoteClose(remote, error) {
+    if (this.connected !== remote) return;
+    const recover = this.recoverable === remote;
+    this.recoverable = void 0;
+    this.connected = void 0;
+    this.connectionProgress = void 0;
+    this.pendingWorkspaceSelection = void 0;
+    this.gatewaySwitch.disconnectRemote();
+    const cleanup = Promise.allSettled([
+      this.closePreview(),
+      this.closeCodexVirtual(),
+      this.closeCursorVirtual(),
+      this.codexStreamBridge.closeCodexStreams(remote.client),
+      remote.client.close()
+    ]);
+    this.logger.warn("remote Harness transport closed", { targetDeviceId: shortId(remote.target.deviceId) });
+    if (!recover || this.closed) return;
+    this.reconnect.start(async (signal) => {
+      await cleanup;
+      signal.throwIfAborted();
+      const next = await this.connect(remote.target.deviceId, signal);
+      try {
+        signal.throwIfAborted();
+        this.selectRemoteTarget(next);
+        this.connected = next;
+        this.connection.clearConnectionProgress(next.progressRunId);
+        this.recoveryGeneration += 1;
+      } catch (error2) {
+        await next.client.close().catch(() => void 0);
+        throw error2;
+      }
+    }, error);
   }
 };
 

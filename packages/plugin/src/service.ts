@@ -24,6 +24,7 @@ import type { AuthenticatedPeerChannel } from './types.js'
 import { CodexRemoteDomain } from './codex/domain.js'
 import { AcpGateway, StdioAcpAdapter } from './acp.js'
 import { execFileSync } from 'node:child_process'
+import { randomFillSync } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import type { CodexPeerBridge, PublishCodexFrame } from './codex/peer-bridge.js'
 import { AcpRemoteGateway } from './acp/gateway.js'
@@ -186,6 +187,7 @@ export class HostPluginRuntime {
     })
     this.harnessVersion = await this.readHarnessVersion()
     this.credentialStore = new LocalCredentialStore()
+    await this.provisionDirectCredentials()
     this.directServer = new HostDirectServer(
       this.config.listen,
       this.identity,
@@ -197,6 +199,25 @@ export class HostPluginRuntime {
       this.harnessVersion,
     )
     if (this.config.hostControl?.enabled !== false) this.directServer.start()
+  }
+
+  private async provisionDirectCredentials(): Promise<void> {
+    if (this.credentialStore === undefined) return
+    const configured = this.config.direct
+    if (configured !== undefined) {
+      await this.credentialStore.add(configured.account, configured.password)
+      this.logger.info('direct-connect credentials applied from plugin settings', { account: configured.account })
+      return
+    }
+    if ((await this.credentialStore.list()).length > 0) return
+    const account = 'local'
+    const password = Buffer.from(randomFillSync(new Uint8Array(12))).toString('base64url')
+    await this.credentialStore.add(account, password)
+    this.logger.warn(
+      'direct-connect: no account configured; generated a default account.'
+      + ' Set direct account/password in the plugin settings to choose your own.',
+      { account, password },
+    )
   }
 
   currentIdentity(): HostIdentity {

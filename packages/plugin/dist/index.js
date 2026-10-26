@@ -9505,6 +9505,10 @@ var entryConfigSchema = s.object({
     port: s.number(),
     autoPort: s.boolean()
   }),
+  direct: s.object({
+    account: s.string(),
+    password: s.string().role("secret")
+  }),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
   hostControl: s.object({ enabled: s.boolean() }),
@@ -9547,6 +9551,7 @@ var configSchema = external_exports.object({
   role: external_exports.enum(["host", "client", "both"]).optional(),
   serverUrl: external_exports.string().url().optional(),
   listen: external_exports.object({ host: external_exports.string().min(1).max(254).optional(), port: external_exports.number().int().min(1).max(65535).optional(), autoPort: external_exports.boolean().optional() }).optional(),
+  direct: external_exports.object({ account: external_exports.string().trim().min(1).max(254).optional(), password: external_exports.string().min(1).max(256).optional() }).strict().optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
@@ -9580,6 +9585,12 @@ function resolveConfig(input3 = {}, env = process.env) {
   if (maxDelayMs < initialDelayMs) {
     throw new TypeError("reconnect.maxDelayMs must be greater than or equal to reconnect.initialDelayMs");
   }
+  const directAccount = parsed.direct?.account;
+  const directPassword = parsed.direct?.password;
+  if (directAccount === void 0 !== (directPassword === void 0)) {
+    throw new TypeError("direct.account and direct.password must be configured together");
+  }
+  const direct = directAccount === void 0 || directPassword === void 0 ? void 0 : { account: directAccount, password: directPassword };
   return {
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? "host",
@@ -9588,6 +9599,7 @@ function resolveConfig(input3 = {}, env = process.env) {
       const l = parsed.listen ?? {};
       return { host: l.host ?? "0.0.0.0", port: l.port ?? 18888, autoPort: l.autoPort ?? true };
     })(),
+    ...direct === void 0 ? {} : { direct },
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === void 0 || env.DSH_REMOTE_TERMINAL_ENABLED === "true") },
@@ -18969,7 +18981,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.19";
+var PLUGIN_VERSION = "0.5.20";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;
@@ -23111,6 +23123,7 @@ function isUnmaterializedThreadError(error) {
 
 // src/service.ts
 import { execFileSync } from "node:child_process";
+import { randomFillSync as randomFillSync2 } from "node:crypto";
 import { existsSync as existsSync3 } from "node:fs";
 
 // src/acp/adapters/session-models.ts
@@ -28689,6 +28702,7 @@ var HostPluginRuntime = class {
     });
     this.harnessVersion = await this.readHarnessVersion();
     this.credentialStore = new LocalCredentialStore();
+    await this.provisionDirectCredentials();
     this.directServer = new HostDirectServer(
       this.config.listen,
       this.identity,
@@ -28700,6 +28714,23 @@ var HostPluginRuntime = class {
       this.harnessVersion
     );
     if (this.config.hostControl?.enabled !== false) this.directServer.start();
+  }
+  async provisionDirectCredentials() {
+    if (this.credentialStore === void 0) return;
+    const configured = this.config.direct;
+    if (configured !== void 0) {
+      await this.credentialStore.add(configured.account, configured.password);
+      this.logger.info("direct-connect credentials applied from plugin settings", { account: configured.account });
+      return;
+    }
+    if ((await this.credentialStore.list()).length > 0) return;
+    const account = "local";
+    const password = Buffer.from(randomFillSync2(new Uint8Array(12))).toString("base64url");
+    await this.credentialStore.add(account, password);
+    this.logger.warn(
+      "direct-connect: no account configured; generated a default account. Set direct account/password in the plugin settings to choose your own.",
+      { account, password }
+    );
   }
   currentIdentity() {
     if (this.identity === void 0) throw new Error("remote runtime has not started");

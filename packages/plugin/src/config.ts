@@ -11,6 +11,8 @@ export interface Config {
   serverUrl?: string
   /** Serverless direct-connect listen address. When set, the Host listens for Clients directly (no relay Server). */
   listen?: { host?: string; port?: number; autoPort?: boolean }
+  /** Direct-connect sign-in credentials applied to the local credential store on startup. */
+  direct?: { account?: string; password?: string }
   deviceName?: string
   terminal?: { enabled?: boolean }
   hostControl?: { enabled?: boolean }
@@ -63,6 +65,7 @@ export interface ResolvedConfig {
   role: 'host' | 'client' | 'both'
   serverUrl?: string
   listen: { host: string; port: number; autoPort: boolean }
+  direct?: { account: string; password: string }
   deviceName: string
   forceRelay: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
@@ -102,6 +105,10 @@ const entryConfigSchema = s.object({
     host: s.string(),
     port: s.number(),
     autoPort: s.boolean(),
+  }),
+  direct: s.object({
+    account: s.string(),
+    password: s.string().role('secret'),
   }),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
@@ -157,6 +164,7 @@ const configSchema = z.object({
   role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
   listen: z.object({ host: z.string().min(1).max(254).optional(), port: z.number().int().min(1).max(65535).optional(), autoPort: z.boolean().optional() }).optional(),
+  direct: z.object({ account: z.string().trim().min(1).max(254).optional(), password: z.string().min(1).max(256).optional() }).strict().optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
@@ -194,6 +202,14 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
   if (maxDelayMs < initialDelayMs) {
     throw new TypeError('reconnect.maxDelayMs must be greater than or equal to reconnect.initialDelayMs')
   }
+  const directAccount = parsed.direct?.account
+  const directPassword = parsed.direct?.password
+  if ((directAccount === undefined) !== (directPassword === undefined)) {
+    throw new TypeError('direct.account and direct.password must be configured together')
+  }
+  const direct = directAccount === undefined || directPassword === undefined
+    ? undefined
+    : { account: directAccount, password: directPassword }
   return {
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? 'host',
@@ -202,6 +218,7 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
       const l = parsed.listen ?? {}
       return { host: l.host ?? '0.0.0.0', port: l.port ?? 18888, autoPort: l.autoPort ?? true }
     })(),
+    ...(direct === undefined ? {} : { direct }),
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },

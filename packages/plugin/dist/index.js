@@ -9549,9 +9549,9 @@ var configSchema = external_exports.object({
   role: external_exports.enum(["host", "client", "both"]).optional(),
   serverUrl: external_exports.string().url().optional(),
   listen: external_exports.object({ host: external_exports.string().min(1).max(254).optional(), port: external_exports.number().int().min(1).max(65535).optional(), autoPort: external_exports.boolean().optional() }).optional(),
-  direct: external_exports.object({ account: external_exports.string().trim().min(1).max(254).optional(), password: external_exports.string().min(1).max(256).optional() }).strict().optional(),
-  directAccount: external_exports.string().trim().min(1).max(254).optional(),
-  directPassword: external_exports.string().min(1).max(256).optional(),
+  direct: external_exports.object({ account: external_exports.preprocess((v) => v === void 0 ? void 0 : String(v), external_exports.string().trim().min(1).max(254).optional()), password: external_exports.preprocess((v) => v === void 0 ? void 0 : String(v), external_exports.string().min(1).max(256).optional()) }).strict().optional(),
+  directAccount: external_exports.preprocess((v) => v === void 0 ? void 0 : String(v), external_exports.string().trim().min(1).max(254).optional()),
+  directPassword: external_exports.preprocess((v) => v === void 0 ? void 0 : String(v), external_exports.string().min(1).max(256).optional()),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
@@ -18981,7 +18981,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.22";
+var PLUGIN_VERSION = "0.5.23";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;

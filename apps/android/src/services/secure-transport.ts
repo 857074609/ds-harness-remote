@@ -212,8 +212,9 @@ export class DirectSecureTransport implements RemoteTransport {
           if (settled) return
           try {
             if (step !== 2) throw new Error(strings.runtime.secureHandshakeOrder)
+            // XXpsk3: the initiator is only complete after writing message 3;
+            // completion is asserted after sendHandshake(3) below.
             noise.readHandshake(data)
-            if (!noise.complete) throw new Error(strings.runtime.secureHandshakeIncomplete)
             finish()
           } catch (error) {
             finish(error instanceof Error ? error : new Error(strings.runtime.secureHandshakeFailed))

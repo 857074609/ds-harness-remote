@@ -3,18 +3,18 @@
     "name": "DSH Remote",
     "slug": "dsh-remote",
     "scheme": "dshremote",
-    "version": "0.5.24",
+    "version": "0.5.25",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "io.github.liguobao.dshremote",
-      "buildNumber": "65"
+      "buildNumber": "66"
     },
     "android": {
       "package": "io.github.liguobao.dshremote",
-      "versionCode": 65,
+      "versionCode": 66,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES",

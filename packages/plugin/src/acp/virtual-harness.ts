@@ -8,6 +8,7 @@ import type { AcpModelSelection, AcpVirtualWorkspaceView } from './virtual-catal
 import { createAcpWorkspaceView, modelCatalog, nativeWorkspace, recreateWorkspaceFromId } from './virtual-catalog.js'
 import type {
   AcpClientLike,
+  AcpPermissionPreset,
   AcpSessionState,
   FollowState,
   JsonRecord,
@@ -15,6 +16,7 @@ import type {
   PendingApproval,
 } from './virtual-contract.js'
 import {
+  acpPermissionsProjection,
   array,
   AsyncValueQueue,
   business,
@@ -24,6 +26,7 @@ import {
   fail,
   failFrom,
   failure,
+  isAcpPermissionPreset,
   isRecord,
   nativeAcpId,
   optionalInteger,
@@ -60,6 +63,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private readonly pendingHistory = new Map<string, Promise<void>>()
   private selectedWorkspaceId?: string
   private readonly selectedModels = new Map<string, AcpModelSelection>()
+  private readonly selectedPermissions = new Map<string, AcpPermissionPreset>()
+  private commandSeq = 0
   private lastProjectionSeq = 0
   private readonly imageAttachments = new Map<string, { sessionId: string; attachment: unknown; data: string }>()
   private closed = false
@@ -98,6 +103,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
       get pendingApprovals() { return owner.pendingApprovals },
       emitApproval: (...args) => owner.events.emitApproval(...args),
       modelSelection: (...args) => owner.modelSelection(...args),
+      permissionsProjection: (...args) => owner.permissionsProjection(...args),
+      permissionSelection: (...args) => owner.permissionSelection(...args),
     })
     this.events = new AcpEventCarrier({
       get archivedSessionIds() { return owner.archivedSessionIds },
@@ -256,6 +263,14 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           }
         }
         case 'session/selectModel': return business(await this.selectModel(requestArg(args)))
+        case 'session/selectPermission': {
+          const rawId = extractSessionId(requestArg(args))
+          const sessionId = this.resolveSessionId(rawId)
+          const preset = requiredString(requestArg(args).preset, 'preset')
+          if (!isAcpPermissionPreset(preset)) return business(failure('invalid-preset', `unknown preset "${preset}"`))
+          this.setPermissionSelection(sessionId, preset)
+          return business(success({ preset }))
+        }
         case 'session/initializeDefaultModel': return business(success(undefined))
         case 'session/canOpenWorkspacePath': return business(this.selectedWorkspaceId !== undefined)
         case 'session/openWorkspacePath': return business(failure('bad-request', `Opening Host paths is unavailable in ${this.backendLabel()} mode.`))
@@ -263,8 +278,8 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
         case 'host/listDirectory':
         case 'directoryPicker/list': return business(await this.listDirectory(requestArg(args), signal))
         case 'skills/list': return business(success({ items: [] }))
-        case 'commands/list': return business([])
-        case 'commands/execute': return business(undefined)
+        case 'commands/list': return business(this.commandList(requestArg(args)))
+        case 'commands/execute': return business(await this.executeCommand(requestArg(args)))
         default:
           return this.hostCarrier === undefined
             ? fail('method-not-found', `${this.backendLabel()} virtual Harness does not implement ${endpoint}.`)
@@ -572,6 +587,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank && session.events.length === 0, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(sessionId),
+          permissions: this.permissionsProjection(sessionId),
           imageLimits: acpImageLimits(this.backend),
         },
       },
@@ -785,6 +801,7 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
           title: session.title ?? (this.backend === "claude" ? "Claude" : this.backend === "pi" ? "Pi" : this.backend === "opencode" ? "OpenCode" : this.backend === "antigravity" ? "Antigravity" : "Cursor"),
           sessionListMetadata: { blank: session.blank, lastPromptAt: null },
           modelSelection: this.modelSelectionProjection(session.sessionId),
+          permissions: this.permissionsProjection(session.sessionId),
           imageLimits: acpImageLimits(this.backend),
         },
       },
@@ -810,6 +827,69 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
   private modelSelectionProjection(sessionId: string): { lastUsed: AcpModelSelection; next: AcpModelSelection } {
     const selection = this.modelSelection(sessionId)
     return { lastUsed: selection, next: selection }
+  }
+
+  private permissionSelection(sessionId: string): AcpPermissionPreset | undefined {
+    const resolved = this.resolveSessionId(sessionId)
+    return this.selectedPermissions.get(resolved) ?? this.selectedPermissions.get(sessionId)
+  }
+
+  private permissionsProjection(sessionId: string): unknown {
+    return acpPermissionsProjection(this.permissionSelection(sessionId))
+  }
+
+  private setPermissionSelection(sessionId: string, preset: AcpPermissionPreset | undefined): void {
+    const resolved = this.resolveSessionId(sessionId)
+    if (preset === undefined) {
+      this.selectedPermissions.delete(resolved)
+      this.selectedPermissions.delete(sessionId)
+    } else {
+      this.selectedPermissions.set(resolved, preset)
+      this.selectedPermissions.set(sessionId, preset)
+    }
+    const seq = this.nextProjectionSeq()
+    this.events.publishProjection(resolved, 'permissions', this.permissionsProjection(resolved), seq)
+    if (resolved !== sessionId) {
+      this.events.publishProjection(sessionId, 'permissions', this.permissionsProjection(resolved), seq)
+    }
+    if (this.client.selectPermission) {
+      void this.client.selectPermission(nativeAcpId(resolved, this.backend), this.backend, preset ?? 'workspace-write').catch(() => undefined)
+    }
+  }
+
+  private commandList(args: JsonRecord): unknown[] {
+    const rawId = extractSessionId(args)
+    if (rawId) this.resolveSessionId(rawId)
+    return [{
+      name: 'permission',
+      description: `Switch the ${this.backendLabel()} Remote sandbox mode and approval policy`,
+      input: { hint: '<preset>' },
+    }]
+  }
+
+  private async executeCommand(args: JsonRecord): Promise<unknown> {
+    const rawId = requiredString(args.agentId ?? args.sessionId, 'agentId')
+    const sessionId = this.resolveSessionId(rawId)
+    const line = requiredString(args.line, 'command line').trim()
+    const match = /^\/permission(?:\s+([\s\S]*))?$/u.exec(line)
+    if (match === null) return undefined
+
+    const commandId = `acp-permission:${++this.commandSeq}`
+    const requested = (match[1] ?? '').trim()
+    if (requested === '') {
+      return {
+        commandId,
+        result: { kind: 'success', text: `current preset ${this.permissionSelection(sessionId) ?? 'Host settings (not reported)'}` },
+      }
+    }
+    if (!isAcpPermissionPreset(requested)) {
+      return {
+        commandId,
+        result: { kind: 'error', text: `unknown preset "${requested}" (available: workspace-write, danger-full-access)` },
+      }
+    }
+    this.setPermissionSelection(sessionId, requested)
+    return { commandId, result: { kind: 'success', text: `preset ${requested}` } }
   }
 
   private async hostSessionModels(sessionId: string): Promise<AcpSessionModels> {
@@ -881,5 +961,6 @@ export class AcpVirtualHarness implements RemoteTypertGatewayTarget {
 }
 
 export { acpCwdWorkspaceId, createAcpWorkspaceView, discoverAcpVirtualWorkspaces, modelCatalog } from './virtual-catalog.js'
+export { acpPermissionsProjection, isAcpPermissionPreset } from './virtual-contract.js'
 export type { AcpModelSelection, AcpModelView, AcpVirtualWorkspaceView } from './virtual-catalog.js'
-export type { AcpClientLike } from './virtual-contract.js'
+export type { AcpClientLike, AcpPermissionPreset } from './virtual-contract.js'

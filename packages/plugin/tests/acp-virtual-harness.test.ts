@@ -1039,4 +1039,87 @@ describe('AcpVirtualHarness', () => {
     } finally { await agy.close(); await cursor.close() }
   })
 
+  it('projects and toggles ACP permission presets and auto-approves requests under danger-full-access', async () => {
+    let onFrame!: (frame: AgentAcpFrameData) => void
+    const client = {
+      ...fakeAcp(),
+      openStream: vi.fn(async (_id: string, handler: typeof onFrame) => { onFrame = handler; return { close: async () => undefined } }),
+      respond: vi.fn(async () => ({})),
+      selectPermission: vi.fn(async () => ({})),
+    }
+    const target = new AcpVirtualHarness(client, { deviceId: 'host', name: 'Host' }, 'opencode')
+    const signal = new AbortController().signal
+    try {
+      const workspace = await target.selectOrCreateWorkspace('/test')
+      const sessionId = workspace.sessionIds[0]!
+      const request = { sessionId }
+
+      const initial = await target.dispatch('session/projections', { args: { request } }, signal)
+      expect(initial).toMatchObject({
+        ok: true,
+        value: {
+          values: {
+            permissions: {
+              options: [
+                { value: 'workspace-write' },
+                { value: 'danger-full-access' },
+              ],
+              currentValue: 'Host settings (not reported)',
+            },
+          },
+        },
+      })
+
+      const commands = await target.dispatch('commands/list', { args: { request } }, signal)
+      expect(commands).toMatchObject({ ok: true, value: [{ name: 'permission' }] })
+
+      const switchResult = await target.dispatch('commands/execute', { args: { agentId: sessionId, line: '/permission danger-full-access', images: [] } }, signal)
+      expect(switchResult).toMatchObject({ ok: true, value: { result: { kind: 'success', text: 'preset danger-full-access' } } })
+      expect(client.selectPermission).toHaveBeenCalledWith('remote-history', 'opencode', 'danger-full-access')
+
+      const updated = await target.dispatch('session/projections', { args: { request } }, signal)
+      expect(updated).toMatchObject({
+        ok: true,
+        value: {
+          values: {
+            permissions: {
+              currentValue: 'danger-full-access',
+            },
+          },
+        },
+      })
+
+      const followStream = await target.open('session/follow', { args: { request } }, signal)
+      const iterator = followStream[Symbol.asyncIterator]()
+      await iterator.next()
+
+      onFrame({
+        frame: {
+          method: 'session/request_permission',
+          params: {
+            requestHandle: 'handle_1',
+            toolName: 'bash',
+            reason: 'execute command',
+          },
+        },
+      } as AgentAcpFrameData)
+
+      expect(client.respond).toHaveBeenCalledWith('handle_1', 'allow-once')
+
+      await target.dispatch('commands/execute', { args: { agentId: sessionId, line: '/permission workspace-write', images: [] } }, signal)
+      const reverted = await target.dispatch('session/projections', { args: { request } }, signal)
+      expect(reverted).toMatchObject({
+        ok: true,
+        value: {
+          values: {
+            permissions: {
+              currentValue: 'workspace-write',
+            },
+          },
+        },
+      })
+    } finally {
+      await target.close()
+    }
+  })
 })

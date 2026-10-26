@@ -165,6 +165,15 @@ async function activate(
   // termination for remote terminals. Profiles without it fall back to the plain
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
+  // Settings edits must reach the direct-connect server without a restart:
+  // re-resolve the entry config on each sign-in attempt.
+  const liveDirectCredentials = (): { account: string; password: string } | undefined => {
+    try {
+      return resolveConfig(readConfig()).direct
+    } catch {
+      return undefined
+    }
+  }
   const createRuntimes = (config: ResolvedConfig) => {
     const hostIdentities = new IdentityStore({ directory: defaultIdentityDirectory })
     const runtime = new HostPluginRuntime(
@@ -179,6 +188,7 @@ async function activate(
         () => (ctx.get('webServer') as DshWebServerPortLike | undefined)?.port,
         peer,
       ),
+      liveDirectCredentials,
     )
 
     return runtime
@@ -247,7 +257,12 @@ async function disableLegacyLoaderEntries(ctx: Context, logger: SafeLogger): Pro
   const currentEntryId = loader.locate?.(ctx.fiber)
   for (const entry of loader.entries()) {
     const moduleName = entry.options.name
-    if (moduleName === undefined || !legacyLoaderModuleNames.has(moduleName)) continue
+    // Rows inserted by pre-0.5.21 manifests: renamed modules and the TUI-scoped
+    // entry (which may survive as a nameless zombie row in saved profiles).
+    const isLegacy = (moduleName !== undefined && legacyLoaderModuleNames.has(moduleName))
+      || entry.id === 'ds-harness-remote-tui'
+      || entry.options.id === 'ds-harness-remote-tui'
+    if (!isLegacy) continue
     if (entry.id === currentEntryId || entry.options.disabled === true) continue
 
     try {

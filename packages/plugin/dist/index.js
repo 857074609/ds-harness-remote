@@ -9505,10 +9505,8 @@ var entryConfigSchema = s.object({
     port: s.number(),
     autoPort: s.boolean()
   }),
-  direct: s.object({
-    account: s.string(),
-    password: s.string().role("secret")
-  }),
+  directAccount: s.string(),
+  directPassword: s.string().role("secret"),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
   hostControl: s.object({ enabled: s.boolean() }),
@@ -9552,6 +9550,8 @@ var configSchema = external_exports.object({
   serverUrl: external_exports.string().url().optional(),
   listen: external_exports.object({ host: external_exports.string().min(1).max(254).optional(), port: external_exports.number().int().min(1).max(65535).optional(), autoPort: external_exports.boolean().optional() }).optional(),
   direct: external_exports.object({ account: external_exports.string().trim().min(1).max(254).optional(), password: external_exports.string().min(1).max(256).optional() }).strict().optional(),
+  directAccount: external_exports.string().trim().min(1).max(254).optional(),
+  directPassword: external_exports.string().min(1).max(256).optional(),
   deviceName: external_exports.string().trim().min(1).max(80).optional(),
   terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
   hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
@@ -9585,8 +9585,8 @@ function resolveConfig(input3 = {}, env = process.env) {
   if (maxDelayMs < initialDelayMs) {
     throw new TypeError("reconnect.maxDelayMs must be greater than or equal to reconnect.initialDelayMs");
   }
-  const directAccount = parsed.direct?.account;
-  const directPassword = parsed.direct?.password;
+  const directAccount = parsed.directAccount ?? parsed.direct?.account;
+  const directPassword = parsed.directPassword ?? parsed.direct?.password;
   if (directAccount === void 0 !== (directPassword === void 0)) {
     throw new TypeError("direct.account and direct.password must be configured together");
   }
@@ -18981,13 +18981,13 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.21";
+var PLUGIN_VERSION = "0.5.22";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;
 var MAX_RELAY_FRAME_BYTES2 = 1048576;
 var HostDirectServer = class {
-  constructor(options, identity2, identities, credentials, connections, logger, hostCapabilities = () => [], harnessVersion) {
+  constructor(options, identity2, identities, credentials, connections, logger, hostCapabilities = () => [], harnessVersion, liveCredentials) {
     this.options = options;
     this.identity = identity2;
     this.identities = identities;
@@ -18996,6 +18996,7 @@ var HostDirectServer = class {
     this.logger = logger;
     this.hostCapabilities = hostCapabilities;
     this.harnessVersion = harnessVersion;
+    this.liveCredentials = liveCredentials;
   }
   server;
   tunnels = /* @__PURE__ */ new Map();
@@ -19092,7 +19093,11 @@ var HostDirectServer = class {
       this.sendError(ws, "AUTH_REQUIRED", "account, password and deviceId are required");
       throw new ControlError("AUTH_REQUIRED", "Missing account, password or deviceId.");
     }
-    const verified = await this.credentials.verify(account, password);
+    let verified = await this.credentials.verify(account, password);
+    if (verified === void 0) {
+      const live = this.liveCredentials?.();
+      if (live !== void 0 && live.account === account && live.password === password) verified = account;
+    }
     if (verified === void 0) {
       this.sendError(ws, "AUTH_INVALID", "invalid account or password");
       throw new ControlError("AUTH_INVALID", "Invalid account or password.");
@@ -19347,6 +19352,30 @@ var LocalCredentialStore = class {
   async list() {
     const accounts = await this.load();
     return [...accounts.keys()];
+  }
+  /** Accounts whose stored secret is not a valid scrypt record (e.g. a hand-edited file). */
+  async malformedAccounts() {
+    const accounts = await this.load();
+    return [...accounts].filter(([, secret]) => !secret.startsWith("scrypt$")).map(([account]) => account);
+  }
+  /**
+   * Plaintext copy of the effective credentials for the machine owner, so the
+   * password stays retrievable without digging through logs (mode 0600, LAN
+   * tool). Callers pass the credentials they just provisioned.
+   */
+  async writeLoginNotes(entries) {
+    await mkdir2(this.directory, { recursive: true, mode: 448 });
+    await chmod2(this.directory, 448);
+    const path = join4(this.directory, "login.txt");
+    const body = entries.map((entry) => `account: ${entry.account}
+password: ${entry.password}
+`).join("\n");
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    await writeFile2(tmp, `# ds-harness-remote direct-connect sign-in (Android login page)
+${body}`, { encoding: "utf8", mode: 384 });
+    await chmod2(tmp, 384);
+    await rename2(tmp, path);
+    await chmod2(path, 384);
   }
 };
 var CredentialStoreError = class extends Error {
@@ -28584,7 +28613,7 @@ var CodexWorkspaceBridge = class extends WorkspaceBridge {
 
 // src/service.ts
 var HostPluginRuntime = class {
-  constructor(config, identities, logger, localGateway, fileViewerHost, terminalSpawner, pluginRoutes) {
+  constructor(config, identities, logger, localGateway, fileViewerHost, terminalSpawner, pluginRoutes, liveDirectCredentials) {
     this.config = config;
     this.identities = identities;
     this.logger = logger;
@@ -28592,6 +28621,7 @@ var HostPluginRuntime = class {
     this.fileViewerHost = fileViewerHost;
     this.terminalSpawner = terminalSpawner;
     this.pluginRoutes = pluginRoutes;
+    this.liveDirectCredentials = liveDirectCredentials;
     this.terminalEnabled = config.terminal.enabled;
     this.loopbackPorts = [...config.loopback.ports];
     this.codex = new CodexRemoteDomain(config.codex, logger);
@@ -28711,15 +28741,21 @@ var HostPluginRuntime = class {
       this.connections,
       this.logger,
       () => this.hostCapabilities(),
-      this.harnessVersion
+      this.harnessVersion,
+      () => this.liveDirectCredentials?.()
     );
     if (this.config.hostControl?.enabled !== false) this.directServer.start();
   }
   async provisionDirectCredentials() {
     if (this.credentialStore === void 0) return;
+    for (const account2 of await this.credentialStore.malformedAccounts()) {
+      await this.credentialStore.remove(account2);
+      this.logger.warn("direct-connect: removed malformed credential record (regenerating)", { account: account2 });
+    }
     const configured = this.config.direct;
     if (configured !== void 0) {
       await this.credentialStore.add(configured.account, configured.password);
+      await this.credentialStore.writeLoginNotes([configured]);
       this.logger.info("direct-connect credentials applied from plugin settings", { account: configured.account });
       return;
     }
@@ -28727,6 +28763,7 @@ var HostPluginRuntime = class {
     const account = "local";
     const password = Buffer.from(randomFillSync2(new Uint8Array(12))).toString("base64url");
     await this.credentialStore.add(account, password);
+    await this.credentialStore.writeLoginNotes([{ account, password }]);
     this.logger.warn(
       "direct-connect: no account configured; generated a default account. Set direct account/password in the plugin settings to choose your own.",
       { account, password }
@@ -29944,6 +29981,13 @@ async function activate(ctx, readConfig, entryId) {
     };
   }
   const subprocess = ctx.get("subprocess", false);
+  const liveDirectCredentials = () => {
+    try {
+      return resolveConfig(readConfig()).direct;
+    } catch {
+      return void 0;
+    }
+  };
   const createRuntimes = (config2) => {
     const hostIdentities = new IdentityStore({ directory: defaultIdentityDirectory });
     const runtime2 = new HostPluginRuntime(
@@ -29957,7 +30001,8 @@ async function activate(ctx, readConfig, entryId) {
         () => ctx.get("connection"),
         () => ctx.get("webServer")?.port,
         peer
-      )
+      ),
+      liveDirectCredentials
     );
     return runtime2;
   };
@@ -30002,7 +30047,8 @@ async function disableLegacyLoaderEntries(ctx, logger) {
   const currentEntryId = loader.locate?.(ctx.fiber);
   for (const entry of loader.entries()) {
     const moduleName = entry.options.name;
-    if (moduleName === void 0 || !legacyLoaderModuleNames.has(moduleName)) continue;
+    const isLegacy = moduleName !== void 0 && legacyLoaderModuleNames.has(moduleName) || entry.id === "ds-harness-remote-tui" || entry.options.id === "ds-harness-remote-tui";
+    if (!isLegacy) continue;
     if (entry.id === currentEntryId || entry.options.disabled === true) continue;
     try {
       await loader.update(entry.id, { disabled: true });

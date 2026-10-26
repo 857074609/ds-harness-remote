@@ -13,7 +13,7 @@ import {
 import type { SafeLogger } from './logging.js'
 import { RpcRouter } from './rpc-router.js'
 import { RemoteFileViewerBridge, type FileViewerHostServiceLike } from './file-viewer-bridge.js'
-import { HostDirectServer } from './host-server.js'
+import { HostDirectServer, type DirectCredentials } from './host-server.js'
 import { LocalCredentialStore } from './local-credentials.js'
 import { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
@@ -82,6 +82,8 @@ export class HostPluginRuntime {
     /** PTY-backed terminal provider from the Host `subprocess` service, when present. */
     private readonly terminalSpawner?: RemoteTerminalSpawner,
     private readonly pluginRoutes?: (peer?: unknown) => PluginRouteDispatcher | undefined,
+    /** Latest settings credentials, re-read on each sign-in so edits apply without a restart. */
+    private readonly liveDirectCredentials?: () => DirectCredentials | undefined,
   ) {
     this.terminalEnabled = config.terminal.enabled
     this.loopbackPorts = [...config.loopback.ports]
@@ -197,15 +199,21 @@ export class HostPluginRuntime {
       this.logger,
       () => this.hostCapabilities(),
       this.harnessVersion,
+      () => this.liveDirectCredentials?.(),
     )
     if (this.config.hostControl?.enabled !== false) this.directServer.start()
   }
 
   private async provisionDirectCredentials(): Promise<void> {
     if (this.credentialStore === undefined) return
+    for (const account of await this.credentialStore.malformedAccounts()) {
+      await this.credentialStore.remove(account)
+      this.logger.warn('direct-connect: removed malformed credential record (regenerating)', { account })
+    }
     const configured = this.config.direct
     if (configured !== undefined) {
       await this.credentialStore.add(configured.account, configured.password)
+      await this.credentialStore.writeLoginNotes([configured])
       this.logger.info('direct-connect credentials applied from plugin settings', { account: configured.account })
       return
     }
@@ -213,6 +221,7 @@ export class HostPluginRuntime {
     const account = 'local'
     const password = Buffer.from(randomFillSync(new Uint8Array(12))).toString('base64url')
     await this.credentialStore.add(account, password)
+    await this.credentialStore.writeLoginNotes([{ account, password }])
     this.logger.warn(
       'direct-connect: no account configured; generated a default account.'
       + ' Set direct account/password in the plugin settings to choose your own.',

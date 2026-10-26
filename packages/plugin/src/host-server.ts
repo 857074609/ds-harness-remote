@@ -41,6 +41,12 @@ export interface HostDirectServerOptions {
   autoPort?: boolean
 }
 
+/** Credentials straight from the (possibly just-edited) plugin settings. */
+export interface DirectCredentials {
+  account: string
+  password: string
+}
+
 interface DirectTunnel {
   connectionId: string
   account: string
@@ -70,6 +76,7 @@ export class HostDirectServer {
     private readonly logger: SafeLogger,
     private readonly hostCapabilities: () => readonly string[] = () => [],
     private readonly harnessVersion?: string,
+    private readonly liveCredentials?: () => DirectCredentials | undefined,
   ) {}
 
   /** The address clients should connect to. Known only after `start()`. */
@@ -148,7 +155,11 @@ export class HostDirectServer {
       this.sendError(ws, 'AUTH_REQUIRED', 'account, password and deviceId are required')
       throw new ControlError('AUTH_REQUIRED', 'Missing account, password or deviceId.')
     }
-    const verified = await this.credentials.verify(account, password)
+    let verified = await this.credentials.verify(account, password)
+    if (verified === undefined) {
+      const live = this.liveCredentials?.()
+      if (live !== undefined && live.account === account && live.password === password) verified = account
+    }
     if (verified === undefined) {
       this.sendError(ws, 'AUTH_INVALID', 'invalid account or password')
       throw new ControlError('AUTH_INVALID', 'Invalid account or password.')

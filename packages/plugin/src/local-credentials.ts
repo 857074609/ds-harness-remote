@@ -108,6 +108,29 @@ export class LocalCredentialStore {
     const accounts = await this.load()
     return [...accounts.keys()]
   }
+
+  /** Accounts whose stored secret is not a valid scrypt record (e.g. a hand-edited file). */
+  async malformedAccounts(): Promise<string[]> {
+    const accounts = await this.load()
+    return [...accounts].filter(([, secret]) => !secret.startsWith('scrypt$')).map(([account]) => account)
+  }
+
+  /**
+   * Plaintext copy of the effective credentials for the machine owner, so the
+   * password stays retrievable without digging through logs (mode 0600, LAN
+   * tool). Callers pass the credentials they just provisioned.
+   */
+  async writeLoginNotes(entries: ReadonlyArray<{ account: string; password: string }>): Promise<void> {
+    await mkdir(this.directory, { recursive: true, mode: 0o700 })
+    await chmod(this.directory, 0o700)
+    const path = join(this.directory, 'login.txt')
+    const body = entries.map(entry => `account: ${entry.account}\npassword: ${entry.password}\n`).join('\n')
+    const tmp = `${path}.${process.pid}.${Date.now()}.tmp`
+    await writeFile(tmp, `# ds-harness-remote direct-connect sign-in (Android login page)\n${body}`, { encoding: 'utf8', mode: 0o600 })
+    await chmod(tmp, 0o600)
+    await rename(tmp, path)
+    await chmod(path, 0o600)
+  }
 }
 
 export class CredentialStoreError extends Error {

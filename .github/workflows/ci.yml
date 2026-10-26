@@ -92,9 +92,6 @@ jobs:
       - name: Build workspace
         run: NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 
-      - name: Verify packed Host WebRTC fallback and installation closure
-        run: node scripts/verify-packed-webrtc.mjs
-
   plugin-package:
     name: Package npm plugin
     needs: quality

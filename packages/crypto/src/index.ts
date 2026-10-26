@@ -71,5 +71,9 @@ export {
   NoiseIkSession,
   NoiseSessionError,
   createNoisePrologue,
+  NOISE_XX_PSK_PROTOCOL,
+  NoiseXxPskSession,
+  derivePsk,
+  createDirectNoisePrologue,
 } from './noise.js'
-export type { NoiseIkSessionOptions } from './noise.js'
+export type { NoiseIkSessionOptions, NoiseXxPskSessionOptions } from './noise.js'

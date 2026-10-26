@@ -1,21 +1,19 @@
 import { browseScope, useBrowseMemory } from '../services/browse-memory'
-import { friendlyError, isSessionAuthError } from '../lib/errors'
-import { initialProbeTransports } from '../lib/network-route'
+import { friendlyError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
-import { resolveAutomaticPreferredTransports } from '../services/network-route'
-import { serverSession } from '../services/server-session'
-import { saveLastConnectedDeviceId } from '../services/storage'
+import { saveDirectConnect, loadDirectConnect, saveLastConnectedDeviceId } from '../services/storage'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
 
 /** Connection actions use the store's single connection/session runtime. */
 export function createConnectionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'connectDevice' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
+  'connectDevice' | 'connectDirectHost' | 'reconnect' | 'resumeConnection' | 'refreshConnectionNetworkDetails' | 'disconnect' | 'setOffline'> {
   return {
     async connectDevice(device, options = {}) {
-      const { config, identity } = get()
-      if (config === undefined || identity === undefined) return false
+      const { identity } = get()
+      if (identity === undefined) return false
+      if (device.platform !== 'direct') return false
       const generation = ++runtime.connectionGeneration
       ++runtime.sessionLoadGeneration
       runtime.sessionReadAbort?.abort()
@@ -59,36 +57,26 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         await runtime.connection.prepareConnection(recovering)
         if (generation !== runtime.connectionGeneration) return false
         await runtime.closeActiveCodexStream(false)
-        await runtime.closeActiveCursorStream(false)
-        const { api, credentials } = await serverSession.authenticate(config.baseUrl, identity)
-        const preference = get().transportPreference
-        const forceRelay = options.forceRelay === true || preference === 'relay'
-        const preferredTransports = forceRelay
-          ? ['relay'] as const
-          : preference === 'turn'
-            ? ['turn', 'relay'] as const
-            : await resolveAutomaticPreferredTransports()
-        if (generation !== runtime.connectionGeneration) return false
-        set({ connectionStage: 'transport', connectionProbeOrder: initialProbeTransports(preferredTransports) })
-        await runtime.connection.connect(
-          config.baseUrl,
+        // Serverless direct connect: no Server, no access token; the local
+        // account password authenticates hello and derives the Noise PSK.
+        // Credentials persist in SecureStore so reconnects survive restarts.
+        let directSpec = runtime.pendingDirectConnect
+        if (directSpec === undefined) {
+          directSpec = await loadDirectConnect()
+          if (directSpec !== undefined) runtime.pendingDirectConnect = directSpec
+        }
+        if (directSpec === undefined) {
+          set({ connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.setup.directHint, retryable: false } })
+          return false
+        }
+        runtime.pendingDirectConnect = directSpec
+        set({ connectionStage: 'secure' })
+        const connectedDeviceId = await runtime.connection.connectDirect(
+          { host: directSpec.host, port: directSpec.port },
+          { account: directSpec.account, password: directSpec.password },
           identity,
-          device,
-          credentials.accessToken,
           frame => runtime.enqueueMuxFrame(generation, frame),
           {
-            fetchIceServers: async connectionId => api.turnCredentials(connectionId),
-            preferredTransports: [...preferredTransports],
-            forceRelay,
-            onOpencodeArchived: nativeId => {
-              if (generation !== runtime.connectionGeneration) return
-              const sessionId = `opencode:${nativeId}`
-              set(state => ({
-                sessions: state.sessions.filter(item => item.sessionId !== sessionId),
-                workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),
-              }))
-              if (get().workspaceCatalog?.backend === 'opencode') void get().refreshWorkspaces('opencode')
-            },
             onSecureHandshake: () => {
               if (generation !== runtime.connectionGeneration) return
               set(state => ({
@@ -97,9 +85,8 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 }
               }))
             },
-            onClose: closeOptions => {
+            onClose: () => {
               if (generation !== runtime.connectionGeneration) return
-              // Drop local stream handles so reconnect opens a fresh stream.
               void runtime.closeActiveCodexStream(false)
               void runtime.closeActiveCursorStream(false)
               if (get().connection.phase !== 'disconnected') {
@@ -107,7 +94,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                 ++runtime.sessionLoadGeneration
                 set({
                   connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: zhCN.runtime.hostClosed,
-                    retryable: closeOptions?.retryable !== false },
+                    retryable: true },
                   codexAvailable: false,
                   cursorAvailable: false,
                   antigravityAvailable: false,
@@ -120,12 +107,15 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
             },
           },
         )
+        device = { ...device, deviceId: connectedDeviceId }
+        set(state => ({
+          selectedDevice: state.selectedDevice === undefined ? undefined : { ...state.selectedDevice, deviceId: connectedDeviceId },
+        }))
         if (generation !== runtime.connectionGeneration) return false
         set({ connectionStage: 'loading' })
         const proxy = runtime.connection.requireProxy()
         // Catalogs belong to the category the user opens, not connection setup.
         const hostDescriptor = await proxy.hostDescribe()
-        const connectionNetworkDetails = await runtime.connection.getNetworkDetails().catch(() => undefined)
         if (generation !== runtime.connectionGeneration) return false
         set({
           hostDescriptor,
@@ -136,22 +126,18 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           opencodeAvailable: runtime.connection.hasOpencode(),
           claudeAvailable: runtime.connection.hasClaude(),
           connectionStage: 'ready',
-          connectionNetworkDetails,
-          lastConnectedDeviceId: device.deviceId,
+          connectionNetworkDetails: undefined,
+          lastConnectedDeviceId: connectedDeviceId,
           pendingAutoConnectDeviceId: undefined,
           connection: { phase: 'connected', stats: runtime.connection.getStats() ?? { mode: 'Relay', connected: true } },
         })
         runtime.connectionStartedAt = Date.now()
-        await saveLastConnectedDeviceId(device.deviceId)
+        await saveLastConnectedDeviceId(connectedDeviceId)
         return true
       } catch (error) {
         if (generation !== runtime.connectionGeneration) return false
         console.warn('[dsh-remote] Connection setup failed at stage:', get().connectionStage, error)
-        await runtime.connection.close({ preserveRecovery: recovering && !isSessionAuthError(error) })
-        if (isSessionAuthError(error)) {
-          await get().requireReauth(friendlyError(error))
-          return false
-        }
+        await runtime.connection.close({ preserveRecovery: recovering })
         const message = friendlyError(error)
         set({
           connection: { phase: 'offline', stats: { mode: 'Disconnected', connected: false }, error: message },
@@ -163,6 +149,39 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           claudeAvailable: false,
           error: message,
         })
+        return false
+      }
+    },
+
+    async connectDirectHost(spec) {
+      const identity = get().identity
+      if (identity === undefined) return false
+      runtime.pendingDirectConnect = spec
+      try {
+        const ok = await get().connectDevice({
+          deviceId: 'direct',
+          name: spec.account,
+          platform: 'direct',
+          identityKey: '',
+          membershipId: '',
+          online: true,
+          trusted: true,
+        })
+        if (ok) {
+          await saveDirectConnect(spec)
+          set(state => ({
+            config: { baseUrl: `direct://${spec.host}:${spec.port}`, host: spec.host, port: spec.port, account: spec.account },
+            account: spec.account,
+            devices: state.devices.some(device => device.deviceId === 'direct')
+              ? state.devices.map(device => device.deviceId === 'direct' ? { ...device, name: spec.account } : device)
+              : [...state.devices, {
+                  deviceId: 'direct', name: spec.account, platform: 'direct', identityKey: '', membershipId: '', online: true, trusted: true,
+                }],
+          }))
+        }
+        return ok
+      } catch (error) {
+        console.warn('[dsh-remote] Direct connect failed:', error)
         return false
       }
     },
@@ -209,7 +228,6 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         console.info('[dsh-remote] Resume health check failed; reconnecting')
         await get().reconnect()
       }
-      else await get().refreshConnectionNetworkDetails()
     },
 
     async refreshConnectionNetworkDetails() {
@@ -224,6 +242,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
     },
 
     async disconnect() {
+      runtime.pendingDirectConnect = undefined
       runtime.flushPendingMuxFrames()
       ++runtime.connectionGeneration
       ++runtime.sessionLoadGeneration

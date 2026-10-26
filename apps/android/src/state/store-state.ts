@@ -1,6 +1,5 @@
 import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import type { AppLanguage, LanguagePreference } from '../locales/i18n'
-import type { OAuthProviderInfo, OAuthQrPollResult, OAuthQrSession } from '../services/api'
 import type {
   AgentBackend,
   AgentPresetOption,
@@ -16,11 +15,10 @@ import type {
   ModelSelection,
   MuxStreamFrame,
   PromptImage,
-  RedirectLoginMethod,
   RemoteDevice,
   RemoteSession,
   SendMessageResult,
-  ServerConfig,
+  DirectConfig,
   SessionModels,
   TransportPreference,
   WorkspaceShortcut,
@@ -30,24 +28,11 @@ import type { ThemePreference, TypographyDensity } from '../ui/theme'
 
 type BootPhase = 'loading' | 'ready' | 'error'
 
-type AuthPhase = 'idle' | 'authenticating' | 'complete' | 'error'
-
 /** Provider discovery result for QR sign-in; the Base URL is already normalized. */
-export interface QrProviderList {
-  baseUrl: string
-  providers: OAuthProviderInfo[]
-}
-
 /** A QR sign-in session bound to the Server and provider that created it. */
-export interface QrLoginStart {
-  baseUrl: string
-  provider: OAuthProviderInfo
-  session: OAuthQrSession
-}
-
 export interface AppState {
   bootPhase: BootPhase
-  config?: ServerConfig
+  config?: DirectConfig
   identity?: DeviceIdentity
   account?: string
   devices: RemoteDevice[]
@@ -99,9 +84,6 @@ export interface AppState {
   themePreference: ThemePreference
   typographyDensity: TypographyDensity
   defaultPermissionPreset: DefaultPermissionPreset
-  pendingOAuthBaseUrl?: string
-  pendingOAuthLoginMethod?: RedirectLoginMethod
-  authPhase: AuthPhase
   refreshing: boolean
   busyAction?: string
   error?: string
@@ -119,26 +101,14 @@ export interface AppState {
   bootstrap(): Promise<void>
   requireReauth(message?: string): Promise<void>
   consumePendingAutoConnect(): string | undefined
-  selectServer(input: string): Promise<string | undefined>
-  configureServer(input: string, email: string, password: string): Promise<boolean>
-  startOAuth(input: string): Promise<string | undefined>
-  startGithubOAuth(input: string): Promise<string | undefined>
-  startGoogleOAuth(input: string): Promise<string | undefined>
-  completeOAuth(token: string): Promise<boolean>
-  listLoginProviders(input: string): Promise<QrProviderList | undefined>
-  listQrProviders(input: string): Promise<QrProviderList | undefined>
-  startQrLogin(input: string, providerId: string): Promise<QrLoginStart | undefined>
-  pollQrLogin(baseUrl: string, qrId: string): Promise<OAuthQrPollResult | undefined>
-  completeQrLogin(baseUrl: string, token: string, method: RedirectLoginMethod): Promise<boolean>
-  refreshDevices(): Promise<void>
   refreshWorkspaces(backend?: AgentBackend): Promise<void>
   refreshSessionStatus(): Promise<void>
   refreshConnectionNetworkDetails(): Promise<void>
   resumeConnection(): Promise<void>
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
-  renameDevice(deviceId: string, name: string): Promise<boolean>
   connectDevice(device: RemoteDevice, options?: { forceRelay?: boolean }): Promise<boolean>
+  connectDirectHost(spec: { host: string; port: number; account: string; password: string }): Promise<boolean>
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>
@@ -192,7 +162,7 @@ export const disconnected: ConnectionSnapshot = {
 export function initialData(): Pick<AppState,
   'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
   'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
-  'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'authPhase' | 'refreshing' | 'busyAction' | 'error' |
+  'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
     config: undefined,
@@ -230,7 +200,6 @@ export function initialData(): Pick<AppState,
     historyLoadingOlder: false,
     oldestLoadedSeq: undefined,
     transportPreference: 'auto',
-    authPhase: 'idle',
     refreshing: false,
     busyAction: undefined,
     error: undefined,

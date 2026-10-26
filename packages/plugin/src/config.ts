@@ -9,6 +9,8 @@ export interface Config {
   enabled?: boolean
   role?: 'host' | 'client' | 'both'
   serverUrl?: string
+  /** Serverless direct-connect listen address. When set, the Host listens for Clients directly (no relay Server). */
+  listen?: { host?: string; port?: number; autoPort?: boolean }
   deviceName?: string
   terminal?: { enabled?: boolean }
   hostControl?: { enabled?: boolean }
@@ -60,6 +62,7 @@ export interface ResolvedConfig {
   enabled: boolean
   role: 'host' | 'client' | 'both'
   serverUrl?: string
+  listen: { host: string; port: number; autoPort: boolean }
   deviceName: string
   forceRelay: boolean
   logLevel: 'debug' | 'info' | 'warn' | 'error'
@@ -95,6 +98,11 @@ const entryConfigSchema = s.object({
   enabled: s.boolean(),
   role: s.union(['host', 'client', 'both'] as const),
   serverUrl: s.string(),
+  listen: s.object({
+    host: s.string(),
+    port: s.number(),
+    autoPort: s.boolean(),
+  }),
   deviceName: s.string(),
   terminal: s.object({ enabled: s.boolean() }),
   hostControl: s.object({ enabled: s.boolean() }),
@@ -148,6 +156,7 @@ const configSchema = z.object({
   enabled: z.boolean().optional(),
   role: z.enum(['host', 'client', 'both']).optional(),
   serverUrl: z.string().url().optional(),
+  listen: z.object({ host: z.string().min(1).max(254).optional(), port: z.number().int().min(1).max(65535).optional(), autoPort: z.boolean().optional() }).optional(),
   deviceName: z.string().trim().min(1).max(80).optional(),
   terminal: z.object({ enabled: z.boolean().optional() }).strict().optional(),
   hostControl: z.object({ enabled: z.boolean().optional() }).strict().optional(),
@@ -189,6 +198,10 @@ export function resolveConfig(input: ConfigInput = {}, env: NodeJS.ProcessEnv = 
     enabled: parsed.enabled ?? true,
     role: parsed.role ?? 'host',
     ...(serverUrl === undefined ? {} : { serverUrl }),
+    listen: (() => {
+      const l = parsed.listen ?? {}
+      return { host: l.host ?? '0.0.0.0', port: l.port ?? 18888, autoPort: l.autoPort ?? true }
+    })(),
     deviceName: parsed.deviceName ?? env.DSH_REMOTE_DEVICE_NAME ?? hostname(),
     hostControl: { enabled: parsed.hostControl?.enabled ?? true },
     terminal: { enabled: parsed.terminal?.enabled ?? (env.DSH_REMOTE_TERMINAL_ENABLED === undefined || env.DSH_REMOTE_TERMINAL_ENABLED === 'true') },

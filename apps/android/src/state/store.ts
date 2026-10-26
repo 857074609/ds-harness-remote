@@ -78,7 +78,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   typographyDensity: 'compact',
   statusBarVisible: true,
   defaultPermissionPreset: 'default',
-  authPhase: 'idle',
   refreshing: false,
   reauthRequired: false,
   clearError() {

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronRight, CircleCheck, Code2, Laptop, MessageSquareText, MoreVertical, Pencil, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, ChevronRight, CircleCheck, Code2, Laptop, MessageSquareText, MoreVertical, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -27,7 +27,6 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { resolveSessionDisplayTitle } from './session-title'
-import { DeviceRenameModal } from './device-rename-modal'
 
 export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   onDevice: (device: RemoteDevice) => void
@@ -42,7 +41,8 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   const connectedDevice = useAppStore(state => state.selectedDevice)
   const connectedWorkspaces = useAppStore(state => state.workspaces)
   const refreshing = useAppStore(state => state.refreshing)
-  const refresh = useAppStore(state => state.refreshDevices)
+  // Direct mode has no server-side device directory; the single local device row is always current.
+  const refresh = () => undefined
   const forgetDevice = useAppStore(state => state.forgetDevice)
   const mutationPending = useAppStore(state => state.busyAction?.startsWith('forget:') === true
     || state.busyAction?.startsWith('rename-device:') === true)
@@ -868,7 +868,6 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
   const workspaces = useAppStore(state => state.workspaces)
   const trust = useAppStore(state => state.trustDevice)
   const reconnect = useAppStore(state => state.reconnect)
-  const [renaming, setRenaming] = useState(false)
   const isSelected = selected?.deviceId === device.deviceId
   const isConnected = isSelected && connection.phase === 'connected'
 
@@ -889,7 +888,6 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
               <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
               <View style={styles.deviceHeroCopy}>
                 <Text style={styles.deviceName}>{device.name}</Text>
-                <IconButton label={`${zhCN.devices.rename} ${device.name}`} icon={Pencil} tint={colors.primary} dense onPress={() => setRenaming(true)} />
               </View>
               <Text style={styles.devicePlatform}>{platformName(device.platform)}</Text>
             </View>
@@ -940,7 +938,6 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
           </View>
         </Screen>
       </BlurHeaderFrame>
-      {renaming && <DeviceRenameModal device={device} onClose={() => setRenaming(false)} />}
     </View>
   )
 }

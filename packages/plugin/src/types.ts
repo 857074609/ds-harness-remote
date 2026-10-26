@@ -3,13 +3,17 @@ import type { RemoteMessage } from '@dsh-remote/protocol'
 export interface AuthenticatedPeerChannel {
   /**
    * Attestation supplied by the Noise/control-plane integration. Implementors
-   * must expose this channel only after both the Noise IK transcript and the
-   * Server membership for this exact connection have been verified.
+   * must expose this channel only after the Noise transcript and, depending on
+   * the protocol, the Server membership OR the direct-connect password PSK for
+   * this exact connection have been verified.
    */
   readonly security: {
-    protocol: 'Noise_IK_25519_ChaChaPoly_SHA256'
+    protocol: 'Noise_IK_25519_ChaChaPoly_SHA256' | 'Noise_XXpsk3_25519_ChaChaPoly_SHA256'
     connectionId: string
-    membershipId: string
+    /** Present for the relay-Server (IK) flow; absent for the serverless direct-connect (XXpsk3) flow. */
+    membershipId?: string
+    /** True when the peer was authenticated by a password-derived PSK instead of Server membership. */
+    authenticatedByPassword?: boolean
   }
   readonly peerDeviceId: string
   readonly peerIdentityKey: string

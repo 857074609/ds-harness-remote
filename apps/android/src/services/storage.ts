@@ -7,10 +7,10 @@ import { isLanguagePreference, messageCatalogs, strings, type LanguagePreference
 import type { Messages } from '../locales/types'
 import zhCN from '../locales/zh-CN'
 import { isThemePreference, isTypographyDensity, type ThemePreference, type TypographyDensity } from '../ui/theme'
-import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, ServerConfig, WorkspaceShortcut } from '../types'
+import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, DeviceCredentials, DeviceIdentity, RemoteDevice, WorkspaceShortcut } from '../types'
 
 const KEYS = {
-  config: 'dshremote.server.v1',
+  directConnect: 'dshremote.direct-connect.v1',
   identity: 'dshremote.identity.v1',
   credentials: 'dshremote.credentials.v1',
   trustedHosts: 'dshremote.trusted-hosts.v1',
@@ -36,12 +36,34 @@ const secureOptions: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 }
 
-export async function loadServerConfig(): Promise<ServerConfig | undefined> {
-  return readJson<ServerConfig>(KEYS.config)
+/** Serverless direct-connect credentials, persisted so reconnects survive restarts. */
+export interface DirectConnectCredentials {
+  host: string
+  port: number
+  account: string
+  password: string
 }
 
-export async function saveServerConfig(config: ServerConfig): Promise<void> {
-  await writeJson(KEYS.config, config)
+function asDirectConnect(value: unknown): DirectConnectCredentials | undefined {
+  if (typeof value !== 'object' || value === null) return undefined
+  const { host, port, account, password } = value as Record<string, unknown>
+  if (typeof host !== 'string' || host.trim() === '') return undefined
+  if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return undefined
+  if (typeof account !== 'string' || account.trim() === '') return undefined
+  if (typeof password !== 'string' || password === '') return undefined
+  return { host, port, account, password }
+}
+
+export async function loadDirectConnect(): Promise<DirectConnectCredentials | undefined> {
+  return asDirectConnect(await readJson<unknown>(KEYS.directConnect))
+}
+
+export async function saveDirectConnect(credentials: DirectConnectCredentials): Promise<void> {
+  await writeJson(KEYS.directConnect, credentials)
+}
+
+export async function clearDirectConnect(): Promise<void> {
+  await SecureStore.deleteItemAsync(KEYS.directConnect, secureOptions)
 }
 
 export async function loadOrCreateIdentity(): Promise<DeviceIdentity> {

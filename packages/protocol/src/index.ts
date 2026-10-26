@@ -309,7 +309,25 @@ export interface ControlFrameByteLimits {
 export interface HelloPayload {
   role: 'host' | 'client'
   deviceId: string
-  accessToken: string
+  /**
+   * Server-issued bearer token. Required by the legacy relay Server and
+   * unused by the serverless direct-connect mode, which authenticates with
+   * `account` + `password` instead. Optional so a direct-connect Client can
+   * omit it.
+   */
+  accessToken?: string
+  /**
+   * Direct-connect account name. Carries the local-credential identity the
+   * Host verifies before establishing the Noise XX PSK session. Absent in the
+   * legacy relay-Server flow.
+   */
+  account?: string
+  /**
+   * Direct-connect password. The Host never stores this; it is verified
+   * against a local scrypt hash and used to derive the Noise XX PSK. Absent
+   * in the legacy relay-Server flow.
+   */
+  password?: string
   protocols: number[]
   capabilities: string[]
   /** Version of the Client/Plugin software reporting in; symmetric to ``HelloAckPayload.serverVersion``. */
@@ -322,6 +340,8 @@ export interface HelloAckPayload {
   protocol: typeof PROTOCOL_VERSION
   serverVersion: string
   connectionSessionId: string
+  /** Host device id; the direct-connect Client uses it as the connect.request hostDeviceId and the secure.handshake targetDeviceId. */
+  hostDeviceId: string
   heartbeatIntervalMs: number
   maxControlFrameBytes: number
   maxRelayFrameBytes: number
@@ -945,7 +965,9 @@ const selectedTransportEnum = z.enum(selectedTransports)
 export const helloPayloadSchema = z.object({
   role: z.enum(['host', 'client']),
   deviceId: z.string().min(1),
-  accessToken: z.string().min(1),
+  accessToken: z.string().min(1).optional(),
+  account: z.string().min(1).max(254).optional(),
+  password: z.string().min(1).max(4096).optional(),
   protocols: z.array(z.number().int().nonnegative().safe()).min(1).refine(uniqueNumbers),
   capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
   clientVersion: z.string().optional(),
@@ -956,6 +978,7 @@ export const helloAckPayloadSchema = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string().min(1),
   connectionSessionId: z.string().min(1),
+  hostDeviceId: z.string().min(1).optional(),
   heartbeatIntervalMs: z.number().int().positive(),
   maxControlFrameBytes: z.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: z.number().int().positive().max(MAX_RELAY_FRAME_BYTES),

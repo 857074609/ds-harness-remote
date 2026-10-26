@@ -1,4 +1,3 @@
-import { CONTROL_RPC_PREFIX } from './control-route.js'
 
 type Fetch = typeof globalThis.fetch
 
@@ -18,7 +17,7 @@ export function createPluginRouteFetch(original: Fetch, baseUrl: string, options
 
   const control = async (method: string, payload: unknown, signal?: AbortSignal): Promise<unknown> => {
     const rpcId = `plugin-route-${++nextRpcId}`
-    const response = await original(new URL(`${CONTROL_RPC_PREFIX.slice(1)}/${method}`, baseUrl), {
+    const response = await original(new URL(`${'/ds-harness-remote'.slice(1)}/${method}`, baseUrl), {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },

@@ -1,10 +1,9 @@
 import { AgentAcpClient, CodexRemoteClient, HarnessAlphaClient, RemoteClientCore, RemoteTypertGateway, probeRemoteHostFeatures, remoteWorkspaceTypeAvailable, type RemoteHostFeatures } from '@dsh-remote/client-core'
-import { AdaptiveTransport, type AdaptiveConnectionDetails, type RtcIceServer } from '@dsh-remote/webrtc'
-import { websocketUrl } from '../lib/server-url'
 import { strings } from '../locales/i18n'
-import type { DeviceIdentity, MuxStreamFrame, RemoteDevice } from '../types'
+import type { DeviceIdentity, MuxStreamFrame } from '../types'
 import { AcpSessionTools, HarnessSessionTools, type SessionTools } from './session-tools'
-import { SecureTransport } from './secure-transport'
+import { DirectTransport, type DirectCredentials, type DirectEndpoint } from './direct-transport'
+import { DirectSecureTransport, SecureTransport } from './secure-transport'
 import { BotRemoteClient } from './bot-catalog'
 
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
@@ -13,9 +12,6 @@ type RemoteHarnessClient = HarnessAlphaClient
 
 export interface AndroidConnectionOptions {
   onOpencodeArchived?: (sessionId: string) => void
-  preferredTransports?: Array<'lan' | 'p2p' | 'turn' | 'relay'>
-  forceRelay?: boolean
-  fetchIceServers?: (connectionId: string) => Promise<RtcIceServer[]>
   onSecureHandshake?: () => void
   onClose?: CloseHandler
 }
@@ -34,7 +30,7 @@ export class AndroidRemoteConnection {
   private unsubscribeClose?: () => void
   private unsubscribeArchived?: () => void
   private muxHandler?: MuxFrameHandler
-  private transport?: AdaptiveTransport
+  private transport?: DirectTransport
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
@@ -45,150 +41,6 @@ export class AndroidRemoteConnection {
     }
   }
 
-  async connect(
-    baseUrl: string,
-    identity: DeviceIdentity,
-    host: RemoteDevice,
-    accessToken: string,
-    onFrame: MuxFrameHandler,
-    options: AndroidConnectionOptions = {},
-  ): Promise<void> {
-    // Replacing a connection must not wait for a graceful stream-close RPC:
-    // the old data path may be exactly what is being recovered from.
-    const attempt = ++this.connectionAttempt
-    await this.clearConnection()
-    if (attempt !== this.connectionAttempt) throw new Error('The connection attempt was superseded.')
-    this.muxHandler = onFrame
-    let webRtcFallback = false
-    let replacingFallback = false
-    let retryableClose = true
-    const createTransport = (relayOnly: boolean) => new AdaptiveTransport(websocketUrl(baseUrl), {
-      role: 'client',
-      deviceId: identity.deviceId,
-      accessToken,
-      targetDeviceId: host.deviceId,
-      forceRelay: options.forceRelay || relayOnly,
-      preferredTransports: options.forceRelay || relayOnly
-        ? ['relay']
-        : options.preferredTransports ?? ['lan', 'p2p', 'turn', 'relay'],
-      fetchIceServers: options.fetchIceServers,
-      onDisconnect: event => {
-        // Refused/replaced credentials, protocol errors and malformed frames
-        // need manual recovery; do not automatically compete for ownership.
-        retryableClose = event.reason !== 'invalid-control-frame'
-          && !(event.closeCode !== undefined && (event.closeCode >= 4000
-            || [1002, 1003, 1007, 1008, 1009].includes(event.closeCode)))
-        console.warn('[dsh-remote] Carrier closed:', JSON.stringify(event))
-      },
-      onWebRtcFallback: error => {
-        webRtcFallback = true
-        // Do not include credentials, SDP, prompts, or tunnel payloads.
-        console.warn('[dsh-remote] WebRTC fallback:', error.message)
-      },
-      onWebRtcDiagnostic: event => {
-        if (event.type !== 'selected-path') return
-        // Selected-path telemetry contains candidate types and address scopes,
-        // never the candidate IPs, SDP, credentials, or tunnel payloads.
-        console.info('[dsh-remote] WebRTC selected path:', JSON.stringify({
-          ...event.selectedPath,
-          signaledRemoteCandidates: {
-            total: event.diagnostics.remoteCandidates.total,
-            byType: event.diagnostics.remoteCandidates.byType,
-            byScope: event.diagnostics.remoteCandidates.byScope,
-          },
-        }))
-      },
-    })
-    const connectCore = async (relayOnly: boolean) => {
-      const transport = createTransport(relayOnly)
-      this.transport = transport
-      // Host-side Typert calls are capped at 30s. Leave a small delivery
-      // margin, then treat silence as an unhealthy business channel.
-      const core = new RemoteClientCore(
-        new SecureTransport(transport, identity, host, options.onSecureHandshake),
-        35_000,
-      )
-      this.core = core
-      this.unsubscribeClose = core.onClose(() => {
-        // A late close from a replaced connection must not tear down the new
-        // connection that may already be stored on this instance.
-        if (this.core !== core) return
-        this.clearHealthTimer()
-        void this.closeMux?.(false)
-        this.closeMux = undefined
-        this.core = undefined
-        this.proxy = undefined
-        this.codex = undefined
-        this.codexAvailable = false
-        this.cursor = undefined
-        this.acpBackends.clear()
-        this.sessionTools = undefined
-        if (!replacingFallback) options.onClose?.({ retryable: retryableClose })
-      })
-      await core.connect()
-      if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
-      return core
-    }
-    try {
-      let core = await connectCore(false)
-      // Mirror the Desktop plugin: Hosts that accepted a WebRTC offer before
-      // the client fell back can later close that logical Relay connection.
-      // A new relay-only connection ID prevents that stale RTC state leaking
-      // into the working fallback channel.
-      if (webRtcFallback) {
-        replacingFallback = true
-        await core.close()
-        this.unsubscribeClose?.()
-        this.unsubscribeClose = undefined
-        this.core = undefined
-        replacingFallback = false
-        webRtcFallback = false
-        core = await connectCore(true)
-      }
-      const features = await probeRemoteHostFeatures(core, host.clientVersion)
-      if (attempt !== this.connectionAttempt || this.core !== core) throw new Error('The connection attempt was superseded.')
-      const emitFrame = (frame: MuxStreamFrame) => {
-        if (this.core !== core) return
-        if (frame.payload.type === 'stream/closed' && frame.payload.reason === 'failed') {
-          console.warn('[dsh-remote] Harness stream failed; closing carrier')
-          // A live carrier failure is an offline channel, even if its socket
-          // still answers. Reconnect will create a fresh follow subscription.
-          void this.close()
-          options.onClose?.()
-          return
-        }
-        this.muxHandler?.(frame)
-      }
-      this.compactHistorySupported = features.capabilities.includes('remote.history.compact.v1')
-      this.applyBackendFeatures(core, features)
-      this.unsubscribeArchived = this.cursor?.onSessionArchived(data => {
-        if (this.core === core) options.onOpencodeArchived?.(data.sessionId)
-      })
-      if (features.remoteGateway) {
-        this.sessionTools = new HarnessSessionTools(new RemoteTypertGateway(core))
-        const alpha = new HarnessAlphaClient(
-          core,
-          {
-            clientVersion: host.clientVersion,
-            harnessVersion: host.harnessVersion,
-            ...(features.sessionFormat === undefined ? {} : { sessionFormat: features.sessionFormat }),
-          },
-          frame => emitFrame(frame as unknown as MuxStreamFrame),
-        )
-        alpha.start()
-        this.proxy = alpha
-        this.closeMux = async (notifyRemote = true) => { await alpha.close(notifyRemote) }
-      } else {
-        throw new Error('The remote Host exposes no supported Harness transport.')
-      }
-      this.scheduleHealthCheck(core)
-    } catch (error) {
-      if (attempt === this.connectionAttempt) await this.clearConnection()
-      throw error
-    }
-  }
-
-  /** Reprobe readiness on workspace refresh so Host backend switches need no reconnect. */
   async refreshBackends(): Promise<void> {
     if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
     const core = this.core
@@ -368,8 +220,56 @@ export class AndroidRemoteConnection {
     this.healthTimer = undefined
   }
 
-  async getNetworkDetails(): Promise<AdaptiveConnectionDetails | undefined> {
-    return await this.transport?.connectionDetails()
+  async getNetworkDetails(): Promise<undefined> {
+    return undefined
+  }
+
+  /**
+   * Connect to a Host that serves its built-in serverless direct listener:
+   * no relay Server, no OAuth access token — the local account password both
+   * authenticates the hello frame and derives the Noise PSK. Returns the
+   * Host's device id as announced in hello.ack.
+   */
+  async connectDirect(
+    endpoint: DirectEndpoint,
+    credentials: DirectCredentials,
+    identity: DeviceIdentity,
+    onFrame: MuxFrameHandler,
+    options: AndroidConnectionOptions = {},
+  ): Promise<string> {
+    const attempt = ++this.connectionAttempt
+    await this.clearConnection()
+    if (attempt !== this.connectionAttempt) throw new Error('The connection attempt was superseded.')
+    this.muxHandler = onFrame
+    const transport = new DirectTransport(endpoint, credentials, identity.deviceId)
+    this.transport = transport
+    // Host-side Typert calls are capped at 30s. Leave a small delivery
+    // margin, then treat silence as an unhealthy business channel.
+    const core = new RemoteClientCore(
+      new DirectSecureTransport(transport, identity, credentials),
+      35_000,
+    )
+    this.core = core
+    this.unsubscribeClose = core.onClose(() => {
+      if (this.core !== core) return
+      this.clearHealthTimer()
+      void this.closeMux?.(false)
+      this.closeMux = undefined
+      this.core = undefined
+      this.proxy = undefined
+      this.codex = undefined
+      this.codexAvailable = false
+      this.cursor = undefined
+      this.acpBackends.clear()
+      this.sessionTools = undefined
+      options.onClose?.({ retryable: true })
+    })
+    options.onSecureHandshake?.()
+    await core.connect()
+    if (attempt !== this.connectionAttempt || this.core !== core) {
+      throw new Error('The connection attempt was superseded.')
+    }
+    return transport.getHostDeviceId()
   }
 
   async close(): Promise<void> {

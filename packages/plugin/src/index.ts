@@ -2,7 +2,6 @@ import * as DshConnection from '@deepseek-ai/dsh-client-connection'
 import type { Context } from '@deepseek-ai/cordis'
 // Type-only: pulls the `ctx.settings` Context merge and the rc.1 forms type.
 import type { SettingsForms } from '@deepseek-ai/dsh-settings'
-import { ClientModeRuntime, type HostConnectionHandle } from './client-runtime.js'
 import {
   Config,
   DEFAULT_REMOTE_SERVER_URL,
@@ -12,28 +11,23 @@ import {
   type EntryConfig,
   type ResolvedConfig,
 } from './config.js'
-import { PluginControlRuntime, type PluginSettingsBinding } from './control-runtime.js'
-import type { HostWebServerLike } from './control-route.js'
+interface HostWebServerLike { port?: number }
+interface PluginSettingsBinding {
+  get(): ConfigInput
+  replace(section: ConfigShape): Promise<unknown>
+}
 import { IdentityStore, serverStorageDirectory } from './identity-store.js'
 import { SafeLogger } from './logging.js'
 import { HostPluginRuntime } from './service.js'
-import { ClientServerApi } from './server-api.js'
-import { ServerCredentialStore } from './server-credentials.js'
 import type { TypertGatewayLike } from './typert-gateway-contract.js'
 import { subprocessTerminalSpawner, type HostSubprocessLike } from './codex-workspace-bridge.js'
 import { TypertGatewaySwitch } from './typert-gateway-switch.js'
 import type { FileViewerHostServiceLike } from './file-viewer-bridge.js'
 import { createPluginRouteDispatcher, type PluginRouteConnectionLike } from './plugin-route-dispatcher.js'
-import {
-  installTuiRemoteCommand,
-  type TuiRemoteBinding,
-  type TuiRemoteTarget,
-} from './tui-command.js'
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     dshRemote: HostPluginRuntime
-    dshRemoteClient: ClientModeRuntime
     typertGateway: TypertGatewayLike
   }
 }
@@ -107,15 +101,9 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   // detection keeps the retired call from throwing during activation.
   ctx.inject(['settings'], (settingsContext) => {
     const settings = settingsContext.settings
-    if (isLegacySettingsProvider(settings)) return
+    if (typeof (settings as { configure?: unknown }).configure !== 'function') return
     settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
   })
-  const tuiCommandsAvailable = ctx.get('commands', false) !== undefined
-    && ctx.get('tuiScenes', false) !== undefined
-  const tuiBinding: TuiRemoteBinding | undefined = tuiCommandsAvailable ? {} : undefined
-  // Entry-level TUI injects make this synchronous with the Loader activation,
-  // which is required by dsh-TUI's authenticated scene/completion registries.
-  if (tuiBinding !== undefined) installTuiRemoteCommand(ctx, () => tuiBinding.target)
 
   // A terminal-only dsh-TUI profile has no browser `connection` service.
   // A Gateway without a stream carrier still supports the Host
@@ -123,69 +111,24 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   // profiles still wait for one complete official Harness carrier.
   const activateWhenCarrierReady = (runtimeContext: Context): void | Promise<void> => {
     const gateway = runtimeContext.get('typertGateway') as TypertGatewayLike
-    const connection = runtimeContext.get('connection') as HostConnectionHandle | undefined
-    const webServer = runtimeContext.get('webServer') as HostWebServerLike | undefined
-    let disposePendingControl: (() => Promise<void>) | undefined
-    const installPendingControl = (): void => {
-      if (connection === undefined || disposePendingControl !== undefined) return
-      disposePendingControl = runtimeContext.effect(() => {
-        const control = new PluginControlRuntime(
-          resolveConfig(readConfig()),
-          new IdentityStore().directory,
-          undefined,
-          undefined,
-          undefined,
-        )
-        return control.register(connection, webServer)
-      }, 'dsh-remote pending control')
+    if (new TypertGatewaySwitch(gateway).supportsCarrier()) {
+      return activate(runtimeContext, readConfig, entryId)
     }
-    const startActiveRuntime = async (activeContext: Context): Promise<void> => {
-      await disposePendingControl?.()
-      disposePendingControl = undefined
-      await activate(activeContext, readConfig, entryId, tuiBinding)
-    }
-    if (
-      tuiCommandsAvailable
-      || new TypertGatewaySwitch(gateway).supportsCarrier()
-    ) {
-      return startActiveRuntime(runtimeContext)
-    }
-    installPendingControl()
+    runtimeContext.logger.warn('Remote Host idle: no Typert gateway carrier detected')
   }
 
-  if (tuiCommandsAvailable) {
-    ctx.inject(['settings', 'typertGateway'], activateWhenCarrierReady)
-  } else {
-    ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
-  }
+  ctx.inject(['settings', 'connection', 'typertGateway'], activateWhenCarrierReady)
 }
 
 async function activate(
   ctx: Context,
   readConfig: () => ConfigInput,
   entryId: string,
-  tuiBinding?: TuiRemoteBinding,
 ): Promise<void> {
-  const settings = ctx.get('settings') as SettingsServiceLike | undefined
-  const settingsBinding = await createSettingsBinding(ctx, settings, readConfig, entryId)
-  const connection = ctx.get('connection') as HostConnectionHandle | undefined
-  const webServer = ctx.get('webServer') as HostWebServerLike | undefined
-  // Reads resolve through the binding so the ≤0.1.6 scope's user layer (not the
-  // raw composition seed) is honored; the rc.1 binding reads the live Config.
-  const resolvedConfig = resolveConfig(settingsBinding?.get() ?? readConfig())
-  // dsh-TUI has no settings UI or browser connection. In that profile the
-  // QR-authorized Host is enabled against the hosted Server by default.
-  const config: ResolvedConfig = connection === undefined && resolvedConfig.serverUrl === undefined
-    ? { ...resolvedConfig, serverUrl: DEFAULT_REMOTE_SERVER_URL }
-    : resolvedConfig
+  const resolvedConfig = resolveConfig(readConfig())
+  const config: ResolvedConfig = resolvedConfig
+  if (!config.enabled) return
   const defaultIdentityDirectory = new IdentityStore().directory
-  if (!config.enabled) {
-    if (connection !== undefined) {
-      const controlRuntime = new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, undefined, undefined)
-      ctx.effect(() => controlRuntime.register(connection, webServer), 'dsh-remote disabled control')
-    }
-    return
-  }
   // Mirrors SafeLogger output to the process stdout/stderr as well as the DSH
   // logger: the web process stdout is captured by the Desktop shell into
   // desktop.log, so remote RPC/transport diagnostics stay greppable there.
@@ -223,11 +166,7 @@ async function activate(
   // pipe spawner inside the bridge.
   const subprocess = ctx.get('subprocess', false) as HostSubprocessLike | undefined
   const createRuntimes = (config: ResolvedConfig) => {
-    const hostIdentities = new IdentityStore({
-      directory: config.serverUrl === undefined
-        ? defaultIdentityDirectory
-        : serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'host'),
-    })
+    const hostIdentities = new IdentityStore({ directory: defaultIdentityDirectory })
     const runtime = new HostPluginRuntime(
       config,
       hostIdentities,
@@ -242,102 +181,21 @@ async function activate(
       ),
     )
 
-    let clientRuntime: ClientModeRuntime | undefined
-    if (config.serverUrl !== undefined && connection !== undefined) {
-      const clientIdentities = new IdentityStore({
-        directory: serverStorageDirectory(defaultIdentityDirectory, config.serverUrl, 'client'),
-      })
-      clientRuntime = new ClientModeRuntime(
-        config,
-        clientIdentities,
-        new ClientServerApi(config.serverUrl, new ServerCredentialStore(clientIdentities.directory)),
-        nativeTypertGateway,
-        logger,
-        runtime,
-      )
-    }
-
-    return { runtime, clientRuntime }
+    return runtime
   }
-  let { runtime, clientRuntime } = createRuntimes(config)
+  let runtime = createRuntimes(config)
   let closed = false
-  let clientServiceProvided = clientRuntime !== undefined
-  let startup: Promise<void> | undefined
-  let replacement: Promise<{ client: ClientModeRuntime | undefined; host: HostPluginRuntime }> | undefined
-  const replaceServer = (next: ResolvedConfig) => {
-    const operation = async () => {
-      await startup
-      if (closed) throw new Error('Remote plugin is closed')
-      // Stop both authorities before loading identities scoped to another Server.
-      const shutdown = await Promise.allSettled([clientRuntime?.close(), runtime.close()])
-      const failure = shutdown.find(result => result.status === 'rejected')
-      if (failure?.status === 'rejected') throw failure.reason
-      if (closed) throw new Error('Remote plugin is closed')
-      const fresh = createRuntimes(next)
-      try {
-        await fresh.runtime.start()
-        await fresh.clientRuntime?.start()
-        if (closed) throw new Error('Remote plugin is closed')
-      } catch (error) {
-        await Promise.allSettled([fresh.clientRuntime?.close(), fresh.runtime.close()])
-        throw error
-      }
-      runtime = fresh.runtime
-      clientRuntime = fresh.clientRuntime
-      ctx.dshRemote = runtime
-      if (clientRuntime !== undefined) {
-        if (clientServiceProvided) ctx.dshRemoteClient = clientRuntime
-        else {
-          ctx.provide('dshRemoteClient', clientRuntime)
-          clientServiceProvided = true
-        }
-      }
-      tuiTarget = { runtime, config: next }
-      if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
-      return { client: clientRuntime, host: runtime }
-    }
-    replacement = operation()
-    return replacement
-  }
-
-  const controlRuntime = connection === undefined
-    ? undefined
-    : new PluginControlRuntime(config, defaultIdentityDirectory, settingsBinding, clientRuntime, runtime, replaceServer)
-
   ctx.provide('dshRemote', runtime)
-  if (clientRuntime !== undefined) ctx.provide('dshRemoteClient', clientRuntime)
-  let tuiTarget: TuiRemoteTarget = { runtime, config }
-  if (tuiBinding !== undefined) tuiBinding.target = tuiTarget
   await disableLegacyLoaderEntries(ctx, logger)
   await ctx.effect(async () => {
-    const disposeControl = controlRuntime?.register(connection!, webServer)
     try {
-      startup = (async () => {
-        await runtime.start()
-        if (clientRuntime !== undefined) {
-          await clientRuntime.start()
-        } else {
-          logger.warn('client remote mode is unavailable', {
-            serverConfigured: config.serverUrl !== undefined,
-            remoteGatewayAvailable: localTypertGateway.supportsCarrier,
-            connectionAvailable: connection !== undefined,
-          })
-        }
-      })()
-      await startup
+      await runtime.start()
     } catch (error) {
-      if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
-      await disposeControl?.()
-      await clientRuntime?.close()
       await runtime.close()
       throw error
     }
     return async () => {
       closed = true
-      await replacement?.catch(() => undefined)
-      if (tuiBinding?.target === tuiTarget) tuiBinding.target = undefined
-      await disposeControl?.()
-      await clientRuntime?.close()
       await runtime.close()
     }
   }, 'dsh-remote lifecycle')
@@ -376,88 +234,6 @@ function locateEntryId(ctx: Context): string {
   // Fallback for a tree whose entries are not enumerable: the root include's
   // path component is the only prefix a direct profile row carries.
   return located.startsWith(INCLUDE_ENTRY_PREFIX) ? located.slice(INCLUDE_ENTRY_PREFIX.length) : located
-}
-
-/**
- * Build the live read/write face for this instance's settings.
- *
- * DSH 0.1.7-rc.1 (DSH-0.1.7-RC1-04) replaced the namespace registry with
- * profile-owned `SettingsForms`: reads come from the entry's live volatile
- * Config and writes go to `settings.replace(entryId, section)`. The ≤0.1.6
- * registry generation still exposes `register(ns, Config, …)`, whose scope is
- * the read/write pair. Feature detection keeps both generations on one binding
- * seam so `PluginControlRuntime` never branches on the host version.
- */
-async function createSettingsBinding(
-  ctx: Context,
-  settings: SettingsServiceLike | undefined,
-  readConfig: () => ConfigInput,
-  entryId: string,
-): Promise<PluginSettingsBinding | undefined> {
-  if (settings === undefined) return undefined
-  if (!isLegacySettingsProvider(settings)) {
-    return {
-      get: readConfig,
-      replace: async section => { await settings.replace(entryId, section) },
-    }
-  }
-  const scope = settings.register(pluginSettingsNamespace, Config, {
-    base: readConfig(),
-    applies: 'restart',
-    validate: value => { resolveConfig(value) },
-  })
-  reportSettingsMigration(ctx, await migrateLegacySettings(settings, scope))
-  return {
-    get: () => scope.get(),
-    replace: async section => { await scope.replace(section) },
-  }
-}
-
-/** Whether the settings service is the ≤0.1.6 registry generation. */
-function isLegacySettingsProvider(value: unknown): value is LegacySettingsProviderLike {
-  return typeof value === 'object' && value !== null
-    && typeof (value as { register?: unknown }).register === 'function'
-}
-
-function reportSettingsMigration(
-  ctx: Context,
-  migration: 'migrated' | 'skipped' | 'failed',
-): void {
-  if (migration === 'migrated') ctx.logger.info('migrated legacy Remote settings namespace')
-  if (migration === 'failed') ctx.logger.warn('failed to migrate legacy Remote settings namespace')
-}
-
-/**
- * Preserve existing installs after the package/settings namespace rename. The
- * old section remains untouched as a rollback source; only its raw user layer
- * is copied, once, when the current namespace has no user layer of its own.
- * Only reachable on the ≤0.1.6 registry generation.
- */
-export async function migrateLegacySettings(
-  settings: LegacySettingsProviderLike,
-  currentScope: LegacySettingsScopeLike,
-): Promise<'migrated' | 'skipped' | 'failed'> {
-  if (typeof settings.describe !== 'function') return 'skipped'
-  try {
-    let descriptors = settings.describe()
-    const current = descriptors.find(descriptor => descriptor.ns === pluginSettingsNamespace)
-    if (isPlainRecord(current?.user)) return 'skipped'
-
-    let legacy = descriptors.find(descriptor => descriptor.ns === legacySettingsNamespace)
-    if (legacy === undefined) {
-      settings.register(legacySettingsNamespace, Config, {
-        applies: 'restart',
-        validate: value => { resolveConfig(value) },
-      })
-      descriptors = settings.describe()
-      legacy = descriptors.find(descriptor => descriptor.ns === legacySettingsNamespace)
-    }
-    if (!isPlainRecord(legacy?.user) || Object.keys(legacy.user).length === 0) return 'skipped'
-    await currentScope.replace(legacy.user as Config)
-    return 'migrated'
-  } catch {
-    return 'failed'
-  }
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -500,16 +276,8 @@ export type { PeerConnectionContext, RpcRouterFactory } from './connection-contr
 export { fingerprint, IdentityInvalidError, IdentityStore } from './identity-store.js'
 export { serverStorageDirectory } from './identity-store.js'
 export type { HostIdentity, RemoteDeviceRole, TrustedPeer } from './identity-store.js'
-export { ClientServerApi, HostServerApi, ServerApiError } from './server-api.js'
-export { HostServerConnection } from './server-connection.js'
-export type { WebSocketFactory } from './server-connection.js'
-export { ServerCredentialStore, ServerCredentialsInvalidError } from './server-credentials.js'
-export type { ServerCredentials } from './server-credentials.js'
 export { HOST_CAPABILITIES, RpcError, RpcRouter } from './rpc-router.js'
 export { HostPluginRuntime } from './service.js'
-export { ClientModeError, ClientModeRuntime } from './client-runtime.js'
-export { PluginControlRuntime } from './control-runtime.js'
-export { ClientSecureTransport } from './client-secure-transport.js'
 export { HARNESS_REMOTE_ALLOWLIST, HarnessRemoteBridge } from './harness-remote-bridge.js'
 export { RemoteTypertGateway } from './remote-typert-gateway.js'
 export { RemoteFileViewerBridge } from './file-viewer-bridge.js'
@@ -523,8 +291,6 @@ export { CursorAcpClient, CursorAcpError } from './acp/adapters/cursor-process.j
 export { ACP_METHOD_ALLOWLIST } from './acp/method-policy.js'
 export { createRemoteFileContentProvider } from './remote-file-content-provider.js'
 export { TypertGatewaySwitch } from './typert-gateway-switch.js'
-export { runCli } from './cli.js'
-export type { RemoteCliDependencies } from './cli.js'
 export type {
   LocalTypertGateway,
   RemoteTypertGatewayTarget,

@@ -2,7 +2,7 @@ import { strings } from '../locales/i18n'
 import { create } from 'zustand'
 const filesystem = () => import('expo-file-system/legacy')
 import { encryptFrame, decryptFrame, fromBase64Url, toBase64Url } from '@dsh-remote/crypto'
-import type { PromptImage, RemoteDevice, RemoteSession, ServerConfig, WorkspaceView } from '../types'
+import type { DirectConfig, PromptImage, RemoteDevice, RemoteSession, WorkspaceView } from '../types'
 
 export type ReadingPosition = { key?: string; offset: number; atBottom: boolean }
 export type BrowseEntry = {
@@ -19,7 +19,7 @@ type Snapshot = {
 type Memory = Snapshot & { ready: boolean; error?: string }
 const empty = (): Snapshot => ({ entries: {}, catalogs: {}, hostModes: {}, resume: false, notifications: true })
 export const useBrowseMemory = create<Memory>(() => ({ ...empty(), ready: false }))
-export const browseScope = (state: {config?: ServerConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
+export const browseScope = (state: {config?: DirectConfig; selectedDevice?: RemoteDevice}): string => JSON.stringify([
   state.config?.baseUrl, state.config?.account, state.selectedDevice?.deviceId, state.selectedDevice?.identityKey,
 ])
 export const browseKey = (scope: string, id: string): string => JSON.stringify([scope, id])

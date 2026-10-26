@@ -20,14 +20,12 @@ export type ConnectionStage =
 
 export type ConnectionProbeTransport = 'lan' | 'p2p' | 'turn' | 'relay'
 
-export type LoginMethod = 'oauth' | 'github-oauth' | 'google-oauth' | 'password'
-
-export type RedirectLoginMethod = Exclude<LoginMethod, 'password'>
-
-export interface ServerConfig {
+export interface DirectConfig {
+  /** Stable scope key for caches: direct://host:port */
   baseUrl: string
+  host: string
+  port: number
   account?: string
-  loginMethod?: LoginMethod
 }
 
 export interface DeviceIdentity {
@@ -475,10 +473,6 @@ export interface ConnectionSnapshot {
 
 /** Diagnostics for the currently selected network path. Kept in memory only. */
 export type ConnectionNetworkDetails = AdaptiveConnectionDetails
-
-export interface PairLink {
-  server?: string
-}
 
 /** Client-side transport routing preference (mirrors the Web Remote console). */
 export type TransportPreference = 'auto' | 'turn' | 'relay'

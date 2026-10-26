@@ -204,7 +204,7 @@ const jaJP = {
     oauth: "Zhihu", githubOAuth: "GitHub", passwordMethod: "電子メール", zhihu: "志胡を続ける", github: "GitHub を続ける", oauthHint: "ブラウザが開いて認証が完了し、自動的にここに戻ります。",
     qr: "QRコードでサインイン", qrEntryHint: "タップしてコードを表示し、携帯電話でスキャンします", qrScanTitle: "携帯電話でサインインする", qrScanHint: "このコードを携帯電話でスキャンし、認証ページで確認してください。このデバイスはその後自動的にサインインします。", qrWaiting: "電話を待っています…", qrExpired: "このQRコードは有効期限が切れています。更新して再試行してください。", qrRefresh: "リフレッシュコード", qrUnsupported: "このサーバーは QR サインインを提供しません。別のサインイン方法を使用してください。", qrFailed: "QRサインインが完了しませんでした。もう一度やり直してください。",
     email: "電子メール", emailPlaceholder: "メールアドレスを入力してください", password: "パスワード", passwordPlaceholder: "パスワードを入力してください", passwordHint: "パスワードはこのサインインにのみ使用され、携帯電話には保存されません。",
-    server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
+    server: "サーバーアドレス", serverHint: "HTTPS アドレスを使用します。", directHint: 'IP:ポートを入力すると中継サーバーなしで LAN 内のホストに直接接続します。', trustTitle: "デバイスと会話を保護する", trustBody: "会話データは転送中に暗号化されます。同じアカウントにサインインしている信頼できるデバイスのみがアクセスできます。",
   },
   settings: {
     appearance: "外観",

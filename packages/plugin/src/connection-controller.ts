@@ -4,6 +4,7 @@ import {
   encodeMessage,
   type RemoteMessage,
 } from '@dsh-remote/protocol'
+import { NOISE_XX_PSK_PROTOCOL } from '@dsh-remote/crypto'
 import type { IdentityStore } from './identity-store.js'
 import type { SafeLogger } from './logging.js'
 import type { RpcRouter } from './rpc-router.js'
@@ -57,16 +58,26 @@ export class ConnectionController {
   }
 
   private async acceptOne(channel: AuthenticatedPeerChannel): Promise<void> {
-    if (channel.security?.protocol !== 'Noise_IK_25519_ChaChaPoly_SHA256'
-      || channel.security.connectionId === ''
-      || channel.security.membershipId === '') {
+    const protocol = channel.security?.protocol
+    const isDirect = protocol === 'Noise_XXpsk3_25519_ChaChaPoly_SHA256'
+    const isRelay = protocol === 'Noise_IK_25519_ChaChaPoly_SHA256'
+    if ((!isDirect && !isRelay) || channel.security.connectionId === '') {
       await channel.close('SECURE_CHANNEL_FAILED')
-      throw new ConnectionRejectedError('SECURE_CHANNEL_FAILED', 'The channel is missing its authenticated Noise or membership context.')
+      throw new ConnectionRejectedError('SECURE_CHANNEL_FAILED', 'The channel is missing its authenticated Noise context.')
     }
-    if (!this.identities.isTrusted(channel.peerDeviceId, channel.peerIdentityKey)) {
-      await channel.close('PEER_IDENTITY_MISMATCH')
-      throw new ConnectionRejectedError('PEER_IDENTITY_MISMATCH', 'The peer identity does not match local trust.')
+    if (isRelay) {
+      // Legacy relay-Server flow: requires Server membership + pinned peer trust.
+      if (channel.security.membershipId === '') {
+        await channel.close('SECURE_CHANNEL_FAILED')
+        throw new ConnectionRejectedError('SECURE_CHANNEL_FAILED', 'The channel is missing its Server membership context.')
+      }
+      if (!this.identities.isTrusted(channel.peerDeviceId, channel.peerIdentityKey)) {
+        await channel.close('PEER_IDENTITY_MISMATCH')
+        throw new ConnectionRejectedError('PEER_IDENTITY_MISMATCH', 'The peer identity does not match local trust.')
+      }
     }
+    // Direct-connect (XXpsk3): the password-derived PSK already authenticated the
+    // peer during the Noise handshake; no pre-distributed trust is required.
     const connectionId = channel.security.connectionId
     const connectionConflict = this.active.get(connectionId)
     if (connectionConflict !== undefined && connectionConflict.channel.peerDeviceId !== channel.peerDeviceId) {

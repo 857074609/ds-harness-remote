@@ -1,6 +1,7 @@
 import { AndroidRemoteConnection } from './connection'
+import type { DirectCredentials, DirectEndpoint } from './direct-transport'
 import type { AndroidConnectionOptions, MuxFrameHandler } from './connection'
-import type { DeviceIdentity, RemoteDevice } from '../types'
+import type { DeviceIdentity } from '../types'
 import { foregroundService } from './foreground-service'
 
 /** Owns the authenticated carrier independently from React screens. */
@@ -21,20 +22,19 @@ export class AndroidRemoteRuntime {
     if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
   }
 
-  async connect(
-    baseUrl: string,
+  async connectDirect(
+    endpoint: DirectEndpoint,
+    credentials: DirectCredentials,
     identity: DeviceIdentity,
-    host: RemoteDevice,
-    accessToken: string,
     onFrame: MuxFrameHandler,
     options: AndroidConnectionOptions = {},
-  ): Promise<void> {
+  ): Promise<string> {
     const generation = ++this.generation
     this.connected = false
     try {
       await this.updateForeground(generation, true, this.recovering ? 'reconnecting' : 'connecting')
       if (generation !== this.generation) throw new Error('The connection attempt was superseded.')
-      await this.client.connect(baseUrl, identity, host, accessToken, onFrame, {
+      const hostDeviceId = await this.client.connectDirect(endpoint, credentials, identity, onFrame, {
         ...options,
         onClose: closeOptions => {
           if (generation !== this.generation) return
@@ -48,6 +48,7 @@ export class AndroidRemoteRuntime {
       this.connected = true
       this.recovering = false
       await this.updateForeground(generation, true, 'connected')
+      return hostDeviceId
     } catch (error) {
       if (generation === this.generation && !this.recovering) {
         await this.updateForeground(generation, false).catch(() => undefined)

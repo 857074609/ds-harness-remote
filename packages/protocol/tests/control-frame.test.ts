@@ -277,10 +277,10 @@ describe('hello payload rejection', () => {
         },
       },
       {
-        name: 'rejects missing accessToken',
+        name: 'accepts hello without accessToken (serverless direct-connect Clients authenticate with account+password)',
         run: () => {
           const { accessToken, ...noToken } = validPayloads['hello'] as HelloPayload
-          expect(() => parseControlFrame(makeFrame('hello', noToken))).toThrow()
+          expect(() => parseControlFrame(makeFrame('hello', noToken))).not.toThrow()
         },
       },
       {

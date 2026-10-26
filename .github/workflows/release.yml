@@ -73,11 +73,7 @@ jobs:
       - name: Build workspace
         run: NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 
-      - name: Verify production Plugin bundles
-        run: |
           git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/client.github.js
-          node scripts/verify-dsh-plugin.mjs
-
       - name: Pack npm plugin
         run: |
           mkdir -p release-assets
@@ -88,68 +84,10 @@ jobs:
           cd release-assets
           sha256sum *.tgz > SHA256SUMS.txt
 
-      - name: Build and package browser extension
-        run: |
-          NODE_ENV=production pnpm --dir apps/browser build
-          mkdir -p release-assets/browser-extension
-          cd apps/browser
-          zip -qr "$GITHUB_WORKSPACE/release-assets/dsh-remote-browser-${GITHUB_REF_NAME}.zip" \
-            manifest.json popup.html styles.css media _locales dist
-
       - name: Update release checksums
         run: |
           cd release-assets
-          sha256sum *.tgz *.zip > SHA256SUMS.txt
-
-      - name: Publish npm plugin
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          PACKAGE_NAME="$(node -p "JSON.parse(require('fs').readFileSync('packages/plugin/package.json', 'utf8')).name")"
-          echo "Checking if version already exists on npm..."
-          if npm view "$PACKAGE_NAME"@"$VERSION" >/dev/null 2>&1; then
-            echo "Version already exists on npm, skip publish."
-          else
-            (cd packages/plugin && npm publish)
-          fi
-
-      - name: Publish GitHub Packages plugin
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          PACKAGE_SCOPE="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
-          PACKAGE_NAME="@${PACKAGE_SCOPE}/ds-harness-remote"
-          NPM_CONFIG_USERCONFIG="$RUNNER_TEMP/github-packages.npmrc"
-          export NPM_CONFIG_USERCONFIG PACKAGE_NAME
-
-          printf '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}\n' > "$NPM_CONFIG_USERCONFIG"
-          printf '@%s:registry=https://npm.pkg.github.com\n' "$PACKAGE_SCOPE" >> "$NPM_CONFIG_USERCONFIG"
-
-          echo "Checking if version already exists on GitHub Packages..."
-          if npm view "$PACKAGE_NAME@$VERSION" --registry=https://npm.pkg.github.com >/dev/null 2>&1; then
-            echo "Version already exists on GitHub Packages, skip publish."
-            exit 0
-          fi
-
-          GITHUB_PACKAGE_DIR="$RUNNER_TEMP/github-package"
-          mkdir -p "$GITHUB_PACKAGE_DIR"
-          tar -xzf "release-assets/ds-harness-remote-$VERSION.tgz" -C "$GITHUB_PACKAGE_DIR"
-
-          node --input-type=module <<'NODE'
-          import { readFile, writeFile } from 'node:fs/promises'
-
-          const packageJsonPath = `${process.env.RUNNER_TEMP}/github-package/package/package.json`
-          const manifest = JSON.parse(await readFile(packageJsonPath, 'utf8'))
-          manifest.name = process.env.PACKAGE_NAME
-          manifest.publishConfig = {
-            ...(manifest.publishConfig ?? {}),
-            registry: 'https://npm.pkg.github.com',
-            provenance: false,
-          }
-          await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`)
-          NODE
-
-          npm publish "$GITHUB_PACKAGE_DIR/package" --registry=https://npm.pkg.github.com --access public
+          sha256sum *.tgz > SHA256SUMS.txt
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2

@@ -2,10 +2,13 @@ import {
   NqHandshake,
   chachaPoly,
   noiseIk,
+  noiseXxPsk3,
   sha256H,
   type TransportState,
 } from '@lukeburns/clatterjs'
 import { randomBytes } from '@noble/ciphers/webcrypto'
+import { hkdf } from '@noble/hashes/hkdf'
+import { sha256 } from '@noble/hashes/sha256'
 import { fromBase64Url } from './index.js'
 
 export const NOISE_IK_PROTOCOL = 'Noise_IK_25519_ChaChaPoly_SHA256' as const
@@ -155,4 +158,143 @@ function constantTimeEqual(left: Uint8Array, right: Uint8Array): boolean {
   let different = 0
   for (let index = 0; index < left.byteLength; index += 1) different |= left[index]! ^ right[index]!
   return different === 0
+}
+
+
+// ────────────────────────────────────────────────────────────────────────────
+// Serverless direct-connect E2EE: Noise XX with a password-derived PSK.
+//
+// Unlike the relay-Server IK suite, there is no trusted third party to
+// distribute X25519 static keys, so both peers authenticate each other with a
+// pre-shared key derived from the account password. The PSK is mixed into the
+// handshake from the first message (XXpsk3), so a wrong password aborts the
+// handshake before any business data can flow. Each peer still uses its own
+// long-lived X25519 device identity as the Noise static key.
+// ────────────────────────────────────────────────────────────────────────────
+
+export const NOISE_XX_PSK_PROTOCOL = 'Noise_XXpsk3_25519_ChaChaPoly_SHA256' as const
+
+export interface NoiseXxPskSessionOptions {
+  role: 'initiator' | 'responder'
+  localPrivateKey: string
+  localPublicKey: string
+  /** 32-byte pre-shared key derived from the account password (see `derivePsk`). */
+  psk: Uint8Array
+  prologue: Uint8Array
+  random?: (length: number) => Uint8Array
+}
+
+export class NoiseXxPskSession {
+  private readonly handshake: NqHandshake
+  private transport?: TransportState
+  private destroyed = false
+
+  constructor(options: NoiseXxPskSessionOptions) {
+    const localPrivate = requireKey(options.localPrivateKey, 'local private key')
+    const localPublic = requireKey(options.localPublicKey, 'local public key')
+    const psk = requirePsk(options.psk)
+    const initiator = options.role === 'initiator'
+    this.handshake = new NqHandshake(noiseXxPsk3(), {
+      prologue: Uint8Array.from(options.prologue),
+      initiator,
+      s: { secretKey: localPrivate, publicKey: localPublic },
+      cipher: chachaPoly,
+      hash: sha256H,
+      rng: options.random ?? randomBytes,
+    })
+    // XXpsk3 mixes the PSK into the handshake from the first message, so a
+    // peer without the correct password cannot complete authentication.
+    this.handshake.pushPsk(psk)
+    if (this.handshake.getName() !== NOISE_XX_PSK_PROTOCOL) {
+      throw new NoiseSessionError('NOISE_SUITE_MISMATCH', 'The Noise provider selected an unexpected cipher suite.')
+    }
+  }
+
+  get protocol(): typeof NOISE_XX_PSK_PROTOCOL { return NOISE_XX_PSK_PROTOCOL }
+
+  get complete(): boolean { return this.transport !== undefined }
+
+  get canWriteHandshake(): boolean {
+    this.assertLive()
+    return !this.complete && this.handshake.isWriteTurn()
+  }
+
+  writeHandshake(payload = new Uint8Array()): Uint8Array {
+    this.assertHandshake(false)
+    const output = new Uint8Array(payload.byteLength + this.handshake.getNextMessageOverhead())
+    const length = this.handshake.writeMessage(payload, output)
+    this.finishIfReady()
+    return output.slice(0, length)
+  }
+
+  readHandshake(message: Uint8Array): Uint8Array {
+    this.assertHandshake(true)
+    const output = new Uint8Array(message.byteLength)
+    const length = this.handshake.readMessage(message, output)
+    this.finishIfReady()
+    return output.slice(0, length)
+  }
+
+  encrypt(plaintext: Uint8Array): Uint8Array {
+    this.assertLive()
+    if (this.transport === undefined) throw new NoiseSessionError('NOISE_NOT_READY', 'The Noise handshake is not complete.')
+    return this.transport.sendVec(plaintext)
+  }
+
+  decrypt(ciphertext: Uint8Array): Uint8Array {
+    this.assertLive()
+    if (this.transport === undefined) throw new NoiseSessionError('NOISE_NOT_READY', 'The Noise handshake is not complete.')
+    return this.transport.receiveVec(ciphertext)
+  }
+
+  sendingCounter(): bigint {
+    if (this.transport === undefined) return 0n
+    return this.transport.sendingNonce()
+  }
+
+  receivingCounter(): bigint {
+    if (this.transport === undefined) return 0n
+    return this.transport.receivingNonce()
+  }
+
+  destroy(): void {
+    this.destroyed = true
+    this.transport = undefined
+  }
+
+  private finishIfReady(): void {
+    if (!this.handshake.isFinished()) return
+    this.transport = this.handshake.finalize()
+  }
+
+  private assertHandshake(reading: boolean): void {
+    this.assertLive()
+    if (this.complete) throw new NoiseSessionError('NOISE_ALREADY_READY', 'The Noise handshake is already complete.')
+    if (this.handshake.isWriteTurn() === reading) {
+      throw new NoiseSessionError('NOISE_HANDSHAKE_ORDER', 'The Noise handshake message arrived out of order.')
+    }
+  }
+
+  private assertLive(): void {
+    if (this.destroyed) throw new NoiseSessionError('NOISE_DESTROYED', 'The Noise session is closed.')
+  }
+}
+
+/** Derive the Noise XX PSK from an account password + account name (HKDF-SHA256). */
+export function derivePsk(password: string, account: string): Uint8Array {
+  const enc = new TextEncoder()
+  return hkdf(sha256, enc.encode(password), enc.encode(`DSH-REMOTE-ACCOUNT\0${account}`), enc.encode('DSH-REMOTE-DIRECT-PSK-v1'), 32)
+}
+
+/** Build the handshake prologue that binds the account name and connection id. */
+export function createDirectNoisePrologue(account: string, connectionId: string): Uint8Array {
+  for (const [name, value] of Object.entries({ account, connectionId })) {
+    if (value.length === 0 || value.includes('\0')) throw new TypeError(`${name} is not safe for a Noise prologue`)
+  }
+  return new TextEncoder().encode(`DSH-REMOTE\0v=1\0connection=${connectionId}\0account=${account}`)
+}
+
+function requirePsk(value: Uint8Array): Uint8Array {
+  if (value.byteLength !== 32) throw new NoiseSessionError('INVALID_PSK', 'The Noise XX PSK must be a 32-byte value.')
+  return Uint8Array.from(value)
 }

@@ -13,17 +13,8 @@ import {
 import type { SafeLogger } from './logging.js'
 import { RpcRouter } from './rpc-router.js'
 import { RemoteFileViewerBridge, type FileViewerHostServiceLike } from './file-viewer-bridge.js'
-import {
-  HostServerApi,
-  ServerApiError,
-  type DeviceAuthorization,
-  type OAuthProvider,
-  type OAuthProviderInfo,
-  type OAuthQrPollResult,
-  type OAuthQrSession,
-} from './server-api.js'
-import { HostServerConnection } from './server-connection.js'
-import { ServerCredentialStore } from './server-credentials.js'
+import { HostDirectServer } from './host-server.js'
+import { LocalCredentialStore } from './local-credentials.js'
 import { HarnessRemoteBridge } from './harness-remote-bridge.js'
 import type { PluginRouteDispatcher } from './plugin-route-bridge.js'
 import { PluginRouteBridge } from './plugin-route-bridge.js'
@@ -58,6 +49,8 @@ export interface HostRemoteStatus {
   authorized: boolean
   accountRequired: boolean
   connectedClients: HostConnectedClient[]
+  /** Serverless direct-connect listen address, present when the Host is running without a relay Server. */
+  directListen?: { host: string; port: number }
 }
 
 export class HostPluginRuntime {
@@ -67,8 +60,8 @@ export class HostPluginRuntime {
   private terminalEnabled: boolean
   private loopbackPorts: readonly number[]
   private identity?: HostIdentity
-  private readonly serverApi?: HostServerApi
-  private serverConnection?: HostServerConnection
+  private directServer?: HostDirectServer
+  private credentialStore?: LocalCredentialStore
   private harnessVersion?: string
   private closed = false
   private readonly codex: CodexRemoteDomain
@@ -147,9 +140,6 @@ export class HostPluginRuntime {
         )),
       )
     }, this.logger)
-    if (config.serverUrl !== undefined) {
-      this.serverApi = new HostServerApi(config.serverUrl, new ServerCredentialStore(identities.directory))
-    }
   }
 
   setTerminalEnabled(enabled: boolean): void {
@@ -194,13 +184,19 @@ export class HostPluginRuntime {
     void this.acp.start().catch(() => {
       this.logger.warn('ACP background initialization failed', { code: 'ACP_START_FAILED' })
     })
-    if (this.serverApi !== undefined) {
-      this.harnessVersion = await this.readHarnessVersion()
-      this.serverApi.setHarnessVersion(this.harnessVersion)
-      this.serverApi.bindIdentity(this.identity)
-      this.serverConnection = this.createServerConnection(this.identity)
-      if (this.config.hostControl?.enabled !== false) this.serverConnection.start()
-    }
+    this.harnessVersion = await this.readHarnessVersion()
+    this.credentialStore = new LocalCredentialStore()
+    this.directServer = new HostDirectServer(
+      this.config.listen,
+      this.identity,
+      this.identities,
+      this.credentialStore,
+      this.connections,
+      this.logger,
+      () => this.hostCapabilities(),
+      this.harnessVersion,
+    )
+    if (this.config.hostControl?.enabled !== false) this.directServer.start()
   }
 
   currentIdentity(): HostIdentity {
@@ -214,26 +210,17 @@ export class HostPluginRuntime {
   }
 
   hostStatus(): HostRemoteStatus {
-    const error = this.serverConnection?.lastError()
-    const authorization = this.serverApi?.currentAuthorization()
+    const listen = this.directServer?.listenAddress()
     return {
       ...(this.identity === undefined ? {} : { deviceId: this.identity.deviceId }),
-      configured: this.serverApi !== undefined,
-      online: this.serverConnection?.isOnline() ?? false,
-      reconnecting: this.serverConnection?.isReconnecting() ?? false,
-      ...(this.serverConnection?.lastActivity() === undefined
-        ? {}
-        : { lastActiveAt: this.serverConnection.lastActivity() }),
-      ...(error === undefined ? {} : { error }),
-      ...(authorization?.account === undefined ? {} : { account: authorization.account }),
-      authorized: authorization !== undefined,
-      accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED' || error === 'DEVICE_REVOKED',
+      configured: true,
+      online: this.directServer !== undefined,
+      reconnecting: false,
+      ...(listen === undefined ? {} : { directListen: listen }),
+      authorized: this.credentialStore !== undefined,
+      accountRequired: false,
       connectedClients: this.listConnectedClients(),
     }
-  }
-
-  async hasStoredAuthorization(): Promise<boolean> {
-    return this.serverApi?.hasStoredAuthorization() ?? false
   }
 
   private listConnectedClients(): HostConnectedClient[] {
@@ -250,109 +237,6 @@ export class HostPluginRuntime {
 
   localHarnessVersion(): string | undefined {
     return this.harnessVersion
-  }
-
-  reconnectHost(): void {
-    if (this.closed) throw new Error('remote runtime is closed')
-    if (this.serverConnection === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before reconnecting.', false)
-    }
-    this.serverConnection.reconnect()
-  }
-
-  async hostOAuthProviders(): Promise<OAuthProviderInfo[]> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Remote Host Server is unavailable.', false)
-    }
-    return this.serverApi.oauthProviders()
-  }
-
-  async startHostOAuthQrLogin(provider: OAuthProvider): Promise<OAuthQrSession> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Remote Host Server is unavailable.', false)
-    }
-    return this.serverApi.startOAuthQrLogin(provider)
-  }
-
-  async pollHostOAuthQrLogin(qrId: string): Promise<OAuthQrPollResult> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Remote Host Server is unavailable.', false)
-    }
-    const result = await this.serverApi.pollOAuthQrLogin(this.currentIdentity(), qrId, async () => {
-      await this.serverConnection?.stop()
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.serverApi!.bindIdentity(this.identity)
-      this.serverConnection = this.createServerConnection(this.identity)
-      return this.identity
-    })
-    if (result.status === 'complete') {
-      this.serverConnection?.reconnect()
-      this.logger.info('Host account authorized through OAuth QR login')
-    }
-    return result
-  }
-
-  async clearHostAuthorization(): Promise<void> {
-    await this.serverConnection?.stop()
-    let revokeFailure: unknown
-    try {
-      await this.serverApi?.revokeCurrentDevice()
-    } catch (error) {
-      revokeFailure = error
-    }
-    this.identity = await this.identities.reset(this.config.deviceName)
-    this.serverApi?.bindIdentity(this.identity)
-    if (this.serverApi !== undefined) this.serverConnection = this.createServerConnection(this.identity)
-    this.logger.info('Host authorization cleared')
-    if (revokeFailure !== undefined) throw revokeFailure
-  }
-
-  async authorizeHostAsOwned(accessToken: string, account?: string): Promise<DeviceAuthorization> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before enabling Host access.', false)
-    }
-    let result
-    try {
-      result = await this.serverApi.authorizeOwnedRole(this.currentIdentity(), accessToken, account)
-    } catch (error) {
-      if (!(error instanceof ServerApiError) || error.code !== 'DEVICE_REVOKED') throw error
-      await this.serverConnection?.stop()
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.serverApi.bindIdentity(this.identity)
-      this.serverConnection = this.createServerConnection(this.identity)
-      result = await this.serverApi.authorizeOwnedRole(this.identity, accessToken, account)
-      this.logger.info('Rotated revoked Host identity before owned-device authorization')
-    }
-    this.serverConnection?.resume()
-    this.logger.info('Host authorized as an owned device')
-    return result
-  }
-
-  async authorizeHostWithAccount(email: string, password: string): Promise<DeviceAuthorization> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before signing in.', false)
-    }
-    const result = await this.serverApi.authorizeWithAccount(this.currentIdentity(), email, password, async () => {
-      await this.serverConnection?.stop()
-      this.identity = await this.identities.reset(this.config.deviceName)
-      this.serverApi!.bindIdentity(this.identity)
-      this.serverConnection = this.createServerConnection(this.identity)
-      this.logger.info('Rotated revoked Host identity before account authorization')
-      return this.identity
-    })
-    this.serverConnection?.resume()
-    this.logger.info('Host account authorized')
-    return result
-  }
-
-  async authorizeHostWithCode(code: string): Promise<DeviceAuthorization> {
-    if (this.serverApi === undefined) {
-      throw new ServerApiError('SERVER_NOT_CONFIGURED', 'Configure serverUrl before entering a Host registration code.', false)
-    }
-    const result = await this.serverApi.authorizeHostWithCode(this.currentIdentity(), code)
-    this.serverConnection?.resume()
-    this.logger.info('Host registration code authorized')
-    return result
   }
 
   async revokePeer(deviceId: string): Promise<boolean> {
@@ -414,8 +298,9 @@ export class HostPluginRuntime {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
-    this.serverApi?.close()
-    await this.serverConnection?.stop()
+    await this.directServer?.stop().catch(() => undefined)
+    this.directServer = undefined
+    this.credentialStore = undefined
     await this.connections.close()
     await this.localCodexPeer?.closeAll()
     this.localCodexPeer = undefined
@@ -431,9 +316,6 @@ export class HostPluginRuntime {
       loaded: this.identity !== undefined,
       deviceId: this.identity === undefined ? undefined : shortId(this.identity.deviceId),
       identityValid: this.identity !== undefined,
-      serverConfigured: this.config.serverUrl !== undefined,
-      serverOnline: this.serverConnection?.isOnline() ?? false,
-      serverError: this.serverConnection?.lastError(),
       online: this.connections.isOnline(),
       activeConnections: this.connections.connectionCount(),
       peerDeviceId: this.connections.peerDeviceId() === undefined ? undefined : shortId(this.connections.peerDeviceId()!),
@@ -444,23 +326,6 @@ export class HostPluginRuntime {
       codex: this.codex.status(),
       acp: this.acp.status(),
     }
-  }
-
-  private createServerConnection(identity: HostIdentity): HostServerConnection {
-    return new HostServerConnection(
-      this.config,
-      identity,
-      this.identities,
-      this.serverApi!,
-      this.connections,
-      this.logger,
-      undefined,
-      this.config.forceRelay
-        ? undefined
-        : () => loadNodeRtcFactory({ routeTargets: this.config.serverUrl === undefined ? [] : [this.config.serverUrl] }),
-      () => this.hostCapabilities(),
-      this.harnessVersion,
-    )
   }
 
   private async readHarnessVersion(): Promise<string | undefined> {

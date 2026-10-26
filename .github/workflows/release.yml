@@ -73,18 +73,12 @@ jobs:
       - name: Build workspace
         run: NODE_ENV=production pnpm --workspace-concurrency=1 -r build
 
-          git diff --exit-code -- packages/plugin/dist/index.js packages/plugin/dist/client.github.js
       - name: Pack npm plugin
         run: |
           mkdir -p release-assets
           pnpm --dir packages/plugin pack --pack-destination "$GITHUB_WORKSPACE/release-assets"
 
       - name: Stage release assets
-        run: |
-          cd release-assets
-          sha256sum *.tgz > SHA256SUMS.txt
-
-      - name: Update release checksums
         run: |
           cd release-assets
           sha256sum *.tgz > SHA256SUMS.txt

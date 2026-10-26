@@ -8,7 +8,7 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
-import { AboutScreen, HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
+import { HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
@@ -33,7 +33,6 @@ type Route =
   | { name: 'workspaces'; focusWorkspaceKey?: string; botConversationId?: string }
   | { name: 'chat' }
   | { name: 'settings' }
-  | { name: 'about' }
 
 export default function App() {
   const locales = useLocales()
@@ -380,7 +379,6 @@ function AppNavigator() {
       />}
       {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
-      {route.name === 'about' && <AboutScreen onBack={pop} />}
       {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
         <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
           <ErrorBanner message={error} onDismiss={clearError} />
@@ -402,10 +400,6 @@ function AppNavigator() {
         onSettings={() => {
           setHomeMenuOpen(false)
           push({ name: 'settings' })
-        }}
-        onAbout={() => {
-          setHomeMenuOpen(false)
-          push({ name: 'about' })
         }}
       />
     </View>

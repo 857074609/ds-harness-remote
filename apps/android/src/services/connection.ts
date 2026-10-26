@@ -269,6 +269,9 @@ export class AndroidRemoteConnection {
     if (attempt !== this.connectionAttempt || this.core !== core) {
       throw new Error('The connection attempt was superseded.')
     }
+    // The direct path must expose the business client exactly like the
+    // probe-verified stack: RPCs (hostDescribe, session list) go through it.
+    this.proxy = new HarnessAlphaClient(core)
     return transport.getHostDeviceId()
   }
 

@@ -17698,7 +17698,7 @@ var helloAckPayloadSchema = external_exports.object({
   protocol: external_exports.literal(PROTOCOL_VERSION),
   serverVersion: external_exports.string().min(1),
   connectionSessionId: external_exports.string().min(1),
-  hostDeviceId: external_exports.string().min(1),
+  hostDeviceId: external_exports.string().min(1).optional(),
   heartbeatIntervalMs: external_exports.number().int().positive(),
   maxControlFrameBytes: external_exports.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: external_exports.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
@@ -18981,7 +18981,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.20";
+var PLUGIN_VERSION = "0.5.21";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;

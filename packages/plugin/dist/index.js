@@ -15,8 +15,8 @@ var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
-var __commonJS = (cb, mod4) => function __require2() {
-  return mod4 || (0, cb[__getOwnPropNames(cb)[0]])((mod4 = { exports: {} }).exports, mod4), mod4.exports;
+var __commonJS = (cb, mod3) => function __require2() {
+  return mod3 || (0, cb[__getOwnPropNames(cb)[0]])((mod3 = { exports: {} }).exports, mod3), mod3.exports;
 };
 var __export = (target2, all) => {
   for (var name2 in all)
@@ -30,15 +30,1621 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod4, isNodeMode, target2) => (target2 = mod4 != null ? __create(__getProtoOf(mod4)) : {}, __copyProps(
+var __toESM = (mod3, isNodeMode, target2) => (target2 = mod3 != null ? __create(__getProtoOf(mod3)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod4 || !mod4.__esModule ? __defProp(target2, "default", { value: mod4, enumerable: true }) : target2,
-  mod4
+  isNodeMode || !mod3 || !mod3.__esModule ? __defProp(target2, "default", { value: mod3, enumerable: true }) : target2,
+  mod3
 ));
-var __toCommonJS = (mod4) => __copyProps(__defProp({}, "__esModule", { value: true }), mod4);
+var __toCommonJS = (mod3) => __copyProps(__defProp({}, "__esModule", { value: true }), mod3);
+
+// node_modules/@noble/hashes/esm/cryptoNode.js
+import * as nc2 from "node:crypto";
+var crypto3;
+var init_cryptoNode = __esm({
+  "node_modules/@noble/hashes/esm/cryptoNode.js"() {
+    crypto3 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
+  }
+});
+
+// node_modules/@noble/hashes/esm/utils.js
+function isBytes(a) {
+  return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
+}
+function anumber(n) {
+  if (!Number.isSafeInteger(n) || n < 0)
+    throw new Error("positive integer expected, got " + n);
+}
+function abytes(b, ...lengths) {
+  if (!isBytes(b))
+    throw new Error("Uint8Array expected");
+  if (lengths.length > 0 && !lengths.includes(b.length))
+    throw new Error("Uint8Array expected of length " + lengths + ", got length=" + b.length);
+}
+function ahash(h) {
+  if (typeof h !== "function" || typeof h.create !== "function")
+    throw new Error("Hash should be wrapped by utils.createHasher");
+  anumber(h.outputLen);
+  anumber(h.blockLen);
+}
+function aexists(instance, checkFinished = true) {
+  if (instance.destroyed)
+    throw new Error("Hash instance has been destroyed");
+  if (checkFinished && instance.finished)
+    throw new Error("Hash#digest() has already been called");
+}
+function aoutput(out, instance) {
+  abytes(out);
+  const min = instance.outputLen;
+  if (out.length < min) {
+    throw new Error("digestInto() expects output buffer of length at least " + min);
+  }
+}
+function clean(...arrays) {
+  for (let i = 0; i < arrays.length; i++) {
+    arrays[i].fill(0);
+  }
+}
+function createView(arr) {
+  return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
+}
+function rotr(word, shift) {
+  return word << 32 - shift | word >>> shift;
+}
+function bytesToHex(bytes) {
+  abytes(bytes);
+  if (hasHexBuiltin)
+    return bytes.toHex();
+  let hex = "";
+  for (let i = 0; i < bytes.length; i++) {
+    hex += hexes[bytes[i]];
+  }
+  return hex;
+}
+function asciiToBase16(ch) {
+  if (ch >= asciis._0 && ch <= asciis._9)
+    return ch - asciis._0;
+  if (ch >= asciis.A && ch <= asciis.F)
+    return ch - (asciis.A - 10);
+  if (ch >= asciis.a && ch <= asciis.f)
+    return ch - (asciis.a - 10);
+  return;
+}
+function hexToBytes(hex) {
+  if (typeof hex !== "string")
+    throw new Error("hex string expected, got " + typeof hex);
+  if (hasHexBuiltin)
+    return Uint8Array.fromHex(hex);
+  const hl = hex.length;
+  const al = hl / 2;
+  if (hl % 2)
+    throw new Error("hex string expected, got unpadded hex of length " + hl);
+  const array4 = new Uint8Array(al);
+  for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
+    const n1 = asciiToBase16(hex.charCodeAt(hi));
+    const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
+    if (n1 === void 0 || n2 === void 0) {
+      const char = hex[hi] + hex[hi + 1];
+      throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
+    }
+    array4[ai] = n1 * 16 + n2;
+  }
+  return array4;
+}
+function utf8ToBytes(str) {
+  if (typeof str !== "string")
+    throw new Error("string expected");
+  return new Uint8Array(new TextEncoder().encode(str));
+}
+function toBytes(data2) {
+  if (typeof data2 === "string")
+    data2 = utf8ToBytes(data2);
+  abytes(data2);
+  return data2;
+}
+function concatBytes(...arrays) {
+  let sum = 0;
+  for (let i = 0; i < arrays.length; i++) {
+    const a = arrays[i];
+    abytes(a);
+    sum += a.length;
+  }
+  const res = new Uint8Array(sum);
+  for (let i = 0, pad = 0; i < arrays.length; i++) {
+    const a = arrays[i];
+    res.set(a, pad);
+    pad += a.length;
+  }
+  return res;
+}
+function createHasher(hashCons) {
+  const hashC = (msg) => hashCons().update(toBytes(msg)).digest();
+  const tmp = hashCons();
+  hashC.outputLen = tmp.outputLen;
+  hashC.blockLen = tmp.blockLen;
+  hashC.create = () => hashCons();
+  return hashC;
+}
+function randomBytes2(bytesLength = 32) {
+  if (crypto3 && typeof crypto3.getRandomValues === "function") {
+    return crypto3.getRandomValues(new Uint8Array(bytesLength));
+  }
+  if (crypto3 && typeof crypto3.randomBytes === "function") {
+    return Uint8Array.from(crypto3.randomBytes(bytesLength));
+  }
+  throw new Error("crypto.getRandomValues must be defined");
+}
+var hasHexBuiltin, hexes, asciis, Hash;
+var init_utils = __esm({
+  "node_modules/@noble/hashes/esm/utils.js"() {
+    init_cryptoNode();
+    hasHexBuiltin = /* @__PURE__ */ (() => (
+      // @ts-ignore
+      typeof Uint8Array.from([]).toHex === "function" && typeof Uint8Array.fromHex === "function"
+    ))();
+    hexes = /* @__PURE__ */ Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
+    asciis = { _0: 48, _9: 57, A: 65, F: 70, a: 97, f: 102 };
+    Hash = class {
+    };
+  }
+});
+
+// node_modules/@noble/hashes/esm/_md.js
+function setBigUint64(view, byteOffset, value, isLE3) {
+  if (typeof view.setBigUint64 === "function")
+    return view.setBigUint64(byteOffset, value, isLE3);
+  const _32n3 = BigInt(32);
+  const _u32_max = BigInt(4294967295);
+  const wh = Number(value >> _32n3 & _u32_max);
+  const wl = Number(value & _u32_max);
+  const h = isLE3 ? 4 : 0;
+  const l = isLE3 ? 0 : 4;
+  view.setUint32(byteOffset + h, wh, isLE3);
+  view.setUint32(byteOffset + l, wl, isLE3);
+}
+function Chi(a, b, c) {
+  return a & b ^ ~a & c;
+}
+function Maj(a, b, c) {
+  return a & b ^ a & c ^ b & c;
+}
+var HashMD, SHA256_IV, SHA384_IV, SHA512_IV;
+var init_md = __esm({
+  "node_modules/@noble/hashes/esm/_md.js"() {
+    init_utils();
+    HashMD = class extends Hash {
+      constructor(blockLen, outputLen, padOffset, isLE3) {
+        super();
+        this.finished = false;
+        this.length = 0;
+        this.pos = 0;
+        this.destroyed = false;
+        this.blockLen = blockLen;
+        this.outputLen = outputLen;
+        this.padOffset = padOffset;
+        this.isLE = isLE3;
+        this.buffer = new Uint8Array(blockLen);
+        this.view = createView(this.buffer);
+      }
+      update(data2) {
+        aexists(this);
+        data2 = toBytes(data2);
+        abytes(data2);
+        const { view, buffer: buffer2, blockLen } = this;
+        const len = data2.length;
+        for (let pos = 0; pos < len; ) {
+          const take = Math.min(blockLen - this.pos, len - pos);
+          if (take === blockLen) {
+            const dataView = createView(data2);
+            for (; blockLen <= len - pos; pos += blockLen)
+              this.process(dataView, pos);
+            continue;
+          }
+          buffer2.set(data2.subarray(pos, pos + take), this.pos);
+          this.pos += take;
+          pos += take;
+          if (this.pos === blockLen) {
+            this.process(view, 0);
+            this.pos = 0;
+          }
+        }
+        this.length += data2.length;
+        this.roundClean();
+        return this;
+      }
+      digestInto(out) {
+        aexists(this);
+        aoutput(out, this);
+        this.finished = true;
+        const { buffer: buffer2, view, blockLen, isLE: isLE3 } = this;
+        let { pos } = this;
+        buffer2[pos++] = 128;
+        clean(this.buffer.subarray(pos));
+        if (this.padOffset > blockLen - pos) {
+          this.process(view, 0);
+          pos = 0;
+        }
+        for (let i = pos; i < blockLen; i++)
+          buffer2[i] = 0;
+        setBigUint64(view, blockLen - 8, BigInt(this.length * 8), isLE3);
+        this.process(view, 0);
+        const oview = createView(out);
+        const len = this.outputLen;
+        if (len % 4)
+          throw new Error("_sha2: outputLen should be aligned to 32bit");
+        const outLen = len / 4;
+        const state = this.get();
+        if (outLen > state.length)
+          throw new Error("_sha2: outputLen bigger than state");
+        for (let i = 0; i < outLen; i++)
+          oview.setUint32(4 * i, state[i], isLE3);
+      }
+      digest() {
+        const { buffer: buffer2, outputLen } = this;
+        this.digestInto(buffer2);
+        const res = buffer2.slice(0, outputLen);
+        this.destroy();
+        return res;
+      }
+      _cloneInto(to) {
+        to || (to = new this.constructor());
+        to.set(...this.get());
+        const { blockLen, buffer: buffer2, length, finished, destroyed, pos } = this;
+        to.destroyed = destroyed;
+        to.finished = finished;
+        to.length = length;
+        to.pos = pos;
+        if (length % blockLen)
+          to.buffer.set(buffer2);
+        return to;
+      }
+      clone() {
+        return this._cloneInto();
+      }
+    };
+    SHA256_IV = /* @__PURE__ */ Uint32Array.from([
+      1779033703,
+      3144134277,
+      1013904242,
+      2773480762,
+      1359893119,
+      2600822924,
+      528734635,
+      1541459225
+    ]);
+    SHA384_IV = /* @__PURE__ */ Uint32Array.from([
+      3418070365,
+      3238371032,
+      1654270250,
+      914150663,
+      2438529370,
+      812702999,
+      355462360,
+      4144912697,
+      1731405415,
+      4290775857,
+      2394180231,
+      1750603025,
+      3675008525,
+      1694076839,
+      1203062813,
+      3204075428
+    ]);
+    SHA512_IV = /* @__PURE__ */ Uint32Array.from([
+      1779033703,
+      4089235720,
+      3144134277,
+      2227873595,
+      1013904242,
+      4271175723,
+      2773480762,
+      1595750129,
+      1359893119,
+      2917565137,
+      2600822924,
+      725511199,
+      528734635,
+      4215389547,
+      1541459225,
+      327033209
+    ]);
+  }
+});
+
+// node_modules/@noble/hashes/esm/_u64.js
+function fromBig(n, le = false) {
+  if (le)
+    return { h: Number(n & U32_MASK64), l: Number(n >> _32n & U32_MASK64) };
+  return { h: Number(n >> _32n & U32_MASK64) | 0, l: Number(n & U32_MASK64) | 0 };
+}
+function split(lst, le = false) {
+  const len = lst.length;
+  let Ah = new Uint32Array(len);
+  let Al = new Uint32Array(len);
+  for (let i = 0; i < len; i++) {
+    const { h, l } = fromBig(lst[i], le);
+    [Ah[i], Al[i]] = [h, l];
+  }
+  return [Ah, Al];
+}
+function add(Ah, Al, Bh, Bl) {
+  const l = (Al >>> 0) + (Bl >>> 0);
+  return { h: Ah + Bh + (l / 2 ** 32 | 0) | 0, l: l | 0 };
+}
+var U32_MASK64, _32n, shrSH, shrSL, rotrSH, rotrSL, rotrBH, rotrBL, add3L, add3H, add4L, add4H, add5L, add5H;
+var init_u64 = __esm({
+  "node_modules/@noble/hashes/esm/_u64.js"() {
+    U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
+    _32n = /* @__PURE__ */ BigInt(32);
+    shrSH = (h, _l, s2) => h >>> s2;
+    shrSL = (h, l, s2) => h << 32 - s2 | l >>> s2;
+    rotrSH = (h, l, s2) => h >>> s2 | l << 32 - s2;
+    rotrSL = (h, l, s2) => h << 32 - s2 | l >>> s2;
+    rotrBH = (h, l, s2) => h << 64 - s2 | l >>> s2 - 32;
+    rotrBL = (h, l, s2) => h >>> s2 - 32 | l << 64 - s2;
+    add3L = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
+    add3H = (low, Ah, Bh, Ch) => Ah + Bh + Ch + (low / 2 ** 32 | 0) | 0;
+    add4L = (Al, Bl, Cl, Dl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0);
+    add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0;
+    add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
+    add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
+  }
+});
+
+// node_modules/@noble/hashes/esm/sha2.js
+var SHA256_K, SHA256_W, SHA256, K512, SHA512_Kh, SHA512_Kl, SHA512_W_H, SHA512_W_L, SHA512, SHA384, sha256, sha512, sha384;
+var init_sha2 = __esm({
+  "node_modules/@noble/hashes/esm/sha2.js"() {
+    init_md();
+    init_u64();
+    init_utils();
+    SHA256_K = /* @__PURE__ */ Uint32Array.from([
+      1116352408,
+      1899447441,
+      3049323471,
+      3921009573,
+      961987163,
+      1508970993,
+      2453635748,
+      2870763221,
+      3624381080,
+      310598401,
+      607225278,
+      1426881987,
+      1925078388,
+      2162078206,
+      2614888103,
+      3248222580,
+      3835390401,
+      4022224774,
+      264347078,
+      604807628,
+      770255983,
+      1249150122,
+      1555081692,
+      1996064986,
+      2554220882,
+      2821834349,
+      2952996808,
+      3210313671,
+      3336571891,
+      3584528711,
+      113926993,
+      338241895,
+      666307205,
+      773529912,
+      1294757372,
+      1396182291,
+      1695183700,
+      1986661051,
+      2177026350,
+      2456956037,
+      2730485921,
+      2820302411,
+      3259730800,
+      3345764771,
+      3516065817,
+      3600352804,
+      4094571909,
+      275423344,
+      430227734,
+      506948616,
+      659060556,
+      883997877,
+      958139571,
+      1322822218,
+      1537002063,
+      1747873779,
+      1955562222,
+      2024104815,
+      2227730452,
+      2361852424,
+      2428436474,
+      2756734187,
+      3204031479,
+      3329325298
+    ]);
+    SHA256_W = /* @__PURE__ */ new Uint32Array(64);
+    SHA256 = class extends HashMD {
+      constructor(outputLen = 32) {
+        super(64, outputLen, 8, false);
+        this.A = SHA256_IV[0] | 0;
+        this.B = SHA256_IV[1] | 0;
+        this.C = SHA256_IV[2] | 0;
+        this.D = SHA256_IV[3] | 0;
+        this.E = SHA256_IV[4] | 0;
+        this.F = SHA256_IV[5] | 0;
+        this.G = SHA256_IV[6] | 0;
+        this.H = SHA256_IV[7] | 0;
+      }
+      get() {
+        const { A, B, C, D, E, F, G, H } = this;
+        return [A, B, C, D, E, F, G, H];
+      }
+      // prettier-ignore
+      set(A, B, C, D, E, F, G, H) {
+        this.A = A | 0;
+        this.B = B | 0;
+        this.C = C | 0;
+        this.D = D | 0;
+        this.E = E | 0;
+        this.F = F | 0;
+        this.G = G | 0;
+        this.H = H | 0;
+      }
+      process(view, offset) {
+        for (let i = 0; i < 16; i++, offset += 4)
+          SHA256_W[i] = view.getUint32(offset, false);
+        for (let i = 16; i < 64; i++) {
+          const W15 = SHA256_W[i - 15];
+          const W2 = SHA256_W[i - 2];
+          const s0 = rotr(W15, 7) ^ rotr(W15, 18) ^ W15 >>> 3;
+          const s1 = rotr(W2, 17) ^ rotr(W2, 19) ^ W2 >>> 10;
+          SHA256_W[i] = s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16] | 0;
+        }
+        let { A, B, C, D, E, F, G, H } = this;
+        for (let i = 0; i < 64; i++) {
+          const sigma1 = rotr(E, 6) ^ rotr(E, 11) ^ rotr(E, 25);
+          const T1 = H + sigma1 + Chi(E, F, G) + SHA256_K[i] + SHA256_W[i] | 0;
+          const sigma0 = rotr(A, 2) ^ rotr(A, 13) ^ rotr(A, 22);
+          const T2 = sigma0 + Maj(A, B, C) | 0;
+          H = G;
+          G = F;
+          F = E;
+          E = D + T1 | 0;
+          D = C;
+          C = B;
+          B = A;
+          A = T1 + T2 | 0;
+        }
+        A = A + this.A | 0;
+        B = B + this.B | 0;
+        C = C + this.C | 0;
+        D = D + this.D | 0;
+        E = E + this.E | 0;
+        F = F + this.F | 0;
+        G = G + this.G | 0;
+        H = H + this.H | 0;
+        this.set(A, B, C, D, E, F, G, H);
+      }
+      roundClean() {
+        clean(SHA256_W);
+      }
+      destroy() {
+        this.set(0, 0, 0, 0, 0, 0, 0, 0);
+        clean(this.buffer);
+      }
+    };
+    K512 = /* @__PURE__ */ (() => split([
+      "0x428a2f98d728ae22",
+      "0x7137449123ef65cd",
+      "0xb5c0fbcfec4d3b2f",
+      "0xe9b5dba58189dbbc",
+      "0x3956c25bf348b538",
+      "0x59f111f1b605d019",
+      "0x923f82a4af194f9b",
+      "0xab1c5ed5da6d8118",
+      "0xd807aa98a3030242",
+      "0x12835b0145706fbe",
+      "0x243185be4ee4b28c",
+      "0x550c7dc3d5ffb4e2",
+      "0x72be5d74f27b896f",
+      "0x80deb1fe3b1696b1",
+      "0x9bdc06a725c71235",
+      "0xc19bf174cf692694",
+      "0xe49b69c19ef14ad2",
+      "0xefbe4786384f25e3",
+      "0x0fc19dc68b8cd5b5",
+      "0x240ca1cc77ac9c65",
+      "0x2de92c6f592b0275",
+      "0x4a7484aa6ea6e483",
+      "0x5cb0a9dcbd41fbd4",
+      "0x76f988da831153b5",
+      "0x983e5152ee66dfab",
+      "0xa831c66d2db43210",
+      "0xb00327c898fb213f",
+      "0xbf597fc7beef0ee4",
+      "0xc6e00bf33da88fc2",
+      "0xd5a79147930aa725",
+      "0x06ca6351e003826f",
+      "0x142929670a0e6e70",
+      "0x27b70a8546d22ffc",
+      "0x2e1b21385c26c926",
+      "0x4d2c6dfc5ac42aed",
+      "0x53380d139d95b3df",
+      "0x650a73548baf63de",
+      "0x766a0abb3c77b2a8",
+      "0x81c2c92e47edaee6",
+      "0x92722c851482353b",
+      "0xa2bfe8a14cf10364",
+      "0xa81a664bbc423001",
+      "0xc24b8b70d0f89791",
+      "0xc76c51a30654be30",
+      "0xd192e819d6ef5218",
+      "0xd69906245565a910",
+      "0xf40e35855771202a",
+      "0x106aa07032bbd1b8",
+      "0x19a4c116b8d2d0c8",
+      "0x1e376c085141ab53",
+      "0x2748774cdf8eeb99",
+      "0x34b0bcb5e19b48a8",
+      "0x391c0cb3c5c95a63",
+      "0x4ed8aa4ae3418acb",
+      "0x5b9cca4f7763e373",
+      "0x682e6ff3d6b2b8a3",
+      "0x748f82ee5defb2fc",
+      "0x78a5636f43172f60",
+      "0x84c87814a1f0ab72",
+      "0x8cc702081a6439ec",
+      "0x90befffa23631e28",
+      "0xa4506cebde82bde9",
+      "0xbef9a3f7b2c67915",
+      "0xc67178f2e372532b",
+      "0xca273eceea26619c",
+      "0xd186b8c721c0c207",
+      "0xeada7dd6cde0eb1e",
+      "0xf57d4f7fee6ed178",
+      "0x06f067aa72176fba",
+      "0x0a637dc5a2c898a6",
+      "0x113f9804bef90dae",
+      "0x1b710b35131c471b",
+      "0x28db77f523047d84",
+      "0x32caab7b40c72493",
+      "0x3c9ebe0a15c9bebc",
+      "0x431d67c49c100d4c",
+      "0x4cc5d4becb3e42b6",
+      "0x597f299cfc657e2a",
+      "0x5fcb6fab3ad6faec",
+      "0x6c44198c4a475817"
+    ].map((n) => BigInt(n))))();
+    SHA512_Kh = /* @__PURE__ */ (() => K512[0])();
+    SHA512_Kl = /* @__PURE__ */ (() => K512[1])();
+    SHA512_W_H = /* @__PURE__ */ new Uint32Array(80);
+    SHA512_W_L = /* @__PURE__ */ new Uint32Array(80);
+    SHA512 = class extends HashMD {
+      constructor(outputLen = 64) {
+        super(128, outputLen, 16, false);
+        this.Ah = SHA512_IV[0] | 0;
+        this.Al = SHA512_IV[1] | 0;
+        this.Bh = SHA512_IV[2] | 0;
+        this.Bl = SHA512_IV[3] | 0;
+        this.Ch = SHA512_IV[4] | 0;
+        this.Cl = SHA512_IV[5] | 0;
+        this.Dh = SHA512_IV[6] | 0;
+        this.Dl = SHA512_IV[7] | 0;
+        this.Eh = SHA512_IV[8] | 0;
+        this.El = SHA512_IV[9] | 0;
+        this.Fh = SHA512_IV[10] | 0;
+        this.Fl = SHA512_IV[11] | 0;
+        this.Gh = SHA512_IV[12] | 0;
+        this.Gl = SHA512_IV[13] | 0;
+        this.Hh = SHA512_IV[14] | 0;
+        this.Hl = SHA512_IV[15] | 0;
+      }
+      // prettier-ignore
+      get() {
+        const { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
+        return [Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl];
+      }
+      // prettier-ignore
+      set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl) {
+        this.Ah = Ah | 0;
+        this.Al = Al | 0;
+        this.Bh = Bh | 0;
+        this.Bl = Bl | 0;
+        this.Ch = Ch | 0;
+        this.Cl = Cl | 0;
+        this.Dh = Dh | 0;
+        this.Dl = Dl | 0;
+        this.Eh = Eh | 0;
+        this.El = El | 0;
+        this.Fh = Fh | 0;
+        this.Fl = Fl | 0;
+        this.Gh = Gh | 0;
+        this.Gl = Gl | 0;
+        this.Hh = Hh | 0;
+        this.Hl = Hl | 0;
+      }
+      process(view, offset) {
+        for (let i = 0; i < 16; i++, offset += 4) {
+          SHA512_W_H[i] = view.getUint32(offset);
+          SHA512_W_L[i] = view.getUint32(offset += 4);
+        }
+        for (let i = 16; i < 80; i++) {
+          const W15h = SHA512_W_H[i - 15] | 0;
+          const W15l = SHA512_W_L[i - 15] | 0;
+          const s0h = rotrSH(W15h, W15l, 1) ^ rotrSH(W15h, W15l, 8) ^ shrSH(W15h, W15l, 7);
+          const s0l = rotrSL(W15h, W15l, 1) ^ rotrSL(W15h, W15l, 8) ^ shrSL(W15h, W15l, 7);
+          const W2h = SHA512_W_H[i - 2] | 0;
+          const W2l = SHA512_W_L[i - 2] | 0;
+          const s1h = rotrSH(W2h, W2l, 19) ^ rotrBH(W2h, W2l, 61) ^ shrSH(W2h, W2l, 6);
+          const s1l = rotrSL(W2h, W2l, 19) ^ rotrBL(W2h, W2l, 61) ^ shrSL(W2h, W2l, 6);
+          const SUMl = add4L(s0l, s1l, SHA512_W_L[i - 7], SHA512_W_L[i - 16]);
+          const SUMh = add4H(SUMl, s0h, s1h, SHA512_W_H[i - 7], SHA512_W_H[i - 16]);
+          SHA512_W_H[i] = SUMh | 0;
+          SHA512_W_L[i] = SUMl | 0;
+        }
+        let { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
+        for (let i = 0; i < 80; i++) {
+          const sigma1h = rotrSH(Eh, El, 14) ^ rotrSH(Eh, El, 18) ^ rotrBH(Eh, El, 41);
+          const sigma1l = rotrSL(Eh, El, 14) ^ rotrSL(Eh, El, 18) ^ rotrBL(Eh, El, 41);
+          const CHIh = Eh & Fh ^ ~Eh & Gh;
+          const CHIl = El & Fl ^ ~El & Gl;
+          const T1ll = add5L(Hl, sigma1l, CHIl, SHA512_Kl[i], SHA512_W_L[i]);
+          const T1h = add5H(T1ll, Hh, sigma1h, CHIh, SHA512_Kh[i], SHA512_W_H[i]);
+          const T1l = T1ll | 0;
+          const sigma0h = rotrSH(Ah, Al, 28) ^ rotrBH(Ah, Al, 34) ^ rotrBH(Ah, Al, 39);
+          const sigma0l = rotrSL(Ah, Al, 28) ^ rotrBL(Ah, Al, 34) ^ rotrBL(Ah, Al, 39);
+          const MAJh = Ah & Bh ^ Ah & Ch ^ Bh & Ch;
+          const MAJl = Al & Bl ^ Al & Cl ^ Bl & Cl;
+          Hh = Gh | 0;
+          Hl = Gl | 0;
+          Gh = Fh | 0;
+          Gl = Fl | 0;
+          Fh = Eh | 0;
+          Fl = El | 0;
+          ({ h: Eh, l: El } = add(Dh | 0, Dl | 0, T1h | 0, T1l | 0));
+          Dh = Ch | 0;
+          Dl = Cl | 0;
+          Ch = Bh | 0;
+          Cl = Bl | 0;
+          Bh = Ah | 0;
+          Bl = Al | 0;
+          const All = add3L(T1l, sigma0l, MAJl);
+          Ah = add3H(All, T1h, sigma0h, MAJh);
+          Al = All | 0;
+        }
+        ({ h: Ah, l: Al } = add(this.Ah | 0, this.Al | 0, Ah | 0, Al | 0));
+        ({ h: Bh, l: Bl } = add(this.Bh | 0, this.Bl | 0, Bh | 0, Bl | 0));
+        ({ h: Ch, l: Cl } = add(this.Ch | 0, this.Cl | 0, Ch | 0, Cl | 0));
+        ({ h: Dh, l: Dl } = add(this.Dh | 0, this.Dl | 0, Dh | 0, Dl | 0));
+        ({ h: Eh, l: El } = add(this.Eh | 0, this.El | 0, Eh | 0, El | 0));
+        ({ h: Fh, l: Fl } = add(this.Fh | 0, this.Fl | 0, Fh | 0, Fl | 0));
+        ({ h: Gh, l: Gl } = add(this.Gh | 0, this.Gl | 0, Gh | 0, Gl | 0));
+        ({ h: Hh, l: Hl } = add(this.Hh | 0, this.Hl | 0, Hh | 0, Hl | 0));
+        this.set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl);
+      }
+      roundClean() {
+        clean(SHA512_W_H, SHA512_W_L);
+      }
+      destroy() {
+        clean(this.buffer);
+        this.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+      }
+    };
+    SHA384 = class extends SHA512 {
+      constructor() {
+        super(48);
+        this.Ah = SHA384_IV[0] | 0;
+        this.Al = SHA384_IV[1] | 0;
+        this.Bh = SHA384_IV[2] | 0;
+        this.Bl = SHA384_IV[3] | 0;
+        this.Ch = SHA384_IV[4] | 0;
+        this.Cl = SHA384_IV[5] | 0;
+        this.Dh = SHA384_IV[6] | 0;
+        this.Dl = SHA384_IV[7] | 0;
+        this.Eh = SHA384_IV[8] | 0;
+        this.El = SHA384_IV[9] | 0;
+        this.Fh = SHA384_IV[10] | 0;
+        this.Fl = SHA384_IV[11] | 0;
+        this.Gh = SHA384_IV[12] | 0;
+        this.Gl = SHA384_IV[13] | 0;
+        this.Hh = SHA384_IV[14] | 0;
+        this.Hl = SHA384_IV[15] | 0;
+      }
+    };
+    sha256 = /* @__PURE__ */ createHasher(() => new SHA256());
+    sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
+    sha384 = /* @__PURE__ */ createHasher(() => new SHA384());
+  }
+});
+
+// node_modules/@noble/curves/esm/utils.js
+function _abool2(value, title = "") {
+  if (typeof value !== "boolean") {
+    const prefix = title && `"${title}"`;
+    throw new Error(prefix + "expected boolean, got type=" + typeof value);
+  }
+  return value;
+}
+function _abytes2(value, length, title = "") {
+  const bytes = isBytes(value);
+  const len = value?.length;
+  const needsLen = length !== void 0;
+  if (!bytes || needsLen && len !== length) {
+    const prefix = title && `"${title}" `;
+    const ofLen = needsLen ? ` of length ${length}` : "";
+    const got = bytes ? `length=${len}` : `type=${typeof value}`;
+    throw new Error(prefix + "expected Uint8Array" + ofLen + ", got " + got);
+  }
+  return value;
+}
+function numberToHexUnpadded(num) {
+  const hex = num.toString(16);
+  return hex.length & 1 ? "0" + hex : hex;
+}
+function hexToNumber(hex) {
+  if (typeof hex !== "string")
+    throw new Error("hex string expected, got " + typeof hex);
+  return hex === "" ? _0n : BigInt("0x" + hex);
+}
+function bytesToNumberBE(bytes) {
+  return hexToNumber(bytesToHex(bytes));
+}
+function bytesToNumberLE(bytes) {
+  abytes(bytes);
+  return hexToNumber(bytesToHex(Uint8Array.from(bytes).reverse()));
+}
+function numberToBytesBE(n, len) {
+  return hexToBytes(n.toString(16).padStart(len * 2, "0"));
+}
+function numberToBytesLE(n, len) {
+  return numberToBytesBE(n, len).reverse();
+}
+function ensureBytes(title, hex, expectedLength) {
+  let res;
+  if (typeof hex === "string") {
+    try {
+      res = hexToBytes(hex);
+    } catch (e) {
+      throw new Error(title + " must be hex string or Uint8Array, cause: " + e);
+    }
+  } else if (isBytes(hex)) {
+    res = Uint8Array.from(hex);
+  } else {
+    throw new Error(title + " must be hex string or Uint8Array");
+  }
+  const len = res.length;
+  if (typeof expectedLength === "number" && len !== expectedLength)
+    throw new Error(title + " of length " + expectedLength + " expected, got " + len);
+  return res;
+}
+function equalBytes(a, b) {
+  if (a.length !== b.length)
+    return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++)
+    diff |= a[i] ^ b[i];
+  return diff === 0;
+}
+function copyBytes(bytes) {
+  return Uint8Array.from(bytes);
+}
+function inRange(n, min, max) {
+  return isPosBig(n) && isPosBig(min) && isPosBig(max) && min <= n && n < max;
+}
+function aInRange(title, n, min, max) {
+  if (!inRange(n, min, max))
+    throw new Error("expected valid " + title + ": " + min + " <= n < " + max + ", got " + n);
+}
+function bitLen(n) {
+  let len;
+  for (len = 0; n > _0n; n >>= _1n, len += 1)
+    ;
+  return len;
+}
+function createHmacDrbg(hashLen, qByteLen, hmacFn) {
+  if (typeof hashLen !== "number" || hashLen < 2)
+    throw new Error("hashLen must be a number");
+  if (typeof qByteLen !== "number" || qByteLen < 2)
+    throw new Error("qByteLen must be a number");
+  if (typeof hmacFn !== "function")
+    throw new Error("hmacFn must be a function");
+  const u8n = (len) => new Uint8Array(len);
+  const u8of = (byte) => Uint8Array.of(byte);
+  let v = u8n(hashLen);
+  let k = u8n(hashLen);
+  let i = 0;
+  const reset = () => {
+    v.fill(1);
+    k.fill(0);
+    i = 0;
+  };
+  const h = (...b) => hmacFn(k, v, ...b);
+  const reseed = (seed = u8n(0)) => {
+    k = h(u8of(0), seed);
+    v = h();
+    if (seed.length === 0)
+      return;
+    k = h(u8of(1), seed);
+    v = h();
+  };
+  const gen = () => {
+    if (i++ >= 1e3)
+      throw new Error("drbg: tried 1000 values");
+    let len = 0;
+    const out = [];
+    while (len < qByteLen) {
+      v = h();
+      const sl = v.slice();
+      out.push(sl);
+      len += v.length;
+    }
+    return concatBytes(...out);
+  };
+  const genUntil = (seed, pred) => {
+    reset();
+    reseed(seed);
+    let res = void 0;
+    while (!(res = pred(gen())))
+      reseed();
+    reset();
+    return res;
+  };
+  return genUntil;
+}
+function _validateObject(object3, fields, optFields = {}) {
+  if (!object3 || typeof object3 !== "object")
+    throw new Error("expected valid options object");
+  function checkField(fieldName, expectedType, isOpt) {
+    const val = object3[fieldName];
+    if (isOpt && val === void 0)
+      return;
+    const current = typeof val;
+    if (current !== expectedType || val === null)
+      throw new Error(`param "${fieldName}" is invalid: expected ${expectedType}, got ${current}`);
+  }
+  Object.entries(fields).forEach(([k, v]) => checkField(k, v, false));
+  Object.entries(optFields).forEach(([k, v]) => checkField(k, v, true));
+}
+function memoized(fn) {
+  const map = /* @__PURE__ */ new WeakMap();
+  return (arg, ...args) => {
+    const val = map.get(arg);
+    if (val !== void 0)
+      return val;
+    const computed = fn(arg, ...args);
+    map.set(arg, computed);
+    return computed;
+  };
+}
+var _0n, _1n, isPosBig, bitMask, notImplemented;
+var init_utils2 = __esm({
+  "node_modules/@noble/curves/esm/utils.js"() {
+    init_utils();
+    init_utils();
+    _0n = /* @__PURE__ */ BigInt(0);
+    _1n = /* @__PURE__ */ BigInt(1);
+    isPosBig = (n) => typeof n === "bigint" && _0n <= n;
+    bitMask = (n) => (_1n << BigInt(n)) - _1n;
+    notImplemented = () => {
+      throw new Error("not implemented");
+    };
+  }
+});
+
+// node_modules/@noble/curves/esm/abstract/modular.js
+function mod(a, b) {
+  const result = a % b;
+  return result >= _0n2 ? result : b + result;
+}
+function pow2(x, power, modulo) {
+  let res = x;
+  while (power-- > _0n2) {
+    res *= res;
+    res %= modulo;
+  }
+  return res;
+}
+function invert(number, modulo) {
+  if (number === _0n2)
+    throw new Error("invert: expected non-zero number");
+  if (modulo <= _0n2)
+    throw new Error("invert: expected positive modulus, got " + modulo);
+  let a = mod(number, modulo);
+  let b = modulo;
+  let x = _0n2, y = _1n2, u = _1n2, v = _0n2;
+  while (a !== _0n2) {
+    const q = b / a;
+    const r = b % a;
+    const m = x - u * q;
+    const n = y - v * q;
+    b = a, a = r, x = u, y = v, u = m, v = n;
+  }
+  const gcd = b;
+  if (gcd !== _1n2)
+    throw new Error("invert: does not exist");
+  return mod(x, modulo);
+}
+function assertIsSquare(Fp2, root, n) {
+  if (!Fp2.eql(Fp2.sqr(root), n))
+    throw new Error("Cannot find square root");
+}
+function sqrt3mod4(Fp2, n) {
+  const p1div4 = (Fp2.ORDER + _1n2) / _4n;
+  const root = Fp2.pow(n, p1div4);
+  assertIsSquare(Fp2, root, n);
+  return root;
+}
+function sqrt5mod8(Fp2, n) {
+  const p5div8 = (Fp2.ORDER - _5n) / _8n;
+  const n2 = Fp2.mul(n, _2n);
+  const v = Fp2.pow(n2, p5div8);
+  const nv = Fp2.mul(n, v);
+  const i = Fp2.mul(Fp2.mul(nv, _2n), v);
+  const root = Fp2.mul(nv, Fp2.sub(i, Fp2.ONE));
+  assertIsSquare(Fp2, root, n);
+  return root;
+}
+function sqrt9mod16(P) {
+  const Fp_ = Field(P);
+  const tn = tonelliShanks(P);
+  const c1 = tn(Fp_, Fp_.neg(Fp_.ONE));
+  const c2 = tn(Fp_, c1);
+  const c3 = tn(Fp_, Fp_.neg(c1));
+  const c4 = (P + _7n) / _16n;
+  return (Fp2, n) => {
+    let tv1 = Fp2.pow(n, c4);
+    let tv2 = Fp2.mul(tv1, c1);
+    const tv3 = Fp2.mul(tv1, c2);
+    const tv4 = Fp2.mul(tv1, c3);
+    const e1 = Fp2.eql(Fp2.sqr(tv2), n);
+    const e2 = Fp2.eql(Fp2.sqr(tv3), n);
+    tv1 = Fp2.cmov(tv1, tv2, e1);
+    tv2 = Fp2.cmov(tv4, tv3, e2);
+    const e3 = Fp2.eql(Fp2.sqr(tv2), n);
+    const root = Fp2.cmov(tv1, tv2, e3);
+    assertIsSquare(Fp2, root, n);
+    return root;
+  };
+}
+function tonelliShanks(P) {
+  if (P < _3n)
+    throw new Error("sqrt is not defined for small field");
+  let Q = P - _1n2;
+  let S = 0;
+  while (Q % _2n === _0n2) {
+    Q /= _2n;
+    S++;
+  }
+  let Z = _2n;
+  const _Fp = Field(P);
+  while (FpLegendre(_Fp, Z) === 1) {
+    if (Z++ > 1e3)
+      throw new Error("Cannot find square root: probably non-prime P");
+  }
+  if (S === 1)
+    return sqrt3mod4;
+  let cc = _Fp.pow(Z, Q);
+  const Q1div2 = (Q + _1n2) / _2n;
+  return function tonelliSlow(Fp2, n) {
+    if (Fp2.is0(n))
+      return n;
+    if (FpLegendre(Fp2, n) !== 1)
+      throw new Error("Cannot find square root");
+    let M = S;
+    let c = Fp2.mul(Fp2.ONE, cc);
+    let t = Fp2.pow(n, Q);
+    let R = Fp2.pow(n, Q1div2);
+    while (!Fp2.eql(t, Fp2.ONE)) {
+      if (Fp2.is0(t))
+        return Fp2.ZERO;
+      let i = 1;
+      let t_tmp = Fp2.sqr(t);
+      while (!Fp2.eql(t_tmp, Fp2.ONE)) {
+        i++;
+        t_tmp = Fp2.sqr(t_tmp);
+        if (i === M)
+          throw new Error("Cannot find square root");
+      }
+      const exponent = _1n2 << BigInt(M - i - 1);
+      const b = Fp2.pow(c, exponent);
+      M = i;
+      c = Fp2.sqr(b);
+      t = Fp2.mul(t, c);
+      R = Fp2.mul(R, b);
+    }
+    return R;
+  };
+}
+function FpSqrt(P) {
+  if (P % _4n === _3n)
+    return sqrt3mod4;
+  if (P % _8n === _5n)
+    return sqrt5mod8;
+  if (P % _16n === _9n)
+    return sqrt9mod16(P);
+  return tonelliShanks(P);
+}
+function validateField(field) {
+  const initial = {
+    ORDER: "bigint",
+    MASK: "bigint",
+    BYTES: "number",
+    BITS: "number"
+  };
+  const opts = FIELD_FIELDS.reduce((map, val) => {
+    map[val] = "function";
+    return map;
+  }, initial);
+  _validateObject(field, opts);
+  return field;
+}
+function FpPow(Fp2, num, power) {
+  if (power < _0n2)
+    throw new Error("invalid exponent, negatives unsupported");
+  if (power === _0n2)
+    return Fp2.ONE;
+  if (power === _1n2)
+    return num;
+  let p = Fp2.ONE;
+  let d = num;
+  while (power > _0n2) {
+    if (power & _1n2)
+      p = Fp2.mul(p, d);
+    d = Fp2.sqr(d);
+    power >>= _1n2;
+  }
+  return p;
+}
+function FpInvertBatch(Fp2, nums, passZero = false) {
+  const inverted = new Array(nums.length).fill(passZero ? Fp2.ZERO : void 0);
+  const multipliedAcc = nums.reduce((acc, num, i) => {
+    if (Fp2.is0(num))
+      return acc;
+    inverted[i] = acc;
+    return Fp2.mul(acc, num);
+  }, Fp2.ONE);
+  const invertedAcc = Fp2.inv(multipliedAcc);
+  nums.reduceRight((acc, num, i) => {
+    if (Fp2.is0(num))
+      return acc;
+    inverted[i] = Fp2.mul(acc, inverted[i]);
+    return Fp2.mul(acc, num);
+  }, invertedAcc);
+  return inverted;
+}
+function FpLegendre(Fp2, n) {
+  const p1mod2 = (Fp2.ORDER - _1n2) / _2n;
+  const powered = Fp2.pow(n, p1mod2);
+  const yes = Fp2.eql(powered, Fp2.ONE);
+  const zero = Fp2.eql(powered, Fp2.ZERO);
+  const no = Fp2.eql(powered, Fp2.neg(Fp2.ONE));
+  if (!yes && !zero && !no)
+    throw new Error("invalid Legendre symbol result");
+  return yes ? 1 : zero ? 0 : -1;
+}
+function nLength(n, nBitLength) {
+  if (nBitLength !== void 0)
+    anumber(nBitLength);
+  const _nBitLength = nBitLength !== void 0 ? nBitLength : n.toString(2).length;
+  const nByteLength = Math.ceil(_nBitLength / 8);
+  return { nBitLength: _nBitLength, nByteLength };
+}
+function Field(ORDER, bitLenOrOpts, isLE3 = false, opts = {}) {
+  if (ORDER <= _0n2)
+    throw new Error("invalid field: expected ORDER > 0, got " + ORDER);
+  let _nbitLength = void 0;
+  let _sqrt = void 0;
+  let modFromBytes = false;
+  let allowedLengths = void 0;
+  if (typeof bitLenOrOpts === "object" && bitLenOrOpts != null) {
+    if (opts.sqrt || isLE3)
+      throw new Error("cannot specify opts in two arguments");
+    const _opts = bitLenOrOpts;
+    if (_opts.BITS)
+      _nbitLength = _opts.BITS;
+    if (_opts.sqrt)
+      _sqrt = _opts.sqrt;
+    if (typeof _opts.isLE === "boolean")
+      isLE3 = _opts.isLE;
+    if (typeof _opts.modFromBytes === "boolean")
+      modFromBytes = _opts.modFromBytes;
+    allowedLengths = _opts.allowedLengths;
+  } else {
+    if (typeof bitLenOrOpts === "number")
+      _nbitLength = bitLenOrOpts;
+    if (opts.sqrt)
+      _sqrt = opts.sqrt;
+  }
+  const { nBitLength: BITS, nByteLength: BYTES } = nLength(ORDER, _nbitLength);
+  if (BYTES > 2048)
+    throw new Error("invalid field: expected ORDER of <= 2048 bytes");
+  let sqrtP;
+  const f = Object.freeze({
+    ORDER,
+    isLE: isLE3,
+    BITS,
+    BYTES,
+    MASK: bitMask(BITS),
+    ZERO: _0n2,
+    ONE: _1n2,
+    allowedLengths,
+    create: (num) => mod(num, ORDER),
+    isValid: (num) => {
+      if (typeof num !== "bigint")
+        throw new Error("invalid field element: expected bigint, got " + typeof num);
+      return _0n2 <= num && num < ORDER;
+    },
+    is0: (num) => num === _0n2,
+    // is valid and invertible
+    isValidNot0: (num) => !f.is0(num) && f.isValid(num),
+    isOdd: (num) => (num & _1n2) === _1n2,
+    neg: (num) => mod(-num, ORDER),
+    eql: (lhs, rhs) => lhs === rhs,
+    sqr: (num) => mod(num * num, ORDER),
+    add: (lhs, rhs) => mod(lhs + rhs, ORDER),
+    sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
+    mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
+    pow: (num, power) => FpPow(f, num, power),
+    div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
+    // Same as above, but doesn't normalize
+    sqrN: (num) => num * num,
+    addN: (lhs, rhs) => lhs + rhs,
+    subN: (lhs, rhs) => lhs - rhs,
+    mulN: (lhs, rhs) => lhs * rhs,
+    inv: (num) => invert(num, ORDER),
+    sqrt: _sqrt || ((n) => {
+      if (!sqrtP)
+        sqrtP = FpSqrt(ORDER);
+      return sqrtP(f, n);
+    }),
+    toBytes: (num) => isLE3 ? numberToBytesLE(num, BYTES) : numberToBytesBE(num, BYTES),
+    fromBytes: (bytes, skipValidation = true) => {
+      if (allowedLengths) {
+        if (!allowedLengths.includes(bytes.length) || bytes.length > BYTES) {
+          throw new Error("Field.fromBytes: expected " + allowedLengths + " bytes, got " + bytes.length);
+        }
+        const padded = new Uint8Array(BYTES);
+        padded.set(bytes, isLE3 ? 0 : padded.length - bytes.length);
+        bytes = padded;
+      }
+      if (bytes.length !== BYTES)
+        throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
+      let scalar = isLE3 ? bytesToNumberLE(bytes) : bytesToNumberBE(bytes);
+      if (modFromBytes)
+        scalar = mod(scalar, ORDER);
+      if (!skipValidation) {
+        if (!f.isValid(scalar))
+          throw new Error("invalid field element: outside of range 0..ORDER");
+      }
+      return scalar;
+    },
+    // TODO: we don't need it here, move out to separate fn
+    invertBatch: (lst) => FpInvertBatch(f, lst),
+    // We can't move this out because Fp6, Fp12 implement it
+    // and it's unclear what to return in there.
+    cmov: (a, b, c) => c ? b : a
+  });
+  return Object.freeze(f);
+}
+function getFieldBytesLength(fieldOrder) {
+  if (typeof fieldOrder !== "bigint")
+    throw new Error("field order must be bigint");
+  const bitLength = fieldOrder.toString(2).length;
+  return Math.ceil(bitLength / 8);
+}
+function getMinHashLength(fieldOrder) {
+  const length = getFieldBytesLength(fieldOrder);
+  return length + Math.ceil(length / 2);
+}
+function mapHashToField(key, fieldOrder, isLE3 = false) {
+  const len = key.length;
+  const fieldLen = getFieldBytesLength(fieldOrder);
+  const minLen = getMinHashLength(fieldOrder);
+  if (len < 16 || len < minLen || len > 1024)
+    throw new Error("expected " + minLen + "-1024 bytes of input, got " + len);
+  const num = isLE3 ? bytesToNumberLE(key) : bytesToNumberBE(key);
+  const reduced = mod(num, fieldOrder - _1n2) + _1n2;
+  return isLE3 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
+}
+var _0n2, _1n2, _2n, _3n, _4n, _5n, _7n, _8n, _9n, _16n, isNegativeLE, FIELD_FIELDS;
+var init_modular = __esm({
+  "node_modules/@noble/curves/esm/abstract/modular.js"() {
+    init_utils2();
+    _0n2 = BigInt(0);
+    _1n2 = BigInt(1);
+    _2n = /* @__PURE__ */ BigInt(2);
+    _3n = /* @__PURE__ */ BigInt(3);
+    _4n = /* @__PURE__ */ BigInt(4);
+    _5n = /* @__PURE__ */ BigInt(5);
+    _7n = /* @__PURE__ */ BigInt(7);
+    _8n = /* @__PURE__ */ BigInt(8);
+    _9n = /* @__PURE__ */ BigInt(9);
+    _16n = /* @__PURE__ */ BigInt(16);
+    isNegativeLE = (num, modulo) => (mod(num, modulo) & _1n2) === _1n2;
+    FIELD_FIELDS = [
+      "create",
+      "isValid",
+      "is0",
+      "neg",
+      "inv",
+      "sqrt",
+      "sqr",
+      "eql",
+      "add",
+      "sub",
+      "mul",
+      "pow",
+      "div",
+      "addN",
+      "subN",
+      "mulN",
+      "sqrN"
+    ];
+  }
+});
+
+// node_modules/@noble/curves/esm/abstract/curve.js
+function negateCt(condition, item) {
+  const neg = item.negate();
+  return condition ? neg : item;
+}
+function normalizeZ(c, points) {
+  const invertedZs = FpInvertBatch(c.Fp, points.map((p) => p.Z));
+  return points.map((p, i) => c.fromAffine(p.toAffine(invertedZs[i])));
+}
+function validateW(W, bits) {
+  if (!Number.isSafeInteger(W) || W <= 0 || W > bits)
+    throw new Error("invalid window size, expected [1.." + bits + "], got W=" + W);
+}
+function calcWOpts(W, scalarBits) {
+  validateW(W, scalarBits);
+  const windows = Math.ceil(scalarBits / W) + 1;
+  const windowSize = 2 ** (W - 1);
+  const maxNumber = 2 ** W;
+  const mask = bitMask(W);
+  const shiftBy = BigInt(W);
+  return { windows, windowSize, mask, maxNumber, shiftBy };
+}
+function calcOffsets(n, window2, wOpts) {
+  const { windowSize, mask, maxNumber, shiftBy } = wOpts;
+  let wbits = Number(n & mask);
+  let nextN = n >> shiftBy;
+  if (wbits > windowSize) {
+    wbits -= maxNumber;
+    nextN += _1n3;
+  }
+  const offsetStart = window2 * windowSize;
+  const offset = offsetStart + Math.abs(wbits) - 1;
+  const isZero = wbits === 0;
+  const isNeg = wbits < 0;
+  const isNegF = window2 % 2 !== 0;
+  const offsetF = offsetStart;
+  return { nextN, offset, isZero, isNeg, isNegF, offsetF };
+}
+function validateMSMPoints(points, c) {
+  if (!Array.isArray(points))
+    throw new Error("array expected");
+  points.forEach((p, i) => {
+    if (!(p instanceof c))
+      throw new Error("invalid point at index " + i);
+  });
+}
+function validateMSMScalars(scalars, field) {
+  if (!Array.isArray(scalars))
+    throw new Error("array of scalars expected");
+  scalars.forEach((s2, i) => {
+    if (!field.isValid(s2))
+      throw new Error("invalid scalar at index " + i);
+  });
+}
+function getW(P) {
+  return pointWindowSizes.get(P) || 1;
+}
+function assert0(n) {
+  if (n !== _0n3)
+    throw new Error("invalid wNAF");
+}
+function mulEndoUnsafe(Point, point, k1, k2) {
+  let acc = point;
+  let p1 = Point.ZERO;
+  let p2 = Point.ZERO;
+  while (k1 > _0n3 || k2 > _0n3) {
+    if (k1 & _1n3)
+      p1 = p1.add(acc);
+    if (k2 & _1n3)
+      p2 = p2.add(acc);
+    acc = acc.double();
+    k1 >>= _1n3;
+    k2 >>= _1n3;
+  }
+  return { p1, p2 };
+}
+function pippenger(c, fieldN, points, scalars) {
+  validateMSMPoints(points, c);
+  validateMSMScalars(scalars, fieldN);
+  const plength = points.length;
+  const slength = scalars.length;
+  if (plength !== slength)
+    throw new Error("arrays of points and scalars must have equal length");
+  const zero = c.ZERO;
+  const wbits = bitLen(BigInt(plength));
+  let windowSize = 1;
+  if (wbits > 12)
+    windowSize = wbits - 3;
+  else if (wbits > 4)
+    windowSize = wbits - 2;
+  else if (wbits > 0)
+    windowSize = 2;
+  const MASK = bitMask(windowSize);
+  const buckets = new Array(Number(MASK) + 1).fill(zero);
+  const lastBits = Math.floor((fieldN.BITS - 1) / windowSize) * windowSize;
+  let sum = zero;
+  for (let i = lastBits; i >= 0; i -= windowSize) {
+    buckets.fill(zero);
+    for (let j = 0; j < slength; j++) {
+      const scalar = scalars[j];
+      const wbits2 = Number(scalar >> BigInt(i) & MASK);
+      buckets[wbits2] = buckets[wbits2].add(points[j]);
+    }
+    let resI = zero;
+    for (let j = buckets.length - 1, sumI = zero; j > 0; j--) {
+      sumI = sumI.add(buckets[j]);
+      resI = resI.add(sumI);
+    }
+    sum = sum.add(resI);
+    if (i !== 0)
+      for (let j = 0; j < windowSize; j++)
+        sum = sum.double();
+  }
+  return sum;
+}
+function createField(order, field, isLE3) {
+  if (field) {
+    if (field.ORDER !== order)
+      throw new Error("Field.ORDER must match order: Fp == p, Fn == n");
+    validateField(field);
+    return field;
+  } else {
+    return Field(order, { isLE: isLE3 });
+  }
+}
+function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
+  if (FpFnLE === void 0)
+    FpFnLE = type === "edwards";
+  if (!CURVE || typeof CURVE !== "object")
+    throw new Error(`expected valid ${type} CURVE object`);
+  for (const p of ["p", "n", "h"]) {
+    const val = CURVE[p];
+    if (!(typeof val === "bigint" && val > _0n3))
+      throw new Error(`CURVE.${p} must be positive bigint`);
+  }
+  const Fp2 = createField(CURVE.p, curveOpts.Fp, FpFnLE);
+  const Fn2 = createField(CURVE.n, curveOpts.Fn, FpFnLE);
+  const _b = type === "weierstrass" ? "b" : "d";
+  const params = ["Gx", "Gy", "a", _b];
+  for (const p of params) {
+    if (!Fp2.isValid(CURVE[p]))
+      throw new Error(`CURVE.${p} must be valid field element of CURVE.Fp`);
+  }
+  CURVE = Object.freeze(Object.assign({}, CURVE));
+  return { CURVE, Fp: Fp2, Fn: Fn2 };
+}
+var _0n3, _1n3, pointPrecomputes, pointWindowSizes, wNAF;
+var init_curve = __esm({
+  "node_modules/@noble/curves/esm/abstract/curve.js"() {
+    init_utils2();
+    init_modular();
+    _0n3 = BigInt(0);
+    _1n3 = BigInt(1);
+    pointPrecomputes = /* @__PURE__ */ new WeakMap();
+    pointWindowSizes = /* @__PURE__ */ new WeakMap();
+    wNAF = class {
+      // Parametrized with a given Point class (not individual point)
+      constructor(Point, bits) {
+        this.BASE = Point.BASE;
+        this.ZERO = Point.ZERO;
+        this.Fn = Point.Fn;
+        this.bits = bits;
+      }
+      // non-const time multiplication ladder
+      _unsafeLadder(elm, n, p = this.ZERO) {
+        let d = elm;
+        while (n > _0n3) {
+          if (n & _1n3)
+            p = p.add(d);
+          d = d.double();
+          n >>= _1n3;
+        }
+        return p;
+      }
+      /**
+       * Creates a wNAF precomputation window. Used for caching.
+       * Default window size is set by `utils.precompute()` and is equal to 8.
+       * Number of precomputed points depends on the curve size:
+       * 2^(𝑊−1) * (Math.ceil(𝑛 / 𝑊) + 1), where:
+       * - 𝑊 is the window size
+       * - 𝑛 is the bitlength of the curve order.
+       * For a 256-bit curve and window size 8, the number of precomputed points is 128 * 33 = 4224.
+       * @param point Point instance
+       * @param W window size
+       * @returns precomputed point tables flattened to a single array
+       */
+      precomputeWindow(point, W) {
+        const { windows, windowSize } = calcWOpts(W, this.bits);
+        const points = [];
+        let p = point;
+        let base = p;
+        for (let window2 = 0; window2 < windows; window2++) {
+          base = p;
+          points.push(base);
+          for (let i = 1; i < windowSize; i++) {
+            base = base.add(p);
+            points.push(base);
+          }
+          p = base.double();
+        }
+        return points;
+      }
+      /**
+       * Implements ec multiplication using precomputed tables and w-ary non-adjacent form.
+       * More compact implementation:
+       * https://github.com/paulmillr/noble-secp256k1/blob/47cb1669b6e506ad66b35fe7d76132ae97465da2/index.ts#L502-L541
+       * @returns real and fake (for const-time) points
+       */
+      wNAF(W, precomputes, n) {
+        if (!this.Fn.isValid(n))
+          throw new Error("invalid scalar");
+        let p = this.ZERO;
+        let f = this.BASE;
+        const wo = calcWOpts(W, this.bits);
+        for (let window2 = 0; window2 < wo.windows; window2++) {
+          const { nextN, offset, isZero, isNeg, isNegF, offsetF } = calcOffsets(n, window2, wo);
+          n = nextN;
+          if (isZero) {
+            f = f.add(negateCt(isNegF, precomputes[offsetF]));
+          } else {
+            p = p.add(negateCt(isNeg, precomputes[offset]));
+          }
+        }
+        assert0(n);
+        return { p, f };
+      }
+      /**
+       * Implements ec unsafe (non const-time) multiplication using precomputed tables and w-ary non-adjacent form.
+       * @param acc accumulator point to add result of multiplication
+       * @returns point
+       */
+      wNAFUnsafe(W, precomputes, n, acc = this.ZERO) {
+        const wo = calcWOpts(W, this.bits);
+        for (let window2 = 0; window2 < wo.windows; window2++) {
+          if (n === _0n3)
+            break;
+          const { nextN, offset, isZero, isNeg } = calcOffsets(n, window2, wo);
+          n = nextN;
+          if (isZero) {
+            continue;
+          } else {
+            const item = precomputes[offset];
+            acc = acc.add(isNeg ? item.negate() : item);
+          }
+        }
+        assert0(n);
+        return acc;
+      }
+      getPrecomputes(W, point, transform) {
+        let comp = pointPrecomputes.get(point);
+        if (!comp) {
+          comp = this.precomputeWindow(point, W);
+          if (W !== 1) {
+            if (typeof transform === "function")
+              comp = transform(comp);
+            pointPrecomputes.set(point, comp);
+          }
+        }
+        return comp;
+      }
+      cached(point, scalar, transform) {
+        const W = getW(point);
+        return this.wNAF(W, this.getPrecomputes(W, point, transform), scalar);
+      }
+      unsafe(point, scalar, transform, prev) {
+        const W = getW(point);
+        if (W === 1)
+          return this._unsafeLadder(point, scalar, prev);
+        return this.wNAFUnsafe(W, this.getPrecomputes(W, point, transform), scalar, prev);
+      }
+      // We calculate precomputes for elliptic curve point multiplication
+      // using windowed method. This specifies window size and
+      // stores precomputed values. Usually only base point would be precomputed.
+      createCache(P, W) {
+        validateW(W, this.bits);
+        pointWindowSizes.set(P, W);
+        pointPrecomputes.delete(P);
+      }
+      hasCache(elm) {
+        return getW(elm) !== 1;
+      }
+    };
+  }
+});
+
+// node_modules/@noble/hashes/esm/hmac.js
+var HMAC, hmac;
+var init_hmac = __esm({
+  "node_modules/@noble/hashes/esm/hmac.js"() {
+    init_utils();
+    HMAC = class extends Hash {
+      constructor(hash2, _key) {
+        super();
+        this.finished = false;
+        this.destroyed = false;
+        ahash(hash2);
+        const key = toBytes(_key);
+        this.iHash = hash2.create();
+        if (typeof this.iHash.update !== "function")
+          throw new Error("Expected instance of class which extends utils.Hash");
+        this.blockLen = this.iHash.blockLen;
+        this.outputLen = this.iHash.outputLen;
+        const blockLen = this.blockLen;
+        const pad = new Uint8Array(blockLen);
+        pad.set(key.length > blockLen ? hash2.create().update(key).digest() : key);
+        for (let i = 0; i < pad.length; i++)
+          pad[i] ^= 54;
+        this.iHash.update(pad);
+        this.oHash = hash2.create();
+        for (let i = 0; i < pad.length; i++)
+          pad[i] ^= 54 ^ 92;
+        this.oHash.update(pad);
+        clean(pad);
+      }
+      update(buf) {
+        aexists(this);
+        this.iHash.update(buf);
+        return this;
+      }
+      digestInto(out) {
+        aexists(this);
+        abytes(out, this.outputLen);
+        this.finished = true;
+        this.iHash.digestInto(out);
+        this.oHash.update(out);
+        this.oHash.digestInto(out);
+        this.destroy();
+      }
+      digest() {
+        const out = new Uint8Array(this.oHash.outputLen);
+        this.digestInto(out);
+        return out;
+      }
+      _cloneInto(to) {
+        to || (to = Object.create(Object.getPrototypeOf(this), {}));
+        const { oHash, iHash, finished, destroyed, blockLen, outputLen } = this;
+        to = to;
+        to.finished = finished;
+        to.destroyed = destroyed;
+        to.blockLen = blockLen;
+        to.outputLen = outputLen;
+        to.oHash = oHash._cloneInto(to.oHash);
+        to.iHash = iHash._cloneInto(to.iHash);
+        return to;
+      }
+      clone() {
+        return this._cloneInto();
+      }
+      destroy() {
+        this.destroyed = true;
+        this.oHash.destroy();
+        this.iHash.destroy();
+      }
+    };
+    hmac = (hash2, key, message) => new HMAC(hash2, key).update(message).digest();
+    hmac.create = (hash2, key) => new HMAC(hash2, key);
+  }
+});
 
 // node_modules/ms/index.js
 var require_ms = __commonJS({
@@ -162,7 +1768,7 @@ var require_common = __commonJS({
     function setup(env) {
       createDebug.debug = createDebug;
       createDebug.default = createDebug;
-      createDebug.coerce = coerce3;
+      createDebug.coerce = coerce2;
       createDebug.disable = disable;
       createDebug.enable = enable;
       createDebug.enabled = enabled;
@@ -259,8 +1865,8 @@ var require_common = __commonJS({
         createDebug.namespaces = namespaces;
         createDebug.names = [];
         createDebug.skips = [];
-        const split4 = (typeof namespaces === "string" ? namespaces : "").trim().replace(" ", ",").split(",").filter(Boolean);
-        for (const ns of split4) {
+        const split3 = (typeof namespaces === "string" ? namespaces : "").trim().replace(" ", ",").split(",").filter(Boolean);
+        for (const ns of split3) {
           if (ns[0] === "-") {
             createDebug.skips.push(ns.slice(1));
           } else {
@@ -317,7 +1923,7 @@ var require_common = __commonJS({
         }
         return false;
       }
-      function coerce3(val) {
+      function coerce2(val) {
         if (val instanceof Error) {
           return val.stack || val.message;
         }
@@ -622,14 +2228,14 @@ var require_supports_color = __commonJS({
 var require_node = __commonJS({
   "node_modules/debug/src/node.js"(exports, module) {
     var tty = __require("tty");
-    var util3 = __require("util");
+    var util2 = __require("util");
     exports.init = init;
     exports.log = log39;
     exports.formatArgs = formatArgs;
     exports.save = save;
     exports.load = load;
     exports.useColors = useColors;
-    exports.destroy = util3.deprecate(
+    exports.destroy = util2.deprecate(
       () => {
       },
       "Instance method `debug.destroy()` is deprecated and no longer does anything. It will be removed in the next major version of `debug`."
@@ -760,7 +2366,7 @@ var require_node = __commonJS({
       return (/* @__PURE__ */ new Date()).toISOString() + " ";
     }
     function log39(...args) {
-      return process.stderr.write(util3.formatWithOptions(exports.inspectOpts, ...args) + "\n");
+      return process.stderr.write(util2.formatWithOptions(exports.inspectOpts, ...args) + "\n");
     }
     function save(namespaces) {
       if (namespaces) {
@@ -783,11 +2389,11 @@ var require_node = __commonJS({
     var { formatters } = module.exports;
     formatters.o = function(v) {
       this.inspectOpts.colors = this.useColors;
-      return util3.inspect(v, this.inspectOpts).split("\n").map((str) => str.trim()).join(" ");
+      return util2.inspect(v, this.inspectOpts).split("\n").map((str) => str.trim()).join(" ");
     };
     formatters.O = function(v) {
       this.inspectOpts.colors = this.useColors;
-      return util3.inspect(v, this.inspectOpts);
+      return util2.inspect(v, this.inspectOpts);
     };
   }
 });
@@ -2790,7 +4396,7 @@ var require_nacl_fast = __commonJS({
         for (i = 0; i < 8; i++) ts64(out, 8 * i, hh[i], hl[i]);
         return 0;
       }
-      function add4(p, q) {
+      function add3(p, q) {
         var a = gf(), b = gf(), c = gf(), d = gf(), e = gf(), f = gf(), g = gf(), h = gf(), t = gf();
         Z(a, p[1], p[0]);
         Z(t, q[1], q[0]);
@@ -2834,8 +4440,8 @@ var require_nacl_fast = __commonJS({
         for (i = 255; i >= 0; --i) {
           b = s2[i / 8 | 0] >> (i & 7) & 1;
           cswap2(p, q, b);
-          add4(q, p);
-          add4(p, p);
+          add3(q, p);
+          add3(p, p);
           cswap2(p, q, b);
         }
       }
@@ -2960,7 +4566,7 @@ var require_nacl_fast = __commonJS({
         reduce(h);
         scalarmult(p, q, h);
         scalarbase(q, sm.subarray(32));
-        add4(p, q);
+        add3(p, q);
         pack(t, p);
         n -= 64;
         if (crypto_verify_32(sm, 0, t, 0)) {
@@ -3021,7 +4627,7 @@ var require_nacl_fast = __commonJS({
         S,
         Z,
         pow2523,
-        add: add4,
+        add: add3,
         set25519,
         modL,
         scalarmult,
@@ -3207,22 +4813,22 @@ var require_nacl_fast = __commonJS({
         randombytes = fn;
       };
       (function() {
-        var crypto6 = typeof self !== "undefined" ? self.crypto || self.msCrypto : null;
-        if (crypto6 && crypto6.getRandomValues) {
+        var crypto5 = typeof self !== "undefined" ? self.crypto || self.msCrypto : null;
+        if (crypto5 && crypto5.getRandomValues) {
           var QUOTA = 65536;
           nacl3.setPRNG(function(x, n) {
             var i, v = new Uint8Array(n);
             for (i = 0; i < n; i += QUOTA) {
-              crypto6.getRandomValues(v.subarray(i, i + Math.min(n - i, QUOTA)));
+              crypto5.getRandomValues(v.subarray(i, i + Math.min(n - i, QUOTA)));
             }
             for (i = 0; i < n; i++) x[i] = v[i];
             cleanup(v);
           });
         } else if (typeof __require !== "undefined") {
-          crypto6 = __require("crypto");
-          if (crypto6 && crypto6.randomBytes) {
+          crypto5 = __require("crypto");
+          if (crypto5 && crypto5.randomBytes) {
             nacl3.setPRNG(function(x, n) {
-              var i, v = crypto6.randomBytes(n);
+              var i, v = crypto5.randomBytes(n);
               for (i = 0; i < n; i++) x[i] = v[i];
               cleanup(v);
             });
@@ -3495,9 +5101,9 @@ var require_asn1 = __commonJS({
       Tag2[Tag2["GENERALSTRING"] = 27] = "GENERALSTRING";
     })(Tag = exports.Tag || (exports.Tag = {}));
     var BitString = class {
-      constructor(buf, bitLen4) {
+      constructor(buf, bitLen3) {
         this.buf = buf;
-        this.bitLen = bitLen4;
+        this.bitLen = bitLen3;
       }
       /**
        * Returns the value for the given bits offset.
@@ -7185,17 +8791,17 @@ function __makeTemplateObject(cooked, raw) {
   }
   return cooked;
 }
-function __importStar(mod4) {
-  if (mod4 && mod4.__esModule) return mod4;
+function __importStar(mod3) {
+  if (mod3 && mod3.__esModule) return mod3;
   var result = {};
-  if (mod4 != null) {
-    for (var k = ownKeys(mod4), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod4, k[i]);
+  if (mod3 != null) {
+    for (var k = ownKeys(mod3), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod3, k[i]);
   }
-  __setModuleDefault(result, mod4);
+  __setModuleDefault(result, mod3);
   return result;
 }
-function __importDefault(mod4) {
-  return mod4 && mod4.__esModule ? mod4 : { default: mod4 };
+function __importDefault(mod3) {
+  return mod3 && mod3.__esModule ? mod3 : { default: mod3 };
 }
 function __classPrivateFieldGet(receiver, state, kind, f) {
   if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
@@ -18391,17 +19997,17 @@ function __makeTemplateObject2(cooked, raw) {
   }
   return cooked;
 }
-function __importStar2(mod4) {
-  if (mod4 && mod4.__esModule) return mod4;
+function __importStar2(mod3) {
+  if (mod3 && mod3.__esModule) return mod3;
   var result = {};
-  if (mod4 != null) {
-    for (var k in mod4) if (Object.hasOwnProperty.call(mod4, k)) result[k] = mod4[k];
+  if (mod3 != null) {
+    for (var k in mod3) if (Object.hasOwnProperty.call(mod3, k)) result[k] = mod3[k];
   }
-  result.default = mod4;
+  result.default = mod3;
   return result;
 }
-function __importDefault2(mod4) {
-  return mod4 && mod4.__esModule ? mod4 : { default: mod4 };
+function __importDefault2(mod3) {
+  return mod3 && mod3.__esModule ? mod3 : { default: mod3 };
 }
 function __classPrivateFieldGet2(receiver, privateMap) {
   if (!privateMap.has(receiver)) {
@@ -20984,11 +22590,11 @@ var require_x509_cjs = __commonJS({
         return this.items[Symbol.iterator]();
       }
       get(key = _CryptoProvider.DEFAULT) {
-        const crypto6 = this.items.get(key.toLowerCase());
-        if (!crypto6) {
+        const crypto5 = this.items.get(key.toLowerCase());
+        if (!crypto5) {
           throw new Error(`Cannot get Crypto by name '${key}'`);
         }
-        return crypto6;
+        return crypto5;
       }
       set(key, value) {
         if (typeof key === "string") {
@@ -21216,15 +22822,15 @@ var require_x509_cjs = __commonJS({
       }
       async getThumbprint(...args) {
         var _a2;
-        let crypto6;
+        let crypto5;
         let algorithm = "SHA-1";
         if (args.length >= 1 && !((_a2 = args[0]) === null || _a2 === void 0 ? void 0 : _a2.subtle)) {
           algorithm = args[0] || algorithm;
-          crypto6 = args[1] || cryptoProvider2.get();
+          crypto5 = args[1] || cryptoProvider2.get();
         } else {
-          crypto6 = args[0] || cryptoProvider2.get();
+          crypto5 = args[0] || cryptoProvider2.get();
         }
-        return await crypto6.subtle.digest(algorithm, this.toArrayBuffer());
+        return await crypto5.subtle.digest(algorithm, this.toArrayBuffer());
       }
     };
     var ERR_GN_CONSTRUCTOR = "Cannot initialize GeneralName from ASN.1 data.";
@@ -21625,14 +23231,14 @@ var require_x509_cjs = __commonJS({
       }
     };
     var PublicKey = class _PublicKey extends PemData {
-      static async create(data2, crypto6 = cryptoProvider2.get()) {
+      static async create(data2, crypto5 = cryptoProvider2.get()) {
         if (data2 instanceof _PublicKey) {
           return data2;
         } else if (CryptoProvider.isCryptoKey(data2)) {
           if (data2.type !== "public") {
             throw new TypeError("Public key is required");
           }
-          const spki = await crypto6.subtle.exportKey("spki", data2);
+          const spki = await crypto5.subtle.exportKey("spki", data2);
           return new _PublicKey(spki);
         } else if (data2.publicKey) {
           return data2.publicKey;
@@ -21651,7 +23257,7 @@ var require_x509_cjs = __commonJS({
         this.tag = PemConverter2.PublicKeyTag;
       }
       async export(...args) {
-        let crypto6;
+        let crypto5;
         let keyUsages = ["verify"];
         let algorithm = {
           hash: "SHA-256",
@@ -21660,16 +23266,16 @@ var require_x509_cjs = __commonJS({
         if (args.length > 1) {
           algorithm = args[0] || algorithm;
           keyUsages = args[1] || keyUsages;
-          crypto6 = args[2] || cryptoProvider2.get();
+          crypto5 = args[2] || cryptoProvider2.get();
         } else {
-          crypto6 = args[0] || cryptoProvider2.get();
+          crypto5 = args[0] || cryptoProvider2.get();
         }
         let raw = this.rawData;
         const asnSpki = asn1Schema.AsnConvert.parse(this.rawData, asn1X509.SubjectPublicKeyInfo);
         if (asnSpki.algorithm.algorithm === asn1Rsa.id_RSASSA_PSS) {
           raw = convertSpkiToRsaPkcs1(asnSpki, raw);
         }
-        return crypto6.subtle.importKey("spki", raw, algorithm, true, keyUsages);
+        return crypto5.subtle.importKey("spki", raw, algorithm, true, keyUsages);
       }
       onInit(asn) {
         const algProv = tsyringe.container.resolve(diAlgorithmProvider);
@@ -21686,34 +23292,34 @@ var require_x509_cjs = __commonJS({
       }
       async getThumbprint(...args) {
         var _a2;
-        let crypto6;
+        let crypto5;
         let algorithm = "SHA-1";
         if (args.length >= 1 && !((_a2 = args[0]) === null || _a2 === void 0 ? void 0 : _a2.subtle)) {
           algorithm = args[0] || algorithm;
-          crypto6 = args[1] || cryptoProvider2.get();
+          crypto5 = args[1] || cryptoProvider2.get();
         } else {
-          crypto6 = args[0] || cryptoProvider2.get();
+          crypto5 = args[0] || cryptoProvider2.get();
         }
-        return await crypto6.subtle.digest(algorithm, this.rawData);
+        return await crypto5.subtle.digest(algorithm, this.rawData);
       }
       async getKeyIdentifier(...args) {
-        let crypto6;
+        let crypto5;
         let algorithm = "SHA-1";
         if (args.length === 1) {
           if (typeof args[0] === "string") {
             algorithm = args[0];
-            crypto6 = cryptoProvider2.get();
+            crypto5 = cryptoProvider2.get();
           } else {
-            crypto6 = args[0];
+            crypto5 = args[0];
           }
         } else if (args.length === 2) {
           algorithm = args[0];
-          crypto6 = args[1];
+          crypto5 = args[1];
         } else {
-          crypto6 = cryptoProvider2.get();
+          crypto5 = cryptoProvider2.get();
         }
         const asn = asn1Schema.AsnConvert.parse(this.rawData, asn1X509.SubjectPublicKeyInfo);
-        return await crypto6.subtle.digest(algorithm, asn.subjectPublicKey);
+        return await crypto5.subtle.digest(algorithm, asn.subjectPublicKey);
       }
       toTextObject() {
         const obj = this.toTextObjectEmpty();
@@ -21739,12 +23345,12 @@ var require_x509_cjs = __commonJS({
       return raw;
     }
     var AuthorityKeyIdentifierExtension = class _AuthorityKeyIdentifierExtension extends Extension2 {
-      static async create(param, critical = false, crypto6 = cryptoProvider2.get()) {
+      static async create(param, critical = false, crypto5 = cryptoProvider2.get()) {
         if ("name" in param && "serialNumber" in param) {
           return new _AuthorityKeyIdentifierExtension(param, critical);
         }
-        const key = await PublicKey.create(param, crypto6);
-        const id5 = await key.getKeyIdentifier(crypto6);
+        const key = await PublicKey.create(param, crypto5);
+        const id5 = await key.getKeyIdentifier(crypto5);
         return new _AuthorityKeyIdentifierExtension(pvtsutils.Convert.ToHex(id5), critical);
       }
       constructor(...args) {
@@ -21882,9 +23488,9 @@ var require_x509_cjs = __commonJS({
     };
     KeyUsagesExtension.NAME = "Key Usages";
     var SubjectKeyIdentifierExtension = class _SubjectKeyIdentifierExtension extends Extension2 {
-      static async create(publicKey, critical = false, crypto6 = cryptoProvider2.get()) {
-        const key = await PublicKey.create(publicKey, crypto6);
-        const id5 = await key.getKeyIdentifier(crypto6);
+      static async create(publicKey, critical = false, crypto5 = cryptoProvider2.get()) {
+        const key = await PublicKey.create(publicKey, crypto5);
+        const id5 = await key.getKeyIdentifier(crypto5);
         return new _SubjectKeyIdentifierExtension(pvtsutils.Convert.ToHex(id5), critical);
       }
       constructor(...args) {
@@ -22622,12 +24228,12 @@ var require_x509_cjs = __commonJS({
       getExtensions(type) {
         return this.extensions.filter((o) => o.type === type);
       }
-      async verify(crypto6 = cryptoProvider2.get()) {
+      async verify(crypto5 = cryptoProvider2.get()) {
         const algorithm = {
           ...this.publicKey.algorithm,
           ...this.signatureAlgorithm
         };
-        const publicKey = await this.publicKey.export(algorithm, ["verify"], crypto6);
+        const publicKey = await this.publicKey.export(algorithm, ["verify"], crypto5);
         const signatureFormatters = tsyringe.container.resolveAll(diAsnSignatureFormatter).reverse();
         let signature = null;
         for (const signatureFormatter of signatureFormatters) {
@@ -22639,7 +24245,7 @@ var require_x509_cjs = __commonJS({
         if (!signature) {
           throw Error("Cannot convert WebCrypto signature value to ASN.1 format");
         }
-        const ok4 = await crypto6.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
+        const ok4 = await crypto5.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
         return ok4;
       }
       toTextObject() {
@@ -22670,14 +24276,14 @@ var require_x509_cjs = __commonJS({
     _Pkcs10CertificateRequest_tbs = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_subjectName = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_subject = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_signatureAlgorithm = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_signature = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_publicKey = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_attributes = /* @__PURE__ */ new WeakMap(), _Pkcs10CertificateRequest_extensions = /* @__PURE__ */ new WeakMap();
     Pkcs10CertificateRequest.NAME = "PKCS#10 Certificate Request";
     var Pkcs10CertificateRequestGenerator = class {
-      static async create(params, crypto6 = cryptoProvider2.get()) {
+      static async create(params, crypto5 = cryptoProvider2.get()) {
         if (!params.keys.privateKey) {
           throw new Error("Bad field 'keys' in 'params' argument. 'privateKey' is empty");
         }
         if (!params.keys.publicKey) {
           throw new Error("Bad field 'keys' in 'params' argument. 'publicKey' is empty");
         }
-        const spki = await crypto6.subtle.exportKey("spki", params.keys.publicKey);
+        const spki = await crypto5.subtle.exportKey("spki", params.keys.publicKey);
         const asnReq = new asn1Csr.CertificationRequest({
           certificationRequestInfo: new asn1Csr.CertificationRequestInfo({ subjectPKInfo: asn1Schema.AsnConvert.parse(spki, asn1X509.SubjectPublicKeyInfo) })
         });
@@ -22706,7 +24312,7 @@ var require_x509_cjs = __commonJS({
         const algProv = tsyringe.container.resolve(diAlgorithmProvider);
         asnReq.signatureAlgorithm = algProv.toAsnAlgorithm(signingAlgorithm);
         const tbs = asn1Schema.AsnConvert.serialize(asnReq.certificationRequestInfo);
-        const signature = await crypto6.subtle.sign(signingAlgorithm, params.keys.privateKey, tbs);
+        const signature = await crypto5.subtle.sign(signingAlgorithm, params.keys.privateKey, tbs);
         const signatureFormatters = tsyringe.container.resolveAll(diAsnSignatureFormatter).reverse();
         let asnSignature = null;
         for (const signatureFormatter of signatureFormatters) {
@@ -22866,7 +24472,7 @@ var require_x509_cjs = __commonJS({
           }
         });
       }
-      async verify(params = {}, crypto6 = cryptoProvider2.get()) {
+      async verify(params = {}, crypto5 = cryptoProvider2.get()) {
         let keyAlgorithm;
         let publicKey;
         const paramsKey = params.publicKey;
@@ -22876,26 +24482,26 @@ var require_x509_cjs = __commonJS({
               ...this.publicKey.algorithm,
               ...this.signatureAlgorithm
             };
-            publicKey = await this.publicKey.export(keyAlgorithm, ["verify"], crypto6);
+            publicKey = await this.publicKey.export(keyAlgorithm, ["verify"], crypto5);
           } else if ("publicKey" in paramsKey) {
             keyAlgorithm = {
               ...paramsKey.publicKey.algorithm,
               ...this.signatureAlgorithm
             };
-            publicKey = await paramsKey.publicKey.export(keyAlgorithm, ["verify"], crypto6);
+            publicKey = await paramsKey.publicKey.export(keyAlgorithm, ["verify"], crypto5);
           } else if (paramsKey instanceof PublicKey) {
             keyAlgorithm = {
               ...paramsKey.algorithm,
               ...this.signatureAlgorithm
             };
-            publicKey = await paramsKey.export(keyAlgorithm, ["verify"], crypto6);
+            publicKey = await paramsKey.export(keyAlgorithm, ["verify"], crypto5);
           } else if (pvtsutils.BufferSourceConverter.isBufferSource(paramsKey)) {
             const key = new PublicKey(paramsKey);
             keyAlgorithm = {
               ...key.algorithm,
               ...this.signatureAlgorithm
             };
-            publicKey = await key.export(keyAlgorithm, ["verify"], crypto6);
+            publicKey = await key.export(keyAlgorithm, ["verify"], crypto5);
           } else {
             keyAlgorithm = {
               ...paramsKey.algorithm,
@@ -22917,7 +24523,7 @@ var require_x509_cjs = __commonJS({
         if (!signature) {
           throw Error("Cannot convert ASN.1 signature value to WebCrypto format");
         }
-        const ok4 = await crypto6.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
+        const ok4 = await crypto5.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
         if (params.signatureOnly) {
           return ok4;
         } else {
@@ -22927,21 +24533,21 @@ var require_x509_cjs = __commonJS({
         }
       }
       async getThumbprint(...args) {
-        let crypto6;
+        let crypto5;
         let algorithm = "SHA-1";
         if (args[0]) {
           if (!args[0].subtle) {
             algorithm = args[0] || algorithm;
-            crypto6 = args[1];
+            crypto5 = args[1];
           } else {
-            crypto6 = args[0];
+            crypto5 = args[0];
           }
         }
-        crypto6 !== null && crypto6 !== void 0 ? crypto6 : crypto6 = cryptoProvider2.get();
-        return await crypto6.subtle.digest(algorithm, this.rawData);
+        crypto5 !== null && crypto5 !== void 0 ? crypto5 : crypto5 = cryptoProvider2.get();
+        return await crypto5.subtle.digest(algorithm, this.rawData);
       }
-      async isSelfSigned(crypto6 = cryptoProvider2.get()) {
-        return this.subject === this.issuer && await this.verify({ signatureOnly: true }, crypto6);
+      async isSelfSigned(crypto5 = cryptoProvider2.get()) {
+        return this.subject === this.issuer && await this.verify({ signatureOnly: true }, crypto5);
       }
       toTextObject() {
         const obj = this.toTextObjectEmpty();
@@ -23071,13 +24677,13 @@ var require_x509_cjs = __commonJS({
           this.certificates = params.certificates;
         }
       }
-      async build(cert, crypto6 = cryptoProvider2.get()) {
+      async build(cert, crypto5 = cryptoProvider2.get()) {
         const chain = new X509Certificates(cert);
         let current = cert;
-        while (current = await this.findIssuer(current, crypto6)) {
-          const thumbprint = await current.getThumbprint(crypto6);
+        while (current = await this.findIssuer(current, crypto5)) {
+          const thumbprint = await current.getThumbprint(crypto5);
           for (const item of chain) {
-            const thumbprint2 = await item.getThumbprint(crypto6);
+            const thumbprint2 = await item.getThumbprint(crypto5);
             if (pvtsutils.isEqual(thumbprint, thumbprint2)) {
               throw new Error("Cannot build a certificate chain. Circular dependency.");
             }
@@ -23086,8 +24692,8 @@ var require_x509_cjs = __commonJS({
         }
         return chain;
       }
-      async findIssuer(cert, crypto6 = cryptoProvider2.get()) {
-        if (!await cert.isSelfSigned(crypto6)) {
+      async findIssuer(cert, crypto5 = cryptoProvider2.get()) {
+        if (!await cert.isSelfSigned(crypto5)) {
           const akiExt = cert.getExtension(asn1X509__namespace.id_ce_authorityKeyIdentifier);
           for (const item of this.certificates) {
             if (item.subject !== cert.issuer) {
@@ -23111,11 +24717,11 @@ var require_x509_cjs = __commonJS({
                 ...item.publicKey.algorithm,
                 ...cert.signatureAlgorithm
               };
-              const publicKey = await item.publicKey.export(algorithm, ["verify"], crypto6);
+              const publicKey = await item.publicKey.export(algorithm, ["verify"], crypto5);
               const ok4 = await cert.verify({
                 publicKey,
                 signatureOnly: true
-              }, crypto6);
+              }, crypto5);
               if (!ok4) {
                 continue;
               }
@@ -23128,11 +24734,11 @@ var require_x509_cjs = __commonJS({
         return null;
       }
     };
-    function generateCertificateSerialNumber(input3, crypto6 = cryptoProvider2.get()) {
+    function generateCertificateSerialNumber(input3, crypto5 = cryptoProvider2.get()) {
       const inputView = pvtsutils.BufferSourceConverter.toUint8Array(pvtsutils.Convert.FromHex(input3 || ""));
       let serialNumber = inputView && inputView.length && inputView.some((o) => o > 0) ? new Uint8Array(inputView) : void 0;
       if (!serialNumber) {
-        serialNumber = crypto6.getRandomValues(new Uint8Array(16));
+        serialNumber = crypto5.getRandomValues(new Uint8Array(16));
       }
       let firstNonZero = 0;
       while (firstNonZero < serialNumber.length - 1 && serialNumber[firstNonZero] === 0) {
@@ -23148,7 +24754,7 @@ var require_x509_cjs = __commonJS({
       return serialNumber.buffer;
     }
     var X509CertificateGenerator2 = class {
-      static async createSelfSigned(params, crypto6 = cryptoProvider2.get()) {
+      static async createSelfSigned(params, crypto5 = cryptoProvider2.get()) {
         if (!params.keys.privateKey) {
           throw new Error("Bad field 'keys' in 'params' argument. 'privateKey' is empty");
         }
@@ -23165,9 +24771,9 @@ var require_x509_cjs = __commonJS({
           signingKey: params.keys.privateKey,
           signingAlgorithm: params.signingAlgorithm,
           extensions: params.extensions
-        }, crypto6);
+        }, crypto5);
       }
-      static async create(params, crypto6 = cryptoProvider2.get()) {
+      static async create(params, crypto5 = cryptoProvider2.get()) {
         var _a2;
         let spki;
         if (params.publicKey instanceof PublicKey) {
@@ -23177,9 +24783,9 @@ var require_x509_cjs = __commonJS({
         } else if (pvtsutils.BufferSourceConverter.isBufferSource(params.publicKey)) {
           spki = params.publicKey;
         } else {
-          spki = await crypto6.subtle.exportKey("spki", params.publicKey);
+          spki = await crypto5.subtle.exportKey("spki", params.publicKey);
         }
-        const serialNumber = generateCertificateSerialNumber(params.serialNumber, crypto6);
+        const serialNumber = generateCertificateSerialNumber(params.serialNumber, crypto5);
         const notBefore = params.notBefore || /* @__PURE__ */ new Date();
         const notAfter = params.notAfter || new Date(notBefore.getTime() + 31536e6);
         const asnX509 = new asn1X509__namespace.Certificate({
@@ -23214,7 +24820,7 @@ var require_x509_cjs = __commonJS({
         const algProv = tsyringe.container.resolve(diAlgorithmProvider);
         asnX509.tbsCertificate.signature = asnX509.signatureAlgorithm = algProv.toAsnAlgorithm(signatureAlgorithm);
         const tbs = asn1Schema.AsnConvert.serialize(asnX509.tbsCertificate);
-        const signatureValue = "signingKey" in params ? await crypto6.subtle.sign(signatureAlgorithm, params.signingKey, tbs) : params.signature;
+        const signatureValue = "signingKey" in params ? await crypto5.subtle.sign(signatureAlgorithm, params.signingKey, tbs) : params.signature;
         const signatureFormatters = tsyringe.container.resolveAll(diAsnSignatureFormatter).reverse();
         let asnSignature = null;
         for (const signatureFormatter of signatureFormatters) {
@@ -23435,7 +25041,7 @@ var require_x509_cjs = __commonJS({
           }
         });
       }
-      async verify(params, crypto6 = cryptoProvider2.get()) {
+      async verify(params, crypto5 = cryptoProvider2.get()) {
         if (!this.certListSignatureAlgorithm.isEqual(this.tbsCertListSignatureAlgorithm)) {
           throw new Error("algorithm identifier in the sequence tbsCertList and CertificateList mismatch");
         }
@@ -23476,21 +25082,21 @@ var require_x509_cjs = __commonJS({
         if (!signature) {
           throw Error("Cannot convert ASN.1 signature value to WebCrypto format");
         }
-        return await crypto6.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
+        return await crypto5.subtle.verify(this.signatureAlgorithm, publicKey, signature, this.tbs);
       }
       async getThumbprint(...args) {
-        let crypto6;
+        let crypto5;
         let algorithm = "SHA-1";
         if (args[0]) {
           if (!args[0].subtle) {
             algorithm = args[0] || algorithm;
-            crypto6 = args[1];
+            crypto5 = args[1];
           } else {
-            crypto6 = args[0];
+            crypto5 = args[0];
           }
         }
-        crypto6 !== null && crypto6 !== void 0 ? crypto6 : crypto6 = cryptoProvider2.get();
-        return await crypto6.subtle.digest(algorithm, this.rawData);
+        crypto5 !== null && crypto5 !== void 0 ? crypto5 : crypto5 = cryptoProvider2.get();
+        return await crypto5.subtle.digest(algorithm, this.rawData);
       }
       findRevoked(certOrSerialNumber) {
         const serialNumber = typeof certOrSerialNumber === "string" ? certOrSerialNumber : certOrSerialNumber.serialNumber;
@@ -23505,7 +25111,7 @@ var require_x509_cjs = __commonJS({
     };
     _X509Crl_tbs = /* @__PURE__ */ new WeakMap(), _X509Crl_signatureAlgorithm = /* @__PURE__ */ new WeakMap(), _X509Crl_issuerName = /* @__PURE__ */ new WeakMap(), _X509Crl_thisUpdate = /* @__PURE__ */ new WeakMap(), _X509Crl_nextUpdate = /* @__PURE__ */ new WeakMap(), _X509Crl_entries = /* @__PURE__ */ new WeakMap(), _X509Crl_extensions = /* @__PURE__ */ new WeakMap();
     var X509CrlGenerator = class {
-      static async create(params, crypto6 = cryptoProvider2.get()) {
+      static async create(params, crypto5 = cryptoProvider2.get()) {
         var _a2;
         const name2 = params.issuer instanceof Name ? params.issuer : new Name(params.issuer);
         const asnX509Crl = new asn1X509__namespace.CertificateList({
@@ -23572,7 +25178,7 @@ var require_x509_cjs = __commonJS({
         const algProv = tsyringe.container.resolve(diAlgorithmProvider);
         asnX509Crl.tbsCertList.signature = asnX509Crl.signatureAlgorithm = algProv.toAsnAlgorithm(signingAlgorithm);
         const tbs = asn1Schema.AsnConvert.serialize(asnX509Crl.tbsCertList);
-        const signature = await crypto6.subtle.sign(signingAlgorithm, params.signingKey, tbs);
+        const signature = await crypto5.subtle.sign(signingAlgorithm, params.signingKey, tbs);
         const signatureFormatters = tsyringe.container.resolveAll(diAsnSignatureFormatter).reverse();
         let asnSignature = null;
         for (const signatureFormatter of signatureFormatters) {
@@ -23679,7 +25285,7 @@ var require_is_property = __commonJS({
 // node_modules/generate-function/index.js
 var require_generate_function = __commonJS({
   "node_modules/generate-function/index.js"(exports, module) {
-    var util3 = __require("util");
+    var util2 = __require("util");
     var isProperty = require_is_property();
     var INDENT_START = /[\{\[]/;
     var INDENT_END = /[\}\]]/;
@@ -23790,7 +25396,7 @@ var require_generate_function = __commonJS({
             pushLine(lines2[i2].trim());
           }
         } else {
-          pushLine(util3.format.apply(util3, arguments));
+          pushLine(util2.format.apply(util2, arguments));
         }
         return line;
       };
@@ -25728,1589 +27334,6 @@ var require_src2 = __commonJS({
   }
 });
 
-// node_modules/@noble/hashes/esm/cryptoNode.js
-import * as nc3 from "node:crypto";
-var crypto4;
-var init_cryptoNode = __esm({
-  "node_modules/@noble/hashes/esm/cryptoNode.js"() {
-    crypto4 = nc3 && typeof nc3 === "object" && "webcrypto" in nc3 ? nc3.webcrypto : nc3 && typeof nc3 === "object" && "randomBytes" in nc3 ? nc3 : void 0;
-  }
-});
-
-// node_modules/@noble/hashes/esm/utils.js
-function isBytes5(a) {
-  return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
-}
-function anumber5(n) {
-  if (!Number.isSafeInteger(n) || n < 0)
-    throw new Error("positive integer expected, got " + n);
-}
-function abytes5(b, ...lengths) {
-  if (!isBytes5(b))
-    throw new Error("Uint8Array expected");
-  if (lengths.length > 0 && !lengths.includes(b.length))
-    throw new Error("Uint8Array expected of length " + lengths + ", got length=" + b.length);
-}
-function ahash2(h) {
-  if (typeof h !== "function" || typeof h.create !== "function")
-    throw new Error("Hash should be wrapped by utils.createHasher");
-  anumber5(h.outputLen);
-  anumber5(h.blockLen);
-}
-function aexists4(instance, checkFinished = true) {
-  if (instance.destroyed)
-    throw new Error("Hash instance has been destroyed");
-  if (checkFinished && instance.finished)
-    throw new Error("Hash#digest() has already been called");
-}
-function aoutput4(out, instance) {
-  abytes5(out);
-  const min = instance.outputLen;
-  if (out.length < min) {
-    throw new Error("digestInto() expects output buffer of length at least " + min);
-  }
-}
-function clean4(...arrays) {
-  for (let i = 0; i < arrays.length; i++) {
-    arrays[i].fill(0);
-  }
-}
-function createView4(arr) {
-  return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
-}
-function rotr3(word, shift) {
-  return word << 32 - shift | word >>> shift;
-}
-function bytesToHex4(bytes) {
-  abytes5(bytes);
-  if (hasHexBuiltin3)
-    return bytes.toHex();
-  let hex = "";
-  for (let i = 0; i < bytes.length; i++) {
-    hex += hexes3[bytes[i]];
-  }
-  return hex;
-}
-function asciiToBase163(ch) {
-  if (ch >= asciis2._0 && ch <= asciis2._9)
-    return ch - asciis2._0;
-  if (ch >= asciis2.A && ch <= asciis2.F)
-    return ch - (asciis2.A - 10);
-  if (ch >= asciis2.a && ch <= asciis2.f)
-    return ch - (asciis2.a - 10);
-  return;
-}
-function hexToBytes4(hex) {
-  if (typeof hex !== "string")
-    throw new Error("hex string expected, got " + typeof hex);
-  if (hasHexBuiltin3)
-    return Uint8Array.fromHex(hex);
-  const hl = hex.length;
-  const al = hl / 2;
-  if (hl % 2)
-    throw new Error("hex string expected, got unpadded hex of length " + hl);
-  const array4 = new Uint8Array(al);
-  for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
-    const n1 = asciiToBase163(hex.charCodeAt(hi));
-    const n2 = asciiToBase163(hex.charCodeAt(hi + 1));
-    if (n1 === void 0 || n2 === void 0) {
-      const char = hex[hi] + hex[hi + 1];
-      throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
-    }
-    array4[ai] = n1 * 16 + n2;
-  }
-  return array4;
-}
-function utf8ToBytes2(str) {
-  if (typeof str !== "string")
-    throw new Error("string expected");
-  return new Uint8Array(new TextEncoder().encode(str));
-}
-function toBytes2(data2) {
-  if (typeof data2 === "string")
-    data2 = utf8ToBytes2(data2);
-  abytes5(data2);
-  return data2;
-}
-function concatBytes4(...arrays) {
-  let sum = 0;
-  for (let i = 0; i < arrays.length; i++) {
-    const a = arrays[i];
-    abytes5(a);
-    sum += a.length;
-  }
-  const res = new Uint8Array(sum);
-  for (let i = 0, pad = 0; i < arrays.length; i++) {
-    const a = arrays[i];
-    res.set(a, pad);
-    pad += a.length;
-  }
-  return res;
-}
-function createHasher3(hashCons) {
-  const hashC = (msg) => hashCons().update(toBytes2(msg)).digest();
-  const tmp = hashCons();
-  hashC.outputLen = tmp.outputLen;
-  hashC.blockLen = tmp.blockLen;
-  hashC.create = () => hashCons();
-  return hashC;
-}
-function randomBytes8(bytesLength = 32) {
-  if (crypto4 && typeof crypto4.getRandomValues === "function") {
-    return crypto4.getRandomValues(new Uint8Array(bytesLength));
-  }
-  if (crypto4 && typeof crypto4.randomBytes === "function") {
-    return Uint8Array.from(crypto4.randomBytes(bytesLength));
-  }
-  throw new Error("crypto.getRandomValues must be defined");
-}
-var hasHexBuiltin3, hexes3, asciis2, Hash2;
-var init_utils = __esm({
-  "node_modules/@noble/hashes/esm/utils.js"() {
-    init_cryptoNode();
-    hasHexBuiltin3 = /* @__PURE__ */ (() => (
-      // @ts-ignore
-      typeof Uint8Array.from([]).toHex === "function" && typeof Uint8Array.fromHex === "function"
-    ))();
-    hexes3 = /* @__PURE__ */ Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
-    asciis2 = { _0: 48, _9: 57, A: 65, F: 70, a: 97, f: 102 };
-    Hash2 = class {
-    };
-  }
-});
-
-// node_modules/@noble/curves/esm/utils.js
-function _abool22(value, title = "") {
-  if (typeof value !== "boolean") {
-    const prefix = title && `"${title}"`;
-    throw new Error(prefix + "expected boolean, got type=" + typeof value);
-  }
-  return value;
-}
-function _abytes22(value, length, title = "") {
-  const bytes = isBytes5(value);
-  const len = value?.length;
-  const needsLen = length !== void 0;
-  if (!bytes || needsLen && len !== length) {
-    const prefix = title && `"${title}" `;
-    const ofLen = needsLen ? ` of length ${length}` : "";
-    const got = bytes ? `length=${len}` : `type=${typeof value}`;
-    throw new Error(prefix + "expected Uint8Array" + ofLen + ", got " + got);
-  }
-  return value;
-}
-function numberToHexUnpadded(num) {
-  const hex = num.toString(16);
-  return hex.length & 1 ? "0" + hex : hex;
-}
-function hexToNumber3(hex) {
-  if (typeof hex !== "string")
-    throw new Error("hex string expected, got " + typeof hex);
-  return hex === "" ? _0n13 : BigInt("0x" + hex);
-}
-function bytesToNumberBE3(bytes) {
-  return hexToNumber3(bytesToHex4(bytes));
-}
-function bytesToNumberLE3(bytes) {
-  abytes5(bytes);
-  return hexToNumber3(bytesToHex4(Uint8Array.from(bytes).reverse()));
-}
-function numberToBytesBE3(n, len) {
-  return hexToBytes4(n.toString(16).padStart(len * 2, "0"));
-}
-function numberToBytesLE3(n, len) {
-  return numberToBytesBE3(n, len).reverse();
-}
-function ensureBytes2(title, hex, expectedLength) {
-  let res;
-  if (typeof hex === "string") {
-    try {
-      res = hexToBytes4(hex);
-    } catch (e) {
-      throw new Error(title + " must be hex string or Uint8Array, cause: " + e);
-    }
-  } else if (isBytes5(hex)) {
-    res = Uint8Array.from(hex);
-  } else {
-    throw new Error(title + " must be hex string or Uint8Array");
-  }
-  const len = res.length;
-  if (typeof expectedLength === "number" && len !== expectedLength)
-    throw new Error(title + " of length " + expectedLength + " expected, got " + len);
-  return res;
-}
-function inRange3(n, min, max) {
-  return isPosBig3(n) && isPosBig3(min) && isPosBig3(max) && min <= n && n < max;
-}
-function aInRange3(title, n, min, max) {
-  if (!inRange3(n, min, max))
-    throw new Error("expected valid " + title + ": " + min + " <= n < " + max + ", got " + n);
-}
-function bitLen3(n) {
-  let len;
-  for (len = 0; n > _0n13; n >>= _1n13, len += 1)
-    ;
-  return len;
-}
-function createHmacDrbg(hashLen, qByteLen, hmacFn) {
-  if (typeof hashLen !== "number" || hashLen < 2)
-    throw new Error("hashLen must be a number");
-  if (typeof qByteLen !== "number" || qByteLen < 2)
-    throw new Error("qByteLen must be a number");
-  if (typeof hmacFn !== "function")
-    throw new Error("hmacFn must be a function");
-  const u8n = (len) => new Uint8Array(len);
-  const u8of = (byte) => Uint8Array.of(byte);
-  let v = u8n(hashLen);
-  let k = u8n(hashLen);
-  let i = 0;
-  const reset = () => {
-    v.fill(1);
-    k.fill(0);
-    i = 0;
-  };
-  const h = (...b) => hmacFn(k, v, ...b);
-  const reseed = (seed = u8n(0)) => {
-    k = h(u8of(0), seed);
-    v = h();
-    if (seed.length === 0)
-      return;
-    k = h(u8of(1), seed);
-    v = h();
-  };
-  const gen = () => {
-    if (i++ >= 1e3)
-      throw new Error("drbg: tried 1000 values");
-    let len = 0;
-    const out = [];
-    while (len < qByteLen) {
-      v = h();
-      const sl = v.slice();
-      out.push(sl);
-      len += v.length;
-    }
-    return concatBytes4(...out);
-  };
-  const genUntil = (seed, pred) => {
-    reset();
-    reseed(seed);
-    let res = void 0;
-    while (!(res = pred(gen())))
-      reseed();
-    reset();
-    return res;
-  };
-  return genUntil;
-}
-function _validateObject2(object3, fields, optFields = {}) {
-  if (!object3 || typeof object3 !== "object")
-    throw new Error("expected valid options object");
-  function checkField(fieldName, expectedType, isOpt) {
-    const val = object3[fieldName];
-    if (isOpt && val === void 0)
-      return;
-    const current = typeof val;
-    if (current !== expectedType || val === null)
-      throw new Error(`param "${fieldName}" is invalid: expected ${expectedType}, got ${current}`);
-  }
-  Object.entries(fields).forEach(([k, v]) => checkField(k, v, false));
-  Object.entries(optFields).forEach(([k, v]) => checkField(k, v, true));
-}
-function memoized2(fn) {
-  const map = /* @__PURE__ */ new WeakMap();
-  return (arg, ...args) => {
-    const val = map.get(arg);
-    if (val !== void 0)
-      return val;
-    const computed = fn(arg, ...args);
-    map.set(arg, computed);
-    return computed;
-  };
-}
-var _0n13, _1n13, isPosBig3, bitMask3;
-var init_utils2 = __esm({
-  "node_modules/@noble/curves/esm/utils.js"() {
-    init_utils();
-    init_utils();
-    _0n13 = /* @__PURE__ */ BigInt(0);
-    _1n13 = /* @__PURE__ */ BigInt(1);
-    isPosBig3 = (n) => typeof n === "bigint" && _0n13 <= n;
-    bitMask3 = (n) => (_1n13 << BigInt(n)) - _1n13;
-  }
-});
-
-// node_modules/@noble/curves/esm/abstract/modular.js
-function mod3(a, b) {
-  const result = a % b;
-  return result >= _0n14 ? result : b + result;
-}
-function invert3(number, modulo) {
-  if (number === _0n14)
-    throw new Error("invert: expected non-zero number");
-  if (modulo <= _0n14)
-    throw new Error("invert: expected positive modulus, got " + modulo);
-  let a = mod3(number, modulo);
-  let b = modulo;
-  let x = _0n14, y = _1n14, u = _1n14, v = _0n14;
-  while (a !== _0n14) {
-    const q = b / a;
-    const r = b % a;
-    const m = x - u * q;
-    const n = y - v * q;
-    b = a, a = r, x = u, y = v, u = m, v = n;
-  }
-  const gcd = b;
-  if (gcd !== _1n14)
-    throw new Error("invert: does not exist");
-  return mod3(x, modulo);
-}
-function assertIsSquare3(Fp2, root, n) {
-  if (!Fp2.eql(Fp2.sqr(root), n))
-    throw new Error("Cannot find square root");
-}
-function sqrt3mod43(Fp2, n) {
-  const p1div4 = (Fp2.ORDER + _1n14) / _4n5;
-  const root = Fp2.pow(n, p1div4);
-  assertIsSquare3(Fp2, root, n);
-  return root;
-}
-function sqrt5mod83(Fp2, n) {
-  const p5div8 = (Fp2.ORDER - _5n5) / _8n7;
-  const n2 = Fp2.mul(n, _2n9);
-  const v = Fp2.pow(n2, p5div8);
-  const nv = Fp2.mul(n, v);
-  const i = Fp2.mul(Fp2.mul(nv, _2n9), v);
-  const root = Fp2.mul(nv, Fp2.sub(i, Fp2.ONE));
-  assertIsSquare3(Fp2, root, n);
-  return root;
-}
-function sqrt9mod163(P) {
-  const Fp_ = Field3(P);
-  const tn = tonelliShanks3(P);
-  const c1 = tn(Fp_, Fp_.neg(Fp_.ONE));
-  const c2 = tn(Fp_, c1);
-  const c3 = tn(Fp_, Fp_.neg(c1));
-  const c4 = (P + _7n3) / _16n3;
-  return (Fp2, n) => {
-    let tv1 = Fp2.pow(n, c4);
-    let tv2 = Fp2.mul(tv1, c1);
-    const tv3 = Fp2.mul(tv1, c2);
-    const tv4 = Fp2.mul(tv1, c3);
-    const e1 = Fp2.eql(Fp2.sqr(tv2), n);
-    const e2 = Fp2.eql(Fp2.sqr(tv3), n);
-    tv1 = Fp2.cmov(tv1, tv2, e1);
-    tv2 = Fp2.cmov(tv4, tv3, e2);
-    const e3 = Fp2.eql(Fp2.sqr(tv2), n);
-    const root = Fp2.cmov(tv1, tv2, e3);
-    assertIsSquare3(Fp2, root, n);
-    return root;
-  };
-}
-function tonelliShanks3(P) {
-  if (P < _3n5)
-    throw new Error("sqrt is not defined for small field");
-  let Q = P - _1n14;
-  let S = 0;
-  while (Q % _2n9 === _0n14) {
-    Q /= _2n9;
-    S++;
-  }
-  let Z = _2n9;
-  const _Fp = Field3(P);
-  while (FpLegendre3(_Fp, Z) === 1) {
-    if (Z++ > 1e3)
-      throw new Error("Cannot find square root: probably non-prime P");
-  }
-  if (S === 1)
-    return sqrt3mod43;
-  let cc = _Fp.pow(Z, Q);
-  const Q1div2 = (Q + _1n14) / _2n9;
-  return function tonelliSlow(Fp2, n) {
-    if (Fp2.is0(n))
-      return n;
-    if (FpLegendre3(Fp2, n) !== 1)
-      throw new Error("Cannot find square root");
-    let M = S;
-    let c = Fp2.mul(Fp2.ONE, cc);
-    let t = Fp2.pow(n, Q);
-    let R = Fp2.pow(n, Q1div2);
-    while (!Fp2.eql(t, Fp2.ONE)) {
-      if (Fp2.is0(t))
-        return Fp2.ZERO;
-      let i = 1;
-      let t_tmp = Fp2.sqr(t);
-      while (!Fp2.eql(t_tmp, Fp2.ONE)) {
-        i++;
-        t_tmp = Fp2.sqr(t_tmp);
-        if (i === M)
-          throw new Error("Cannot find square root");
-      }
-      const exponent = _1n14 << BigInt(M - i - 1);
-      const b = Fp2.pow(c, exponent);
-      M = i;
-      c = Fp2.sqr(b);
-      t = Fp2.mul(t, c);
-      R = Fp2.mul(R, b);
-    }
-    return R;
-  };
-}
-function FpSqrt3(P) {
-  if (P % _4n5 === _3n5)
-    return sqrt3mod43;
-  if (P % _8n7 === _5n5)
-    return sqrt5mod83;
-  if (P % _16n3 === _9n3)
-    return sqrt9mod163(P);
-  return tonelliShanks3(P);
-}
-function validateField3(field) {
-  const initial = {
-    ORDER: "bigint",
-    MASK: "bigint",
-    BYTES: "number",
-    BITS: "number"
-  };
-  const opts = FIELD_FIELDS3.reduce((map, val) => {
-    map[val] = "function";
-    return map;
-  }, initial);
-  _validateObject2(field, opts);
-  return field;
-}
-function FpPow2(Fp2, num, power) {
-  if (power < _0n14)
-    throw new Error("invalid exponent, negatives unsupported");
-  if (power === _0n14)
-    return Fp2.ONE;
-  if (power === _1n14)
-    return num;
-  let p = Fp2.ONE;
-  let d = num;
-  while (power > _0n14) {
-    if (power & _1n14)
-      p = Fp2.mul(p, d);
-    d = Fp2.sqr(d);
-    power >>= _1n14;
-  }
-  return p;
-}
-function FpInvertBatch3(Fp2, nums, passZero = false) {
-  const inverted = new Array(nums.length).fill(passZero ? Fp2.ZERO : void 0);
-  const multipliedAcc = nums.reduce((acc, num, i) => {
-    if (Fp2.is0(num))
-      return acc;
-    inverted[i] = acc;
-    return Fp2.mul(acc, num);
-  }, Fp2.ONE);
-  const invertedAcc = Fp2.inv(multipliedAcc);
-  nums.reduceRight((acc, num, i) => {
-    if (Fp2.is0(num))
-      return acc;
-    inverted[i] = Fp2.mul(acc, inverted[i]);
-    return Fp2.mul(acc, num);
-  }, invertedAcc);
-  return inverted;
-}
-function FpLegendre3(Fp2, n) {
-  const p1mod2 = (Fp2.ORDER - _1n14) / _2n9;
-  const powered = Fp2.pow(n, p1mod2);
-  const yes = Fp2.eql(powered, Fp2.ONE);
-  const zero = Fp2.eql(powered, Fp2.ZERO);
-  const no = Fp2.eql(powered, Fp2.neg(Fp2.ONE));
-  if (!yes && !zero && !no)
-    throw new Error("invalid Legendre symbol result");
-  return yes ? 1 : zero ? 0 : -1;
-}
-function nLength3(n, nBitLength) {
-  if (nBitLength !== void 0)
-    anumber5(nBitLength);
-  const _nBitLength = nBitLength !== void 0 ? nBitLength : n.toString(2).length;
-  const nByteLength = Math.ceil(_nBitLength / 8);
-  return { nBitLength: _nBitLength, nByteLength };
-}
-function Field3(ORDER, bitLenOrOpts, isLE3 = false, opts = {}) {
-  if (ORDER <= _0n14)
-    throw new Error("invalid field: expected ORDER > 0, got " + ORDER);
-  let _nbitLength = void 0;
-  let _sqrt = void 0;
-  let modFromBytes = false;
-  let allowedLengths = void 0;
-  if (typeof bitLenOrOpts === "object" && bitLenOrOpts != null) {
-    if (opts.sqrt || isLE3)
-      throw new Error("cannot specify opts in two arguments");
-    const _opts = bitLenOrOpts;
-    if (_opts.BITS)
-      _nbitLength = _opts.BITS;
-    if (_opts.sqrt)
-      _sqrt = _opts.sqrt;
-    if (typeof _opts.isLE === "boolean")
-      isLE3 = _opts.isLE;
-    if (typeof _opts.modFromBytes === "boolean")
-      modFromBytes = _opts.modFromBytes;
-    allowedLengths = _opts.allowedLengths;
-  } else {
-    if (typeof bitLenOrOpts === "number")
-      _nbitLength = bitLenOrOpts;
-    if (opts.sqrt)
-      _sqrt = opts.sqrt;
-  }
-  const { nBitLength: BITS, nByteLength: BYTES } = nLength3(ORDER, _nbitLength);
-  if (BYTES > 2048)
-    throw new Error("invalid field: expected ORDER of <= 2048 bytes");
-  let sqrtP;
-  const f = Object.freeze({
-    ORDER,
-    isLE: isLE3,
-    BITS,
-    BYTES,
-    MASK: bitMask3(BITS),
-    ZERO: _0n14,
-    ONE: _1n14,
-    allowedLengths,
-    create: (num) => mod3(num, ORDER),
-    isValid: (num) => {
-      if (typeof num !== "bigint")
-        throw new Error("invalid field element: expected bigint, got " + typeof num);
-      return _0n14 <= num && num < ORDER;
-    },
-    is0: (num) => num === _0n14,
-    // is valid and invertible
-    isValidNot0: (num) => !f.is0(num) && f.isValid(num),
-    isOdd: (num) => (num & _1n14) === _1n14,
-    neg: (num) => mod3(-num, ORDER),
-    eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num) => mod3(num * num, ORDER),
-    add: (lhs, rhs) => mod3(lhs + rhs, ORDER),
-    sub: (lhs, rhs) => mod3(lhs - rhs, ORDER),
-    mul: (lhs, rhs) => mod3(lhs * rhs, ORDER),
-    pow: (num, power) => FpPow2(f, num, power),
-    div: (lhs, rhs) => mod3(lhs * invert3(rhs, ORDER), ORDER),
-    // Same as above, but doesn't normalize
-    sqrN: (num) => num * num,
-    addN: (lhs, rhs) => lhs + rhs,
-    subN: (lhs, rhs) => lhs - rhs,
-    mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num) => invert3(num, ORDER),
-    sqrt: _sqrt || ((n) => {
-      if (!sqrtP)
-        sqrtP = FpSqrt3(ORDER);
-      return sqrtP(f, n);
-    }),
-    toBytes: (num) => isLE3 ? numberToBytesLE3(num, BYTES) : numberToBytesBE3(num, BYTES),
-    fromBytes: (bytes, skipValidation = true) => {
-      if (allowedLengths) {
-        if (!allowedLengths.includes(bytes.length) || bytes.length > BYTES) {
-          throw new Error("Field.fromBytes: expected " + allowedLengths + " bytes, got " + bytes.length);
-        }
-        const padded = new Uint8Array(BYTES);
-        padded.set(bytes, isLE3 ? 0 : padded.length - bytes.length);
-        bytes = padded;
-      }
-      if (bytes.length !== BYTES)
-        throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
-      let scalar = isLE3 ? bytesToNumberLE3(bytes) : bytesToNumberBE3(bytes);
-      if (modFromBytes)
-        scalar = mod3(scalar, ORDER);
-      if (!skipValidation) {
-        if (!f.isValid(scalar))
-          throw new Error("invalid field element: outside of range 0..ORDER");
-      }
-      return scalar;
-    },
-    // TODO: we don't need it here, move out to separate fn
-    invertBatch: (lst) => FpInvertBatch3(f, lst),
-    // We can't move this out because Fp6, Fp12 implement it
-    // and it's unclear what to return in there.
-    cmov: (a, b, c) => c ? b : a
-  });
-  return Object.freeze(f);
-}
-function getFieldBytesLength(fieldOrder) {
-  if (typeof fieldOrder !== "bigint")
-    throw new Error("field order must be bigint");
-  const bitLength = fieldOrder.toString(2).length;
-  return Math.ceil(bitLength / 8);
-}
-function getMinHashLength(fieldOrder) {
-  const length = getFieldBytesLength(fieldOrder);
-  return length + Math.ceil(length / 2);
-}
-function mapHashToField(key, fieldOrder, isLE3 = false) {
-  const len = key.length;
-  const fieldLen = getFieldBytesLength(fieldOrder);
-  const minLen = getMinHashLength(fieldOrder);
-  if (len < 16 || len < minLen || len > 1024)
-    throw new Error("expected " + minLen + "-1024 bytes of input, got " + len);
-  const num = isLE3 ? bytesToNumberLE3(key) : bytesToNumberBE3(key);
-  const reduced = mod3(num, fieldOrder - _1n14) + _1n14;
-  return isLE3 ? numberToBytesLE3(reduced, fieldLen) : numberToBytesBE3(reduced, fieldLen);
-}
-var _0n14, _1n14, _2n9, _3n5, _4n5, _5n5, _7n3, _8n7, _9n3, _16n3, FIELD_FIELDS3;
-var init_modular = __esm({
-  "node_modules/@noble/curves/esm/abstract/modular.js"() {
-    init_utils2();
-    _0n14 = BigInt(0);
-    _1n14 = BigInt(1);
-    _2n9 = /* @__PURE__ */ BigInt(2);
-    _3n5 = /* @__PURE__ */ BigInt(3);
-    _4n5 = /* @__PURE__ */ BigInt(4);
-    _5n5 = /* @__PURE__ */ BigInt(5);
-    _7n3 = /* @__PURE__ */ BigInt(7);
-    _8n7 = /* @__PURE__ */ BigInt(8);
-    _9n3 = /* @__PURE__ */ BigInt(9);
-    _16n3 = /* @__PURE__ */ BigInt(16);
-    FIELD_FIELDS3 = [
-      "create",
-      "isValid",
-      "is0",
-      "neg",
-      "inv",
-      "sqrt",
-      "sqr",
-      "eql",
-      "add",
-      "sub",
-      "mul",
-      "pow",
-      "div",
-      "addN",
-      "subN",
-      "mulN",
-      "sqrN"
-    ];
-  }
-});
-
-// node_modules/@noble/hashes/esm/_md.js
-function setBigUint642(view, byteOffset, value, isLE3) {
-  if (typeof view.setBigUint64 === "function")
-    return view.setBigUint64(byteOffset, value, isLE3);
-  const _32n4 = BigInt(32);
-  const _u32_max = BigInt(4294967295);
-  const wh = Number(value >> _32n4 & _u32_max);
-  const wl = Number(value & _u32_max);
-  const h = isLE3 ? 4 : 0;
-  const l = isLE3 ? 0 : 4;
-  view.setUint32(byteOffset + h, wh, isLE3);
-  view.setUint32(byteOffset + l, wl, isLE3);
-}
-function Chi3(a, b, c) {
-  return a & b ^ ~a & c;
-}
-function Maj3(a, b, c) {
-  return a & b ^ a & c ^ b & c;
-}
-var HashMD3, SHA256_IV3, SHA384_IV3, SHA512_IV3;
-var init_md = __esm({
-  "node_modules/@noble/hashes/esm/_md.js"() {
-    init_utils();
-    HashMD3 = class extends Hash2 {
-      constructor(blockLen, outputLen, padOffset, isLE3) {
-        super();
-        this.finished = false;
-        this.length = 0;
-        this.pos = 0;
-        this.destroyed = false;
-        this.blockLen = blockLen;
-        this.outputLen = outputLen;
-        this.padOffset = padOffset;
-        this.isLE = isLE3;
-        this.buffer = new Uint8Array(blockLen);
-        this.view = createView4(this.buffer);
-      }
-      update(data2) {
-        aexists4(this);
-        data2 = toBytes2(data2);
-        abytes5(data2);
-        const { view, buffer: buffer2, blockLen } = this;
-        const len = data2.length;
-        for (let pos = 0; pos < len; ) {
-          const take = Math.min(blockLen - this.pos, len - pos);
-          if (take === blockLen) {
-            const dataView = createView4(data2);
-            for (; blockLen <= len - pos; pos += blockLen)
-              this.process(dataView, pos);
-            continue;
-          }
-          buffer2.set(data2.subarray(pos, pos + take), this.pos);
-          this.pos += take;
-          pos += take;
-          if (this.pos === blockLen) {
-            this.process(view, 0);
-            this.pos = 0;
-          }
-        }
-        this.length += data2.length;
-        this.roundClean();
-        return this;
-      }
-      digestInto(out) {
-        aexists4(this);
-        aoutput4(out, this);
-        this.finished = true;
-        const { buffer: buffer2, view, blockLen, isLE: isLE3 } = this;
-        let { pos } = this;
-        buffer2[pos++] = 128;
-        clean4(this.buffer.subarray(pos));
-        if (this.padOffset > blockLen - pos) {
-          this.process(view, 0);
-          pos = 0;
-        }
-        for (let i = pos; i < blockLen; i++)
-          buffer2[i] = 0;
-        setBigUint642(view, blockLen - 8, BigInt(this.length * 8), isLE3);
-        this.process(view, 0);
-        const oview = createView4(out);
-        const len = this.outputLen;
-        if (len % 4)
-          throw new Error("_sha2: outputLen should be aligned to 32bit");
-        const outLen = len / 4;
-        const state = this.get();
-        if (outLen > state.length)
-          throw new Error("_sha2: outputLen bigger than state");
-        for (let i = 0; i < outLen; i++)
-          oview.setUint32(4 * i, state[i], isLE3);
-      }
-      digest() {
-        const { buffer: buffer2, outputLen } = this;
-        this.digestInto(buffer2);
-        const res = buffer2.slice(0, outputLen);
-        this.destroy();
-        return res;
-      }
-      _cloneInto(to) {
-        to || (to = new this.constructor());
-        to.set(...this.get());
-        const { blockLen, buffer: buffer2, length, finished, destroyed, pos } = this;
-        to.destroyed = destroyed;
-        to.finished = finished;
-        to.length = length;
-        to.pos = pos;
-        if (length % blockLen)
-          to.buffer.set(buffer2);
-        return to;
-      }
-      clone() {
-        return this._cloneInto();
-      }
-    };
-    SHA256_IV3 = /* @__PURE__ */ Uint32Array.from([
-      1779033703,
-      3144134277,
-      1013904242,
-      2773480762,
-      1359893119,
-      2600822924,
-      528734635,
-      1541459225
-    ]);
-    SHA384_IV3 = /* @__PURE__ */ Uint32Array.from([
-      3418070365,
-      3238371032,
-      1654270250,
-      914150663,
-      2438529370,
-      812702999,
-      355462360,
-      4144912697,
-      1731405415,
-      4290775857,
-      2394180231,
-      1750603025,
-      3675008525,
-      1694076839,
-      1203062813,
-      3204075428
-    ]);
-    SHA512_IV3 = /* @__PURE__ */ Uint32Array.from([
-      1779033703,
-      4089235720,
-      3144134277,
-      2227873595,
-      1013904242,
-      4271175723,
-      2773480762,
-      1595750129,
-      1359893119,
-      2917565137,
-      2600822924,
-      725511199,
-      528734635,
-      4215389547,
-      1541459225,
-      327033209
-    ]);
-  }
-});
-
-// node_modules/@noble/hashes/esm/_u64.js
-function fromBig3(n, le = false) {
-  if (le)
-    return { h: Number(n & U32_MASK643), l: Number(n >> _32n3 & U32_MASK643) };
-  return { h: Number(n >> _32n3 & U32_MASK643) | 0, l: Number(n & U32_MASK643) | 0 };
-}
-function split3(lst, le = false) {
-  const len = lst.length;
-  let Ah = new Uint32Array(len);
-  let Al = new Uint32Array(len);
-  for (let i = 0; i < len; i++) {
-    const { h, l } = fromBig3(lst[i], le);
-    [Ah[i], Al[i]] = [h, l];
-  }
-  return [Ah, Al];
-}
-function add3(Ah, Al, Bh, Bl) {
-  const l = (Al >>> 0) + (Bl >>> 0);
-  return { h: Ah + Bh + (l / 2 ** 32 | 0) | 0, l: l | 0 };
-}
-var U32_MASK643, _32n3, shrSH3, shrSL3, rotrSH3, rotrSL3, rotrBH3, rotrBL3, add3L3, add3H3, add4L3, add4H3, add5L3, add5H3;
-var init_u64 = __esm({
-  "node_modules/@noble/hashes/esm/_u64.js"() {
-    U32_MASK643 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
-    _32n3 = /* @__PURE__ */ BigInt(32);
-    shrSH3 = (h, _l, s2) => h >>> s2;
-    shrSL3 = (h, l, s2) => h << 32 - s2 | l >>> s2;
-    rotrSH3 = (h, l, s2) => h >>> s2 | l << 32 - s2;
-    rotrSL3 = (h, l, s2) => h << 32 - s2 | l >>> s2;
-    rotrBH3 = (h, l, s2) => h << 64 - s2 | l >>> s2 - 32;
-    rotrBL3 = (h, l, s2) => h >>> s2 - 32 | l << 64 - s2;
-    add3L3 = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
-    add3H3 = (low, Ah, Bh, Ch) => Ah + Bh + Ch + (low / 2 ** 32 | 0) | 0;
-    add4L3 = (Al, Bl, Cl, Dl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0);
-    add4H3 = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0;
-    add5L3 = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
-    add5H3 = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
-  }
-});
-
-// node_modules/@noble/hashes/esm/sha2.js
-var SHA256_K2, SHA256_W2, SHA256, K5123, SHA512_Kh3, SHA512_Kl3, SHA512_W_H3, SHA512_W_L3, SHA5122, SHA384, sha2562, sha5123, sha384;
-var init_sha2 = __esm({
-  "node_modules/@noble/hashes/esm/sha2.js"() {
-    init_md();
-    init_u64();
-    init_utils();
-    SHA256_K2 = /* @__PURE__ */ Uint32Array.from([
-      1116352408,
-      1899447441,
-      3049323471,
-      3921009573,
-      961987163,
-      1508970993,
-      2453635748,
-      2870763221,
-      3624381080,
-      310598401,
-      607225278,
-      1426881987,
-      1925078388,
-      2162078206,
-      2614888103,
-      3248222580,
-      3835390401,
-      4022224774,
-      264347078,
-      604807628,
-      770255983,
-      1249150122,
-      1555081692,
-      1996064986,
-      2554220882,
-      2821834349,
-      2952996808,
-      3210313671,
-      3336571891,
-      3584528711,
-      113926993,
-      338241895,
-      666307205,
-      773529912,
-      1294757372,
-      1396182291,
-      1695183700,
-      1986661051,
-      2177026350,
-      2456956037,
-      2730485921,
-      2820302411,
-      3259730800,
-      3345764771,
-      3516065817,
-      3600352804,
-      4094571909,
-      275423344,
-      430227734,
-      506948616,
-      659060556,
-      883997877,
-      958139571,
-      1322822218,
-      1537002063,
-      1747873779,
-      1955562222,
-      2024104815,
-      2227730452,
-      2361852424,
-      2428436474,
-      2756734187,
-      3204031479,
-      3329325298
-    ]);
-    SHA256_W2 = /* @__PURE__ */ new Uint32Array(64);
-    SHA256 = class extends HashMD3 {
-      constructor(outputLen = 32) {
-        super(64, outputLen, 8, false);
-        this.A = SHA256_IV3[0] | 0;
-        this.B = SHA256_IV3[1] | 0;
-        this.C = SHA256_IV3[2] | 0;
-        this.D = SHA256_IV3[3] | 0;
-        this.E = SHA256_IV3[4] | 0;
-        this.F = SHA256_IV3[5] | 0;
-        this.G = SHA256_IV3[6] | 0;
-        this.H = SHA256_IV3[7] | 0;
-      }
-      get() {
-        const { A, B, C, D, E, F, G, H } = this;
-        return [A, B, C, D, E, F, G, H];
-      }
-      // prettier-ignore
-      set(A, B, C, D, E, F, G, H) {
-        this.A = A | 0;
-        this.B = B | 0;
-        this.C = C | 0;
-        this.D = D | 0;
-        this.E = E | 0;
-        this.F = F | 0;
-        this.G = G | 0;
-        this.H = H | 0;
-      }
-      process(view, offset) {
-        for (let i = 0; i < 16; i++, offset += 4)
-          SHA256_W2[i] = view.getUint32(offset, false);
-        for (let i = 16; i < 64; i++) {
-          const W15 = SHA256_W2[i - 15];
-          const W2 = SHA256_W2[i - 2];
-          const s0 = rotr3(W15, 7) ^ rotr3(W15, 18) ^ W15 >>> 3;
-          const s1 = rotr3(W2, 17) ^ rotr3(W2, 19) ^ W2 >>> 10;
-          SHA256_W2[i] = s1 + SHA256_W2[i - 7] + s0 + SHA256_W2[i - 16] | 0;
-        }
-        let { A, B, C, D, E, F, G, H } = this;
-        for (let i = 0; i < 64; i++) {
-          const sigma1 = rotr3(E, 6) ^ rotr3(E, 11) ^ rotr3(E, 25);
-          const T1 = H + sigma1 + Chi3(E, F, G) + SHA256_K2[i] + SHA256_W2[i] | 0;
-          const sigma0 = rotr3(A, 2) ^ rotr3(A, 13) ^ rotr3(A, 22);
-          const T2 = sigma0 + Maj3(A, B, C) | 0;
-          H = G;
-          G = F;
-          F = E;
-          E = D + T1 | 0;
-          D = C;
-          C = B;
-          B = A;
-          A = T1 + T2 | 0;
-        }
-        A = A + this.A | 0;
-        B = B + this.B | 0;
-        C = C + this.C | 0;
-        D = D + this.D | 0;
-        E = E + this.E | 0;
-        F = F + this.F | 0;
-        G = G + this.G | 0;
-        H = H + this.H | 0;
-        this.set(A, B, C, D, E, F, G, H);
-      }
-      roundClean() {
-        clean4(SHA256_W2);
-      }
-      destroy() {
-        this.set(0, 0, 0, 0, 0, 0, 0, 0);
-        clean4(this.buffer);
-      }
-    };
-    K5123 = /* @__PURE__ */ (() => split3([
-      "0x428a2f98d728ae22",
-      "0x7137449123ef65cd",
-      "0xb5c0fbcfec4d3b2f",
-      "0xe9b5dba58189dbbc",
-      "0x3956c25bf348b538",
-      "0x59f111f1b605d019",
-      "0x923f82a4af194f9b",
-      "0xab1c5ed5da6d8118",
-      "0xd807aa98a3030242",
-      "0x12835b0145706fbe",
-      "0x243185be4ee4b28c",
-      "0x550c7dc3d5ffb4e2",
-      "0x72be5d74f27b896f",
-      "0x80deb1fe3b1696b1",
-      "0x9bdc06a725c71235",
-      "0xc19bf174cf692694",
-      "0xe49b69c19ef14ad2",
-      "0xefbe4786384f25e3",
-      "0x0fc19dc68b8cd5b5",
-      "0x240ca1cc77ac9c65",
-      "0x2de92c6f592b0275",
-      "0x4a7484aa6ea6e483",
-      "0x5cb0a9dcbd41fbd4",
-      "0x76f988da831153b5",
-      "0x983e5152ee66dfab",
-      "0xa831c66d2db43210",
-      "0xb00327c898fb213f",
-      "0xbf597fc7beef0ee4",
-      "0xc6e00bf33da88fc2",
-      "0xd5a79147930aa725",
-      "0x06ca6351e003826f",
-      "0x142929670a0e6e70",
-      "0x27b70a8546d22ffc",
-      "0x2e1b21385c26c926",
-      "0x4d2c6dfc5ac42aed",
-      "0x53380d139d95b3df",
-      "0x650a73548baf63de",
-      "0x766a0abb3c77b2a8",
-      "0x81c2c92e47edaee6",
-      "0x92722c851482353b",
-      "0xa2bfe8a14cf10364",
-      "0xa81a664bbc423001",
-      "0xc24b8b70d0f89791",
-      "0xc76c51a30654be30",
-      "0xd192e819d6ef5218",
-      "0xd69906245565a910",
-      "0xf40e35855771202a",
-      "0x106aa07032bbd1b8",
-      "0x19a4c116b8d2d0c8",
-      "0x1e376c085141ab53",
-      "0x2748774cdf8eeb99",
-      "0x34b0bcb5e19b48a8",
-      "0x391c0cb3c5c95a63",
-      "0x4ed8aa4ae3418acb",
-      "0x5b9cca4f7763e373",
-      "0x682e6ff3d6b2b8a3",
-      "0x748f82ee5defb2fc",
-      "0x78a5636f43172f60",
-      "0x84c87814a1f0ab72",
-      "0x8cc702081a6439ec",
-      "0x90befffa23631e28",
-      "0xa4506cebde82bde9",
-      "0xbef9a3f7b2c67915",
-      "0xc67178f2e372532b",
-      "0xca273eceea26619c",
-      "0xd186b8c721c0c207",
-      "0xeada7dd6cde0eb1e",
-      "0xf57d4f7fee6ed178",
-      "0x06f067aa72176fba",
-      "0x0a637dc5a2c898a6",
-      "0x113f9804bef90dae",
-      "0x1b710b35131c471b",
-      "0x28db77f523047d84",
-      "0x32caab7b40c72493",
-      "0x3c9ebe0a15c9bebc",
-      "0x431d67c49c100d4c",
-      "0x4cc5d4becb3e42b6",
-      "0x597f299cfc657e2a",
-      "0x5fcb6fab3ad6faec",
-      "0x6c44198c4a475817"
-    ].map((n) => BigInt(n))))();
-    SHA512_Kh3 = /* @__PURE__ */ (() => K5123[0])();
-    SHA512_Kl3 = /* @__PURE__ */ (() => K5123[1])();
-    SHA512_W_H3 = /* @__PURE__ */ new Uint32Array(80);
-    SHA512_W_L3 = /* @__PURE__ */ new Uint32Array(80);
-    SHA5122 = class extends HashMD3 {
-      constructor(outputLen = 64) {
-        super(128, outputLen, 16, false);
-        this.Ah = SHA512_IV3[0] | 0;
-        this.Al = SHA512_IV3[1] | 0;
-        this.Bh = SHA512_IV3[2] | 0;
-        this.Bl = SHA512_IV3[3] | 0;
-        this.Ch = SHA512_IV3[4] | 0;
-        this.Cl = SHA512_IV3[5] | 0;
-        this.Dh = SHA512_IV3[6] | 0;
-        this.Dl = SHA512_IV3[7] | 0;
-        this.Eh = SHA512_IV3[8] | 0;
-        this.El = SHA512_IV3[9] | 0;
-        this.Fh = SHA512_IV3[10] | 0;
-        this.Fl = SHA512_IV3[11] | 0;
-        this.Gh = SHA512_IV3[12] | 0;
-        this.Gl = SHA512_IV3[13] | 0;
-        this.Hh = SHA512_IV3[14] | 0;
-        this.Hl = SHA512_IV3[15] | 0;
-      }
-      // prettier-ignore
-      get() {
-        const { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-        return [Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl];
-      }
-      // prettier-ignore
-      set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl) {
-        this.Ah = Ah | 0;
-        this.Al = Al | 0;
-        this.Bh = Bh | 0;
-        this.Bl = Bl | 0;
-        this.Ch = Ch | 0;
-        this.Cl = Cl | 0;
-        this.Dh = Dh | 0;
-        this.Dl = Dl | 0;
-        this.Eh = Eh | 0;
-        this.El = El | 0;
-        this.Fh = Fh | 0;
-        this.Fl = Fl | 0;
-        this.Gh = Gh | 0;
-        this.Gl = Gl | 0;
-        this.Hh = Hh | 0;
-        this.Hl = Hl | 0;
-      }
-      process(view, offset) {
-        for (let i = 0; i < 16; i++, offset += 4) {
-          SHA512_W_H3[i] = view.getUint32(offset);
-          SHA512_W_L3[i] = view.getUint32(offset += 4);
-        }
-        for (let i = 16; i < 80; i++) {
-          const W15h = SHA512_W_H3[i - 15] | 0;
-          const W15l = SHA512_W_L3[i - 15] | 0;
-          const s0h = rotrSH3(W15h, W15l, 1) ^ rotrSH3(W15h, W15l, 8) ^ shrSH3(W15h, W15l, 7);
-          const s0l = rotrSL3(W15h, W15l, 1) ^ rotrSL3(W15h, W15l, 8) ^ shrSL3(W15h, W15l, 7);
-          const W2h = SHA512_W_H3[i - 2] | 0;
-          const W2l = SHA512_W_L3[i - 2] | 0;
-          const s1h = rotrSH3(W2h, W2l, 19) ^ rotrBH3(W2h, W2l, 61) ^ shrSH3(W2h, W2l, 6);
-          const s1l = rotrSL3(W2h, W2l, 19) ^ rotrBL3(W2h, W2l, 61) ^ shrSL3(W2h, W2l, 6);
-          const SUMl = add4L3(s0l, s1l, SHA512_W_L3[i - 7], SHA512_W_L3[i - 16]);
-          const SUMh = add4H3(SUMl, s0h, s1h, SHA512_W_H3[i - 7], SHA512_W_H3[i - 16]);
-          SHA512_W_H3[i] = SUMh | 0;
-          SHA512_W_L3[i] = SUMl | 0;
-        }
-        let { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-        for (let i = 0; i < 80; i++) {
-          const sigma1h = rotrSH3(Eh, El, 14) ^ rotrSH3(Eh, El, 18) ^ rotrBH3(Eh, El, 41);
-          const sigma1l = rotrSL3(Eh, El, 14) ^ rotrSL3(Eh, El, 18) ^ rotrBL3(Eh, El, 41);
-          const CHIh = Eh & Fh ^ ~Eh & Gh;
-          const CHIl = El & Fl ^ ~El & Gl;
-          const T1ll = add5L3(Hl, sigma1l, CHIl, SHA512_Kl3[i], SHA512_W_L3[i]);
-          const T1h = add5H3(T1ll, Hh, sigma1h, CHIh, SHA512_Kh3[i], SHA512_W_H3[i]);
-          const T1l = T1ll | 0;
-          const sigma0h = rotrSH3(Ah, Al, 28) ^ rotrBH3(Ah, Al, 34) ^ rotrBH3(Ah, Al, 39);
-          const sigma0l = rotrSL3(Ah, Al, 28) ^ rotrBL3(Ah, Al, 34) ^ rotrBL3(Ah, Al, 39);
-          const MAJh = Ah & Bh ^ Ah & Ch ^ Bh & Ch;
-          const MAJl = Al & Bl ^ Al & Cl ^ Bl & Cl;
-          Hh = Gh | 0;
-          Hl = Gl | 0;
-          Gh = Fh | 0;
-          Gl = Fl | 0;
-          Fh = Eh | 0;
-          Fl = El | 0;
-          ({ h: Eh, l: El } = add3(Dh | 0, Dl | 0, T1h | 0, T1l | 0));
-          Dh = Ch | 0;
-          Dl = Cl | 0;
-          Ch = Bh | 0;
-          Cl = Bl | 0;
-          Bh = Ah | 0;
-          Bl = Al | 0;
-          const All = add3L3(T1l, sigma0l, MAJl);
-          Ah = add3H3(All, T1h, sigma0h, MAJh);
-          Al = All | 0;
-        }
-        ({ h: Ah, l: Al } = add3(this.Ah | 0, this.Al | 0, Ah | 0, Al | 0));
-        ({ h: Bh, l: Bl } = add3(this.Bh | 0, this.Bl | 0, Bh | 0, Bl | 0));
-        ({ h: Ch, l: Cl } = add3(this.Ch | 0, this.Cl | 0, Ch | 0, Cl | 0));
-        ({ h: Dh, l: Dl } = add3(this.Dh | 0, this.Dl | 0, Dh | 0, Dl | 0));
-        ({ h: Eh, l: El } = add3(this.Eh | 0, this.El | 0, Eh | 0, El | 0));
-        ({ h: Fh, l: Fl } = add3(this.Fh | 0, this.Fl | 0, Fh | 0, Fl | 0));
-        ({ h: Gh, l: Gl } = add3(this.Gh | 0, this.Gl | 0, Gh | 0, Gl | 0));
-        ({ h: Hh, l: Hl } = add3(this.Hh | 0, this.Hl | 0, Hh | 0, Hl | 0));
-        this.set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl);
-      }
-      roundClean() {
-        clean4(SHA512_W_H3, SHA512_W_L3);
-      }
-      destroy() {
-        clean4(this.buffer);
-        this.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-      }
-    };
-    SHA384 = class extends SHA5122 {
-      constructor() {
-        super(48);
-        this.Ah = SHA384_IV3[0] | 0;
-        this.Al = SHA384_IV3[1] | 0;
-        this.Bh = SHA384_IV3[2] | 0;
-        this.Bl = SHA384_IV3[3] | 0;
-        this.Ch = SHA384_IV3[4] | 0;
-        this.Cl = SHA384_IV3[5] | 0;
-        this.Dh = SHA384_IV3[6] | 0;
-        this.Dl = SHA384_IV3[7] | 0;
-        this.Eh = SHA384_IV3[8] | 0;
-        this.El = SHA384_IV3[9] | 0;
-        this.Fh = SHA384_IV3[10] | 0;
-        this.Fl = SHA384_IV3[11] | 0;
-        this.Gh = SHA384_IV3[12] | 0;
-        this.Gl = SHA384_IV3[13] | 0;
-        this.Hh = SHA384_IV3[14] | 0;
-        this.Hl = SHA384_IV3[15] | 0;
-      }
-    };
-    sha2562 = /* @__PURE__ */ createHasher3(() => new SHA256());
-    sha5123 = /* @__PURE__ */ createHasher3(() => new SHA5122());
-    sha384 = /* @__PURE__ */ createHasher3(() => new SHA384());
-  }
-});
-
-// node_modules/@noble/hashes/esm/hmac.js
-var HMAC, hmac2;
-var init_hmac = __esm({
-  "node_modules/@noble/hashes/esm/hmac.js"() {
-    init_utils();
-    HMAC = class extends Hash2 {
-      constructor(hash2, _key) {
-        super();
-        this.finished = false;
-        this.destroyed = false;
-        ahash2(hash2);
-        const key = toBytes2(_key);
-        this.iHash = hash2.create();
-        if (typeof this.iHash.update !== "function")
-          throw new Error("Expected instance of class which extends utils.Hash");
-        this.blockLen = this.iHash.blockLen;
-        this.outputLen = this.iHash.outputLen;
-        const blockLen = this.blockLen;
-        const pad = new Uint8Array(blockLen);
-        pad.set(key.length > blockLen ? hash2.create().update(key).digest() : key);
-        for (let i = 0; i < pad.length; i++)
-          pad[i] ^= 54;
-        this.iHash.update(pad);
-        this.oHash = hash2.create();
-        for (let i = 0; i < pad.length; i++)
-          pad[i] ^= 54 ^ 92;
-        this.oHash.update(pad);
-        clean4(pad);
-      }
-      update(buf) {
-        aexists4(this);
-        this.iHash.update(buf);
-        return this;
-      }
-      digestInto(out) {
-        aexists4(this);
-        abytes5(out, this.outputLen);
-        this.finished = true;
-        this.iHash.digestInto(out);
-        this.oHash.update(out);
-        this.oHash.digestInto(out);
-        this.destroy();
-      }
-      digest() {
-        const out = new Uint8Array(this.oHash.outputLen);
-        this.digestInto(out);
-        return out;
-      }
-      _cloneInto(to) {
-        to || (to = Object.create(Object.getPrototypeOf(this), {}));
-        const { oHash, iHash, finished, destroyed, blockLen, outputLen } = this;
-        to = to;
-        to.finished = finished;
-        to.destroyed = destroyed;
-        to.blockLen = blockLen;
-        to.outputLen = outputLen;
-        to.oHash = oHash._cloneInto(to.oHash);
-        to.iHash = iHash._cloneInto(to.iHash);
-        return to;
-      }
-      clone() {
-        return this._cloneInto();
-      }
-      destroy() {
-        this.destroyed = true;
-        this.oHash.destroy();
-        this.iHash.destroy();
-      }
-    };
-    hmac2 = (hash2, key, message) => new HMAC(hash2, key).update(message).digest();
-    hmac2.create = (hash2, key) => new HMAC(hash2, key);
-  }
-});
-
-// node_modules/@noble/curves/esm/abstract/curve.js
-function negateCt2(condition, item) {
-  const neg = item.negate();
-  return condition ? neg : item;
-}
-function normalizeZ3(c, points) {
-  const invertedZs = FpInvertBatch3(c.Fp, points.map((p) => p.Z));
-  return points.map((p, i) => c.fromAffine(p.toAffine(invertedZs[i])));
-}
-function validateW3(W, bits) {
-  if (!Number.isSafeInteger(W) || W <= 0 || W > bits)
-    throw new Error("invalid window size, expected [1.." + bits + "], got W=" + W);
-}
-function calcWOpts2(W, scalarBits) {
-  validateW3(W, scalarBits);
-  const windows = Math.ceil(scalarBits / W) + 1;
-  const windowSize = 2 ** (W - 1);
-  const maxNumber = 2 ** W;
-  const mask = bitMask3(W);
-  const shiftBy = BigInt(W);
-  return { windows, windowSize, mask, maxNumber, shiftBy };
-}
-function calcOffsets2(n, window2, wOpts) {
-  const { windowSize, mask, maxNumber, shiftBy } = wOpts;
-  let wbits = Number(n & mask);
-  let nextN = n >> shiftBy;
-  if (wbits > windowSize) {
-    wbits -= maxNumber;
-    nextN += _1n15;
-  }
-  const offsetStart = window2 * windowSize;
-  const offset = offsetStart + Math.abs(wbits) - 1;
-  const isZero = wbits === 0;
-  const isNeg = wbits < 0;
-  const isNegF = window2 % 2 !== 0;
-  const offsetF = offsetStart;
-  return { nextN, offset, isZero, isNeg, isNegF, offsetF };
-}
-function validateMSMPoints3(points, c) {
-  if (!Array.isArray(points))
-    throw new Error("array expected");
-  points.forEach((p, i) => {
-    if (!(p instanceof c))
-      throw new Error("invalid point at index " + i);
-  });
-}
-function validateMSMScalars3(scalars, field) {
-  if (!Array.isArray(scalars))
-    throw new Error("array of scalars expected");
-  scalars.forEach((s2, i) => {
-    if (!field.isValid(s2))
-      throw new Error("invalid scalar at index " + i);
-  });
-}
-function getW2(P) {
-  return pointWindowSizes3.get(P) || 1;
-}
-function assert02(n) {
-  if (n !== _0n15)
-    throw new Error("invalid wNAF");
-}
-function mulEndoUnsafe(Point, point, k1, k2) {
-  let acc = point;
-  let p1 = Point.ZERO;
-  let p2 = Point.ZERO;
-  while (k1 > _0n15 || k2 > _0n15) {
-    if (k1 & _1n15)
-      p1 = p1.add(acc);
-    if (k2 & _1n15)
-      p2 = p2.add(acc);
-    acc = acc.double();
-    k1 >>= _1n15;
-    k2 >>= _1n15;
-  }
-  return { p1, p2 };
-}
-function pippenger2(c, fieldN, points, scalars) {
-  validateMSMPoints3(points, c);
-  validateMSMScalars3(scalars, fieldN);
-  const plength = points.length;
-  const slength = scalars.length;
-  if (plength !== slength)
-    throw new Error("arrays of points and scalars must have equal length");
-  const zero = c.ZERO;
-  const wbits = bitLen3(BigInt(plength));
-  let windowSize = 1;
-  if (wbits > 12)
-    windowSize = wbits - 3;
-  else if (wbits > 4)
-    windowSize = wbits - 2;
-  else if (wbits > 0)
-    windowSize = 2;
-  const MASK = bitMask3(windowSize);
-  const buckets = new Array(Number(MASK) + 1).fill(zero);
-  const lastBits = Math.floor((fieldN.BITS - 1) / windowSize) * windowSize;
-  let sum = zero;
-  for (let i = lastBits; i >= 0; i -= windowSize) {
-    buckets.fill(zero);
-    for (let j = 0; j < slength; j++) {
-      const scalar = scalars[j];
-      const wbits2 = Number(scalar >> BigInt(i) & MASK);
-      buckets[wbits2] = buckets[wbits2].add(points[j]);
-    }
-    let resI = zero;
-    for (let j = buckets.length - 1, sumI = zero; j > 0; j--) {
-      sumI = sumI.add(buckets[j]);
-      resI = resI.add(sumI);
-    }
-    sum = sum.add(resI);
-    if (i !== 0)
-      for (let j = 0; j < windowSize; j++)
-        sum = sum.double();
-  }
-  return sum;
-}
-function createField3(order, field, isLE3) {
-  if (field) {
-    if (field.ORDER !== order)
-      throw new Error("Field.ORDER must match order: Fp == p, Fn == n");
-    validateField3(field);
-    return field;
-  } else {
-    return Field3(order, { isLE: isLE3 });
-  }
-}
-function _createCurveFields2(type, CURVE, curveOpts = {}, FpFnLE) {
-  if (FpFnLE === void 0)
-    FpFnLE = type === "edwards";
-  if (!CURVE || typeof CURVE !== "object")
-    throw new Error(`expected valid ${type} CURVE object`);
-  for (const p of ["p", "n", "h"]) {
-    const val = CURVE[p];
-    if (!(typeof val === "bigint" && val > _0n15))
-      throw new Error(`CURVE.${p} must be positive bigint`);
-  }
-  const Fp2 = createField3(CURVE.p, curveOpts.Fp, FpFnLE);
-  const Fn2 = createField3(CURVE.n, curveOpts.Fn, FpFnLE);
-  const _b = type === "weierstrass" ? "b" : "d";
-  const params = ["Gx", "Gy", "a", _b];
-  for (const p of params) {
-    if (!Fp2.isValid(CURVE[p]))
-      throw new Error(`CURVE.${p} must be valid field element of CURVE.Fp`);
-  }
-  CURVE = Object.freeze(Object.assign({}, CURVE));
-  return { CURVE, Fp: Fp2, Fn: Fn2 };
-}
-var _0n15, _1n15, pointPrecomputes2, pointWindowSizes3, wNAF2;
-var init_curve = __esm({
-  "node_modules/@noble/curves/esm/abstract/curve.js"() {
-    init_utils2();
-    init_modular();
-    _0n15 = BigInt(0);
-    _1n15 = BigInt(1);
-    pointPrecomputes2 = /* @__PURE__ */ new WeakMap();
-    pointWindowSizes3 = /* @__PURE__ */ new WeakMap();
-    wNAF2 = class {
-      // Parametrized with a given Point class (not individual point)
-      constructor(Point, bits) {
-        this.BASE = Point.BASE;
-        this.ZERO = Point.ZERO;
-        this.Fn = Point.Fn;
-        this.bits = bits;
-      }
-      // non-const time multiplication ladder
-      _unsafeLadder(elm, n, p = this.ZERO) {
-        let d = elm;
-        while (n > _0n15) {
-          if (n & _1n15)
-            p = p.add(d);
-          d = d.double();
-          n >>= _1n15;
-        }
-        return p;
-      }
-      /**
-       * Creates a wNAF precomputation window. Used for caching.
-       * Default window size is set by `utils.precompute()` and is equal to 8.
-       * Number of precomputed points depends on the curve size:
-       * 2^(𝑊−1) * (Math.ceil(𝑛 / 𝑊) + 1), where:
-       * - 𝑊 is the window size
-       * - 𝑛 is the bitlength of the curve order.
-       * For a 256-bit curve and window size 8, the number of precomputed points is 128 * 33 = 4224.
-       * @param point Point instance
-       * @param W window size
-       * @returns precomputed point tables flattened to a single array
-       */
-      precomputeWindow(point, W) {
-        const { windows, windowSize } = calcWOpts2(W, this.bits);
-        const points = [];
-        let p = point;
-        let base = p;
-        for (let window2 = 0; window2 < windows; window2++) {
-          base = p;
-          points.push(base);
-          for (let i = 1; i < windowSize; i++) {
-            base = base.add(p);
-            points.push(base);
-          }
-          p = base.double();
-        }
-        return points;
-      }
-      /**
-       * Implements ec multiplication using precomputed tables and w-ary non-adjacent form.
-       * More compact implementation:
-       * https://github.com/paulmillr/noble-secp256k1/blob/47cb1669b6e506ad66b35fe7d76132ae97465da2/index.ts#L502-L541
-       * @returns real and fake (for const-time) points
-       */
-      wNAF(W, precomputes, n) {
-        if (!this.Fn.isValid(n))
-          throw new Error("invalid scalar");
-        let p = this.ZERO;
-        let f = this.BASE;
-        const wo = calcWOpts2(W, this.bits);
-        for (let window2 = 0; window2 < wo.windows; window2++) {
-          const { nextN, offset, isZero, isNeg, isNegF, offsetF } = calcOffsets2(n, window2, wo);
-          n = nextN;
-          if (isZero) {
-            f = f.add(negateCt2(isNegF, precomputes[offsetF]));
-          } else {
-            p = p.add(negateCt2(isNeg, precomputes[offset]));
-          }
-        }
-        assert02(n);
-        return { p, f };
-      }
-      /**
-       * Implements ec unsafe (non const-time) multiplication using precomputed tables and w-ary non-adjacent form.
-       * @param acc accumulator point to add result of multiplication
-       * @returns point
-       */
-      wNAFUnsafe(W, precomputes, n, acc = this.ZERO) {
-        const wo = calcWOpts2(W, this.bits);
-        for (let window2 = 0; window2 < wo.windows; window2++) {
-          if (n === _0n15)
-            break;
-          const { nextN, offset, isZero, isNeg } = calcOffsets2(n, window2, wo);
-          n = nextN;
-          if (isZero) {
-            continue;
-          } else {
-            const item = precomputes[offset];
-            acc = acc.add(isNeg ? item.negate() : item);
-          }
-        }
-        assert02(n);
-        return acc;
-      }
-      getPrecomputes(W, point, transform) {
-        let comp = pointPrecomputes2.get(point);
-        if (!comp) {
-          comp = this.precomputeWindow(point, W);
-          if (W !== 1) {
-            if (typeof transform === "function")
-              comp = transform(comp);
-            pointPrecomputes2.set(point, comp);
-          }
-        }
-        return comp;
-      }
-      cached(point, scalar, transform) {
-        const W = getW2(point);
-        return this.wNAF(W, this.getPrecomputes(W, point, transform), scalar);
-      }
-      unsafe(point, scalar, transform, prev) {
-        const W = getW2(point);
-        if (W === 1)
-          return this._unsafeLadder(point, scalar, prev);
-        return this.wNAFUnsafe(W, this.getPrecomputes(W, point, transform), scalar, prev);
-      }
-      // We calculate precomputes for elliptic curve point multiplication
-      // using windowed method. This specifies window size and
-      // stores precomputed values. Usually only base point would be precomputed.
-      createCache(P, W) {
-        validateW3(W, this.bits);
-        pointWindowSizes3.set(P, W);
-        pointPrecomputes2.delete(P);
-      }
-      hasCache(elm) {
-        return getW2(elm) !== 1;
-      }
-    };
-  }
-});
-
 // node_modules/@noble/curves/esm/abstract/weierstrass.js
 function _splitEndoScalar(k, basis, n) {
   const [[a1, b1], [a2, b2]] = basis;
@@ -27318,14 +27341,14 @@ function _splitEndoScalar(k, basis, n) {
   const c2 = divNearest(-b1 * k, n);
   let k1 = k - c1 * a1 - c2 * a2;
   let k2 = -c1 * b1 - c2 * b2;
-  const k1neg = k1 < _0n16;
-  const k2neg = k2 < _0n16;
+  const k1neg = k1 < _0n13;
+  const k2neg = k2 < _0n13;
   if (k1neg)
     k1 = -k1;
   if (k2neg)
     k2 = -k2;
-  const MAX_NUM = bitMask3(Math.ceil(bitLen3(n) / 2)) + _1n16;
-  if (k1 < _0n16 || k1 >= MAX_NUM || k2 < _0n16 || k2 >= MAX_NUM) {
+  const MAX_NUM = bitMask(Math.ceil(bitLen(n) / 2)) + _1n13;
+  if (k1 < _0n13 || k1 >= MAX_NUM || k2 < _0n13 || k2 >= MAX_NUM) {
     throw new Error("splitScalar (endomorphism): failed, k=" + k);
   }
   return { k1neg, k1, k2neg, k2 };
@@ -27340,8 +27363,8 @@ function validateSigOpts(opts, def) {
   for (let optName of Object.keys(def)) {
     optsn[optName] = opts[optName] === void 0 ? def[optName] : opts[optName];
   }
-  _abool22(optsn.lowS, "lowS");
-  _abool22(optsn.prehash, "prehash");
+  _abool2(optsn.lowS, "lowS");
+  _abool2(optsn.prehash, "prehash");
   if (optsn.format !== void 0)
     validateSigFormat(optsn.format);
   return optsn;
@@ -27352,7 +27375,7 @@ function _normFnElement(Fn2, key) {
   if (typeof key === "bigint") {
     num = key;
   } else {
-    let bytes = ensureBytes2("private key", key);
+    let bytes = ensureBytes("private key", key);
     try {
       num = Fn2.fromBytes(bytes);
     } catch (error) {
@@ -27364,11 +27387,11 @@ function _normFnElement(Fn2, key) {
   return num;
 }
 function weierstrassN(params, extraOpts = {}) {
-  const validated = _createCurveFields2("weierstrass", params, extraOpts);
+  const validated = _createCurveFields("weierstrass", params, extraOpts);
   const { Fp: Fp2, Fn: Fn2 } = validated;
   let CURVE = validated.CURVE;
   const { h: cofactor, n: CURVE_ORDER } = CURVE;
-  _validateObject2(extraOpts, {}, {
+  _validateObject(extraOpts, {}, {
     allowInfinityPoint: "boolean",
     clearCofactor: "function",
     isTorsionFree: "function",
@@ -27391,17 +27414,17 @@ function weierstrassN(params, extraOpts = {}) {
   function pointToBytes(_c, point, isCompressed) {
     const { x, y } = point.toAffine();
     const bx = Fp2.toBytes(x);
-    _abool22(isCompressed, "isCompressed");
+    _abool2(isCompressed, "isCompressed");
     if (isCompressed) {
       assertCompressionIsSupported();
       const hasEvenY = !Fp2.isOdd(y);
-      return concatBytes4(pprefix(hasEvenY), bx);
+      return concatBytes(pprefix(hasEvenY), bx);
     } else {
-      return concatBytes4(Uint8Array.of(4), bx, Fp2.toBytes(y));
+      return concatBytes(Uint8Array.of(4), bx, Fp2.toBytes(y));
     }
   }
   function pointFromBytes(bytes) {
-    _abytes22(bytes, void 0, "Point");
+    _abytes2(bytes, void 0, "Point");
     const { publicKey: comp, publicKeyUncompressed: uncomp } = lengths;
     const length = bytes.length;
     const head = bytes[0];
@@ -27449,7 +27472,7 @@ function weierstrassN(params, extraOpts = {}) {
   }
   if (!isValidXY(CURVE.Gx, CURVE.Gy))
     throw new Error("bad curve params: generator point");
-  const _4a3 = Fp2.mul(Fp2.pow(CURVE.a, _3n6), _4n6);
+  const _4a3 = Fp2.mul(Fp2.pow(CURVE.a, _3n5), _4n5);
   const _27b2 = Fp2.mul(Fp2.sqr(CURVE.b), BigInt(27));
   if (Fp2.is0(Fp2.add(_4a3, _27b2)))
     throw new Error("bad curve params: a or b");
@@ -27467,7 +27490,7 @@ function weierstrassN(params, extraOpts = {}) {
       throw new Error("no endo");
     return _splitEndoScalar(k, endo.basises, Fn2.ORDER);
   }
-  const toAffineMemo = memoized2((p, iz) => {
+  const toAffineMemo = memoized((p, iz) => {
     const { X, Y, Z } = p;
     if (Fp2.eql(Z, Fp2.ONE))
       return { x: X, y: Y };
@@ -27483,7 +27506,7 @@ function weierstrassN(params, extraOpts = {}) {
       throw new Error("invZ was invalid");
     return { x, y };
   });
-  const assertValidMemo = memoized2((p) => {
+  const assertValidMemo = memoized((p) => {
     if (p.is0()) {
       if (extraOpts.allowInfinityPoint && !Fp2.is0(p.Y))
         return;
@@ -27500,8 +27523,8 @@ function weierstrassN(params, extraOpts = {}) {
   });
   function finishEndo(endoBeta, k1p, k2p, k1neg, k2neg) {
     k2p = new Point(Fp2.mul(k2p.X, endoBeta), k2p.Y, k2p.Z);
-    k1p = negateCt2(k1neg, k1p);
-    k2p = negateCt2(k2neg, k2p);
+    k1p = negateCt(k1neg, k1p);
+    k2p = negateCt(k2neg, k2p);
     return k1p.add(k2p);
   }
   class Point {
@@ -27527,12 +27550,12 @@ function weierstrassN(params, extraOpts = {}) {
       return new Point(x, y, Fp2.ONE);
     }
     static fromBytes(bytes) {
-      const P = Point.fromAffine(decodePoint(_abytes22(bytes, void 0, "point")));
+      const P = Point.fromAffine(decodePoint(_abytes2(bytes, void 0, "point")));
       P.assertValidity();
       return P;
     }
     static fromHex(hex) {
-      return Point.fromBytes(ensureBytes2("pointHex", hex));
+      return Point.fromBytes(ensureBytes("pointHex", hex));
     }
     get x() {
       return this.toAffine().x;
@@ -27549,7 +27572,7 @@ function weierstrassN(params, extraOpts = {}) {
     precompute(windowSize = 8, isLazy = true) {
       wnaf.createCache(this, windowSize);
       if (!isLazy)
-        this.multiply(_3n6);
+        this.multiply(_3n5);
       return this;
     }
     // TODO: return `this`
@@ -27582,7 +27605,7 @@ function weierstrassN(params, extraOpts = {}) {
     // Cost: 8M + 3S + 3*a + 2*b3 + 15add.
     double() {
       const { a, b } = CURVE;
-      const b3 = Fp2.mul(b, _3n6);
+      const b3 = Fp2.mul(b, _3n5);
       const { X: X1, Y: Y1, Z: Z1 } = this;
       let X3 = Fp2.ZERO, Y3 = Fp2.ZERO, Z3 = Fp2.ZERO;
       let t0 = Fp2.mul(X1, X1);
@@ -27628,7 +27651,7 @@ function weierstrassN(params, extraOpts = {}) {
       const { X: X2, Y: Y2, Z: Z2 } = other;
       let X3 = Fp2.ZERO, Y3 = Fp2.ZERO, Z3 = Fp2.ZERO;
       const a = CURVE.a;
-      const b3 = Fp2.mul(CURVE.b, _3n6);
+      const b3 = Fp2.mul(CURVE.b, _3n5);
       let t0 = Fp2.mul(X1, X2);
       let t1 = Fp2.mul(Y1, Y2);
       let t2 = Fp2.mul(Z1, Z2);
@@ -27691,7 +27714,7 @@ function weierstrassN(params, extraOpts = {}) {
       if (!Fn2.isValidNot0(scalar))
         throw new Error("invalid scalar: out of range");
       let point, fake;
-      const mul = (n) => wnaf.cached(this, n, (p) => normalizeZ3(Point, p));
+      const mul = (n) => wnaf.cached(this, n, (p) => normalizeZ(Point, p));
       if (endo2) {
         const { k1neg, k1, k2neg, k2 } = splitEndoScalarN(scalar);
         const { p: k1p, f: k1f } = mul(k1);
@@ -27703,7 +27726,7 @@ function weierstrassN(params, extraOpts = {}) {
         point = p;
         fake = f;
       }
-      return normalizeZ3(Point, [point, fake])[0];
+      return normalizeZ(Point, [point, fake])[0];
     }
     /**
      * Non-constant-time multiplication. Uses double-and-add algorithm.
@@ -27715,9 +27738,9 @@ function weierstrassN(params, extraOpts = {}) {
       const p = this;
       if (!Fn2.isValid(sc))
         throw new Error("invalid scalar: out of range");
-      if (sc === _0n16 || p.is0())
+      if (sc === _0n13 || p.is0())
         return Point.ZERO;
-      if (sc === _1n16)
+      if (sc === _1n13)
         return p;
       if (wnaf.hasCache(this))
         return this.multiply(sc);
@@ -27746,7 +27769,7 @@ function weierstrassN(params, extraOpts = {}) {
      */
     isTorsionFree() {
       const { isTorsionFree } = extraOpts;
-      if (cofactor === _1n16)
+      if (cofactor === _1n13)
         return true;
       if (isTorsionFree)
         return isTorsionFree(Point, this);
@@ -27754,7 +27777,7 @@ function weierstrassN(params, extraOpts = {}) {
     }
     clearCofactor() {
       const { clearCofactor } = extraOpts;
-      if (cofactor === _1n16)
+      if (cofactor === _1n13)
         return this;
       if (clearCofactor)
         return clearCofactor(Point, this);
@@ -27764,12 +27787,12 @@ function weierstrassN(params, extraOpts = {}) {
       return this.multiplyUnsafe(cofactor).is0();
     }
     toBytes(isCompressed = true) {
-      _abool22(isCompressed, "isCompressed");
+      _abool2(isCompressed, "isCompressed");
       this.assertValidity();
       return encodePoint(Point, this, isCompressed);
     }
     toHex(isCompressed = true) {
-      return bytesToHex4(this.toBytes(isCompressed));
+      return bytesToHex(this.toBytes(isCompressed));
     }
     toString() {
       return `<Point ${this.is0() ? "ZERO" : this.toHex()}>`;
@@ -27791,10 +27814,10 @@ function weierstrassN(params, extraOpts = {}) {
       this.precompute(windowSize);
     }
     static normalizeZ(points) {
-      return normalizeZ3(Point, points);
+      return normalizeZ(Point, points);
     }
     static msm(points, scalars) {
-      return pippenger2(Point, Fn2, points, scalars);
+      return pippenger(Point, Fn2, points, scalars);
     }
     static fromPrivateKey(privateKey) {
       return Point.BASE.multiply(_normFnElement(Fn2, privateKey));
@@ -27805,7 +27828,7 @@ function weierstrassN(params, extraOpts = {}) {
   Point.Fp = Fp2;
   Point.Fn = Fn2;
   const bits = Fn2.BITS;
-  const wnaf = new wNAF2(Point, extraOpts.endo ? Math.ceil(bits / 2) : bits);
+  const wnaf = new wNAF(Point, extraOpts.endo ? Math.ceil(bits / 2) : bits);
   Point.BASE.precompute(8);
   return Point;
 }
@@ -27823,7 +27846,7 @@ function getWLengths(Fp2, Fn2) {
 }
 function ecdh(Point, ecdhOpts = {}) {
   const { Fn: Fn2 } = Point;
-  const randomBytes_ = ecdhOpts.randomBytes || randomBytes8;
+  const randomBytes_ = ecdhOpts.randomBytes || randomBytes2;
   const lengths = Object.assign(getWLengths(Point.Fp, Fn2), { seed: getMinHashLength(Fn2.ORDER) });
   function isValidSecretKey(secretKey2) {
     try {
@@ -27846,7 +27869,7 @@ function ecdh(Point, ecdhOpts = {}) {
     }
   }
   function randomSecretKey(seed = randomBytes_(lengths.seed)) {
-    return mapHashToField(_abytes22(seed, lengths.seed, "seed"), Fn2.ORDER);
+    return mapHashToField(_abytes2(seed, lengths.seed, "seed"), Fn2.ORDER);
   }
   function getPublicKey(secretKey2, isCompressed = true) {
     return Point.BASE.multiply(_normFnElement(Fn2, secretKey2)).toBytes(isCompressed);
@@ -27863,7 +27886,7 @@ function ecdh(Point, ecdhOpts = {}) {
     const { secretKey: secretKey2, publicKey, publicKeyUncompressed } = lengths;
     if (Fn2.allowedLengths || secretKey2 === publicKey)
       return void 0;
-    const l = ensureBytes2("key", item).length;
+    const l = ensureBytes("key", item).length;
     return l === publicKey || l === publicKeyUncompressed;
   }
   function getSharedSecret(secretKeyA, publicKeyB, isCompressed = true) {
@@ -27890,16 +27913,16 @@ function ecdh(Point, ecdhOpts = {}) {
   return Object.freeze({ getPublicKey, getSharedSecret, keygen, Point, utils, lengths });
 }
 function ecdsa(Point, hash2, ecdsaOpts = {}) {
-  ahash2(hash2);
-  _validateObject2(ecdsaOpts, {}, {
+  ahash(hash2);
+  _validateObject(ecdsaOpts, {}, {
     hmac: "function",
     lowS: "boolean",
     randomBytes: "function",
     bits2int: "function",
     bits2int_modN: "function"
   });
-  const randomBytes12 = ecdsaOpts.randomBytes || randomBytes8;
-  const hmac4 = ecdsaOpts.hmac || ((key, ...msgs) => hmac2(hash2, key, concatBytes4(...msgs)));
+  const randomBytes12 = ecdsaOpts.randomBytes || randomBytes2;
+  const hmac4 = ecdsaOpts.hmac || ((key, ...msgs) => hmac(hash2, key, concatBytes(...msgs)));
   const { Fp: Fp2, Fn: Fn2 } = Point;
   const { ORDER: CURVE_ORDER, BITS: fnBits } = Fn2;
   const { keygen, getPublicKey, getSharedSecret, utils, lengths } = ecdh(Point, ecdsaOpts);
@@ -27912,7 +27935,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
   };
   const defaultSigOpts_format = "compact";
   function isBiggerThanHalfOrder(number) {
-    const HALF = CURVE_ORDER >> _1n16;
+    const HALF = CURVE_ORDER >> _1n13;
     return number > HALF;
   }
   function validateRS(title, num) {
@@ -27924,7 +27947,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
     validateSigFormat(format);
     const size2 = lengths.signature;
     const sizer = format === "compact" ? size2 : format === "recovered" ? size2 + 1 : void 0;
-    return _abytes22(bytes, sizer, `${format} signature`);
+    return _abytes2(bytes, sizer, `${format} signature`);
   }
   class Signature2 {
     constructor(r, s2, recovery) {
@@ -27938,7 +27961,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       validateSigLength(bytes, format);
       let recid;
       if (format === "der") {
-        const { r: r2, s: s3 } = DER.toSig(_abytes22(bytes));
+        const { r: r2, s: s3 } = DER.toSig(_abytes2(bytes));
         return new Signature2(r2, s3);
       }
       if (format === "recovered") {
@@ -27952,7 +27975,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       return new Signature2(Fn2.fromBytes(r), Fn2.fromBytes(s2), recid);
     }
     static fromHex(hex, format) {
-      return this.fromBytes(hexToBytes4(hex), format);
+      return this.fromBytes(hexToBytes(hex), format);
     }
     addRecoveryBit(recovery) {
       return new Signature2(this.r, this.s, recovery);
@@ -27962,16 +27985,16 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       const { r, s: s2, recovery: rec } = this;
       if (rec == null || ![0, 1, 2, 3].includes(rec))
         throw new Error("recovery id invalid");
-      const hasCofactor = CURVE_ORDER * _2n10 < FIELD_ORDER;
+      const hasCofactor = CURVE_ORDER * _2n9 < FIELD_ORDER;
       if (hasCofactor && rec > 1)
         throw new Error("recovery id is ambiguous for h>1 curve");
       const radj = rec === 2 || rec === 3 ? r + CURVE_ORDER : r;
       if (!Fp2.isValid(radj))
         throw new Error("recovery id 2 or 3 invalid");
       const x = Fp2.toBytes(radj);
-      const R = Point.fromBytes(concatBytes4(pprefix((rec & 1) === 0), x));
+      const R = Point.fromBytes(concatBytes(pprefix((rec & 1) === 0), x));
       const ir = Fn2.inv(radj);
-      const h = bits2int_modN(ensureBytes2("msgHash", messageHash));
+      const h = bits2int_modN(ensureBytes("msgHash", messageHash));
       const u1 = Fn2.create(-h * ir);
       const u2 = Fn2.create(s2 * ir);
       const Q = Point.BASE.multiplyUnsafe(u1).add(R.multiplyUnsafe(u2));
@@ -27987,27 +28010,27 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
     toBytes(format = defaultSigOpts_format) {
       validateSigFormat(format);
       if (format === "der")
-        return hexToBytes4(DER.hexFromSig(this));
+        return hexToBytes(DER.hexFromSig(this));
       const r = Fn2.toBytes(this.r);
       const s2 = Fn2.toBytes(this.s);
       if (format === "recovered") {
         if (this.recovery == null)
           throw new Error("recovery bit must be present");
-        return concatBytes4(Uint8Array.of(this.recovery), r, s2);
+        return concatBytes(Uint8Array.of(this.recovery), r, s2);
       }
-      return concatBytes4(r, s2);
+      return concatBytes(r, s2);
     }
     toHex(format) {
-      return bytesToHex4(this.toBytes(format));
+      return bytesToHex(this.toBytes(format));
     }
     // TODO: remove
     assertValidity() {
     }
     static fromCompact(hex) {
-      return Signature2.fromBytes(ensureBytes2("sig", hex), "compact");
+      return Signature2.fromBytes(ensureBytes("sig", hex), "compact");
     }
     static fromDER(hex) {
-      return Signature2.fromBytes(ensureBytes2("sig", hex), "der");
+      return Signature2.fromBytes(ensureBytes("sig", hex), "der");
     }
     normalizeS() {
       return this.hasHighS() ? new Signature2(this.r, Fn2.neg(this.s), this.recovery) : this;
@@ -28016,33 +28039,33 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       return this.toBytes("der");
     }
     toDERHex() {
-      return bytesToHex4(this.toBytes("der"));
+      return bytesToHex(this.toBytes("der"));
     }
     toCompactRawBytes() {
       return this.toBytes("compact");
     }
     toCompactHex() {
-      return bytesToHex4(this.toBytes("compact"));
+      return bytesToHex(this.toBytes("compact"));
     }
   }
   const bits2int = ecdsaOpts.bits2int || function bits2int_def(bytes) {
     if (bytes.length > 8192)
       throw new Error("input is too large");
-    const num = bytesToNumberBE3(bytes);
+    const num = bytesToNumberBE(bytes);
     const delta = bytes.length * 8 - fnBits;
     return delta > 0 ? num >> BigInt(delta) : num;
   };
   const bits2int_modN = ecdsaOpts.bits2int_modN || function bits2int_modN_def(bytes) {
     return Fn2.create(bits2int(bytes));
   };
-  const ORDER_MASK = bitMask3(fnBits);
+  const ORDER_MASK = bitMask(fnBits);
   function int2octets(num) {
-    aInRange3("num < 2^" + fnBits, num, _0n16, ORDER_MASK);
+    aInRange("num < 2^" + fnBits, num, _0n13, ORDER_MASK);
     return Fn2.toBytes(num);
   }
   function validateMsgAndHash(message, prehash) {
-    _abytes22(message, void 0, "message");
-    return prehash ? _abytes22(hash2(message), void 0, "prehashed message") : message;
+    _abytes2(message, void 0, "message");
+    return prehash ? _abytes2(hash2(message), void 0, "prehashed message") : message;
   }
   function prepSig(message, privateKey, opts) {
     if (["recovered", "canonical"].some((k) => k in opts))
@@ -28054,9 +28077,9 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
     const seedArgs = [int2octets(d), int2octets(h1int)];
     if (extraEntropy != null && extraEntropy !== false) {
       const e = extraEntropy === true ? randomBytes12(lengths.secretKey) : extraEntropy;
-      seedArgs.push(ensureBytes2("extraEntropy", e));
+      seedArgs.push(ensureBytes("extraEntropy", e));
     }
-    const seed = concatBytes4(...seedArgs);
+    const seed = concatBytes(...seedArgs);
     const m = h1int;
     function k2sig(kBytes) {
       const k = bits2int(kBytes);
@@ -28065,12 +28088,12 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       const ik = Fn2.inv(k);
       const q = Point.BASE.multiply(k).toAffine();
       const r = Fn2.create(q.x);
-      if (r === _0n16)
+      if (r === _0n13)
         return;
       const s2 = Fn2.create(ik * Fn2.create(m + r * d));
-      if (s2 === _0n16)
+      if (s2 === _0n13)
         return;
-      let recovery = (q.x === r ? 0 : 2) | Number(q.y & _1n16);
+      let recovery = (q.x === r ? 0 : 2) | Number(q.y & _1n13);
       let normS = s2;
       if (lowS && isBiggerThanHalfOrder(s2)) {
         normS = Fn2.neg(s2);
@@ -28081,7 +28104,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
     return { seed, k2sig };
   }
   function sign(message, secretKey2, opts = {}) {
-    message = ensureBytes2("message", message);
+    message = ensureBytes("message", message);
     const { seed, k2sig } = prepSig(message, secretKey2, opts);
     const drbg = createHmacDrbg(hash2.outputLen, Fn2.BYTES, hmac4);
     const sig = drbg(seed, k2sig);
@@ -28089,7 +28112,7 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
   }
   function tryParsingSig(sg) {
     let sig = void 0;
-    const isHex = typeof sg === "string" || isBytes5(sg);
+    const isHex = typeof sg === "string" || isBytes(sg);
     const isObj = !isHex && sg !== null && typeof sg === "object" && typeof sg.r === "bigint" && typeof sg.s === "bigint";
     if (!isHex && !isObj)
       throw new Error("invalid signature, expected Uint8Array, hex string or Signature instance");
@@ -28097,14 +28120,14 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
       sig = new Signature2(sg.r, sg.s);
     } else if (isHex) {
       try {
-        sig = Signature2.fromBytes(ensureBytes2("sig", sg), "der");
+        sig = Signature2.fromBytes(ensureBytes("sig", sg), "der");
       } catch (derError) {
         if (!(derError instanceof DER.Err))
           throw derError;
       }
       if (!sig) {
         try {
-          sig = Signature2.fromBytes(ensureBytes2("sig", sg), "compact");
+          sig = Signature2.fromBytes(ensureBytes("sig", sg), "compact");
         } catch (error) {
           return false;
         }
@@ -28116,11 +28139,11 @@ function ecdsa(Point, hash2, ecdsaOpts = {}) {
   }
   function verify(signature, message, publicKey, opts = {}) {
     const { lowS, prehash, format } = validateSigOpts(opts, defaultSigOpts);
-    publicKey = ensureBytes2("publicKey", publicKey);
-    message = validateMsgAndHash(ensureBytes2("message", message), prehash);
+    publicKey = ensureBytes("publicKey", publicKey);
+    message = validateMsgAndHash(ensureBytes("message", message), prehash);
     if ("strict" in opts)
       throw new Error("options.strict was renamed to lowS");
-    const sig = format === void 0 ? tryParsingSig(signature) : Signature2.fromBytes(ensureBytes2("sig", signature), format);
+    const sig = format === void 0 ? tryParsingSig(signature) : Signature2.fromBytes(ensureBytes("sig", signature), format);
     if (sig === false)
       return false;
     try {
@@ -28172,7 +28195,7 @@ function _weierstrass_legacy_opts_to_new(c) {
   };
   const Fp2 = c.Fp;
   let allowedLengths = c.allowedPrivateKeyLengths ? Array.from(new Set(c.allowedPrivateKeyLengths.map((l) => Math.ceil(l / 2)))) : void 0;
-  const Fn2 = Field3(CURVE.n, {
+  const Fn2 = Field(CURVE.n, {
     BITS: c.nBitLength,
     allowedLengths,
     modFromBytes: c.wrapPrivateKey
@@ -28204,7 +28227,7 @@ function _ecdsa_new_output_to_legacy(c, _ecdsa) {
   const Point = _ecdsa.Point;
   return Object.assign({}, _ecdsa, {
     ProjectivePoint: Point,
-    CURVE: Object.assign({}, c, nLength3(Point.Fn.ORDER, Point.Fn.BITS))
+    CURVE: Object.assign({}, c, nLength(Point.Fn.ORDER, Point.Fn.BITS))
   });
 }
 function weierstrass(c) {
@@ -28213,7 +28236,7 @@ function weierstrass(c) {
   const signs = ecdsa(Point, hash2, ecdsaOpts);
   return _ecdsa_new_output_to_legacy(c, signs);
 }
-var divNearest, DERErr, DER, _0n16, _1n16, _2n10, _3n6, _4n6;
+var divNearest, DERErr, DER, _0n13, _1n13, _2n9, _3n5, _4n5;
 var init_weierstrass = __esm({
   "node_modules/@noble/curves/esm/abstract/weierstrass.js"() {
     init_hmac();
@@ -28221,7 +28244,7 @@ var init_weierstrass = __esm({
     init_utils2();
     init_curve();
     init_modular();
-    divNearest = (num, den) => (num + (num >= 0 ? den : -den) / _2n10) / den;
+    divNearest = (num, den) => (num + (num >= 0 ? den : -den) / _2n9) / den;
     DERErr = class extends Error {
       constructor(m = "") {
         super(m);
@@ -28289,7 +28312,7 @@ var init_weierstrass = __esm({
       _int: {
         encode(num) {
           const { Err: E } = DER;
-          if (num < _0n16)
+          if (num < _0n13)
             throw new E("integer: negative integers are not allowed");
           let hex = numberToHexUnpadded(num);
           if (Number.parseInt(hex[0], 16) & 8)
@@ -28304,12 +28327,12 @@ var init_weierstrass = __esm({
             throw new E("invalid signature integer: negative");
           if (data2[0] === 0 && !(data2[1] & 128))
             throw new E("invalid signature integer: unnecessary leading zero");
-          return bytesToNumberBE3(data2);
+          return bytesToNumberBE(data2);
         }
       },
       toSig(hex) {
         const { Err: E, _int: int2, _tlv: tlv } = DER;
-        const data2 = ensureBytes2("signature", hex);
+        const data2 = ensureBytes("signature", hex);
         const { v: seqBytes, l: seqLeftBytes } = tlv.decode(48, data2);
         if (seqLeftBytes.length)
           throw new E("invalid signature: left bytes after parsing");
@@ -28327,11 +28350,11 @@ var init_weierstrass = __esm({
         return tlv.encode(48, seq);
       }
     };
-    _0n16 = BigInt(0);
-    _1n16 = BigInt(1);
-    _2n10 = BigInt(2);
-    _3n6 = BigInt(3);
-    _4n6 = BigInt(4);
+    _0n13 = BigInt(0);
+    _1n13 = BigInt(1);
+    _2n9 = BigInt(2);
+    _3n5 = BigInt(3);
+    _4n5 = BigInt(4);
   }
 });
 
@@ -28380,12 +28403,12 @@ var init_nist = __esm({
       Gx: BigInt("0x00c6858e06b70404e9cd9e3ecb662395b4429c648139053fb521f828af606b4d3dbaa14b5e77efe75928fe1dc127a2ffa8de3348b3c1856a429bf97e7e31c2e5bd66"),
       Gy: BigInt("0x011839296a789a3bc0045c8a5fb42c7d1bd998f54449579b446817afbd17273e662c97ee72995ef42640c550b9013fad0761353c7086a272c24088be94769fd16650")
     };
-    Fp256 = Field3(p256_CURVE.p);
-    Fp384 = Field3(p384_CURVE.p);
-    Fp521 = Field3(p521_CURVE.p);
-    p256 = createCurve({ ...p256_CURVE, Fp: Fp256, lowS: false }, sha2562);
+    Fp256 = Field(p256_CURVE.p);
+    Fp384 = Field(p384_CURVE.p);
+    Fp521 = Field(p521_CURVE.p);
+    p256 = createCurve({ ...p256_CURVE, Fp: Fp256, lowS: false }, sha256);
     p384 = createCurve({ ...p384_CURVE, Fp: Fp384, lowS: false }, sha384);
-    p521 = createCurve({ ...p521_CURVE, Fp: Fp521, lowS: false, allowedPrivateKeyLengths: [130, 131, 132] }, sha5123);
+    p521 = createCurve({ ...p521_CURVE, Fp: Fp521, lowS: false, allowedPrivateKeyLengths: [130, 131, 132] }, sha512);
   }
 });
 
@@ -31018,7 +31041,7 @@ __export(lib_exports, {
   validateRemoteCandidate: () => validateRemoteCandidate,
   wrapRtx: () => wrapRtx
 });
-import { randomBytes as randomBytes9 } from "crypto";
+import { randomBytes as randomBytes8 } from "crypto";
 import { createSocket } from "dgram";
 import {
   createSocket as createSocket2
@@ -31026,7 +31049,7 @@ import {
 import * as net from "node:net";
 import * as tls from "node:tls";
 import { connect as connect2 } from "node:net";
-import { createSign, randomBytes as randomBytes22, webcrypto as webcrypto4 } from "crypto";
+import { createSign, randomBytes as randomBytes22, webcrypto as webcrypto3 } from "crypto";
 import { createHash, createHmac } from "crypto";
 import { randomBytes as randomBytes32 } from "crypto";
 import { setTimeout as setTimeout2 } from "timers/promises";
@@ -31066,7 +31089,7 @@ import { performance as performance2 } from "perf_hooks";
 import { randomUUID as randomUUID4 } from "crypto";
 import { randomUUID as randomUUID5 } from "crypto";
 import { setTimeout as setTimeout6 } from "timers/promises";
-import { randomBytes as randomBytes92 } from "crypto";
+import { randomBytes as randomBytes9 } from "crypto";
 import { isIPv4 as isIPv44 } from "net";
 import { randomUUID as randomUUID6 } from "crypto";
 import { setTimeout as setTimeout7 } from "timers/promises";
@@ -31078,10 +31101,10 @@ import { randomUUID as randomUUID10 } from "crypto";
 import { setTimeout as setTimeout9 } from "timers/promises";
 import { randomUUID as randomUUID11 } from "crypto";
 function random16() {
-  return randomBytes9(2).readUInt16BE(0);
+  return randomBytes8(2).readUInt16BE(0);
 }
 function random32() {
-  return randomBytes9(4).readUInt32BE(0);
+  return randomBytes8(4).readUInt32BE(0);
 }
 function bufferXor(a, b) {
   if (a.length !== b.length) {
@@ -32582,9 +32605,9 @@ function getHostAddresses(useIpv4, useIpv6, options = {}) {
 function enumerate2(arr) {
   return arr.map((v, i) => [i, v]);
 }
-function divide(from, split4) {
-  const arr = from.split(split4);
-  return [arr[0], arr.slice(1).join(split4)];
+function divide(from, split3) {
+  const arr = from.split(split3);
+  return [arr[0], arr.slice(1).join(split3)];
 }
 function getDataChannelMessageSize(data2) {
   return Buffer.isBuffer(data2) ? data2.length : Buffer.byteLength(data2);
@@ -33062,7 +33085,7 @@ function candidateFromSdp(sdp) {
 }
 function addSDPHeader(type, description) {
   const username = "-";
-  const sessionId = randomBytes92(8).readBigUInt64BE(0).toString().slice(0, 8);
+  const sessionId = randomBytes9(8).readBigUInt64BE(0).toString().slice(0, 8);
   const sessionVersion = 0;
   description.origin = `${username} ${sessionId} ${sessionVersion} IN IP4 0.0.0.0`;
   description.msidSemantic.push(new GroupDescription("WMS", ["*"]));
@@ -33206,7 +33229,7 @@ function clonePeerConfiguration(config) {
     debug: { ...config.debug }
   };
 }
-var import_debug, import_x509, x509, import_binary_data, import_binary_data2, import_tweetnacl, import_binary_data3, import_binary_data4, import_binary_data5, import_binary_data6, import_binary_data7, import_tweetnacl2, import_binary_data8, import_binary_data9, import_binary_data10, import_binary_data11, import_binary_data12, import_binary_data13, import_binary_data14, import_binary_data15, import_binary_data16, import_binary_data17, import_binary_data18, import_binary_data19, import_binary_data20, import_binary_data21, import_binary_data22, import_binary_data23, import_multicast_dns, import_x5092, BitWriter, BitWriter2, BufferChain, dumpBuffer, BitStream, POLY_CRC32, POLY_CRC32C, table32, tables32By16, table32c, tables32cBy16, int, PromiseQueue, interfaceAddress, WeriftError, debug, Event2, EventDisposer, log, UdpTransport, TcpTransport, TlsTransport, StreamTransport, SignatureAlgorithm, HashAlgorithm, CipherSuite, CipherSuiteList, NamedCurveAlgorithm, NamedCurveAlgorithmList, CurveType, SignatureScheme, certificateTypes, signatures, p256Keypair, p256PreMasterSecret, SessionType, AbstractCipher, crypto5, CipherContext, SrtpContext, dumpBuffer2, getObjectSummary, FragmentedHandshake, uint16be, uint24be, buffer, array3, uint8, string4, Extension, ExtensionList, ASN11Cert, ClientCertificateType, DistinguishedName, SignatureHashAlgorithm, ProtocolVersion, DtlsRandom, ClientHello, MACHeader, DtlsPlaintext, createFragments, createPlaintext, AlertDesc, warn, err, Flight, Flight1, log2, Flight3, signTypes, keyTypes, kxTypes, KeyExchange, err2, AEADCipher, cipherSuites, AEAD_AES_128_GCM, AEAD_AES_256_GCM, RSA_KEY_EXCHANGE, ECDHE_RSA_KEY_EXCHANGE, ECDHE_ECDSA_KEY_EXCHANGE, PSK_KEY_EXCHANGE, ECDHE_PSK_KEY_EXCHANGE, ExtendedMasterSecret, RenegotiationIndication, UseSRTP, Certificate2, ChangeCipherSpec, CertificateVerify, ClientKeyExchange, Finished, ServerCertificateRequest, ServerHello, ServerHelloDone, ServerKeyExchange, ProtectionProfileAes128CmHmacSha1_80, ProtectionProfileAeadAes128Gcm, Profiles, keyLength, saltLength, log3, AV1RtpPayload, AV1Obu, OBU_TYPES, OBU_TYPE_IDS, H264RtpPayload, NalUnitType, annex_bNALUStartCode, stap_aHeaderSize, stap_aNALULengthSize, OpusRtpPayload, Vp8RtpPayload, Vp9RtpPayload, DePacketizerBase, depacketizerCodecs, timer, RTCP_HEADER_SIZE, RtcpHeader, FullIntraRequest, PictureLossIndication, ReceiverEstimatedMaxBitrate, log4, RtcpPayloadSpecificFeedback, RtcpRrPacket, RtcpReceiverInfo, RtcpTransportLayerFeedbackType, GenericNack, log5, TransportWideCC, RunLengthChunk, StatusVectorChunk, RecvDelta, PacketChunk, PacketStatus, PacketResult, log6, RtcpTransportLayerFeedback, RtcpSourceDescriptionPacket, SourceDescriptionChunk, SourceDescriptionItem, RtcpSrPacket, RtcpSenderInfo, ntpTime2Sec, log7, RtcpPacketConverter, RTP_EXTENSION_URI, log8, Red, RedHeader, RedEncoder, Max14Uint, RedHandler, ExtensionProfiles, seqNumOffset, timestampOffset, ssrcOffset, csrcOffset, csrcSize, RtpHeader, RtpPacket, CipherAesBase, SrtpAuthenticationError, minRtpHeaderSize, minRtcpPacketSize, CipherAesCtr, srtcpIndexSize, CipherAesGcm, srtcpIndexSize2, rtcpEncryptionFlag, Context, MaxROCDisorder, MaxSequenceNumber, SrtcpContext, maxSRTCPIndex, Session, SrtcpSession, SrtpContext2, SrtpSession, RtpBuilder, log9, Flight5, handlers, ServerHelloVerifyRequest, log10, DtlsContext, TransportContext, EllipticCurves, Signature, Alert, log11, err3, parsePacket, parsePlainText, log12, err4, DtlsSocket, log13, DtlsClient, log14, flight2, log15, Flight4, log16, Flight6, handlers2, log17, DtlsServer, COOKIE, FINGERPRINT_LENGTH, FINGERPRINT_XOR, HEADER_LENGTH, INTEGRITY_LENGTH, IPV4_PROTOCOL, IPV6_PROTOCOL, RETRY_MAX, RETRY_RTO, AttributeKeys, classes, methods, cookieBuffer, packUnsigned, unpackUnsigned, packUnsignedShort, unpackUnsignedShort, packUnsigned64, unpackUnsigned64, packString, unpackString, packSoftware, packBytes, unpackBytes, packNone, unpackNone, ATTRIBUTES, AttributeRepository, ATTRIBUTES_BY_TYPE, ATTRIBUTES_BY_NAME, Message, setBodyLength, TransactionError, TransactionFailed, TransactionTimeout, log18, Transaction, log19, BaseTcpProtocol, TcpActiveProtocol, TcpPassiveProtocol, log20, StunProtocol, PQueue, cancelable, log21, DEFAULT_CHANNEL_REFRESH_TIME, DEFAULT_ALLOCATION_LIFETIME, UDP_TRANSPORT, StunOverTurnProtocol, TurnProtocol, Candidate, UDP_TYPE_PREFERENCE, TCP_TYPE_PREFERENCE, ACTIVE_PASSIVE_DIRECTION_PREFERENCE, REFLEXIVE_DIRECTION_PREFERENCE, MdnsLookup, log22, CandidatePair, ICE_COMPLETED, ICE_FAILED, CONSENT_INTERVAL, CONSENT_FAILURES, CONSENT_TIMEOUT, CONSENT_RESPONSE_TIMEOUT, CONSENT_RESPONSE_TIMEOUT_MIN, CandidatePairState, defaultOptions, logger, url2Address, log23, Connection, encodeTxUsername, decodeTxUsername, EventTarget, log24, RTCDataChannel, RTCDataChannelParameters, useFIR, useNACK, usePLI, useREMB, useTWCC, RTCRtpCodecParameters, RTCRtpHeaderExtensionParameters, RTCRtcpParameters, RTCRtcpFeedback, RTCRtpRtxParameters, RTCRtpCodingParameters, RTCRtpSimulcastParameters, useH264, useVP8, useVP9, useAV1X, useOPUS, usePCMU, supportedCodecs, supportedVideoCodecs, supportedAudioCodecs, DATA_CHANNEL_ACK, DATA_CHANNEL_OPEN, DATA_CHANNEL_RELIABLE, WEBRTC_DCEP, WEBRTC_STRING, WEBRTC_BINARY, WEBRTC_STRING_EMPTY, WEBRTC_BINARY_EMPTY, DISCARD_HOST, DISCARD_PORT, DTLS_ROLE_SETUP, DTLS_SETUP_ROLE, FMTP_INT_PARAMETERS, SSRC_INFO_ATTRS, SRTP_PROFILE, SenderDirections, ReceiverDirection, RTCStatsReport, RTCRtpTransceiver, Inactive, Sendonly, Recvonly, Sendrecv, Directions, MediaStreamTrack, MediaStream, log25, fingerprintHashAlgorithms, andDirection, milliTime, startupTimestampInMicroseconds, microTime, timestampSeconds, ntpTime, ntpTimeToEpochMs, compactNtp, createSelfSignedCertificate, MediaStreamTrackFactory, deepMerge, log26, LOST_SIZE, NackHandler, log27, ReceiverTWCC, StreamStatistics, log28, RTCDtlsTransport, DtlsStates, RTCCertificate, RTCDtlsFingerprint, RTCDtlsParameters, deduplicateFingerprints, preferredFingerprintAlgorithms, selectPreferredFingerprintAlgorithm, IceTransport, createIceTransport, log29, RTCIceTransport, IceTransportStates, IceGathererStates, RTCIceGatherer, RTCIceCandidate, IceCandidate, RTCIceParameters, Chunk, BaseInitChunk, InitChunk, InitAckChunk, ReConfigChunk, ForwardTsnChunk, DataChunk, CookieEchoChunk, CookieAckChunk, BaseParamsChunk, AbortChunk, ErrorChunk, HeartbeatChunk, HeartbeatAckChunk, ReconfigChunk, SackChunk, ShutdownChunk, ShutdownAckChunk, ShutdownCompleteChunk, CHUNK_CLASSES, CHUNK_BY_TYPE, OutgoingSSNResetRequestParam, StreamAddOutgoingParam, reconfigResult, ReconfigResponseParam, RECONFIG_PARAM_BY_TYPES, log30, COOKIE_LENGTH, COOKIE_LIFETIME, MAX_STREAMS, USERDATA_MAX_LENGTH, SCTP_DATA_LAST_FRAG, SCTP_DATA_FIRST_FRAG, SCTP_DATA_UNORDERED, SCTP_MAX_ASSOCIATION_RETRANS, SCTP_MAX_INIT_RETRANS, SCTP_RTO_ALPHA, SCTP_RTO_BETA, SCTP_RTO_INITIAL, SCTP_RTO_MIN, SCTP_RTO_MAX, SCTP_TSN_MODULO, SCTP_SACK_DELAY_MS, SCTP_HEARTBEAT_INTERVAL, RECONFIG_MAX_STREAMS, SCTP_STATE_COOKIE, SCTP_SUPPORTED_CHUNK_EXT, SCTP_PRSCTP_SUPPORTED, SCTPConnectionStates, SCTP, InboundStream, RTCSctpCapabilities, log31, DEFAULT_MAX_MESSAGE_SIZE, RTCSctpTransport, RTCSctpCapabilities2, BridgeDtls, SessionDescription, MediaDescription, GroupDescription, RTCSessionDescription, SsrcDescription, log32, RTCRtpReceiver, log33, RtpRouter, CumulativeResult, COUNTER_MAX, SCORE_MAX, SenderBandwidthEstimator, log34, RTP_HISTORY_SIZE, RTT_ALPHA, RTCRtpSender, log35, SctpTransportManager, SDPManager, log36, SecureTransportManager, srtpProfiles, log37, RTCPeerConnection2, findCodecByMimeType, defaultPeerConfig, RTCTrackEvent, log38, TransceiverManager, SignalingStates, ConnectionStates;
+var import_debug, import_x509, x509, import_binary_data, import_binary_data2, import_tweetnacl, import_binary_data3, import_binary_data4, import_binary_data5, import_binary_data6, import_binary_data7, import_tweetnacl2, import_binary_data8, import_binary_data9, import_binary_data10, import_binary_data11, import_binary_data12, import_binary_data13, import_binary_data14, import_binary_data15, import_binary_data16, import_binary_data17, import_binary_data18, import_binary_data19, import_binary_data20, import_binary_data21, import_binary_data22, import_binary_data23, import_multicast_dns, import_x5092, BitWriter, BitWriter2, BufferChain, dumpBuffer, BitStream, POLY_CRC32, POLY_CRC32C, table32, tables32By16, table32c, tables32cBy16, int, PromiseQueue, interfaceAddress, WeriftError, debug, Event2, EventDisposer, log, UdpTransport, TcpTransport, TlsTransport, StreamTransport, SignatureAlgorithm, HashAlgorithm, CipherSuite, CipherSuiteList, NamedCurveAlgorithm, NamedCurveAlgorithmList, CurveType, SignatureScheme, certificateTypes, signatures, p256Keypair, p256PreMasterSecret, SessionType, AbstractCipher, crypto4, CipherContext, SrtpContext, dumpBuffer2, getObjectSummary, FragmentedHandshake, uint16be, uint24be, buffer, array3, uint8, string4, Extension, ExtensionList, ASN11Cert, ClientCertificateType, DistinguishedName, SignatureHashAlgorithm, ProtocolVersion, DtlsRandom, ClientHello, MACHeader, DtlsPlaintext, createFragments, createPlaintext, AlertDesc, warn, err, Flight, Flight1, log2, Flight3, signTypes, keyTypes, kxTypes, KeyExchange, err2, AEADCipher, cipherSuites, AEAD_AES_128_GCM, AEAD_AES_256_GCM, RSA_KEY_EXCHANGE, ECDHE_RSA_KEY_EXCHANGE, ECDHE_ECDSA_KEY_EXCHANGE, PSK_KEY_EXCHANGE, ECDHE_PSK_KEY_EXCHANGE, ExtendedMasterSecret, RenegotiationIndication, UseSRTP, Certificate2, ChangeCipherSpec, CertificateVerify, ClientKeyExchange, Finished, ServerCertificateRequest, ServerHello, ServerHelloDone, ServerKeyExchange, ProtectionProfileAes128CmHmacSha1_80, ProtectionProfileAeadAes128Gcm, Profiles, keyLength, saltLength, log3, AV1RtpPayload, AV1Obu, OBU_TYPES, OBU_TYPE_IDS, H264RtpPayload, NalUnitType, annex_bNALUStartCode, stap_aHeaderSize, stap_aNALULengthSize, OpusRtpPayload, Vp8RtpPayload, Vp9RtpPayload, DePacketizerBase, depacketizerCodecs, timer, RTCP_HEADER_SIZE, RtcpHeader, FullIntraRequest, PictureLossIndication, ReceiverEstimatedMaxBitrate, log4, RtcpPayloadSpecificFeedback, RtcpRrPacket, RtcpReceiverInfo, RtcpTransportLayerFeedbackType, GenericNack, log5, TransportWideCC, RunLengthChunk, StatusVectorChunk, RecvDelta, PacketChunk, PacketStatus, PacketResult, log6, RtcpTransportLayerFeedback, RtcpSourceDescriptionPacket, SourceDescriptionChunk, SourceDescriptionItem, RtcpSrPacket, RtcpSenderInfo, ntpTime2Sec, log7, RtcpPacketConverter, RTP_EXTENSION_URI, log8, Red, RedHeader, RedEncoder, Max14Uint, RedHandler, ExtensionProfiles, seqNumOffset, timestampOffset, ssrcOffset, csrcOffset, csrcSize, RtpHeader, RtpPacket, CipherAesBase, SrtpAuthenticationError, minRtpHeaderSize, minRtcpPacketSize, CipherAesCtr, srtcpIndexSize, CipherAesGcm, srtcpIndexSize2, rtcpEncryptionFlag, Context, MaxROCDisorder, MaxSequenceNumber, SrtcpContext, maxSRTCPIndex, Session, SrtcpSession, SrtpContext2, SrtpSession, RtpBuilder, log9, Flight5, handlers, ServerHelloVerifyRequest, log10, DtlsContext, TransportContext, EllipticCurves, Signature, Alert, log11, err3, parsePacket, parsePlainText, log12, err4, DtlsSocket, log13, DtlsClient, log14, flight2, log15, Flight4, log16, Flight6, handlers2, log17, DtlsServer, COOKIE, FINGERPRINT_LENGTH, FINGERPRINT_XOR, HEADER_LENGTH, INTEGRITY_LENGTH, IPV4_PROTOCOL, IPV6_PROTOCOL, RETRY_MAX, RETRY_RTO, AttributeKeys, classes, methods, cookieBuffer, packUnsigned, unpackUnsigned, packUnsignedShort, unpackUnsignedShort, packUnsigned64, unpackUnsigned64, packString, unpackString, packSoftware, packBytes, unpackBytes, packNone, unpackNone, ATTRIBUTES, AttributeRepository, ATTRIBUTES_BY_TYPE, ATTRIBUTES_BY_NAME, Message, setBodyLength, TransactionError, TransactionFailed, TransactionTimeout, log18, Transaction, log19, BaseTcpProtocol, TcpActiveProtocol, TcpPassiveProtocol, log20, StunProtocol, PQueue, cancelable, log21, DEFAULT_CHANNEL_REFRESH_TIME, DEFAULT_ALLOCATION_LIFETIME, UDP_TRANSPORT, StunOverTurnProtocol, TurnProtocol, Candidate, UDP_TYPE_PREFERENCE, TCP_TYPE_PREFERENCE, ACTIVE_PASSIVE_DIRECTION_PREFERENCE, REFLEXIVE_DIRECTION_PREFERENCE, MdnsLookup, log22, CandidatePair, ICE_COMPLETED, ICE_FAILED, CONSENT_INTERVAL, CONSENT_FAILURES, CONSENT_TIMEOUT, CONSENT_RESPONSE_TIMEOUT, CONSENT_RESPONSE_TIMEOUT_MIN, CandidatePairState, defaultOptions, logger, url2Address, log23, Connection, encodeTxUsername, decodeTxUsername, EventTarget, log24, RTCDataChannel, RTCDataChannelParameters, useFIR, useNACK, usePLI, useREMB, useTWCC, RTCRtpCodecParameters, RTCRtpHeaderExtensionParameters, RTCRtcpParameters, RTCRtcpFeedback, RTCRtpRtxParameters, RTCRtpCodingParameters, RTCRtpSimulcastParameters, useH264, useVP8, useVP9, useAV1X, useOPUS, usePCMU, supportedCodecs, supportedVideoCodecs, supportedAudioCodecs, DATA_CHANNEL_ACK, DATA_CHANNEL_OPEN, DATA_CHANNEL_RELIABLE, WEBRTC_DCEP, WEBRTC_STRING, WEBRTC_BINARY, WEBRTC_STRING_EMPTY, WEBRTC_BINARY_EMPTY, DISCARD_HOST, DISCARD_PORT, DTLS_ROLE_SETUP, DTLS_SETUP_ROLE, FMTP_INT_PARAMETERS, SSRC_INFO_ATTRS, SRTP_PROFILE, SenderDirections, ReceiverDirection, RTCStatsReport, RTCRtpTransceiver, Inactive, Sendonly, Recvonly, Sendrecv, Directions, MediaStreamTrack, MediaStream, log25, fingerprintHashAlgorithms, andDirection, milliTime, startupTimestampInMicroseconds, microTime, timestampSeconds, ntpTime, ntpTimeToEpochMs, compactNtp, createSelfSignedCertificate, MediaStreamTrackFactory, deepMerge, log26, LOST_SIZE, NackHandler, log27, ReceiverTWCC, StreamStatistics, log28, RTCDtlsTransport, DtlsStates, RTCCertificate, RTCDtlsFingerprint, RTCDtlsParameters, deduplicateFingerprints, preferredFingerprintAlgorithms, selectPreferredFingerprintAlgorithm, IceTransport, createIceTransport, log29, RTCIceTransport, IceTransportStates, IceGathererStates, RTCIceGatherer, RTCIceCandidate, IceCandidate, RTCIceParameters, Chunk, BaseInitChunk, InitChunk, InitAckChunk, ReConfigChunk, ForwardTsnChunk, DataChunk, CookieEchoChunk, CookieAckChunk, BaseParamsChunk, AbortChunk, ErrorChunk, HeartbeatChunk, HeartbeatAckChunk, ReconfigChunk, SackChunk, ShutdownChunk, ShutdownAckChunk, ShutdownCompleteChunk, CHUNK_CLASSES, CHUNK_BY_TYPE, OutgoingSSNResetRequestParam, StreamAddOutgoingParam, reconfigResult, ReconfigResponseParam, RECONFIG_PARAM_BY_TYPES, log30, COOKIE_LENGTH, COOKIE_LIFETIME, MAX_STREAMS, USERDATA_MAX_LENGTH, SCTP_DATA_LAST_FRAG, SCTP_DATA_FIRST_FRAG, SCTP_DATA_UNORDERED, SCTP_MAX_ASSOCIATION_RETRANS, SCTP_MAX_INIT_RETRANS, SCTP_RTO_ALPHA, SCTP_RTO_BETA, SCTP_RTO_INITIAL, SCTP_RTO_MIN, SCTP_RTO_MAX, SCTP_TSN_MODULO, SCTP_SACK_DELAY_MS, SCTP_HEARTBEAT_INTERVAL, RECONFIG_MAX_STREAMS, SCTP_STATE_COOKIE, SCTP_SUPPORTED_CHUNK_EXT, SCTP_PRSCTP_SUPPORTED, SCTPConnectionStates, SCTP, InboundStream, RTCSctpCapabilities, log31, DEFAULT_MAX_MESSAGE_SIZE, RTCSctpTransport, RTCSctpCapabilities2, BridgeDtls, SessionDescription, MediaDescription, GroupDescription, RTCSessionDescription, SsrcDescription, log32, RTCRtpReceiver, log33, RtpRouter, CumulativeResult, COUNTER_MAX, SCORE_MAX, SenderBandwidthEstimator, log34, RTP_HISTORY_SIZE, RTT_ALPHA, RTCRtpSender, log35, SctpTransportManager, SDPManager, log36, SecureTransportManager, srtpProfiles, log37, RTCPeerConnection2, findCodecByMimeType, defaultPeerConfig, RTCTrackEvent, log38, TransceiverManager, SignalingStates, ConnectionStates;
 var init_lib = __esm({
   "node_modules/werift/lib/index.mjs"() {
     import_debug = __toESM(require_src(), 1);
@@ -33910,8 +33933,8 @@ var init_lib = __esm({
         return this.name;
       }
     };
-    crypto5 = webcrypto4;
-    x509.cryptoProvider.set(crypto5);
+    crypto4 = webcrypto3;
+    x509.cryptoProvider.set(crypto4);
     CipherContext = class {
       constructor(sessionType, certPem, keyPem, signatureHashAlgorithm) {
         this.sessionType = sessionType;
@@ -33981,7 +34004,7 @@ var init_lib = __esm({
               };
           }
         })();
-        const keys = await crypto5.subtle.generateKey(alg, true, [
+        const keys = await crypto4.subtle.generateKey(alg, true, [
           "sign",
           "verify"
         ]);
@@ -33995,7 +34018,7 @@ var init_lib = __esm({
         });
         const certPem = cert.toString("pem");
         const keyPem = x509.PemConverter.encode(
-          await crypto5.subtle.exportKey("pkcs8", keys.privateKey),
+          await crypto4.subtle.exportKey("pkcs8", keys.privateKey),
           "private key"
         );
         return { certPem, keyPem, signatureHash };
@@ -44272,10 +44295,10 @@ var init_lib = __esm({
             break;
           case StreamAddOutgoingParam.type:
             {
-              const add4 = param;
-              this._inboundStreamsCount += add4.newStreams;
-              const res = new ReconfigResponseParam(add4.requestSequence, 1);
-              this.reconfigResponseSeq = add4.requestSequence;
+              const add3 = param;
+              this._inboundStreamsCount += add3.newStreams;
+              const res = new ReconfigResponseParam(add3.requestSequence, 1);
+              this.reconfigResponseSeq = add3.requestSequence;
               await this.sendReconfigParam(res);
             }
             break;
@@ -54792,37 +54815,37 @@ __export(external_exports, {
 
 // node_modules/zod/v3/helpers/util.js
 var util;
-(function(util3) {
-  util3.assertEqual = (_) => {
+(function(util2) {
+  util2.assertEqual = (_) => {
   };
   function assertIs(_arg) {
   }
-  util3.assertIs = assertIs;
+  util2.assertIs = assertIs;
   function assertNever(_x) {
     throw new Error();
   }
-  util3.assertNever = assertNever;
-  util3.arrayToEnum = (items) => {
+  util2.assertNever = assertNever;
+  util2.arrayToEnum = (items) => {
     const obj = {};
     for (const item of items) {
       obj[item] = item;
     }
     return obj;
   };
-  util3.getValidEnumValues = (obj) => {
-    const validKeys = util3.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
+  util2.getValidEnumValues = (obj) => {
+    const validKeys = util2.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
     const filtered = {};
     for (const k of validKeys) {
       filtered[k] = obj[k];
     }
-    return util3.objectValues(filtered);
+    return util2.objectValues(filtered);
   };
-  util3.objectValues = (obj) => {
-    return util3.objectKeys(obj).map(function(e) {
+  util2.objectValues = (obj) => {
+    return util2.objectKeys(obj).map(function(e) {
       return obj[e];
     });
   };
-  util3.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object3) => {
+  util2.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object3) => {
     const keys = [];
     for (const key in object3) {
       if (Object.prototype.hasOwnProperty.call(object3, key)) {
@@ -54831,19 +54854,19 @@ var util;
     }
     return keys;
   };
-  util3.find = (arr, checker) => {
+  util2.find = (arr, checker) => {
     for (const item of arr) {
       if (checker(item))
         return item;
     }
     return void 0;
   };
-  util3.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
+  util2.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
   function joinValues(array4, separator = " | ") {
     return array4.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
   }
-  util3.joinValues = joinValues;
-  util3.jsonStringifyReplacer = (_, value) => {
+  util2.joinValues = joinValues;
+  util2.jsonStringifyReplacer = (_, value) => {
     if (typeof value === "bigint") {
       return value.toString();
     }
@@ -54851,8 +54874,8 @@ var util;
   };
 })(util || (util = {}));
 var objectUtil;
-(function(objectUtil3) {
-  objectUtil3.mergeShapes = (first, second) => {
+(function(objectUtil2) {
+  objectUtil2.mergeShapes = (first, second) => {
     return {
       ...first,
       ...second
@@ -55266,9 +55289,9 @@ var isAsync = (x) => typeof Promise !== "undefined" && x instanceof Promise;
 
 // node_modules/zod/v3/helpers/errorUtil.js
 var errorUtil;
-(function(errorUtil3) {
-  errorUtil3.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil3.toString = (message) => typeof message === "string" ? message : message?.message;
+(function(errorUtil2) {
+  errorUtil2.errToObj = (message) => typeof message === "string" ? { message } : message || {};
+  errorUtil2.toString = (message) => typeof message === "string" ? message : message?.message;
 })(errorUtil || (errorUtil = {}));
 
 // node_modules/zod/v3/types.js
@@ -55313,12 +55336,12 @@ var handleResult = (ctx, result) => {
 function processCreateParams(params) {
   if (!params)
     return {};
-  const { errorMap: errorMap3, invalid_type_error, required_error, description } = params;
-  if (errorMap3 && (invalid_type_error || required_error)) {
+  const { errorMap: errorMap2, invalid_type_error, required_error, description } = params;
+  if (errorMap2 && (invalid_type_error || required_error)) {
     throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
   }
-  if (errorMap3)
-    return { errorMap: errorMap3, description };
+  if (errorMap2)
+    return { errorMap: errorMap2, description };
   const customMap = (iss, ctx) => {
     const { message } = params;
     if (iss.code === "invalid_enum_value") {
@@ -58629,43 +58652,43 @@ var late = {
   object: ZodObject.lazycreate
 };
 var ZodFirstPartyTypeKind;
-(function(ZodFirstPartyTypeKind3) {
-  ZodFirstPartyTypeKind3["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind3["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind3["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind3["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind3["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind3["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind3["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind3["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind3["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind3["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind3["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind3["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind3["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind3["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind3["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind3["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind3["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind3["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind3["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind3["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind3["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind3["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind3["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind3["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind3["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind3["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind3["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind3["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind3["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind3["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind3["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind3["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind3["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind3["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind3["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind3["ZodReadonly"] = "ZodReadonly";
+(function(ZodFirstPartyTypeKind2) {
+  ZodFirstPartyTypeKind2["ZodString"] = "ZodString";
+  ZodFirstPartyTypeKind2["ZodNumber"] = "ZodNumber";
+  ZodFirstPartyTypeKind2["ZodNaN"] = "ZodNaN";
+  ZodFirstPartyTypeKind2["ZodBigInt"] = "ZodBigInt";
+  ZodFirstPartyTypeKind2["ZodBoolean"] = "ZodBoolean";
+  ZodFirstPartyTypeKind2["ZodDate"] = "ZodDate";
+  ZodFirstPartyTypeKind2["ZodSymbol"] = "ZodSymbol";
+  ZodFirstPartyTypeKind2["ZodUndefined"] = "ZodUndefined";
+  ZodFirstPartyTypeKind2["ZodNull"] = "ZodNull";
+  ZodFirstPartyTypeKind2["ZodAny"] = "ZodAny";
+  ZodFirstPartyTypeKind2["ZodUnknown"] = "ZodUnknown";
+  ZodFirstPartyTypeKind2["ZodNever"] = "ZodNever";
+  ZodFirstPartyTypeKind2["ZodVoid"] = "ZodVoid";
+  ZodFirstPartyTypeKind2["ZodArray"] = "ZodArray";
+  ZodFirstPartyTypeKind2["ZodObject"] = "ZodObject";
+  ZodFirstPartyTypeKind2["ZodUnion"] = "ZodUnion";
+  ZodFirstPartyTypeKind2["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
+  ZodFirstPartyTypeKind2["ZodIntersection"] = "ZodIntersection";
+  ZodFirstPartyTypeKind2["ZodTuple"] = "ZodTuple";
+  ZodFirstPartyTypeKind2["ZodRecord"] = "ZodRecord";
+  ZodFirstPartyTypeKind2["ZodMap"] = "ZodMap";
+  ZodFirstPartyTypeKind2["ZodSet"] = "ZodSet";
+  ZodFirstPartyTypeKind2["ZodFunction"] = "ZodFunction";
+  ZodFirstPartyTypeKind2["ZodLazy"] = "ZodLazy";
+  ZodFirstPartyTypeKind2["ZodLiteral"] = "ZodLiteral";
+  ZodFirstPartyTypeKind2["ZodEnum"] = "ZodEnum";
+  ZodFirstPartyTypeKind2["ZodEffects"] = "ZodEffects";
+  ZodFirstPartyTypeKind2["ZodNativeEnum"] = "ZodNativeEnum";
+  ZodFirstPartyTypeKind2["ZodOptional"] = "ZodOptional";
+  ZodFirstPartyTypeKind2["ZodNullable"] = "ZodNullable";
+  ZodFirstPartyTypeKind2["ZodDefault"] = "ZodDefault";
+  ZodFirstPartyTypeKind2["ZodCatch"] = "ZodCatch";
+  ZodFirstPartyTypeKind2["ZodPromise"] = "ZodPromise";
+  ZodFirstPartyTypeKind2["ZodBranded"] = "ZodBranded";
+  ZodFirstPartyTypeKind2["ZodPipeline"] = "ZodPipeline";
+  ZodFirstPartyTypeKind2["ZodReadonly"] = "ZodReadonly";
 })(ZodFirstPartyTypeKind || (ZodFirstPartyTypeKind = {}));
 var instanceOfType = (cls, params = {
   message: `Input not instance of ${cls.name}`
@@ -59344,9 +59367,9 @@ var RemoteGatewayError = class extends Error {
   }
 };
 function createRemoteId() {
-  const crypto6 = globalThis.crypto;
-  if (crypto6?.randomUUID !== void 0)
-    return crypto6.randomUUID();
+  const crypto5 = globalThis.crypto;
+  if (crypto5?.randomUUID !== void 0)
+    return crypto5.randomUUID();
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
@@ -60211,7 +60234,7 @@ var RemoteClientCore = class {
       return;
     this.closeNotified = false;
     this.unsubscribeTransport = this.transport.onMessage((data2) => this.handleMessage(data2));
-    this.unsubscribeClose = this.transport.onClose?.(() => this.handleTransportClose());
+    this.unsubscribeClose = this.transport.onClose?.((error) => this.handleTransportClose(error));
     try {
       await this.transport.connect();
     } catch (error) {
@@ -60275,12 +60298,12 @@ var RemoteClientCore = class {
     this.unsubscribeClose?.();
     this.unsubscribeClose = void 0;
     this.rejectAllPending((pending) => new RemoteClientError("CLIENT_CLOSED", `RPC ${pending.method} terminated because the remote client closed`));
-    this.notifyClose();
+    this.notifyClose(new RemoteClientError("CLIENT_CLOSED", "The remote client was closed."));
     await this.transport.close();
   }
-  handleTransportClose() {
+  handleTransportClose(error) {
     this.rejectAllPending((pending) => new RemoteClientError("TRANSPORT_CLOSED", `RPC ${pending.method} terminated because the remote transport closed`));
-    this.notifyClose();
+    this.notifyClose(error);
   }
   handleMessage(data2) {
     const message = decodeMessage(data2);
@@ -60329,12 +60352,12 @@ var RemoteClientCore = class {
         pending.reject(createError(pending));
     }
   }
-  notifyClose() {
+  notifyClose(error) {
     if (this.closeNotified)
       return;
     this.closeNotified = true;
     for (const handler of this.closeHandlers)
-      handler();
+      handler(error);
   }
 };
 function rpcAbortedError(method, reason) {
@@ -62265,9 +62288,9 @@ var BaseTransport = class {
     for (const handler of this.handlers)
       handler(data2);
   }
-  emitClose() {
+  emitClose(error) {
     for (const handler of this.closeHandlers)
-      handler();
+      handler(error);
   }
 };
 
@@ -63552,7 +63575,7 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "connect.rejected" || frame.type === "error") {
         const payload = frame.payload;
         const message = typeof payload.message === "string" ? payload.message : "Server rejected the connection";
-        throw Object.assign(new Error(message), { code: payload.code });
+        throw Object.assign(new Error(message), { code: payload.code, retryable: payload.retryable });
       }
       if (frame.type === "relay") {
         if (this.dataMode !== "relay")
@@ -63589,7 +63612,10 @@ var AdaptiveTransport = class extends BaseTransport {
       if (frame.type === "ping")
         this.sendControl("pong", frame.payload);
     } catch (error) {
-      this.failConnection(error instanceof Error ? error : new Error("Invalid adaptive control frame"), { reason: "invalid-control-frame" });
+      const failure4 = error instanceof Error ? error : new Error("Invalid adaptive control frame");
+      if (!("code" in failure4))
+        Object.assign(failure4, { code: "INVALID_MESSAGE" });
+      this.failConnection(failure4, { reason: "invalid-control-frame" });
     }
   }
   handleRelay(payload) {
@@ -63782,7 +63808,7 @@ var AdaptiveTransport = class extends BaseTransport {
   }
   sendControl(type, payload) {
     if (this.socket?.readyState !== WebSocket.OPEN)
-      throw new Error("adaptive control socket is not open");
+      throw Object.assign(new Error("adaptive control socket is not open"), { code: "TRANSPORT_CLOSED" });
     this.socket.send(encodeControlFrame(createControlFrame(type, payload), this.controlFrameLimits));
     this.lastControlSentAt = Date.now();
   }
@@ -63822,7 +63848,7 @@ var AdaptiveTransport = class extends BaseTransport {
       }
     }
     if (socket !== void 0)
-      this.emitClose();
+      this.emitClose(error);
   }
   clearHandshake() {
     if (this.handshakeTimer !== void 0)
@@ -63833,7 +63859,10 @@ var AdaptiveTransport = class extends BaseTransport {
 function adaptiveControlCloseError(event) {
   const reason = event.reason.trim().slice(0, 300);
   const detail = reason.length > 0 ? `${reason} (WebSocket ${event.code})` : `WebSocket closed with code ${event.code}`;
-  return new Error(`Adaptive control channel closed before it was ready: ${detail}`);
+  return Object.assign(new Error(`Adaptive control channel closed: ${detail}`), {
+    code: event.code === 4003 ? "CONNECTION_REPLACED" : "TRANSPORT_CLOSED",
+    retryable: event.code === 1e3 || event.code === 1001 || event.code === 1006 || event.code === 1011 || event.code === 1012 || event.code === 1013
+  });
 }
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -64212,1197 +64241,15 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// node_modules/@noble/hashes/esm/cryptoNode.js
-import * as nc2 from "node:crypto";
-var crypto3 = nc2 && typeof nc2 === "object" && "webcrypto" in nc2 ? nc2.webcrypto : nc2 && typeof nc2 === "object" && "randomBytes" in nc2 ? nc2 : void 0;
-
-// node_modules/@noble/hashes/esm/utils.js
-function isBytes(a) {
-  return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
-}
-function anumber(n) {
-  if (!Number.isSafeInteger(n) || n < 0)
-    throw new Error("positive integer expected, got " + n);
-}
-function abytes(b, ...lengths) {
-  if (!isBytes(b))
-    throw new Error("Uint8Array expected");
-  if (lengths.length > 0 && !lengths.includes(b.length))
-    throw new Error("Uint8Array expected of length " + lengths + ", got length=" + b.length);
-}
-function aexists(instance, checkFinished = true) {
-  if (instance.destroyed)
-    throw new Error("Hash instance has been destroyed");
-  if (checkFinished && instance.finished)
-    throw new Error("Hash#digest() has already been called");
-}
-function aoutput(out, instance) {
-  abytes(out);
-  const min = instance.outputLen;
-  if (out.length < min) {
-    throw new Error("digestInto() expects output buffer of length at least " + min);
-  }
-}
-function clean(...arrays) {
-  for (let i = 0; i < arrays.length; i++) {
-    arrays[i].fill(0);
-  }
-}
-function createView(arr) {
-  return new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
-}
-var hasHexBuiltin = /* @__PURE__ */ (() => (
-  // @ts-ignore
-  typeof Uint8Array.from([]).toHex === "function" && typeof Uint8Array.fromHex === "function"
-))();
-var hexes = /* @__PURE__ */ Array.from({ length: 256 }, (_, i) => i.toString(16).padStart(2, "0"));
-function bytesToHex(bytes) {
-  abytes(bytes);
-  if (hasHexBuiltin)
-    return bytes.toHex();
-  let hex = "";
-  for (let i = 0; i < bytes.length; i++) {
-    hex += hexes[bytes[i]];
-  }
-  return hex;
-}
-var asciis = { _0: 48, _9: 57, A: 65, F: 70, a: 97, f: 102 };
-function asciiToBase16(ch) {
-  if (ch >= asciis._0 && ch <= asciis._9)
-    return ch - asciis._0;
-  if (ch >= asciis.A && ch <= asciis.F)
-    return ch - (asciis.A - 10);
-  if (ch >= asciis.a && ch <= asciis.f)
-    return ch - (asciis.a - 10);
-  return;
-}
-function hexToBytes(hex) {
-  if (typeof hex !== "string")
-    throw new Error("hex string expected, got " + typeof hex);
-  if (hasHexBuiltin)
-    return Uint8Array.fromHex(hex);
-  const hl = hex.length;
-  const al = hl / 2;
-  if (hl % 2)
-    throw new Error("hex string expected, got unpadded hex of length " + hl);
-  const array4 = new Uint8Array(al);
-  for (let ai = 0, hi = 0; ai < al; ai++, hi += 2) {
-    const n1 = asciiToBase16(hex.charCodeAt(hi));
-    const n2 = asciiToBase16(hex.charCodeAt(hi + 1));
-    if (n1 === void 0 || n2 === void 0) {
-      const char = hex[hi] + hex[hi + 1];
-      throw new Error('hex string expected, got non-hex character "' + char + '" at index ' + hi);
-    }
-    array4[ai] = n1 * 16 + n2;
-  }
-  return array4;
-}
-function utf8ToBytes(str) {
-  if (typeof str !== "string")
-    throw new Error("string expected");
-  return new Uint8Array(new TextEncoder().encode(str));
-}
-function toBytes(data2) {
-  if (typeof data2 === "string")
-    data2 = utf8ToBytes(data2);
-  abytes(data2);
-  return data2;
-}
-function concatBytes(...arrays) {
-  let sum = 0;
-  for (let i = 0; i < arrays.length; i++) {
-    const a = arrays[i];
-    abytes(a);
-    sum += a.length;
-  }
-  const res = new Uint8Array(sum);
-  for (let i = 0, pad = 0; i < arrays.length; i++) {
-    const a = arrays[i];
-    res.set(a, pad);
-    pad += a.length;
-  }
-  return res;
-}
-var Hash = class {
-};
-function createHasher(hashCons) {
-  const hashC = (msg) => hashCons().update(toBytes(msg)).digest();
-  const tmp = hashCons();
-  hashC.outputLen = tmp.outputLen;
-  hashC.blockLen = tmp.blockLen;
-  hashC.create = () => hashCons();
-  return hashC;
-}
-function randomBytes2(bytesLength = 32) {
-  if (crypto3 && typeof crypto3.getRandomValues === "function") {
-    return crypto3.getRandomValues(new Uint8Array(bytesLength));
-  }
-  if (crypto3 && typeof crypto3.randomBytes === "function") {
-    return Uint8Array.from(crypto3.randomBytes(bytesLength));
-  }
-  throw new Error("crypto.getRandomValues must be defined");
-}
-
-// node_modules/@noble/hashes/esm/_md.js
-function setBigUint64(view, byteOffset, value, isLE3) {
-  if (typeof view.setBigUint64 === "function")
-    return view.setBigUint64(byteOffset, value, isLE3);
-  const _32n4 = BigInt(32);
-  const _u32_max = BigInt(4294967295);
-  const wh = Number(value >> _32n4 & _u32_max);
-  const wl = Number(value & _u32_max);
-  const h = isLE3 ? 4 : 0;
-  const l = isLE3 ? 0 : 4;
-  view.setUint32(byteOffset + h, wh, isLE3);
-  view.setUint32(byteOffset + l, wl, isLE3);
-}
-var HashMD = class extends Hash {
-  constructor(blockLen, outputLen, padOffset, isLE3) {
-    super();
-    this.finished = false;
-    this.length = 0;
-    this.pos = 0;
-    this.destroyed = false;
-    this.blockLen = blockLen;
-    this.outputLen = outputLen;
-    this.padOffset = padOffset;
-    this.isLE = isLE3;
-    this.buffer = new Uint8Array(blockLen);
-    this.view = createView(this.buffer);
-  }
-  update(data2) {
-    aexists(this);
-    data2 = toBytes(data2);
-    abytes(data2);
-    const { view, buffer: buffer2, blockLen } = this;
-    const len = data2.length;
-    for (let pos = 0; pos < len; ) {
-      const take = Math.min(blockLen - this.pos, len - pos);
-      if (take === blockLen) {
-        const dataView = createView(data2);
-        for (; blockLen <= len - pos; pos += blockLen)
-          this.process(dataView, pos);
-        continue;
-      }
-      buffer2.set(data2.subarray(pos, pos + take), this.pos);
-      this.pos += take;
-      pos += take;
-      if (this.pos === blockLen) {
-        this.process(view, 0);
-        this.pos = 0;
-      }
-    }
-    this.length += data2.length;
-    this.roundClean();
-    return this;
-  }
-  digestInto(out) {
-    aexists(this);
-    aoutput(out, this);
-    this.finished = true;
-    const { buffer: buffer2, view, blockLen, isLE: isLE3 } = this;
-    let { pos } = this;
-    buffer2[pos++] = 128;
-    clean(this.buffer.subarray(pos));
-    if (this.padOffset > blockLen - pos) {
-      this.process(view, 0);
-      pos = 0;
-    }
-    for (let i = pos; i < blockLen; i++)
-      buffer2[i] = 0;
-    setBigUint64(view, blockLen - 8, BigInt(this.length * 8), isLE3);
-    this.process(view, 0);
-    const oview = createView(out);
-    const len = this.outputLen;
-    if (len % 4)
-      throw new Error("_sha2: outputLen should be aligned to 32bit");
-    const outLen = len / 4;
-    const state = this.get();
-    if (outLen > state.length)
-      throw new Error("_sha2: outputLen bigger than state");
-    for (let i = 0; i < outLen; i++)
-      oview.setUint32(4 * i, state[i], isLE3);
-  }
-  digest() {
-    const { buffer: buffer2, outputLen } = this;
-    this.digestInto(buffer2);
-    const res = buffer2.slice(0, outputLen);
-    this.destroy();
-    return res;
-  }
-  _cloneInto(to) {
-    to || (to = new this.constructor());
-    to.set(...this.get());
-    const { blockLen, buffer: buffer2, length, finished, destroyed, pos } = this;
-    to.destroyed = destroyed;
-    to.finished = finished;
-    to.length = length;
-    to.pos = pos;
-    if (length % blockLen)
-      to.buffer.set(buffer2);
-    return to;
-  }
-  clone() {
-    return this._cloneInto();
-  }
-};
-var SHA512_IV = /* @__PURE__ */ Uint32Array.from([
-  1779033703,
-  4089235720,
-  3144134277,
-  2227873595,
-  1013904242,
-  4271175723,
-  2773480762,
-  1595750129,
-  1359893119,
-  2917565137,
-  2600822924,
-  725511199,
-  528734635,
-  4215389547,
-  1541459225,
-  327033209
-]);
-
-// node_modules/@noble/hashes/esm/_u64.js
-var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
-var _32n = /* @__PURE__ */ BigInt(32);
-function fromBig(n, le = false) {
-  if (le)
-    return { h: Number(n & U32_MASK64), l: Number(n >> _32n & U32_MASK64) };
-  return { h: Number(n >> _32n & U32_MASK64) | 0, l: Number(n & U32_MASK64) | 0 };
-}
-function split(lst, le = false) {
-  const len = lst.length;
-  let Ah = new Uint32Array(len);
-  let Al = new Uint32Array(len);
-  for (let i = 0; i < len; i++) {
-    const { h, l } = fromBig(lst[i], le);
-    [Ah[i], Al[i]] = [h, l];
-  }
-  return [Ah, Al];
-}
-var shrSH = (h, _l, s2) => h >>> s2;
-var shrSL = (h, l, s2) => h << 32 - s2 | l >>> s2;
-var rotrSH = (h, l, s2) => h >>> s2 | l << 32 - s2;
-var rotrSL = (h, l, s2) => h << 32 - s2 | l >>> s2;
-var rotrBH = (h, l, s2) => h << 64 - s2 | l >>> s2 - 32;
-var rotrBL = (h, l, s2) => h >>> s2 - 32 | l << 64 - s2;
-function add(Ah, Al, Bh, Bl) {
-  const l = (Al >>> 0) + (Bl >>> 0);
-  return { h: Ah + Bh + (l / 2 ** 32 | 0) | 0, l: l | 0 };
-}
-var add3L = (Al, Bl, Cl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0);
-var add3H = (low, Ah, Bh, Ch) => Ah + Bh + Ch + (low / 2 ** 32 | 0) | 0;
-var add4L = (Al, Bl, Cl, Dl) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0);
-var add4H = (low, Ah, Bh, Ch, Dh) => Ah + Bh + Ch + Dh + (low / 2 ** 32 | 0) | 0;
-var add5L = (Al, Bl, Cl, Dl, El) => (Al >>> 0) + (Bl >>> 0) + (Cl >>> 0) + (Dl >>> 0) + (El >>> 0);
-var add5H = (low, Ah, Bh, Ch, Dh, Eh) => Ah + Bh + Ch + Dh + Eh + (low / 2 ** 32 | 0) | 0;
-
-// node_modules/@noble/hashes/esm/sha2.js
-var K512 = /* @__PURE__ */ (() => split([
-  "0x428a2f98d728ae22",
-  "0x7137449123ef65cd",
-  "0xb5c0fbcfec4d3b2f",
-  "0xe9b5dba58189dbbc",
-  "0x3956c25bf348b538",
-  "0x59f111f1b605d019",
-  "0x923f82a4af194f9b",
-  "0xab1c5ed5da6d8118",
-  "0xd807aa98a3030242",
-  "0x12835b0145706fbe",
-  "0x243185be4ee4b28c",
-  "0x550c7dc3d5ffb4e2",
-  "0x72be5d74f27b896f",
-  "0x80deb1fe3b1696b1",
-  "0x9bdc06a725c71235",
-  "0xc19bf174cf692694",
-  "0xe49b69c19ef14ad2",
-  "0xefbe4786384f25e3",
-  "0x0fc19dc68b8cd5b5",
-  "0x240ca1cc77ac9c65",
-  "0x2de92c6f592b0275",
-  "0x4a7484aa6ea6e483",
-  "0x5cb0a9dcbd41fbd4",
-  "0x76f988da831153b5",
-  "0x983e5152ee66dfab",
-  "0xa831c66d2db43210",
-  "0xb00327c898fb213f",
-  "0xbf597fc7beef0ee4",
-  "0xc6e00bf33da88fc2",
-  "0xd5a79147930aa725",
-  "0x06ca6351e003826f",
-  "0x142929670a0e6e70",
-  "0x27b70a8546d22ffc",
-  "0x2e1b21385c26c926",
-  "0x4d2c6dfc5ac42aed",
-  "0x53380d139d95b3df",
-  "0x650a73548baf63de",
-  "0x766a0abb3c77b2a8",
-  "0x81c2c92e47edaee6",
-  "0x92722c851482353b",
-  "0xa2bfe8a14cf10364",
-  "0xa81a664bbc423001",
-  "0xc24b8b70d0f89791",
-  "0xc76c51a30654be30",
-  "0xd192e819d6ef5218",
-  "0xd69906245565a910",
-  "0xf40e35855771202a",
-  "0x106aa07032bbd1b8",
-  "0x19a4c116b8d2d0c8",
-  "0x1e376c085141ab53",
-  "0x2748774cdf8eeb99",
-  "0x34b0bcb5e19b48a8",
-  "0x391c0cb3c5c95a63",
-  "0x4ed8aa4ae3418acb",
-  "0x5b9cca4f7763e373",
-  "0x682e6ff3d6b2b8a3",
-  "0x748f82ee5defb2fc",
-  "0x78a5636f43172f60",
-  "0x84c87814a1f0ab72",
-  "0x8cc702081a6439ec",
-  "0x90befffa23631e28",
-  "0xa4506cebde82bde9",
-  "0xbef9a3f7b2c67915",
-  "0xc67178f2e372532b",
-  "0xca273eceea26619c",
-  "0xd186b8c721c0c207",
-  "0xeada7dd6cde0eb1e",
-  "0xf57d4f7fee6ed178",
-  "0x06f067aa72176fba",
-  "0x0a637dc5a2c898a6",
-  "0x113f9804bef90dae",
-  "0x1b710b35131c471b",
-  "0x28db77f523047d84",
-  "0x32caab7b40c72493",
-  "0x3c9ebe0a15c9bebc",
-  "0x431d67c49c100d4c",
-  "0x4cc5d4becb3e42b6",
-  "0x597f299cfc657e2a",
-  "0x5fcb6fab3ad6faec",
-  "0x6c44198c4a475817"
-].map((n) => BigInt(n))))();
-var SHA512_Kh = /* @__PURE__ */ (() => K512[0])();
-var SHA512_Kl = /* @__PURE__ */ (() => K512[1])();
-var SHA512_W_H = /* @__PURE__ */ new Uint32Array(80);
-var SHA512_W_L = /* @__PURE__ */ new Uint32Array(80);
-var SHA512 = class extends HashMD {
-  constructor(outputLen = 64) {
-    super(128, outputLen, 16, false);
-    this.Ah = SHA512_IV[0] | 0;
-    this.Al = SHA512_IV[1] | 0;
-    this.Bh = SHA512_IV[2] | 0;
-    this.Bl = SHA512_IV[3] | 0;
-    this.Ch = SHA512_IV[4] | 0;
-    this.Cl = SHA512_IV[5] | 0;
-    this.Dh = SHA512_IV[6] | 0;
-    this.Dl = SHA512_IV[7] | 0;
-    this.Eh = SHA512_IV[8] | 0;
-    this.El = SHA512_IV[9] | 0;
-    this.Fh = SHA512_IV[10] | 0;
-    this.Fl = SHA512_IV[11] | 0;
-    this.Gh = SHA512_IV[12] | 0;
-    this.Gl = SHA512_IV[13] | 0;
-    this.Hh = SHA512_IV[14] | 0;
-    this.Hl = SHA512_IV[15] | 0;
-  }
-  // prettier-ignore
-  get() {
-    const { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-    return [Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl];
-  }
-  // prettier-ignore
-  set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl) {
-    this.Ah = Ah | 0;
-    this.Al = Al | 0;
-    this.Bh = Bh | 0;
-    this.Bl = Bl | 0;
-    this.Ch = Ch | 0;
-    this.Cl = Cl | 0;
-    this.Dh = Dh | 0;
-    this.Dl = Dl | 0;
-    this.Eh = Eh | 0;
-    this.El = El | 0;
-    this.Fh = Fh | 0;
-    this.Fl = Fl | 0;
-    this.Gh = Gh | 0;
-    this.Gl = Gl | 0;
-    this.Hh = Hh | 0;
-    this.Hl = Hl | 0;
-  }
-  process(view, offset) {
-    for (let i = 0; i < 16; i++, offset += 4) {
-      SHA512_W_H[i] = view.getUint32(offset);
-      SHA512_W_L[i] = view.getUint32(offset += 4);
-    }
-    for (let i = 16; i < 80; i++) {
-      const W15h = SHA512_W_H[i - 15] | 0;
-      const W15l = SHA512_W_L[i - 15] | 0;
-      const s0h = rotrSH(W15h, W15l, 1) ^ rotrSH(W15h, W15l, 8) ^ shrSH(W15h, W15l, 7);
-      const s0l = rotrSL(W15h, W15l, 1) ^ rotrSL(W15h, W15l, 8) ^ shrSL(W15h, W15l, 7);
-      const W2h = SHA512_W_H[i - 2] | 0;
-      const W2l = SHA512_W_L[i - 2] | 0;
-      const s1h = rotrSH(W2h, W2l, 19) ^ rotrBH(W2h, W2l, 61) ^ shrSH(W2h, W2l, 6);
-      const s1l = rotrSL(W2h, W2l, 19) ^ rotrBL(W2h, W2l, 61) ^ shrSL(W2h, W2l, 6);
-      const SUMl = add4L(s0l, s1l, SHA512_W_L[i - 7], SHA512_W_L[i - 16]);
-      const SUMh = add4H(SUMl, s0h, s1h, SHA512_W_H[i - 7], SHA512_W_H[i - 16]);
-      SHA512_W_H[i] = SUMh | 0;
-      SHA512_W_L[i] = SUMl | 0;
-    }
-    let { Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl } = this;
-    for (let i = 0; i < 80; i++) {
-      const sigma1h = rotrSH(Eh, El, 14) ^ rotrSH(Eh, El, 18) ^ rotrBH(Eh, El, 41);
-      const sigma1l = rotrSL(Eh, El, 14) ^ rotrSL(Eh, El, 18) ^ rotrBL(Eh, El, 41);
-      const CHIh = Eh & Fh ^ ~Eh & Gh;
-      const CHIl = El & Fl ^ ~El & Gl;
-      const T1ll = add5L(Hl, sigma1l, CHIl, SHA512_Kl[i], SHA512_W_L[i]);
-      const T1h = add5H(T1ll, Hh, sigma1h, CHIh, SHA512_Kh[i], SHA512_W_H[i]);
-      const T1l = T1ll | 0;
-      const sigma0h = rotrSH(Ah, Al, 28) ^ rotrBH(Ah, Al, 34) ^ rotrBH(Ah, Al, 39);
-      const sigma0l = rotrSL(Ah, Al, 28) ^ rotrBL(Ah, Al, 34) ^ rotrBL(Ah, Al, 39);
-      const MAJh = Ah & Bh ^ Ah & Ch ^ Bh & Ch;
-      const MAJl = Al & Bl ^ Al & Cl ^ Bl & Cl;
-      Hh = Gh | 0;
-      Hl = Gl | 0;
-      Gh = Fh | 0;
-      Gl = Fl | 0;
-      Fh = Eh | 0;
-      Fl = El | 0;
-      ({ h: Eh, l: El } = add(Dh | 0, Dl | 0, T1h | 0, T1l | 0));
-      Dh = Ch | 0;
-      Dl = Cl | 0;
-      Ch = Bh | 0;
-      Cl = Bl | 0;
-      Bh = Ah | 0;
-      Bl = Al | 0;
-      const All = add3L(T1l, sigma0l, MAJl);
-      Ah = add3H(All, T1h, sigma0h, MAJh);
-      Al = All | 0;
-    }
-    ({ h: Ah, l: Al } = add(this.Ah | 0, this.Al | 0, Ah | 0, Al | 0));
-    ({ h: Bh, l: Bl } = add(this.Bh | 0, this.Bl | 0, Bh | 0, Bl | 0));
-    ({ h: Ch, l: Cl } = add(this.Ch | 0, this.Cl | 0, Ch | 0, Cl | 0));
-    ({ h: Dh, l: Dl } = add(this.Dh | 0, this.Dl | 0, Dh | 0, Dl | 0));
-    ({ h: Eh, l: El } = add(this.Eh | 0, this.El | 0, Eh | 0, El | 0));
-    ({ h: Fh, l: Fl } = add(this.Fh | 0, this.Fl | 0, Fh | 0, Fl | 0));
-    ({ h: Gh, l: Gl } = add(this.Gh | 0, this.Gl | 0, Gh | 0, Gl | 0));
-    ({ h: Hh, l: Hl } = add(this.Hh | 0, this.Hl | 0, Hh | 0, Hl | 0));
-    this.set(Ah, Al, Bh, Bl, Ch, Cl, Dh, Dl, Eh, El, Fh, Fl, Gh, Gl, Hh, Hl);
-  }
-  roundClean() {
-    clean(SHA512_W_H, SHA512_W_L);
-  }
-  destroy() {
-    clean(this.buffer);
-    this.set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-  }
-};
-var sha512 = /* @__PURE__ */ createHasher(() => new SHA512());
-
-// node_modules/@noble/curves/esm/utils.js
-var _0n = /* @__PURE__ */ BigInt(0);
-var _1n = /* @__PURE__ */ BigInt(1);
-function _abool2(value, title = "") {
-  if (typeof value !== "boolean") {
-    const prefix = title && `"${title}"`;
-    throw new Error(prefix + "expected boolean, got type=" + typeof value);
-  }
-  return value;
-}
-function _abytes2(value, length, title = "") {
-  const bytes = isBytes(value);
-  const len = value?.length;
-  const needsLen = length !== void 0;
-  if (!bytes || needsLen && len !== length) {
-    const prefix = title && `"${title}" `;
-    const ofLen = needsLen ? ` of length ${length}` : "";
-    const got = bytes ? `length=${len}` : `type=${typeof value}`;
-    throw new Error(prefix + "expected Uint8Array" + ofLen + ", got " + got);
-  }
-  return value;
-}
-function hexToNumber(hex) {
-  if (typeof hex !== "string")
-    throw new Error("hex string expected, got " + typeof hex);
-  return hex === "" ? _0n : BigInt("0x" + hex);
-}
-function bytesToNumberBE(bytes) {
-  return hexToNumber(bytesToHex(bytes));
-}
-function bytesToNumberLE(bytes) {
-  abytes(bytes);
-  return hexToNumber(bytesToHex(Uint8Array.from(bytes).reverse()));
-}
-function numberToBytesBE(n, len) {
-  return hexToBytes(n.toString(16).padStart(len * 2, "0"));
-}
-function numberToBytesLE(n, len) {
-  return numberToBytesBE(n, len).reverse();
-}
-function ensureBytes(title, hex, expectedLength) {
-  let res;
-  if (typeof hex === "string") {
-    try {
-      res = hexToBytes(hex);
-    } catch (e) {
-      throw new Error(title + " must be hex string or Uint8Array, cause: " + e);
-    }
-  } else if (isBytes(hex)) {
-    res = Uint8Array.from(hex);
-  } else {
-    throw new Error(title + " must be hex string or Uint8Array");
-  }
-  const len = res.length;
-  if (typeof expectedLength === "number" && len !== expectedLength)
-    throw new Error(title + " of length " + expectedLength + " expected, got " + len);
-  return res;
-}
-function equalBytes(a, b) {
-  if (a.length !== b.length)
-    return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++)
-    diff |= a[i] ^ b[i];
-  return diff === 0;
-}
-function copyBytes(bytes) {
-  return Uint8Array.from(bytes);
-}
-var isPosBig = (n) => typeof n === "bigint" && _0n <= n;
-function inRange(n, min, max) {
-  return isPosBig(n) && isPosBig(min) && isPosBig(max) && min <= n && n < max;
-}
-function aInRange(title, n, min, max) {
-  if (!inRange(n, min, max))
-    throw new Error("expected valid " + title + ": " + min + " <= n < " + max + ", got " + n);
-}
-function bitLen(n) {
-  let len;
-  for (len = 0; n > _0n; n >>= _1n, len += 1)
-    ;
-  return len;
-}
-var bitMask = (n) => (_1n << BigInt(n)) - _1n;
-function _validateObject(object3, fields, optFields = {}) {
-  if (!object3 || typeof object3 !== "object")
-    throw new Error("expected valid options object");
-  function checkField(fieldName, expectedType, isOpt) {
-    const val = object3[fieldName];
-    if (isOpt && val === void 0)
-      return;
-    const current = typeof val;
-    if (current !== expectedType || val === null)
-      throw new Error(`param "${fieldName}" is invalid: expected ${expectedType}, got ${current}`);
-  }
-  Object.entries(fields).forEach(([k, v]) => checkField(k, v, false));
-  Object.entries(optFields).forEach(([k, v]) => checkField(k, v, true));
-}
-var notImplemented = () => {
-  throw new Error("not implemented");
-};
-function memoized(fn) {
-  const map = /* @__PURE__ */ new WeakMap();
-  return (arg, ...args) => {
-    const val = map.get(arg);
-    if (val !== void 0)
-      return val;
-    const computed = fn(arg, ...args);
-    map.set(arg, computed);
-    return computed;
-  };
-}
-
-// node_modules/@noble/curves/esm/abstract/modular.js
-var _0n2 = BigInt(0);
-var _1n2 = BigInt(1);
-var _2n = /* @__PURE__ */ BigInt(2);
-var _3n = /* @__PURE__ */ BigInt(3);
-var _4n = /* @__PURE__ */ BigInt(4);
-var _5n = /* @__PURE__ */ BigInt(5);
-var _7n = /* @__PURE__ */ BigInt(7);
-var _8n = /* @__PURE__ */ BigInt(8);
-var _9n = /* @__PURE__ */ BigInt(9);
-var _16n = /* @__PURE__ */ BigInt(16);
-function mod(a, b) {
-  const result = a % b;
-  return result >= _0n2 ? result : b + result;
-}
-function pow2(x, power, modulo) {
-  let res = x;
-  while (power-- > _0n2) {
-    res *= res;
-    res %= modulo;
-  }
-  return res;
-}
-function invert(number, modulo) {
-  if (number === _0n2)
-    throw new Error("invert: expected non-zero number");
-  if (modulo <= _0n2)
-    throw new Error("invert: expected positive modulus, got " + modulo);
-  let a = mod(number, modulo);
-  let b = modulo;
-  let x = _0n2, y = _1n2, u = _1n2, v = _0n2;
-  while (a !== _0n2) {
-    const q = b / a;
-    const r = b % a;
-    const m = x - u * q;
-    const n = y - v * q;
-    b = a, a = r, x = u, y = v, u = m, v = n;
-  }
-  const gcd = b;
-  if (gcd !== _1n2)
-    throw new Error("invert: does not exist");
-  return mod(x, modulo);
-}
-function assertIsSquare(Fp2, root, n) {
-  if (!Fp2.eql(Fp2.sqr(root), n))
-    throw new Error("Cannot find square root");
-}
-function sqrt3mod4(Fp2, n) {
-  const p1div4 = (Fp2.ORDER + _1n2) / _4n;
-  const root = Fp2.pow(n, p1div4);
-  assertIsSquare(Fp2, root, n);
-  return root;
-}
-function sqrt5mod8(Fp2, n) {
-  const p5div8 = (Fp2.ORDER - _5n) / _8n;
-  const n2 = Fp2.mul(n, _2n);
-  const v = Fp2.pow(n2, p5div8);
-  const nv = Fp2.mul(n, v);
-  const i = Fp2.mul(Fp2.mul(nv, _2n), v);
-  const root = Fp2.mul(nv, Fp2.sub(i, Fp2.ONE));
-  assertIsSquare(Fp2, root, n);
-  return root;
-}
-function sqrt9mod16(P) {
-  const Fp_ = Field(P);
-  const tn = tonelliShanks(P);
-  const c1 = tn(Fp_, Fp_.neg(Fp_.ONE));
-  const c2 = tn(Fp_, c1);
-  const c3 = tn(Fp_, Fp_.neg(c1));
-  const c4 = (P + _7n) / _16n;
-  return (Fp2, n) => {
-    let tv1 = Fp2.pow(n, c4);
-    let tv2 = Fp2.mul(tv1, c1);
-    const tv3 = Fp2.mul(tv1, c2);
-    const tv4 = Fp2.mul(tv1, c3);
-    const e1 = Fp2.eql(Fp2.sqr(tv2), n);
-    const e2 = Fp2.eql(Fp2.sqr(tv3), n);
-    tv1 = Fp2.cmov(tv1, tv2, e1);
-    tv2 = Fp2.cmov(tv4, tv3, e2);
-    const e3 = Fp2.eql(Fp2.sqr(tv2), n);
-    const root = Fp2.cmov(tv1, tv2, e3);
-    assertIsSquare(Fp2, root, n);
-    return root;
-  };
-}
-function tonelliShanks(P) {
-  if (P < _3n)
-    throw new Error("sqrt is not defined for small field");
-  let Q = P - _1n2;
-  let S = 0;
-  while (Q % _2n === _0n2) {
-    Q /= _2n;
-    S++;
-  }
-  let Z = _2n;
-  const _Fp = Field(P);
-  while (FpLegendre(_Fp, Z) === 1) {
-    if (Z++ > 1e3)
-      throw new Error("Cannot find square root: probably non-prime P");
-  }
-  if (S === 1)
-    return sqrt3mod4;
-  let cc = _Fp.pow(Z, Q);
-  const Q1div2 = (Q + _1n2) / _2n;
-  return function tonelliSlow(Fp2, n) {
-    if (Fp2.is0(n))
-      return n;
-    if (FpLegendre(Fp2, n) !== 1)
-      throw new Error("Cannot find square root");
-    let M = S;
-    let c = Fp2.mul(Fp2.ONE, cc);
-    let t = Fp2.pow(n, Q);
-    let R = Fp2.pow(n, Q1div2);
-    while (!Fp2.eql(t, Fp2.ONE)) {
-      if (Fp2.is0(t))
-        return Fp2.ZERO;
-      let i = 1;
-      let t_tmp = Fp2.sqr(t);
-      while (!Fp2.eql(t_tmp, Fp2.ONE)) {
-        i++;
-        t_tmp = Fp2.sqr(t_tmp);
-        if (i === M)
-          throw new Error("Cannot find square root");
-      }
-      const exponent = _1n2 << BigInt(M - i - 1);
-      const b = Fp2.pow(c, exponent);
-      M = i;
-      c = Fp2.sqr(b);
-      t = Fp2.mul(t, c);
-      R = Fp2.mul(R, b);
-    }
-    return R;
-  };
-}
-function FpSqrt(P) {
-  if (P % _4n === _3n)
-    return sqrt3mod4;
-  if (P % _8n === _5n)
-    return sqrt5mod8;
-  if (P % _16n === _9n)
-    return sqrt9mod16(P);
-  return tonelliShanks(P);
-}
-var isNegativeLE = (num, modulo) => (mod(num, modulo) & _1n2) === _1n2;
-var FIELD_FIELDS = [
-  "create",
-  "isValid",
-  "is0",
-  "neg",
-  "inv",
-  "sqrt",
-  "sqr",
-  "eql",
-  "add",
-  "sub",
-  "mul",
-  "pow",
-  "div",
-  "addN",
-  "subN",
-  "mulN",
-  "sqrN"
-];
-function validateField(field) {
-  const initial = {
-    ORDER: "bigint",
-    MASK: "bigint",
-    BYTES: "number",
-    BITS: "number"
-  };
-  const opts = FIELD_FIELDS.reduce((map, val) => {
-    map[val] = "function";
-    return map;
-  }, initial);
-  _validateObject(field, opts);
-  return field;
-}
-function FpPow(Fp2, num, power) {
-  if (power < _0n2)
-    throw new Error("invalid exponent, negatives unsupported");
-  if (power === _0n2)
-    return Fp2.ONE;
-  if (power === _1n2)
-    return num;
-  let p = Fp2.ONE;
-  let d = num;
-  while (power > _0n2) {
-    if (power & _1n2)
-      p = Fp2.mul(p, d);
-    d = Fp2.sqr(d);
-    power >>= _1n2;
-  }
-  return p;
-}
-function FpInvertBatch(Fp2, nums, passZero = false) {
-  const inverted = new Array(nums.length).fill(passZero ? Fp2.ZERO : void 0);
-  const multipliedAcc = nums.reduce((acc, num, i) => {
-    if (Fp2.is0(num))
-      return acc;
-    inverted[i] = acc;
-    return Fp2.mul(acc, num);
-  }, Fp2.ONE);
-  const invertedAcc = Fp2.inv(multipliedAcc);
-  nums.reduceRight((acc, num, i) => {
-    if (Fp2.is0(num))
-      return acc;
-    inverted[i] = Fp2.mul(acc, inverted[i]);
-    return Fp2.mul(acc, num);
-  }, invertedAcc);
-  return inverted;
-}
-function FpLegendre(Fp2, n) {
-  const p1mod2 = (Fp2.ORDER - _1n2) / _2n;
-  const powered = Fp2.pow(n, p1mod2);
-  const yes = Fp2.eql(powered, Fp2.ONE);
-  const zero = Fp2.eql(powered, Fp2.ZERO);
-  const no = Fp2.eql(powered, Fp2.neg(Fp2.ONE));
-  if (!yes && !zero && !no)
-    throw new Error("invalid Legendre symbol result");
-  return yes ? 1 : zero ? 0 : -1;
-}
-function nLength(n, nBitLength) {
-  if (nBitLength !== void 0)
-    anumber(nBitLength);
-  const _nBitLength = nBitLength !== void 0 ? nBitLength : n.toString(2).length;
-  const nByteLength = Math.ceil(_nBitLength / 8);
-  return { nBitLength: _nBitLength, nByteLength };
-}
-function Field(ORDER, bitLenOrOpts, isLE3 = false, opts = {}) {
-  if (ORDER <= _0n2)
-    throw new Error("invalid field: expected ORDER > 0, got " + ORDER);
-  let _nbitLength = void 0;
-  let _sqrt = void 0;
-  let modFromBytes = false;
-  let allowedLengths = void 0;
-  if (typeof bitLenOrOpts === "object" && bitLenOrOpts != null) {
-    if (opts.sqrt || isLE3)
-      throw new Error("cannot specify opts in two arguments");
-    const _opts = bitLenOrOpts;
-    if (_opts.BITS)
-      _nbitLength = _opts.BITS;
-    if (_opts.sqrt)
-      _sqrt = _opts.sqrt;
-    if (typeof _opts.isLE === "boolean")
-      isLE3 = _opts.isLE;
-    if (typeof _opts.modFromBytes === "boolean")
-      modFromBytes = _opts.modFromBytes;
-    allowedLengths = _opts.allowedLengths;
-  } else {
-    if (typeof bitLenOrOpts === "number")
-      _nbitLength = bitLenOrOpts;
-    if (opts.sqrt)
-      _sqrt = opts.sqrt;
-  }
-  const { nBitLength: BITS, nByteLength: BYTES } = nLength(ORDER, _nbitLength);
-  if (BYTES > 2048)
-    throw new Error("invalid field: expected ORDER of <= 2048 bytes");
-  let sqrtP;
-  const f = Object.freeze({
-    ORDER,
-    isLE: isLE3,
-    BITS,
-    BYTES,
-    MASK: bitMask(BITS),
-    ZERO: _0n2,
-    ONE: _1n2,
-    allowedLengths,
-    create: (num) => mod(num, ORDER),
-    isValid: (num) => {
-      if (typeof num !== "bigint")
-        throw new Error("invalid field element: expected bigint, got " + typeof num);
-      return _0n2 <= num && num < ORDER;
-    },
-    is0: (num) => num === _0n2,
-    // is valid and invertible
-    isValidNot0: (num) => !f.is0(num) && f.isValid(num),
-    isOdd: (num) => (num & _1n2) === _1n2,
-    neg: (num) => mod(-num, ORDER),
-    eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num) => mod(num * num, ORDER),
-    add: (lhs, rhs) => mod(lhs + rhs, ORDER),
-    sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
-    mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
-    pow: (num, power) => FpPow(f, num, power),
-    div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
-    // Same as above, but doesn't normalize
-    sqrN: (num) => num * num,
-    addN: (lhs, rhs) => lhs + rhs,
-    subN: (lhs, rhs) => lhs - rhs,
-    mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num) => invert(num, ORDER),
-    sqrt: _sqrt || ((n) => {
-      if (!sqrtP)
-        sqrtP = FpSqrt(ORDER);
-      return sqrtP(f, n);
-    }),
-    toBytes: (num) => isLE3 ? numberToBytesLE(num, BYTES) : numberToBytesBE(num, BYTES),
-    fromBytes: (bytes, skipValidation = true) => {
-      if (allowedLengths) {
-        if (!allowedLengths.includes(bytes.length) || bytes.length > BYTES) {
-          throw new Error("Field.fromBytes: expected " + allowedLengths + " bytes, got " + bytes.length);
-        }
-        const padded = new Uint8Array(BYTES);
-        padded.set(bytes, isLE3 ? 0 : padded.length - bytes.length);
-        bytes = padded;
-      }
-      if (bytes.length !== BYTES)
-        throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
-      let scalar = isLE3 ? bytesToNumberLE(bytes) : bytesToNumberBE(bytes);
-      if (modFromBytes)
-        scalar = mod(scalar, ORDER);
-      if (!skipValidation) {
-        if (!f.isValid(scalar))
-          throw new Error("invalid field element: outside of range 0..ORDER");
-      }
-      return scalar;
-    },
-    // TODO: we don't need it here, move out to separate fn
-    invertBatch: (lst) => FpInvertBatch(f, lst),
-    // We can't move this out because Fp6, Fp12 implement it
-    // and it's unclear what to return in there.
-    cmov: (a, b, c) => c ? b : a
-  });
-  return Object.freeze(f);
-}
-
-// node_modules/@noble/curves/esm/abstract/curve.js
-var _0n3 = BigInt(0);
-var _1n3 = BigInt(1);
-function negateCt(condition, item) {
-  const neg = item.negate();
-  return condition ? neg : item;
-}
-function normalizeZ(c, points) {
-  const invertedZs = FpInvertBatch(c.Fp, points.map((p) => p.Z));
-  return points.map((p, i) => c.fromAffine(p.toAffine(invertedZs[i])));
-}
-function validateW(W, bits) {
-  if (!Number.isSafeInteger(W) || W <= 0 || W > bits)
-    throw new Error("invalid window size, expected [1.." + bits + "], got W=" + W);
-}
-function calcWOpts(W, scalarBits) {
-  validateW(W, scalarBits);
-  const windows = Math.ceil(scalarBits / W) + 1;
-  const windowSize = 2 ** (W - 1);
-  const maxNumber = 2 ** W;
-  const mask = bitMask(W);
-  const shiftBy = BigInt(W);
-  return { windows, windowSize, mask, maxNumber, shiftBy };
-}
-function calcOffsets(n, window2, wOpts) {
-  const { windowSize, mask, maxNumber, shiftBy } = wOpts;
-  let wbits = Number(n & mask);
-  let nextN = n >> shiftBy;
-  if (wbits > windowSize) {
-    wbits -= maxNumber;
-    nextN += _1n3;
-  }
-  const offsetStart = window2 * windowSize;
-  const offset = offsetStart + Math.abs(wbits) - 1;
-  const isZero = wbits === 0;
-  const isNeg = wbits < 0;
-  const isNegF = window2 % 2 !== 0;
-  const offsetF = offsetStart;
-  return { nextN, offset, isZero, isNeg, isNegF, offsetF };
-}
-function validateMSMPoints(points, c) {
-  if (!Array.isArray(points))
-    throw new Error("array expected");
-  points.forEach((p, i) => {
-    if (!(p instanceof c))
-      throw new Error("invalid point at index " + i);
-  });
-}
-function validateMSMScalars(scalars, field) {
-  if (!Array.isArray(scalars))
-    throw new Error("array of scalars expected");
-  scalars.forEach((s2, i) => {
-    if (!field.isValid(s2))
-      throw new Error("invalid scalar at index " + i);
-  });
-}
-var pointPrecomputes = /* @__PURE__ */ new WeakMap();
-var pointWindowSizes = /* @__PURE__ */ new WeakMap();
-function getW(P) {
-  return pointWindowSizes.get(P) || 1;
-}
-function assert0(n) {
-  if (n !== _0n3)
-    throw new Error("invalid wNAF");
-}
-var wNAF = class {
-  // Parametrized with a given Point class (not individual point)
-  constructor(Point, bits) {
-    this.BASE = Point.BASE;
-    this.ZERO = Point.ZERO;
-    this.Fn = Point.Fn;
-    this.bits = bits;
-  }
-  // non-const time multiplication ladder
-  _unsafeLadder(elm, n, p = this.ZERO) {
-    let d = elm;
-    while (n > _0n3) {
-      if (n & _1n3)
-        p = p.add(d);
-      d = d.double();
-      n >>= _1n3;
-    }
-    return p;
-  }
-  /**
-   * Creates a wNAF precomputation window. Used for caching.
-   * Default window size is set by `utils.precompute()` and is equal to 8.
-   * Number of precomputed points depends on the curve size:
-   * 2^(𝑊−1) * (Math.ceil(𝑛 / 𝑊) + 1), where:
-   * - 𝑊 is the window size
-   * - 𝑛 is the bitlength of the curve order.
-   * For a 256-bit curve and window size 8, the number of precomputed points is 128 * 33 = 4224.
-   * @param point Point instance
-   * @param W window size
-   * @returns precomputed point tables flattened to a single array
-   */
-  precomputeWindow(point, W) {
-    const { windows, windowSize } = calcWOpts(W, this.bits);
-    const points = [];
-    let p = point;
-    let base = p;
-    for (let window2 = 0; window2 < windows; window2++) {
-      base = p;
-      points.push(base);
-      for (let i = 1; i < windowSize; i++) {
-        base = base.add(p);
-        points.push(base);
-      }
-      p = base.double();
-    }
-    return points;
-  }
-  /**
-   * Implements ec multiplication using precomputed tables and w-ary non-adjacent form.
-   * More compact implementation:
-   * https://github.com/paulmillr/noble-secp256k1/blob/47cb1669b6e506ad66b35fe7d76132ae97465da2/index.ts#L502-L541
-   * @returns real and fake (for const-time) points
-   */
-  wNAF(W, precomputes, n) {
-    if (!this.Fn.isValid(n))
-      throw new Error("invalid scalar");
-    let p = this.ZERO;
-    let f = this.BASE;
-    const wo = calcWOpts(W, this.bits);
-    for (let window2 = 0; window2 < wo.windows; window2++) {
-      const { nextN, offset, isZero, isNeg, isNegF, offsetF } = calcOffsets(n, window2, wo);
-      n = nextN;
-      if (isZero) {
-        f = f.add(negateCt(isNegF, precomputes[offsetF]));
-      } else {
-        p = p.add(negateCt(isNeg, precomputes[offset]));
-      }
-    }
-    assert0(n);
-    return { p, f };
-  }
-  /**
-   * Implements ec unsafe (non const-time) multiplication using precomputed tables and w-ary non-adjacent form.
-   * @param acc accumulator point to add result of multiplication
-   * @returns point
-   */
-  wNAFUnsafe(W, precomputes, n, acc = this.ZERO) {
-    const wo = calcWOpts(W, this.bits);
-    for (let window2 = 0; window2 < wo.windows; window2++) {
-      if (n === _0n3)
-        break;
-      const { nextN, offset, isZero, isNeg } = calcOffsets(n, window2, wo);
-      n = nextN;
-      if (isZero) {
-        continue;
-      } else {
-        const item = precomputes[offset];
-        acc = acc.add(isNeg ? item.negate() : item);
-      }
-    }
-    assert0(n);
-    return acc;
-  }
-  getPrecomputes(W, point, transform) {
-    let comp = pointPrecomputes.get(point);
-    if (!comp) {
-      comp = this.precomputeWindow(point, W);
-      if (W !== 1) {
-        if (typeof transform === "function")
-          comp = transform(comp);
-        pointPrecomputes.set(point, comp);
-      }
-    }
-    return comp;
-  }
-  cached(point, scalar, transform) {
-    const W = getW(point);
-    return this.wNAF(W, this.getPrecomputes(W, point, transform), scalar);
-  }
-  unsafe(point, scalar, transform, prev) {
-    const W = getW(point);
-    if (W === 1)
-      return this._unsafeLadder(point, scalar, prev);
-    return this.wNAFUnsafe(W, this.getPrecomputes(W, point, transform), scalar, prev);
-  }
-  // We calculate precomputes for elliptic curve point multiplication
-  // using windowed method. This specifies window size and
-  // stores precomputed values. Usually only base point would be precomputed.
-  createCache(P, W) {
-    validateW(W, this.bits);
-    pointWindowSizes.set(P, W);
-    pointPrecomputes.delete(P);
-  }
-  hasCache(elm) {
-    return getW(elm) !== 1;
-  }
-};
-function pippenger(c, fieldN, points, scalars) {
-  validateMSMPoints(points, c);
-  validateMSMScalars(scalars, fieldN);
-  const plength = points.length;
-  const slength = scalars.length;
-  if (plength !== slength)
-    throw new Error("arrays of points and scalars must have equal length");
-  const zero = c.ZERO;
-  const wbits = bitLen(BigInt(plength));
-  let windowSize = 1;
-  if (wbits > 12)
-    windowSize = wbits - 3;
-  else if (wbits > 4)
-    windowSize = wbits - 2;
-  else if (wbits > 0)
-    windowSize = 2;
-  const MASK = bitMask(windowSize);
-  const buckets = new Array(Number(MASK) + 1).fill(zero);
-  const lastBits = Math.floor((fieldN.BITS - 1) / windowSize) * windowSize;
-  let sum = zero;
-  for (let i = lastBits; i >= 0; i -= windowSize) {
-    buckets.fill(zero);
-    for (let j = 0; j < slength; j++) {
-      const scalar = scalars[j];
-      const wbits2 = Number(scalar >> BigInt(i) & MASK);
-      buckets[wbits2] = buckets[wbits2].add(points[j]);
-    }
-    let resI = zero;
-    for (let j = buckets.length - 1, sumI = zero; j > 0; j--) {
-      sumI = sumI.add(buckets[j]);
-      resI = resI.add(sumI);
-    }
-    sum = sum.add(resI);
-    if (i !== 0)
-      for (let j = 0; j < windowSize; j++)
-        sum = sum.double();
-  }
-  return sum;
-}
-function createField(order, field, isLE3) {
-  if (field) {
-    if (field.ORDER !== order)
-      throw new Error("Field.ORDER must match order: Fp == p, Fn == n");
-    validateField(field);
-    return field;
-  } else {
-    return Field(order, { isLE: isLE3 });
-  }
-}
-function _createCurveFields(type, CURVE, curveOpts = {}, FpFnLE) {
-  if (FpFnLE === void 0)
-    FpFnLE = type === "edwards";
-  if (!CURVE || typeof CURVE !== "object")
-    throw new Error(`expected valid ${type} CURVE object`);
-  for (const p of ["p", "n", "h"]) {
-    const val = CURVE[p];
-    if (!(typeof val === "bigint" && val > _0n3))
-      throw new Error(`CURVE.${p} must be positive bigint`);
-  }
-  const Fp2 = createField(CURVE.p, curveOpts.Fp, FpFnLE);
-  const Fn2 = createField(CURVE.n, curveOpts.Fn, FpFnLE);
-  const _b = type === "weierstrass" ? "b" : "d";
-  const params = ["Gx", "Gy", "a", _b];
-  for (const p of params) {
-    if (!Fp2.isValid(CURVE[p]))
-      throw new Error(`CURVE.${p} must be valid field element of CURVE.Fp`);
-  }
-  CURVE = Object.freeze(Object.assign({}, CURVE));
-  return { CURVE, Fp: Fp2, Fn: Fn2 };
-}
+// node_modules/@noble/curves/esm/ed25519.js
+init_sha2();
+init_utils();
+init_curve();
 
 // node_modules/@noble/curves/esm/abstract/edwards.js
+init_utils2();
+init_curve();
+init_modular();
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 var _2n2 = BigInt(2);
@@ -65508,8 +64355,8 @@ function edwards(params, extraOpts = {}) {
       const y2 = modP(y * y);
       const u = modP(y2 - _1n4);
       const v = modP(d * y2 - a);
-      let { isValid: isValid3, value: x } = uvRatio3(u, v);
-      if (!isValid3)
+      let { isValid: isValid2, value: x } = uvRatio3(u, v);
+      if (!isValid2)
         throw new Error("bad point: invalid y coordinate");
       const isXOdd = (x & _1n4) === _1n4;
       const isLastByteOdd = (lastByte & 128) !== 0;
@@ -65953,7 +64800,12 @@ function twistedEdwards(c) {
   return _eddsa_new_output_to_legacy(c, EDDSA);
 }
 
+// node_modules/@noble/curves/esm/ed25519.js
+init_modular();
+
 // node_modules/@noble/curves/esm/abstract/montgomery.js
+init_utils2();
+init_modular();
 var _0n5 = BigInt(0);
 var _1n5 = BigInt(1);
 var _2n3 = BigInt(2);
@@ -66074,6 +64926,7 @@ function montgomery(curveDef) {
 }
 
 // node_modules/@noble/curves/esm/ed25519.js
+init_utils2();
 var _0n6 = /* @__PURE__ */ BigInt(0);
 var _1n6 = BigInt(1);
 var _2n4 = BigInt(2);
@@ -66170,26 +65023,26 @@ var bytes255ToNumberLE = (bytes) => ed25519.Point.Fp.create(bytesToNumberLE(byte
 function calcElligatorRistrettoMap(r0) {
   const { d } = ed25519_CURVE;
   const P = ed25519_CURVE_p;
-  const mod4 = (n) => Fp.create(n);
-  const r = mod4(SQRT_M1 * r0 * r0);
-  const Ns = mod4((r + _1n6) * ONE_MINUS_D_SQ);
+  const mod3 = (n) => Fp.create(n);
+  const r = mod3(SQRT_M1 * r0 * r0);
+  const Ns = mod3((r + _1n6) * ONE_MINUS_D_SQ);
   let c = BigInt(-1);
-  const D = mod4((c - d * r) * mod4(r + d));
+  const D = mod3((c - d * r) * mod3(r + d));
   let { isValid: Ns_D_is_sq, value: s2 } = uvRatio(Ns, D);
-  let s_ = mod4(s2 * r0);
+  let s_ = mod3(s2 * r0);
   if (!isNegativeLE(s_, P))
-    s_ = mod4(-s_);
+    s_ = mod3(-s_);
   if (!Ns_D_is_sq)
     s2 = s_;
   if (!Ns_D_is_sq)
     c = r;
-  const Nt = mod4(c * (r - _1n6) * D_MINUS_ONE_SQ - D);
+  const Nt = mod3(c * (r - _1n6) * D_MINUS_ONE_SQ - D);
   const s22 = s2 * s2;
-  const W0 = mod4((s2 + s2) * D);
-  const W1 = mod4(Nt * SQRT_AD_MINUS_ONE);
-  const W2 = mod4(_1n6 - s22);
-  const W3 = mod4(_1n6 + s22);
-  return new ed25519.Point(mod4(W0 * W3), mod4(W2 * W1), mod4(W1 * W3), mod4(W0 * W2));
+  const W0 = mod3((s2 + s2) * D);
+  const W1 = mod3(Nt * SQRT_AD_MINUS_ONE);
+  const W2 = mod3(_1n6 - s22);
+  const W3 = mod3(_1n6 + s22);
+  return new ed25519.Point(mod3(W0 * W3), mod3(W2 * W1), mod3(W1 * W3), mod3(W0 * W2));
 }
 function ristretto255_map(bytes) {
   abytes(bytes, 64);
@@ -66221,25 +65074,25 @@ var _RistrettoPoint = class __RistrettoPoint extends PrimeEdwardsPoint {
     abytes(bytes, 32);
     const { a, d } = ed25519_CURVE;
     const P = ed25519_CURVE_p;
-    const mod4 = (n) => Fp.create(n);
+    const mod3 = (n) => Fp.create(n);
     const s2 = bytes255ToNumberLE(bytes);
     if (!equalBytes(Fp.toBytes(s2), bytes) || isNegativeLE(s2, P))
       throw new Error("invalid ristretto255 encoding 1");
-    const s22 = mod4(s2 * s2);
-    const u1 = mod4(_1n6 + a * s22);
-    const u2 = mod4(_1n6 - a * s22);
-    const u1_2 = mod4(u1 * u1);
-    const u2_2 = mod4(u2 * u2);
-    const v = mod4(a * d * u1_2 - u2_2);
-    const { isValid: isValid3, value: I } = invertSqrt(mod4(v * u2_2));
-    const Dx = mod4(I * u2);
-    const Dy = mod4(I * Dx * v);
-    let x = mod4((s2 + s2) * Dx);
+    const s22 = mod3(s2 * s2);
+    const u1 = mod3(_1n6 + a * s22);
+    const u2 = mod3(_1n6 - a * s22);
+    const u1_2 = mod3(u1 * u1);
+    const u2_2 = mod3(u2 * u2);
+    const v = mod3(a * d * u1_2 - u2_2);
+    const { isValid: isValid2, value: I } = invertSqrt(mod3(v * u2_2));
+    const Dx = mod3(I * u2);
+    const Dy = mod3(I * Dx * v);
+    let x = mod3((s2 + s2) * Dx);
     if (isNegativeLE(x, P))
-      x = mod4(-x);
-    const y = mod4(u1 * Dy);
-    const t = mod4(x * y);
-    if (!isValid3 || isNegativeLE(t, P) || y === _0n6)
+      x = mod3(-x);
+    const y = mod3(u1 * Dy);
+    const t = mod3(x * y);
+    if (!isValid2 || isNegativeLE(t, P) || y === _0n6)
       throw new Error("invalid ristretto255 encoding 2");
     return new __RistrettoPoint(new ed25519.Point(x, y, _1n6, t));
   }
@@ -66261,29 +65114,29 @@ var _RistrettoPoint = class __RistrettoPoint extends PrimeEdwardsPoint {
   toBytes() {
     let { X, Y, Z, T } = this.ep;
     const P = ed25519_CURVE_p;
-    const mod4 = (n) => Fp.create(n);
-    const u1 = mod4(mod4(Z + Y) * mod4(Z - Y));
-    const u2 = mod4(X * Y);
-    const u2sq = mod4(u2 * u2);
-    const { value: invsqrt } = invertSqrt(mod4(u1 * u2sq));
-    const D1 = mod4(invsqrt * u1);
-    const D2 = mod4(invsqrt * u2);
-    const zInv = mod4(D1 * D2 * T);
+    const mod3 = (n) => Fp.create(n);
+    const u1 = mod3(mod3(Z + Y) * mod3(Z - Y));
+    const u2 = mod3(X * Y);
+    const u2sq = mod3(u2 * u2);
+    const { value: invsqrt } = invertSqrt(mod3(u1 * u2sq));
+    const D1 = mod3(invsqrt * u1);
+    const D2 = mod3(invsqrt * u2);
+    const zInv = mod3(D1 * D2 * T);
     let D;
     if (isNegativeLE(T * zInv, P)) {
-      let _x = mod4(Y * SQRT_M1);
-      let _y = mod4(X * SQRT_M1);
+      let _x = mod3(Y * SQRT_M1);
+      let _y = mod3(X * SQRT_M1);
       X = _x;
       Y = _y;
-      D = mod4(D1 * INVSQRT_A_MINUS_D);
+      D = mod3(D1 * INVSQRT_A_MINUS_D);
     } else {
       D = D2;
     }
     if (isNegativeLE(X * zInv, P))
-      Y = mod4(-Y);
-    let s2 = mod4((Z - Y) * D);
+      Y = mod3(-Y);
+    let s2 = mod3((Z - Y) * D);
     if (isNegativeLE(s2, P))
-      s2 = mod4(-s2);
+      s2 = mod3(-s2);
     return Fp.toBytes(s2);
   }
   /**
@@ -66294,9 +65147,9 @@ var _RistrettoPoint = class __RistrettoPoint extends PrimeEdwardsPoint {
     this.assertSame(other);
     const { X: X1, Y: Y1 } = this.ep;
     const { X: X2, Y: Y2 } = other.ep;
-    const mod4 = (n) => Fp.create(n);
-    const one = mod4(X1 * Y2) === mod4(Y1 * X2);
-    const two = mod4(Y1 * Y2) === mod4(X1 * X2);
+    const mod3 = (n) => Fp.create(n);
+    const one = mod3(X1 * Y2) === mod3(Y1 * X2);
+    const two = mod3(Y1 * Y2) === mod3(X1 * X2);
     return one || two;
   }
   is0() {
@@ -66917,7 +65770,7 @@ function abytes2(value, length, title = "") {
 function copyBytes2(bytes) {
   return Uint8Array.from(abytes2(bytes));
 }
-function ahash(h) {
+function ahash2(h) {
   if (typeof h !== "function" || typeof h.create !== "function")
     throw new TypeError("expected hash wrapped by utils.createHasher");
   anumber2(h.outputLen);
@@ -67196,7 +66049,7 @@ var SHA512_IV2 = /* @__PURE__ */ Uint32Array.from([
 ]);
 
 // node_modules/@noble/hashes/sha2.js
-var SHA256_K = /* @__PURE__ */ Uint32Array.from([
+var SHA256_K2 = /* @__PURE__ */ Uint32Array.from([
   1116352408,
   1899447441,
   3049323471,
@@ -67262,7 +66115,7 @@ var SHA256_K = /* @__PURE__ */ Uint32Array.from([
   3204031479,
   3329325298
 ]);
-var SHA256_W = /* @__PURE__ */ new Uint32Array(64);
+var SHA256_W2 = /* @__PURE__ */ new Uint32Array(64);
 var SHA2_32B = class extends HashMD2 {
   // We cannot use array here since array allows indexing by variable
   // which means optimizer/compiler cannot use registers.
@@ -67308,18 +66161,18 @@ var SHA2_32B = class extends HashMD2 {
   }
   process(view, offset) {
     for (let i = 0; i < 16; i++, offset += 4)
-      SHA256_W[i] = view.getUint32(offset, false);
+      SHA256_W2[i] = view.getUint32(offset, false);
     for (let i = 16; i < 64; i++) {
-      const W15 = SHA256_W[i - 15];
-      const W2 = SHA256_W[i - 2];
+      const W15 = SHA256_W2[i - 15];
+      const W2 = SHA256_W2[i - 2];
       const s0 = rotr2(W15, 7) ^ rotr2(W15, 18) ^ W15 >>> 3;
       const s1 = rotr2(W2, 17) ^ rotr2(W2, 19) ^ W2 >>> 10;
-      SHA256_W[i] = s1 + SHA256_W[i - 7] + s0 + SHA256_W[i - 16] | 0;
+      SHA256_W2[i] = s1 + SHA256_W2[i - 7] + s0 + SHA256_W2[i - 16] | 0;
     }
     let { A, B, C, D, E, F, G, H } = this;
     for (let i = 0; i < 64; i++) {
       const sigma1 = rotr2(E, 6) ^ rotr2(E, 11) ^ rotr2(E, 25);
-      const T1 = H + sigma1 + Chi2(E, F, G) + SHA256_K[i] + SHA256_W[i] | 0;
+      const T1 = H + sigma1 + Chi2(E, F, G) + SHA256_K2[i] + SHA256_W2[i] | 0;
       const sigma0 = rotr2(A, 2) ^ rotr2(A, 13) ^ rotr2(A, 22);
       const T2 = sigma0 + Maj2(A, B, C) | 0;
       H = G;
@@ -67342,7 +66195,7 @@ var SHA2_32B = class extends HashMD2 {
     this.set(A, B, C, D, E, F, G, H);
   }
   roundClean() {
-    clean2(SHA256_W);
+    clean2(SHA256_W2);
   }
   destroy() {
     this.destroyed = true;
@@ -67583,7 +66436,7 @@ var _SHA512 = class extends SHA2_64B {
     super(64, SHA512_IV2);
   }
 };
-var sha256 = /* @__PURE__ */ createHasher2(
+var sha2562 = /* @__PURE__ */ createHasher2(
   () => new _SHA256(),
   /* @__PURE__ */ oidNist(1)
 );
@@ -68625,8 +67478,8 @@ function edwards2(params, extraOpts = {}) {
       const y2 = Fp2.sqr(y);
       const u = Fp2.sub(y2, Fp2.ONE);
       const v = Fp2.sub(Fp2.mulN(d, y2), a);
-      let { isValid: isValid3, value: x } = uvRatio3(u, v);
-      if (!isValid3)
+      let { isValid: isValid2, value: x } = uvRatio3(u, v);
+      if (!isValid2)
         throw new Error("bad point: invalid y coordinate");
       const isXOdd = isOdd(x);
       const isLastByteOdd = (lastByte & 128) !== 0;
@@ -70164,7 +69017,7 @@ var _HMAC = class {
   finished = false;
   destroyed = false;
   constructor(hash2, key) {
-    ahash(hash2);
+    ahash2(hash2);
     abytes2(key, void 0, "key");
     this.iHash = hash2.create();
     if (typeof this.iHash.update !== "function")
@@ -70225,7 +69078,7 @@ var _HMAC = class {
     this.iHash.destroy();
   }
 };
-var hmac = /* @__PURE__ */ (() => {
+var hmac2 = /* @__PURE__ */ (() => {
   const hmac_ = ((hash2, key, message) => new _HMAC(hash2, key).update(message).digest());
   hmac_.create = (hash2, key) => new _HMAC(hash2, key);
   return hmac_;
@@ -70234,7 +69087,7 @@ var hmac = /* @__PURE__ */ (() => {
 // node_modules/@lukeburns/clatterjs/dist/crypto/hash.js
 function makeHash(name2, hash2, hashLen, blockLen) {
   const doHash = (data2) => hash2.create().update(data2).digest();
-  const hmac1 = (key, data2) => hmac(hash2, key, data2);
+  const hmac1 = (key, data2) => hmac2(hash2, key, data2);
   const hmacMany = (key, parts) => hmac1(key, parts.length === 1 ? parts[0] : concatBytes2(...parts));
   return {
     name: name2,
@@ -70261,7 +69114,7 @@ function makeHash(name2, hash2, hashLen, blockLen) {
     }
   };
 }
-var sha256H = makeHash("SHA256", sha256, 32, 64);
+var sha256H = makeHash("SHA256", sha2562, 32, 64);
 var sha512H = makeHash("SHA512", sha5122, 64, 128);
 var blake2bH = makeHash("BLAKE2b", blake2b, 64, 128);
 var blake2sH = makeHash("BLAKE2s", blake2s, 32, 64);
@@ -70545,9 +69398,9 @@ function createCipher(core, opts) {
     if (nonceNcLen !== nonce.length)
       throw new Error(`arx: nonce must be ${nonceNcLen} or 16 bytes`);
     if (nonceNcLen !== 12) {
-      const nc4 = new Uint8Array(12);
-      nc4.set(nonce, counterRight ? 0 : 12 - nonce.length);
-      nonce = nc4;
+      const nc3 = new Uint8Array(12);
+      nc3.set(nonce, counterRight ? 0 : 12 - nonce.length);
+      nonce = nc3;
       toClean.push(nonce);
     }
     const n32 = swap32IfBE2(u322(nonce));
@@ -71215,10 +70068,12 @@ var ClientSecureTransport = class {
   closed = false;
   lifetime;
   sends = new SerialSend();
+  closeError;
   async connect() {
     const lifetime = new AbortController();
     this.lifetime = lifetime;
     this.closed = false;
+    this.closeError = void 0;
     this.incoming.reset();
     this.outgoing.reset();
     await this.inner.connect();
@@ -71226,7 +70081,7 @@ var ClientSecureTransport = class {
     const info = this.inner.connectionInfo();
     if (info.localDeviceId !== this.identity.deviceId || info.remoteDeviceId !== this.host.deviceId) {
       await this.inner.close();
-      throw new Error("The relay connection is bound to an unexpected device.");
+      throw Object.assign(new Error("The relay connection is bound to an unexpected device."), { code: "PEER_IDENTITY_MISMATCH" });
     }
     const noise = new NoiseIkSession({
       role: "initiator",
@@ -71269,6 +70124,7 @@ var ClientSecureTransport = class {
         const message = this.incoming.decode(noise.decrypt(data2));
         if (message !== void 0) handler(message);
       } catch {
+        this.closeError = Object.assign(new Error("The authenticated Remote channel rejected a frame."), { code: "SECURE_CHANNEL_FAILED" });
         void this.close();
       }
     });
@@ -71278,7 +70134,7 @@ var ClientSecureTransport = class {
     };
   }
   onClose(handler) {
-    return this.inner.onClose?.(handler) ?? (() => void 0);
+    return this.inner.onClose?.((error) => handler(this.closeError ?? error)) ?? (() => void 0);
   }
   async close() {
     if (this.closed) return;
@@ -71330,10 +70186,10 @@ async function waitForResponder(inner, noise, signal) {
         if (!noise.complete) throw new Error("Noise IK handshake did not complete.");
         finish();
       } catch (error) {
-        finish(error instanceof Error ? error : new Error("Noise IK handshake failed."));
+        finish(Object.assign(error instanceof Error ? error : new Error("Noise IK handshake failed."), { code: "SECURE_CHANNEL_FAILED" }));
       }
     });
-    unsubscribeClose = inner.onClose?.(() => finish(new Error("Control channel closed during Noise IK handshake."))) ?? (() => {
+    unsubscribeClose = inner.onClose?.((error) => finish(error ?? new Error("Control channel closed during Noise IK handshake."))) ?? (() => {
     });
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) {
@@ -71358,6 +70214,8 @@ var ClientConnection = class {
     this.context.connectionProgress = { runId: progressRunId, targetDeviceId, phase: "checking-host" };
     const identity2 = this.context.requireIdentity();
     let client;
+    let closed = false;
+    let closeError;
     const onAbort = () => {
       void client?.close().catch(() => void 0);
     };
@@ -71420,6 +70278,12 @@ var ClientConnection = class {
         try {
           transport = createTransport(attempt);
           client = new RemoteClientCore(new ClientSecureTransport(transport, identity2, target2), 6e4);
+          closed = false;
+          closeError = void 0;
+          client.onClose((error) => {
+            closed = true;
+            closeError = error;
+          });
           const attemptClient = client;
           signal?.throwIfAborted();
           await attemptClient.connect();
@@ -71448,20 +70312,6 @@ var ClientConnection = class {
         "connected",
         connectedPreference === void 0 ? void 0 : [connectedPreference]
       );
-      connectedClient.onClose(() => {
-        if (this.context.connected?.client !== connectedClient) return;
-        void this.context.closePreview();
-        this.context.connected = void 0;
-        this.context.connectionProgress = void 0;
-        this.context.pendingWorkspaceSelection = void 0;
-        void this.context.closeCodexVirtual();
-        void this.context.closeCursorVirtual();
-        this.context.gatewaySwitch.disconnectRemote();
-        void connectedClient.close().catch(() => void 0);
-        this.context.logger.warn("remote Harness transport closed; keeping Remote authority disconnected", {
-          targetDeviceId: shortId(target2.deviceId)
-        });
-      });
       const connectionDetails = await connectedTransport.connectionDetails().catch(() => void 0);
       this.context.logger.info("remote Harness transport ready", {
         targetDeviceId: shortId(target2.deviceId),
@@ -71480,6 +70330,7 @@ var ClientConnection = class {
       }
       const features = await probeRemoteHostFeatures(connectedClient, serverDevice.clientVersion);
       signal?.throwIfAborted();
+      if (closed) throw closeError ?? new ClientModeError("TRANSPORT_CLOSED", "The Remote connection closed during discovery.", true);
       return {
         client: connectedClient,
         target: target2,
@@ -71491,8 +70342,9 @@ var ClientConnection = class {
       };
     } catch (error) {
       this.clearConnectionProgress(progressRunId);
+      const failure4 = closed && closeError !== void 0 ? closeError : error;
       await client?.close().catch(() => void 0);
-      throw error;
+      throw failure4;
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
@@ -71542,6 +70394,68 @@ var ClientConnection = class {
   }
 };
 
+// src/client-reconnect.ts
+var ClientReconnect = class {
+  constructor(config) {
+    this.config = config;
+  }
+  pending;
+  cancel() {
+    this.pending?.abort();
+    this.pending = void 0;
+  }
+  start(connect4, error) {
+    this.cancel();
+    if (!this.config.enabled || !canReconnect(error)) return;
+    const pending = new AbortController();
+    this.pending = pending;
+    void this.run(connect4, pending).finally(() => {
+      if (this.pending === pending) this.pending = void 0;
+    });
+  }
+  async run(connect4, pending) {
+    let delay = this.config.initialDelayMs;
+    while (!pending.signal.aborted) {
+      const jitter = delay * this.config.jitter * (Math.random() * 2 - 1);
+      await new Promise((resolve6) => {
+        const finish = () => {
+          clearTimeout(timer2);
+          pending.signal.removeEventListener("abort", finish);
+          resolve6();
+        };
+        const timer2 = setTimeout(finish, Math.max(0, delay + jitter));
+        pending.signal.addEventListener("abort", finish, { once: true });
+      });
+      if (pending.signal.aborted) return;
+      try {
+        await connect4(pending.signal);
+        return;
+      } catch (error) {
+        if (!canReconnect(error)) return;
+      }
+      delay = Math.min(this.config.maxDelayMs, delay * 2);
+    }
+  }
+};
+function canReconnect(error) {
+  if (typeof error !== "object" || error === null) return true;
+  const failure4 = error;
+  if (failure4.code !== void 0 && ![
+    "HOST_OFFLINE",
+    "CONNECTION_FAILED",
+    "CONNECTION_NOT_FOUND",
+    "TRANSPORT_CLOSED",
+    "RPC_TIMEOUT",
+    "P2P_FAILED",
+    "TURN_UNAVAILABLE",
+    "RELAY_UNAVAILABLE",
+    "RATE_LIMITED",
+    "SLOW_CONSUMER",
+    "INTERNAL_ERROR"
+  ].includes(String(failure4.code))) return false;
+  return failure4.retryable !== false;
+}
+
 // src/loopback-preview.ts
 import { randomBytes as randomBytes6, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
@@ -71550,4047 +70464,6 @@ import { WebSocketServer } from "ws";
 // src/loopback-host.ts
 import { request as httpRequest } from "node:http";
 import { WebSocket as WebSocket2 } from "ws";
-
-// node_modules/zod/v3/external.js
-var external_exports2 = {};
-__export(external_exports2, {
-  BRAND: () => BRAND2,
-  DIRTY: () => DIRTY2,
-  EMPTY_PATH: () => EMPTY_PATH2,
-  INVALID: () => INVALID2,
-  NEVER: () => NEVER2,
-  OK: () => OK2,
-  ParseStatus: () => ParseStatus2,
-  Schema: () => ZodType2,
-  ZodAny: () => ZodAny2,
-  ZodArray: () => ZodArray2,
-  ZodBigInt: () => ZodBigInt2,
-  ZodBoolean: () => ZodBoolean2,
-  ZodBranded: () => ZodBranded2,
-  ZodCatch: () => ZodCatch2,
-  ZodDate: () => ZodDate2,
-  ZodDefault: () => ZodDefault2,
-  ZodDiscriminatedUnion: () => ZodDiscriminatedUnion2,
-  ZodEffects: () => ZodEffects2,
-  ZodEnum: () => ZodEnum2,
-  ZodError: () => ZodError2,
-  ZodFirstPartyTypeKind: () => ZodFirstPartyTypeKind2,
-  ZodFunction: () => ZodFunction2,
-  ZodIntersection: () => ZodIntersection2,
-  ZodIssueCode: () => ZodIssueCode2,
-  ZodLazy: () => ZodLazy2,
-  ZodLiteral: () => ZodLiteral2,
-  ZodMap: () => ZodMap2,
-  ZodNaN: () => ZodNaN2,
-  ZodNativeEnum: () => ZodNativeEnum2,
-  ZodNever: () => ZodNever2,
-  ZodNull: () => ZodNull2,
-  ZodNullable: () => ZodNullable2,
-  ZodNumber: () => ZodNumber2,
-  ZodObject: () => ZodObject2,
-  ZodOptional: () => ZodOptional2,
-  ZodParsedType: () => ZodParsedType2,
-  ZodPipeline: () => ZodPipeline2,
-  ZodPromise: () => ZodPromise2,
-  ZodReadonly: () => ZodReadonly2,
-  ZodRecord: () => ZodRecord2,
-  ZodSchema: () => ZodType2,
-  ZodSet: () => ZodSet2,
-  ZodString: () => ZodString2,
-  ZodSymbol: () => ZodSymbol2,
-  ZodTransformer: () => ZodEffects2,
-  ZodTuple: () => ZodTuple2,
-  ZodType: () => ZodType2,
-  ZodUndefined: () => ZodUndefined2,
-  ZodUnion: () => ZodUnion2,
-  ZodUnknown: () => ZodUnknown2,
-  ZodVoid: () => ZodVoid2,
-  addIssueToContext: () => addIssueToContext2,
-  any: () => anyType2,
-  array: () => arrayType2,
-  bigint: () => bigIntType2,
-  boolean: () => booleanType2,
-  coerce: () => coerce2,
-  custom: () => custom2,
-  date: () => dateType2,
-  datetimeRegex: () => datetimeRegex2,
-  defaultErrorMap: () => en_default2,
-  discriminatedUnion: () => discriminatedUnionType2,
-  effect: () => effectsType2,
-  enum: () => enumType2,
-  function: () => functionType2,
-  getErrorMap: () => getErrorMap2,
-  getParsedType: () => getParsedType2,
-  instanceof: () => instanceOfType2,
-  intersection: () => intersectionType2,
-  isAborted: () => isAborted2,
-  isAsync: () => isAsync2,
-  isDirty: () => isDirty2,
-  isValid: () => isValid2,
-  late: () => late2,
-  lazy: () => lazyType2,
-  literal: () => literalType2,
-  makeIssue: () => makeIssue2,
-  map: () => mapType2,
-  nan: () => nanType2,
-  nativeEnum: () => nativeEnumType2,
-  never: () => neverType2,
-  null: () => nullType2,
-  nullable: () => nullableType2,
-  number: () => numberType2,
-  object: () => objectType2,
-  objectUtil: () => objectUtil2,
-  oboolean: () => oboolean2,
-  onumber: () => onumber2,
-  optional: () => optionalType2,
-  ostring: () => ostring2,
-  pipeline: () => pipelineType2,
-  preprocess: () => preprocessType2,
-  promise: () => promiseType2,
-  quotelessJson: () => quotelessJson2,
-  record: () => recordType2,
-  set: () => setType2,
-  setErrorMap: () => setErrorMap2,
-  strictObject: () => strictObjectType2,
-  string: () => stringType2,
-  symbol: () => symbolType2,
-  transformer: () => effectsType2,
-  tuple: () => tupleType2,
-  undefined: () => undefinedType2,
-  union: () => unionType2,
-  unknown: () => unknownType2,
-  util: () => util2,
-  void: () => voidType2
-});
-
-// node_modules/zod/v3/helpers/util.js
-var util2;
-(function(util3) {
-  util3.assertEqual = (_) => {
-  };
-  function assertIs(_arg) {
-  }
-  util3.assertIs = assertIs;
-  function assertNever(_x) {
-    throw new Error();
-  }
-  util3.assertNever = assertNever;
-  util3.arrayToEnum = (items) => {
-    const obj = {};
-    for (const item of items) {
-      obj[item] = item;
-    }
-    return obj;
-  };
-  util3.getValidEnumValues = (obj) => {
-    const validKeys = util3.objectKeys(obj).filter((k) => typeof obj[obj[k]] !== "number");
-    const filtered = {};
-    for (const k of validKeys) {
-      filtered[k] = obj[k];
-    }
-    return util3.objectValues(filtered);
-  };
-  util3.objectValues = (obj) => {
-    return util3.objectKeys(obj).map(function(e) {
-      return obj[e];
-    });
-  };
-  util3.objectKeys = typeof Object.keys === "function" ? (obj) => Object.keys(obj) : (object3) => {
-    const keys = [];
-    for (const key in object3) {
-      if (Object.prototype.hasOwnProperty.call(object3, key)) {
-        keys.push(key);
-      }
-    }
-    return keys;
-  };
-  util3.find = (arr, checker) => {
-    for (const item of arr) {
-      if (checker(item))
-        return item;
-    }
-    return void 0;
-  };
-  util3.isInteger = typeof Number.isInteger === "function" ? (val) => Number.isInteger(val) : (val) => typeof val === "number" && Number.isFinite(val) && Math.floor(val) === val;
-  function joinValues(array4, separator = " | ") {
-    return array4.map((val) => typeof val === "string" ? `'${val}'` : val).join(separator);
-  }
-  util3.joinValues = joinValues;
-  util3.jsonStringifyReplacer = (_, value) => {
-    if (typeof value === "bigint") {
-      return value.toString();
-    }
-    return value;
-  };
-})(util2 || (util2 = {}));
-var objectUtil2;
-(function(objectUtil3) {
-  objectUtil3.mergeShapes = (first, second) => {
-    return {
-      ...first,
-      ...second
-      // second overwrites first
-    };
-  };
-})(objectUtil2 || (objectUtil2 = {}));
-var ZodParsedType2 = util2.arrayToEnum([
-  "string",
-  "nan",
-  "number",
-  "integer",
-  "float",
-  "boolean",
-  "date",
-  "bigint",
-  "symbol",
-  "function",
-  "undefined",
-  "null",
-  "array",
-  "object",
-  "unknown",
-  "promise",
-  "void",
-  "never",
-  "map",
-  "set"
-]);
-var getParsedType2 = (data2) => {
-  const t = typeof data2;
-  switch (t) {
-    case "undefined":
-      return ZodParsedType2.undefined;
-    case "string":
-      return ZodParsedType2.string;
-    case "number":
-      return Number.isNaN(data2) ? ZodParsedType2.nan : ZodParsedType2.number;
-    case "boolean":
-      return ZodParsedType2.boolean;
-    case "function":
-      return ZodParsedType2.function;
-    case "bigint":
-      return ZodParsedType2.bigint;
-    case "symbol":
-      return ZodParsedType2.symbol;
-    case "object":
-      if (Array.isArray(data2)) {
-        return ZodParsedType2.array;
-      }
-      if (data2 === null) {
-        return ZodParsedType2.null;
-      }
-      if (data2.then && typeof data2.then === "function" && data2.catch && typeof data2.catch === "function") {
-        return ZodParsedType2.promise;
-      }
-      if (typeof Map !== "undefined" && data2 instanceof Map) {
-        return ZodParsedType2.map;
-      }
-      if (typeof Set !== "undefined" && data2 instanceof Set) {
-        return ZodParsedType2.set;
-      }
-      if (typeof Date !== "undefined" && data2 instanceof Date) {
-        return ZodParsedType2.date;
-      }
-      return ZodParsedType2.object;
-    default:
-      return ZodParsedType2.unknown;
-  }
-};
-
-// node_modules/zod/v3/ZodError.js
-var ZodIssueCode2 = util2.arrayToEnum([
-  "invalid_type",
-  "invalid_literal",
-  "custom",
-  "invalid_union",
-  "invalid_union_discriminator",
-  "invalid_enum_value",
-  "unrecognized_keys",
-  "invalid_arguments",
-  "invalid_return_type",
-  "invalid_date",
-  "invalid_string",
-  "too_small",
-  "too_big",
-  "invalid_intersection_types",
-  "not_multiple_of",
-  "not_finite"
-]);
-var quotelessJson2 = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
-};
-var ZodError2 = class _ZodError extends Error {
-  get errors() {
-    return this.issues;
-  }
-  constructor(issues) {
-    super();
-    this.issues = [];
-    this.addIssue = (sub) => {
-      this.issues = [...this.issues, sub];
-    };
-    this.addIssues = (subs = []) => {
-      this.issues = [...this.issues, ...subs];
-    };
-    const actualProto = new.target.prototype;
-    if (Object.setPrototypeOf) {
-      Object.setPrototypeOf(this, actualProto);
-    } else {
-      this.__proto__ = actualProto;
-    }
-    this.name = "ZodError";
-    this.issues = issues;
-  }
-  format(_mapper) {
-    const mapper = _mapper || function(issue) {
-      return issue.message;
-    };
-    const fieldErrors = { _errors: [] };
-    const processError = (error) => {
-      for (const issue of error.issues) {
-        if (issue.code === "invalid_union") {
-          issue.unionErrors.map(processError);
-        } else if (issue.code === "invalid_return_type") {
-          processError(issue.returnTypeError);
-        } else if (issue.code === "invalid_arguments") {
-          processError(issue.argumentsError);
-        } else if (issue.path.length === 0) {
-          fieldErrors._errors.push(mapper(issue));
-        } else {
-          let curr = fieldErrors;
-          let i = 0;
-          while (i < issue.path.length) {
-            const el = issue.path[i];
-            const terminal = i === issue.path.length - 1;
-            if (!terminal) {
-              curr[el] = curr[el] || { _errors: [] };
-            } else {
-              curr[el] = curr[el] || { _errors: [] };
-              curr[el]._errors.push(mapper(issue));
-            }
-            curr = curr[el];
-            i++;
-          }
-        }
-      }
-    };
-    processError(this);
-    return fieldErrors;
-  }
-  static assert(value) {
-    if (!(value instanceof _ZodError)) {
-      throw new Error(`Not a ZodError: ${value}`);
-    }
-  }
-  toString() {
-    return this.message;
-  }
-  get message() {
-    return JSON.stringify(this.issues, util2.jsonStringifyReplacer, 2);
-  }
-  get isEmpty() {
-    return this.issues.length === 0;
-  }
-  flatten(mapper = (issue) => issue.message) {
-    const fieldErrors = {};
-    const formErrors = [];
-    for (const sub of this.issues) {
-      if (sub.path.length > 0) {
-        const firstEl = sub.path[0];
-        fieldErrors[firstEl] = fieldErrors[firstEl] || [];
-        fieldErrors[firstEl].push(mapper(sub));
-      } else {
-        formErrors.push(mapper(sub));
-      }
-    }
-    return { formErrors, fieldErrors };
-  }
-  get formErrors() {
-    return this.flatten();
-  }
-};
-ZodError2.create = (issues) => {
-  const error = new ZodError2(issues);
-  return error;
-};
-
-// node_modules/zod/v3/locales/en.js
-var errorMap2 = (issue, _ctx) => {
-  let message;
-  switch (issue.code) {
-    case ZodIssueCode2.invalid_type:
-      if (issue.received === ZodParsedType2.undefined) {
-        message = "Required";
-      } else {
-        message = `Expected ${issue.expected}, received ${issue.received}`;
-      }
-      break;
-    case ZodIssueCode2.invalid_literal:
-      message = `Invalid literal value, expected ${JSON.stringify(issue.expected, util2.jsonStringifyReplacer)}`;
-      break;
-    case ZodIssueCode2.unrecognized_keys:
-      message = `Unrecognized key(s) in object: ${util2.joinValues(issue.keys, ", ")}`;
-      break;
-    case ZodIssueCode2.invalid_union:
-      message = `Invalid input`;
-      break;
-    case ZodIssueCode2.invalid_union_discriminator:
-      message = `Invalid discriminator value. Expected ${util2.joinValues(issue.options)}`;
-      break;
-    case ZodIssueCode2.invalid_enum_value:
-      message = `Invalid enum value. Expected ${util2.joinValues(issue.options)}, received '${issue.received}'`;
-      break;
-    case ZodIssueCode2.invalid_arguments:
-      message = `Invalid function arguments`;
-      break;
-    case ZodIssueCode2.invalid_return_type:
-      message = `Invalid function return type`;
-      break;
-    case ZodIssueCode2.invalid_date:
-      message = `Invalid date`;
-      break;
-    case ZodIssueCode2.invalid_string:
-      if (typeof issue.validation === "object") {
-        if ("includes" in issue.validation) {
-          message = `Invalid input: must include "${issue.validation.includes}"`;
-          if (typeof issue.validation.position === "number") {
-            message = `${message} at one or more positions greater than or equal to ${issue.validation.position}`;
-          }
-        } else if ("startsWith" in issue.validation) {
-          message = `Invalid input: must start with "${issue.validation.startsWith}"`;
-        } else if ("endsWith" in issue.validation) {
-          message = `Invalid input: must end with "${issue.validation.endsWith}"`;
-        } else {
-          util2.assertNever(issue.validation);
-        }
-      } else if (issue.validation !== "regex") {
-        message = `Invalid ${issue.validation}`;
-      } else {
-        message = "Invalid";
-      }
-      break;
-    case ZodIssueCode2.too_small:
-      if (issue.type === "array")
-        message = `Array must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `more than`} ${issue.minimum} element(s)`;
-      else if (issue.type === "string")
-        message = `String must contain ${issue.exact ? "exactly" : issue.inclusive ? `at least` : `over`} ${issue.minimum} character(s)`;
-      else if (issue.type === "number")
-        message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
-      else if (issue.type === "bigint")
-        message = `Number must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${issue.minimum}`;
-      else if (issue.type === "date")
-        message = `Date must be ${issue.exact ? `exactly equal to ` : issue.inclusive ? `greater than or equal to ` : `greater than `}${new Date(Number(issue.minimum))}`;
-      else
-        message = "Invalid input";
-      break;
-    case ZodIssueCode2.too_big:
-      if (issue.type === "array")
-        message = `Array must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `less than`} ${issue.maximum} element(s)`;
-      else if (issue.type === "string")
-        message = `String must contain ${issue.exact ? `exactly` : issue.inclusive ? `at most` : `under`} ${issue.maximum} character(s)`;
-      else if (issue.type === "number")
-        message = `Number must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-      else if (issue.type === "bigint")
-        message = `BigInt must be ${issue.exact ? `exactly` : issue.inclusive ? `less than or equal to` : `less than`} ${issue.maximum}`;
-      else if (issue.type === "date")
-        message = `Date must be ${issue.exact ? `exactly` : issue.inclusive ? `smaller than or equal to` : `smaller than`} ${new Date(Number(issue.maximum))}`;
-      else
-        message = "Invalid input";
-      break;
-    case ZodIssueCode2.custom:
-      message = `Invalid input`;
-      break;
-    case ZodIssueCode2.invalid_intersection_types:
-      message = `Intersection results could not be merged`;
-      break;
-    case ZodIssueCode2.not_multiple_of:
-      message = `Number must be a multiple of ${issue.multipleOf}`;
-      break;
-    case ZodIssueCode2.not_finite:
-      message = "Number must be finite";
-      break;
-    default:
-      message = _ctx.defaultError;
-      util2.assertNever(issue);
-  }
-  return { message };
-};
-var en_default2 = errorMap2;
-
-// node_modules/zod/v3/errors.js
-var overrideErrorMap2 = en_default2;
-function setErrorMap2(map) {
-  overrideErrorMap2 = map;
-}
-function getErrorMap2() {
-  return overrideErrorMap2;
-}
-
-// node_modules/zod/v3/helpers/parseUtil.js
-var makeIssue2 = (params) => {
-  const { data: data2, path, errorMaps, issueData } = params;
-  const fullPath = [...path, ...issueData.path || []];
-  const fullIssue = {
-    ...issueData,
-    path: fullPath
-  };
-  if (issueData.message !== void 0) {
-    return {
-      ...issueData,
-      path: fullPath,
-      message: issueData.message
-    };
-  }
-  let errorMessage = "";
-  const maps = errorMaps.filter((m) => !!m).slice().reverse();
-  for (const map of maps) {
-    errorMessage = map(fullIssue, { data: data2, defaultError: errorMessage }).message;
-  }
-  return {
-    ...issueData,
-    path: fullPath,
-    message: errorMessage
-  };
-};
-var EMPTY_PATH2 = [];
-function addIssueToContext2(ctx, issueData) {
-  const overrideMap = getErrorMap2();
-  const issue = makeIssue2({
-    issueData,
-    data: ctx.data,
-    path: ctx.path,
-    errorMaps: [
-      ctx.common.contextualErrorMap,
-      // contextual error map is first priority
-      ctx.schemaErrorMap,
-      // then schema-bound map if available
-      overrideMap,
-      // then global override map
-      overrideMap === en_default2 ? void 0 : en_default2
-      // then global default map
-    ].filter((x) => !!x)
-  });
-  ctx.common.issues.push(issue);
-}
-var ParseStatus2 = class _ParseStatus {
-  constructor() {
-    this.value = "valid";
-  }
-  dirty() {
-    if (this.value === "valid")
-      this.value = "dirty";
-  }
-  abort() {
-    if (this.value !== "aborted")
-      this.value = "aborted";
-  }
-  static mergeArray(status2, results) {
-    const arrayValue = [];
-    for (const s2 of results) {
-      if (s2.status === "aborted")
-        return INVALID2;
-      if (s2.status === "dirty")
-        status2.dirty();
-      arrayValue.push(s2.value);
-    }
-    return { status: status2.value, value: arrayValue };
-  }
-  static async mergeObjectAsync(status2, pairs) {
-    const syncPairs = [];
-    for (const pair of pairs) {
-      const key = await pair.key;
-      const value = await pair.value;
-      syncPairs.push({
-        key,
-        value
-      });
-    }
-    return _ParseStatus.mergeObjectSync(status2, syncPairs);
-  }
-  static mergeObjectSync(status2, pairs) {
-    const finalObject = {};
-    for (const pair of pairs) {
-      const { key, value } = pair;
-      if (key.status === "aborted")
-        return INVALID2;
-      if (value.status === "aborted")
-        return INVALID2;
-      if (key.status === "dirty")
-        status2.dirty();
-      if (value.status === "dirty")
-        status2.dirty();
-      if (key.value !== "__proto__" && (typeof value.value !== "undefined" || pair.alwaysSet)) {
-        finalObject[key.value] = value.value;
-      }
-    }
-    return { status: status2.value, value: finalObject };
-  }
-};
-var INVALID2 = Object.freeze({
-  status: "aborted"
-});
-var DIRTY2 = (value) => ({ status: "dirty", value });
-var OK2 = (value) => ({ status: "valid", value });
-var isAborted2 = (x) => x.status === "aborted";
-var isDirty2 = (x) => x.status === "dirty";
-var isValid2 = (x) => x.status === "valid";
-var isAsync2 = (x) => typeof Promise !== "undefined" && x instanceof Promise;
-
-// node_modules/zod/v3/helpers/errorUtil.js
-var errorUtil2;
-(function(errorUtil3) {
-  errorUtil3.errToObj = (message) => typeof message === "string" ? { message } : message || {};
-  errorUtil3.toString = (message) => typeof message === "string" ? message : message?.message;
-})(errorUtil2 || (errorUtil2 = {}));
-
-// node_modules/zod/v3/types.js
-var ParseInputLazyPath2 = class {
-  constructor(parent, value, path, key) {
-    this._cachedPath = [];
-    this.parent = parent;
-    this.data = value;
-    this._path = path;
-    this._key = key;
-  }
-  get path() {
-    if (!this._cachedPath.length) {
-      if (Array.isArray(this._key)) {
-        this._cachedPath.push(...this._path, ...this._key);
-      } else {
-        this._cachedPath.push(...this._path, this._key);
-      }
-    }
-    return this._cachedPath;
-  }
-};
-var handleResult2 = (ctx, result) => {
-  if (isValid2(result)) {
-    return { success: true, data: result.value };
-  } else {
-    if (!ctx.common.issues.length) {
-      throw new Error("Validation failed but no issues detected.");
-    }
-    return {
-      success: false,
-      get error() {
-        if (this._error)
-          return this._error;
-        const error = new ZodError2(ctx.common.issues);
-        this._error = error;
-        return this._error;
-      }
-    };
-  }
-};
-function processCreateParams2(params) {
-  if (!params)
-    return {};
-  const { errorMap: errorMap3, invalid_type_error, required_error, description } = params;
-  if (errorMap3 && (invalid_type_error || required_error)) {
-    throw new Error(`Can't use "invalid_type_error" or "required_error" in conjunction with custom error map.`);
-  }
-  if (errorMap3)
-    return { errorMap: errorMap3, description };
-  const customMap = (iss, ctx) => {
-    const { message } = params;
-    if (iss.code === "invalid_enum_value") {
-      return { message: message ?? ctx.defaultError };
-    }
-    if (typeof ctx.data === "undefined") {
-      return { message: message ?? required_error ?? ctx.defaultError };
-    }
-    if (iss.code !== "invalid_type")
-      return { message: ctx.defaultError };
-    return { message: message ?? invalid_type_error ?? ctx.defaultError };
-  };
-  return { errorMap: customMap, description };
-}
-var ZodType2 = class {
-  get description() {
-    return this._def.description;
-  }
-  _getType(input3) {
-    return getParsedType2(input3.data);
-  }
-  _getOrReturnCtx(input3, ctx) {
-    return ctx || {
-      common: input3.parent.common,
-      data: input3.data,
-      parsedType: getParsedType2(input3.data),
-      schemaErrorMap: this._def.errorMap,
-      path: input3.path,
-      parent: input3.parent
-    };
-  }
-  _processInputParams(input3) {
-    return {
-      status: new ParseStatus2(),
-      ctx: {
-        common: input3.parent.common,
-        data: input3.data,
-        parsedType: getParsedType2(input3.data),
-        schemaErrorMap: this._def.errorMap,
-        path: input3.path,
-        parent: input3.parent
-      }
-    };
-  }
-  _parseSync(input3) {
-    const result = this._parse(input3);
-    if (isAsync2(result)) {
-      throw new Error("Synchronous parse encountered promise.");
-    }
-    return result;
-  }
-  _parseAsync(input3) {
-    const result = this._parse(input3);
-    return Promise.resolve(result);
-  }
-  parse(data2, params) {
-    const result = this.safeParse(data2, params);
-    if (result.success)
-      return result.data;
-    throw result.error;
-  }
-  safeParse(data2, params) {
-    const ctx = {
-      common: {
-        issues: [],
-        async: params?.async ?? false,
-        contextualErrorMap: params?.errorMap
-      },
-      path: params?.path || [],
-      schemaErrorMap: this._def.errorMap,
-      parent: null,
-      data: data2,
-      parsedType: getParsedType2(data2)
-    };
-    const result = this._parseSync({ data: data2, path: ctx.path, parent: ctx });
-    return handleResult2(ctx, result);
-  }
-  "~validate"(data2) {
-    const ctx = {
-      common: {
-        issues: [],
-        async: !!this["~standard"].async
-      },
-      path: [],
-      schemaErrorMap: this._def.errorMap,
-      parent: null,
-      data: data2,
-      parsedType: getParsedType2(data2)
-    };
-    if (!this["~standard"].async) {
-      try {
-        const result = this._parseSync({ data: data2, path: [], parent: ctx });
-        return isValid2(result) ? {
-          value: result.value
-        } : {
-          issues: ctx.common.issues
-        };
-      } catch (err5) {
-        if (err5?.message?.toLowerCase()?.includes("encountered")) {
-          this["~standard"].async = true;
-        }
-        ctx.common = {
-          issues: [],
-          async: true
-        };
-      }
-    }
-    return this._parseAsync({ data: data2, path: [], parent: ctx }).then((result) => isValid2(result) ? {
-      value: result.value
-    } : {
-      issues: ctx.common.issues
-    });
-  }
-  async parseAsync(data2, params) {
-    const result = await this.safeParseAsync(data2, params);
-    if (result.success)
-      return result.data;
-    throw result.error;
-  }
-  async safeParseAsync(data2, params) {
-    const ctx = {
-      common: {
-        issues: [],
-        contextualErrorMap: params?.errorMap,
-        async: true
-      },
-      path: params?.path || [],
-      schemaErrorMap: this._def.errorMap,
-      parent: null,
-      data: data2,
-      parsedType: getParsedType2(data2)
-    };
-    const maybeAsyncResult = this._parse({ data: data2, path: ctx.path, parent: ctx });
-    const result = await (isAsync2(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
-    return handleResult2(ctx, result);
-  }
-  refine(check, message) {
-    const getIssueProperties = (val) => {
-      if (typeof message === "string" || typeof message === "undefined") {
-        return { message };
-      } else if (typeof message === "function") {
-        return message(val);
-      } else {
-        return message;
-      }
-    };
-    return this._refinement((val, ctx) => {
-      const result = check(val);
-      const setError = () => ctx.addIssue({
-        code: ZodIssueCode2.custom,
-        ...getIssueProperties(val)
-      });
-      if (typeof Promise !== "undefined" && result instanceof Promise) {
-        return result.then((data2) => {
-          if (!data2) {
-            setError();
-            return false;
-          } else {
-            return true;
-          }
-        });
-      }
-      if (!result) {
-        setError();
-        return false;
-      } else {
-        return true;
-      }
-    });
-  }
-  refinement(check, refinementData) {
-    return this._refinement((val, ctx) => {
-      if (!check(val)) {
-        ctx.addIssue(typeof refinementData === "function" ? refinementData(val, ctx) : refinementData);
-        return false;
-      } else {
-        return true;
-      }
-    });
-  }
-  _refinement(refinement) {
-    return new ZodEffects2({
-      schema: this,
-      typeName: ZodFirstPartyTypeKind2.ZodEffects,
-      effect: { type: "refinement", refinement }
-    });
-  }
-  superRefine(refinement) {
-    return this._refinement(refinement);
-  }
-  constructor(def) {
-    this.spa = this.safeParseAsync;
-    this._def = def;
-    this.parse = this.parse.bind(this);
-    this.safeParse = this.safeParse.bind(this);
-    this.parseAsync = this.parseAsync.bind(this);
-    this.safeParseAsync = this.safeParseAsync.bind(this);
-    this.spa = this.spa.bind(this);
-    this.refine = this.refine.bind(this);
-    this.refinement = this.refinement.bind(this);
-    this.superRefine = this.superRefine.bind(this);
-    this.optional = this.optional.bind(this);
-    this.nullable = this.nullable.bind(this);
-    this.nullish = this.nullish.bind(this);
-    this.array = this.array.bind(this);
-    this.promise = this.promise.bind(this);
-    this.or = this.or.bind(this);
-    this.and = this.and.bind(this);
-    this.transform = this.transform.bind(this);
-    this.brand = this.brand.bind(this);
-    this.default = this.default.bind(this);
-    this.catch = this.catch.bind(this);
-    this.describe = this.describe.bind(this);
-    this.pipe = this.pipe.bind(this);
-    this.readonly = this.readonly.bind(this);
-    this.isNullable = this.isNullable.bind(this);
-    this.isOptional = this.isOptional.bind(this);
-    this["~standard"] = {
-      version: 1,
-      vendor: "zod",
-      validate: (data2) => this["~validate"](data2)
-    };
-  }
-  optional() {
-    return ZodOptional2.create(this, this._def);
-  }
-  nullable() {
-    return ZodNullable2.create(this, this._def);
-  }
-  nullish() {
-    return this.nullable().optional();
-  }
-  array() {
-    return ZodArray2.create(this);
-  }
-  promise() {
-    return ZodPromise2.create(this, this._def);
-  }
-  or(option) {
-    return ZodUnion2.create([this, option], this._def);
-  }
-  and(incoming) {
-    return ZodIntersection2.create(this, incoming, this._def);
-  }
-  transform(transform) {
-    return new ZodEffects2({
-      ...processCreateParams2(this._def),
-      schema: this,
-      typeName: ZodFirstPartyTypeKind2.ZodEffects,
-      effect: { type: "transform", transform }
-    });
-  }
-  default(def) {
-    const defaultValueFunc = typeof def === "function" ? def : () => def;
-    return new ZodDefault2({
-      ...processCreateParams2(this._def),
-      innerType: this,
-      defaultValue: defaultValueFunc,
-      typeName: ZodFirstPartyTypeKind2.ZodDefault
-    });
-  }
-  brand() {
-    return new ZodBranded2({
-      typeName: ZodFirstPartyTypeKind2.ZodBranded,
-      type: this,
-      ...processCreateParams2(this._def)
-    });
-  }
-  catch(def) {
-    const catchValueFunc = typeof def === "function" ? def : () => def;
-    return new ZodCatch2({
-      ...processCreateParams2(this._def),
-      innerType: this,
-      catchValue: catchValueFunc,
-      typeName: ZodFirstPartyTypeKind2.ZodCatch
-    });
-  }
-  describe(description) {
-    const This = this.constructor;
-    return new This({
-      ...this._def,
-      description
-    });
-  }
-  pipe(target2) {
-    return ZodPipeline2.create(this, target2);
-  }
-  readonly() {
-    return ZodReadonly2.create(this);
-  }
-  isOptional() {
-    return this.safeParse(void 0).success;
-  }
-  isNullable() {
-    return this.safeParse(null).success;
-  }
-};
-var cuidRegex2 = /^c[^\s-]{8,}$/i;
-var cuid2Regex2 = /^[0-9a-z]+$/;
-var ulidRegex2 = /^[0-9A-HJKMNP-TV-Z]{26}$/i;
-var uuidRegex2 = /^[0-9a-fA-F]{8}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{4}\b-[0-9a-fA-F]{12}$/i;
-var nanoidRegex2 = /^[a-z0-9_-]{21}$/i;
-var jwtRegex2 = /^[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]*$/;
-var durationRegex2 = /^[-+]?P(?!$)(?:(?:[-+]?\d+Y)|(?:[-+]?\d+[.,]\d+Y$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:(?:[-+]?\d+W)|(?:[-+]?\d+[.,]\d+W$))?(?:(?:[-+]?\d+D)|(?:[-+]?\d+[.,]\d+D$))?(?:T(?=[\d+-])(?:(?:[-+]?\d+H)|(?:[-+]?\d+[.,]\d+H$))?(?:(?:[-+]?\d+M)|(?:[-+]?\d+[.,]\d+M$))?(?:[-+]?\d+(?:[.,]\d+)?S)?)??$/;
-var emailRegex2 = /^(?!\.)(?!.*\.\.)([A-Z0-9_'+\-\.]*)[A-Z0-9_+-]@([A-Z0-9][A-Z0-9\-]*\.)+[A-Z]{2,}$/i;
-var _emojiRegex2 = `^(\\p{Extended_Pictographic}|\\p{Emoji_Component})+$`;
-var emojiRegex2;
-var ipv4Regex2 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])$/;
-var ipv4CidrRegex2 = /^(?:(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\.){3}(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9][0-9]|[0-9])\/(3[0-2]|[12]?[0-9])$/;
-var ipv6Regex2 = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))$/;
-var ipv6CidrRegex2 = /^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\/(12[0-8]|1[01][0-9]|[1-9]?[0-9])$/;
-var base64Regex2 = /^([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?$/;
-var base64urlRegex2 = /^([0-9a-zA-Z-_]{4})*(([0-9a-zA-Z-_]{2}(==)?)|([0-9a-zA-Z-_]{3}(=)?))?$/;
-var dateRegexSource2 = `((\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-((0[13578]|1[02])-(0[1-9]|[12]\\d|3[01])|(0[469]|11)-(0[1-9]|[12]\\d|30)|(02)-(0[1-9]|1\\d|2[0-8])))`;
-var dateRegex2 = new RegExp(`^${dateRegexSource2}$`);
-function timeRegexSource2(args) {
-  let secondsRegexSource = `[0-5]\\d`;
-  if (args.precision) {
-    secondsRegexSource = `${secondsRegexSource}\\.\\d{${args.precision}}`;
-  } else if (args.precision == null) {
-    secondsRegexSource = `${secondsRegexSource}(\\.\\d+)?`;
-  }
-  const secondsQuantifier = args.precision ? "+" : "?";
-  return `([01]\\d|2[0-3]):[0-5]\\d(:${secondsRegexSource})${secondsQuantifier}`;
-}
-function timeRegex2(args) {
-  return new RegExp(`^${timeRegexSource2(args)}$`);
-}
-function datetimeRegex2(args) {
-  let regex = `${dateRegexSource2}T${timeRegexSource2(args)}`;
-  const opts = [];
-  opts.push(args.local ? `Z?` : `Z`);
-  if (args.offset)
-    opts.push(`([+-]\\d{2}:?\\d{2})`);
-  regex = `${regex}(${opts.join("|")})`;
-  return new RegExp(`^${regex}$`);
-}
-function isValidIP2(ip, version) {
-  if ((version === "v4" || !version) && ipv4Regex2.test(ip)) {
-    return true;
-  }
-  if ((version === "v6" || !version) && ipv6Regex2.test(ip)) {
-    return true;
-  }
-  return false;
-}
-function isValidJWT2(jwt, alg) {
-  if (!jwtRegex2.test(jwt))
-    return false;
-  try {
-    const [header] = jwt.split(".");
-    if (!header)
-      return false;
-    const base64 = header.replace(/-/g, "+").replace(/_/g, "/").padEnd(header.length + (4 - header.length % 4) % 4, "=");
-    const decoded = JSON.parse(atob(base64));
-    if (typeof decoded !== "object" || decoded === null)
-      return false;
-    if ("typ" in decoded && decoded?.typ !== "JWT")
-      return false;
-    if (!decoded.alg)
-      return false;
-    if (alg && decoded.alg !== alg)
-      return false;
-    return true;
-  } catch {
-    return false;
-  }
-}
-function isValidCidr2(ip, version) {
-  if ((version === "v4" || !version) && ipv4CidrRegex2.test(ip)) {
-    return true;
-  }
-  if ((version === "v6" || !version) && ipv6CidrRegex2.test(ip)) {
-    return true;
-  }
-  return false;
-}
-var ZodString2 = class _ZodString extends ZodType2 {
-  _parse(input3) {
-    if (this._def.coerce) {
-      input3.data = String(input3.data);
-    }
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.string) {
-      const ctx2 = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx2, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.string,
-        received: ctx2.parsedType
-      });
-      return INVALID2;
-    }
-    const status2 = new ParseStatus2();
-    let ctx = void 0;
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        if (input3.data.length < check.value) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_small,
-            minimum: check.value,
-            type: "string",
-            inclusive: true,
-            exact: false,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "max") {
-        if (input3.data.length > check.value) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_big,
-            maximum: check.value,
-            type: "string",
-            inclusive: true,
-            exact: false,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "length") {
-        const tooBig = input3.data.length > check.value;
-        const tooSmall = input3.data.length < check.value;
-        if (tooBig || tooSmall) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          if (tooBig) {
-            addIssueToContext2(ctx, {
-              code: ZodIssueCode2.too_big,
-              maximum: check.value,
-              type: "string",
-              inclusive: true,
-              exact: true,
-              message: check.message
-            });
-          } else if (tooSmall) {
-            addIssueToContext2(ctx, {
-              code: ZodIssueCode2.too_small,
-              minimum: check.value,
-              type: "string",
-              inclusive: true,
-              exact: true,
-              message: check.message
-            });
-          }
-          status2.dirty();
-        }
-      } else if (check.kind === "email") {
-        if (!emailRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "email",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "emoji") {
-        if (!emojiRegex2) {
-          emojiRegex2 = new RegExp(_emojiRegex2, "u");
-        }
-        if (!emojiRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "emoji",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "uuid") {
-        if (!uuidRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "uuid",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "nanoid") {
-        if (!nanoidRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "nanoid",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "cuid") {
-        if (!cuidRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "cuid",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "cuid2") {
-        if (!cuid2Regex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "cuid2",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "ulid") {
-        if (!ulidRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "ulid",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "url") {
-        try {
-          new URL(input3.data);
-        } catch {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "url",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "regex") {
-        check.regex.lastIndex = 0;
-        const testResult = check.regex.test(input3.data);
-        if (!testResult) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "regex",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "trim") {
-        input3.data = input3.data.trim();
-      } else if (check.kind === "includes") {
-        if (!input3.data.includes(check.value, check.position)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: { includes: check.value, position: check.position },
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "toLowerCase") {
-        input3.data = input3.data.toLowerCase();
-      } else if (check.kind === "toUpperCase") {
-        input3.data = input3.data.toUpperCase();
-      } else if (check.kind === "startsWith") {
-        if (!input3.data.startsWith(check.value)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: { startsWith: check.value },
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "endsWith") {
-        if (!input3.data.endsWith(check.value)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: { endsWith: check.value },
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "datetime") {
-        const regex = datetimeRegex2(check);
-        if (!regex.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: "datetime",
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "date") {
-        const regex = dateRegex2;
-        if (!regex.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: "date",
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "time") {
-        const regex = timeRegex2(check);
-        if (!regex.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_string,
-            validation: "time",
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "duration") {
-        if (!durationRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "duration",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "ip") {
-        if (!isValidIP2(input3.data, check.version)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "ip",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "jwt") {
-        if (!isValidJWT2(input3.data, check.alg)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "jwt",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "cidr") {
-        if (!isValidCidr2(input3.data, check.version)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "cidr",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "base64") {
-        if (!base64Regex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "base64",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "base64url") {
-        if (!base64urlRegex2.test(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            validation: "base64url",
-            code: ZodIssueCode2.invalid_string,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else {
-        util2.assertNever(check);
-      }
-    }
-    return { status: status2.value, value: input3.data };
-  }
-  _regex(regex, validation, message) {
-    return this.refinement((data2) => regex.test(data2), {
-      validation,
-      code: ZodIssueCode2.invalid_string,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  _addCheck(check) {
-    return new _ZodString({
-      ...this._def,
-      checks: [...this._def.checks, check]
-    });
-  }
-  email(message) {
-    return this._addCheck({ kind: "email", ...errorUtil2.errToObj(message) });
-  }
-  url(message) {
-    return this._addCheck({ kind: "url", ...errorUtil2.errToObj(message) });
-  }
-  emoji(message) {
-    return this._addCheck({ kind: "emoji", ...errorUtil2.errToObj(message) });
-  }
-  uuid(message) {
-    return this._addCheck({ kind: "uuid", ...errorUtil2.errToObj(message) });
-  }
-  nanoid(message) {
-    return this._addCheck({ kind: "nanoid", ...errorUtil2.errToObj(message) });
-  }
-  cuid(message) {
-    return this._addCheck({ kind: "cuid", ...errorUtil2.errToObj(message) });
-  }
-  cuid2(message) {
-    return this._addCheck({ kind: "cuid2", ...errorUtil2.errToObj(message) });
-  }
-  ulid(message) {
-    return this._addCheck({ kind: "ulid", ...errorUtil2.errToObj(message) });
-  }
-  base64(message) {
-    return this._addCheck({ kind: "base64", ...errorUtil2.errToObj(message) });
-  }
-  base64url(message) {
-    return this._addCheck({
-      kind: "base64url",
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  jwt(options) {
-    return this._addCheck({ kind: "jwt", ...errorUtil2.errToObj(options) });
-  }
-  ip(options) {
-    return this._addCheck({ kind: "ip", ...errorUtil2.errToObj(options) });
-  }
-  cidr(options) {
-    return this._addCheck({ kind: "cidr", ...errorUtil2.errToObj(options) });
-  }
-  datetime(options) {
-    if (typeof options === "string") {
-      return this._addCheck({
-        kind: "datetime",
-        precision: null,
-        offset: false,
-        local: false,
-        message: options
-      });
-    }
-    return this._addCheck({
-      kind: "datetime",
-      precision: typeof options?.precision === "undefined" ? null : options?.precision,
-      offset: options?.offset ?? false,
-      local: options?.local ?? false,
-      ...errorUtil2.errToObj(options?.message)
-    });
-  }
-  date(message) {
-    return this._addCheck({ kind: "date", message });
-  }
-  time(options) {
-    if (typeof options === "string") {
-      return this._addCheck({
-        kind: "time",
-        precision: null,
-        message: options
-      });
-    }
-    return this._addCheck({
-      kind: "time",
-      precision: typeof options?.precision === "undefined" ? null : options?.precision,
-      ...errorUtil2.errToObj(options?.message)
-    });
-  }
-  duration(message) {
-    return this._addCheck({ kind: "duration", ...errorUtil2.errToObj(message) });
-  }
-  regex(regex, message) {
-    return this._addCheck({
-      kind: "regex",
-      regex,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  includes(value, options) {
-    return this._addCheck({
-      kind: "includes",
-      value,
-      position: options?.position,
-      ...errorUtil2.errToObj(options?.message)
-    });
-  }
-  startsWith(value, message) {
-    return this._addCheck({
-      kind: "startsWith",
-      value,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  endsWith(value, message) {
-    return this._addCheck({
-      kind: "endsWith",
-      value,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  min(minLength, message) {
-    return this._addCheck({
-      kind: "min",
-      value: minLength,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  max(maxLength, message) {
-    return this._addCheck({
-      kind: "max",
-      value: maxLength,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  length(len, message) {
-    return this._addCheck({
-      kind: "length",
-      value: len,
-      ...errorUtil2.errToObj(message)
-    });
-  }
-  /**
-   * Equivalent to `.min(1)`
-   */
-  nonempty(message) {
-    return this.min(1, errorUtil2.errToObj(message));
-  }
-  trim() {
-    return new _ZodString({
-      ...this._def,
-      checks: [...this._def.checks, { kind: "trim" }]
-    });
-  }
-  toLowerCase() {
-    return new _ZodString({
-      ...this._def,
-      checks: [...this._def.checks, { kind: "toLowerCase" }]
-    });
-  }
-  toUpperCase() {
-    return new _ZodString({
-      ...this._def,
-      checks: [...this._def.checks, { kind: "toUpperCase" }]
-    });
-  }
-  get isDatetime() {
-    return !!this._def.checks.find((ch) => ch.kind === "datetime");
-  }
-  get isDate() {
-    return !!this._def.checks.find((ch) => ch.kind === "date");
-  }
-  get isTime() {
-    return !!this._def.checks.find((ch) => ch.kind === "time");
-  }
-  get isDuration() {
-    return !!this._def.checks.find((ch) => ch.kind === "duration");
-  }
-  get isEmail() {
-    return !!this._def.checks.find((ch) => ch.kind === "email");
-  }
-  get isURL() {
-    return !!this._def.checks.find((ch) => ch.kind === "url");
-  }
-  get isEmoji() {
-    return !!this._def.checks.find((ch) => ch.kind === "emoji");
-  }
-  get isUUID() {
-    return !!this._def.checks.find((ch) => ch.kind === "uuid");
-  }
-  get isNANOID() {
-    return !!this._def.checks.find((ch) => ch.kind === "nanoid");
-  }
-  get isCUID() {
-    return !!this._def.checks.find((ch) => ch.kind === "cuid");
-  }
-  get isCUID2() {
-    return !!this._def.checks.find((ch) => ch.kind === "cuid2");
-  }
-  get isULID() {
-    return !!this._def.checks.find((ch) => ch.kind === "ulid");
-  }
-  get isIP() {
-    return !!this._def.checks.find((ch) => ch.kind === "ip");
-  }
-  get isCIDR() {
-    return !!this._def.checks.find((ch) => ch.kind === "cidr");
-  }
-  get isBase64() {
-    return !!this._def.checks.find((ch) => ch.kind === "base64");
-  }
-  get isBase64url() {
-    return !!this._def.checks.find((ch) => ch.kind === "base64url");
-  }
-  get minLength() {
-    let min = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
-      }
-    }
-    return min;
-  }
-  get maxLength() {
-    let max = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
-      }
-    }
-    return max;
-  }
-};
-ZodString2.create = (params) => {
-  return new ZodString2({
-    checks: [],
-    typeName: ZodFirstPartyTypeKind2.ZodString,
-    coerce: params?.coerce ?? false,
-    ...processCreateParams2(params)
-  });
-};
-function floatSafeRemainder2(val, step) {
-  const valDecCount = (val.toString().split(".")[1] || "").length;
-  const stepDecCount = (step.toString().split(".")[1] || "").length;
-  const decCount = valDecCount > stepDecCount ? valDecCount : stepDecCount;
-  const valInt = Number.parseInt(val.toFixed(decCount).replace(".", ""));
-  const stepInt = Number.parseInt(step.toFixed(decCount).replace(".", ""));
-  return valInt % stepInt / 10 ** decCount;
-}
-var ZodNumber2 = class _ZodNumber extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this.min = this.gte;
-    this.max = this.lte;
-    this.step = this.multipleOf;
-  }
-  _parse(input3) {
-    if (this._def.coerce) {
-      input3.data = Number(input3.data);
-    }
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.number) {
-      const ctx2 = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx2, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.number,
-        received: ctx2.parsedType
-      });
-      return INVALID2;
-    }
-    let ctx = void 0;
-    const status2 = new ParseStatus2();
-    for (const check of this._def.checks) {
-      if (check.kind === "int") {
-        if (!util2.isInteger(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.invalid_type,
-            expected: "integer",
-            received: "float",
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input3.data < check.value : input3.data <= check.value;
-        if (tooSmall) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_small,
-            minimum: check.value,
-            type: "number",
-            inclusive: check.inclusive,
-            exact: false,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input3.data > check.value : input3.data >= check.value;
-        if (tooBig) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_big,
-            maximum: check.value,
-            type: "number",
-            inclusive: check.inclusive,
-            exact: false,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "multipleOf") {
-        if (floatSafeRemainder2(input3.data, check.value) !== 0) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.not_multiple_of,
-            multipleOf: check.value,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "finite") {
-        if (!Number.isFinite(input3.data)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.not_finite,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else {
-        util2.assertNever(check);
-      }
-    }
-    return { status: status2.value, value: input3.data };
-  }
-  gte(value, message) {
-    return this.setLimit("min", value, true, errorUtil2.toString(message));
-  }
-  gt(value, message) {
-    return this.setLimit("min", value, false, errorUtil2.toString(message));
-  }
-  lte(value, message) {
-    return this.setLimit("max", value, true, errorUtil2.toString(message));
-  }
-  lt(value, message) {
-    return this.setLimit("max", value, false, errorUtil2.toString(message));
-  }
-  setLimit(kind, value, inclusive, message) {
-    return new _ZodNumber({
-      ...this._def,
-      checks: [
-        ...this._def.checks,
-        {
-          kind,
-          value,
-          inclusive,
-          message: errorUtil2.toString(message)
-        }
-      ]
-    });
-  }
-  _addCheck(check) {
-    return new _ZodNumber({
-      ...this._def,
-      checks: [...this._def.checks, check]
-    });
-  }
-  int(message) {
-    return this._addCheck({
-      kind: "int",
-      message: errorUtil2.toString(message)
-    });
-  }
-  positive(message) {
-    return this._addCheck({
-      kind: "min",
-      value: 0,
-      inclusive: false,
-      message: errorUtil2.toString(message)
-    });
-  }
-  negative(message) {
-    return this._addCheck({
-      kind: "max",
-      value: 0,
-      inclusive: false,
-      message: errorUtil2.toString(message)
-    });
-  }
-  nonpositive(message) {
-    return this._addCheck({
-      kind: "max",
-      value: 0,
-      inclusive: true,
-      message: errorUtil2.toString(message)
-    });
-  }
-  nonnegative(message) {
-    return this._addCheck({
-      kind: "min",
-      value: 0,
-      inclusive: true,
-      message: errorUtil2.toString(message)
-    });
-  }
-  multipleOf(value, message) {
-    return this._addCheck({
-      kind: "multipleOf",
-      value,
-      message: errorUtil2.toString(message)
-    });
-  }
-  finite(message) {
-    return this._addCheck({
-      kind: "finite",
-      message: errorUtil2.toString(message)
-    });
-  }
-  safe(message) {
-    return this._addCheck({
-      kind: "min",
-      inclusive: true,
-      value: Number.MIN_SAFE_INTEGER,
-      message: errorUtil2.toString(message)
-    })._addCheck({
-      kind: "max",
-      inclusive: true,
-      value: Number.MAX_SAFE_INTEGER,
-      message: errorUtil2.toString(message)
-    });
-  }
-  get minValue() {
-    let min = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
-      }
-    }
-    return min;
-  }
-  get maxValue() {
-    let max = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
-      }
-    }
-    return max;
-  }
-  get isInt() {
-    return !!this._def.checks.find((ch) => ch.kind === "int" || ch.kind === "multipleOf" && util2.isInteger(ch.value));
-  }
-  get isFinite() {
-    let max = null;
-    let min = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "finite" || ch.kind === "int" || ch.kind === "multipleOf") {
-        return true;
-      } else if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
-      } else if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
-      }
-    }
-    return Number.isFinite(min) && Number.isFinite(max);
-  }
-};
-ZodNumber2.create = (params) => {
-  return new ZodNumber2({
-    checks: [],
-    typeName: ZodFirstPartyTypeKind2.ZodNumber,
-    coerce: params?.coerce || false,
-    ...processCreateParams2(params)
-  });
-};
-var ZodBigInt2 = class _ZodBigInt extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this.min = this.gte;
-    this.max = this.lte;
-  }
-  _parse(input3) {
-    if (this._def.coerce) {
-      try {
-        input3.data = BigInt(input3.data);
-      } catch {
-        return this._getInvalidInput(input3);
-      }
-    }
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.bigint) {
-      return this._getInvalidInput(input3);
-    }
-    let ctx = void 0;
-    const status2 = new ParseStatus2();
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        const tooSmall = check.inclusive ? input3.data < check.value : input3.data <= check.value;
-        if (tooSmall) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_small,
-            type: "bigint",
-            minimum: check.value,
-            inclusive: check.inclusive,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "max") {
-        const tooBig = check.inclusive ? input3.data > check.value : input3.data >= check.value;
-        if (tooBig) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_big,
-            type: "bigint",
-            maximum: check.value,
-            inclusive: check.inclusive,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "multipleOf") {
-        if (input3.data % check.value !== BigInt(0)) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.not_multiple_of,
-            multipleOf: check.value,
-            message: check.message
-          });
-          status2.dirty();
-        }
-      } else {
-        util2.assertNever(check);
-      }
-    }
-    return { status: status2.value, value: input3.data };
-  }
-  _getInvalidInput(input3) {
-    const ctx = this._getOrReturnCtx(input3);
-    addIssueToContext2(ctx, {
-      code: ZodIssueCode2.invalid_type,
-      expected: ZodParsedType2.bigint,
-      received: ctx.parsedType
-    });
-    return INVALID2;
-  }
-  gte(value, message) {
-    return this.setLimit("min", value, true, errorUtil2.toString(message));
-  }
-  gt(value, message) {
-    return this.setLimit("min", value, false, errorUtil2.toString(message));
-  }
-  lte(value, message) {
-    return this.setLimit("max", value, true, errorUtil2.toString(message));
-  }
-  lt(value, message) {
-    return this.setLimit("max", value, false, errorUtil2.toString(message));
-  }
-  setLimit(kind, value, inclusive, message) {
-    return new _ZodBigInt({
-      ...this._def,
-      checks: [
-        ...this._def.checks,
-        {
-          kind,
-          value,
-          inclusive,
-          message: errorUtil2.toString(message)
-        }
-      ]
-    });
-  }
-  _addCheck(check) {
-    return new _ZodBigInt({
-      ...this._def,
-      checks: [...this._def.checks, check]
-    });
-  }
-  positive(message) {
-    return this._addCheck({
-      kind: "min",
-      value: BigInt(0),
-      inclusive: false,
-      message: errorUtil2.toString(message)
-    });
-  }
-  negative(message) {
-    return this._addCheck({
-      kind: "max",
-      value: BigInt(0),
-      inclusive: false,
-      message: errorUtil2.toString(message)
-    });
-  }
-  nonpositive(message) {
-    return this._addCheck({
-      kind: "max",
-      value: BigInt(0),
-      inclusive: true,
-      message: errorUtil2.toString(message)
-    });
-  }
-  nonnegative(message) {
-    return this._addCheck({
-      kind: "min",
-      value: BigInt(0),
-      inclusive: true,
-      message: errorUtil2.toString(message)
-    });
-  }
-  multipleOf(value, message) {
-    return this._addCheck({
-      kind: "multipleOf",
-      value,
-      message: errorUtil2.toString(message)
-    });
-  }
-  get minValue() {
-    let min = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
-      }
-    }
-    return min;
-  }
-  get maxValue() {
-    let max = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
-      }
-    }
-    return max;
-  }
-};
-ZodBigInt2.create = (params) => {
-  return new ZodBigInt2({
-    checks: [],
-    typeName: ZodFirstPartyTypeKind2.ZodBigInt,
-    coerce: params?.coerce ?? false,
-    ...processCreateParams2(params)
-  });
-};
-var ZodBoolean2 = class extends ZodType2 {
-  _parse(input3) {
-    if (this._def.coerce) {
-      input3.data = Boolean(input3.data);
-    }
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.boolean) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.boolean,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-};
-ZodBoolean2.create = (params) => {
-  return new ZodBoolean2({
-    typeName: ZodFirstPartyTypeKind2.ZodBoolean,
-    coerce: params?.coerce || false,
-    ...processCreateParams2(params)
-  });
-};
-var ZodDate2 = class _ZodDate extends ZodType2 {
-  _parse(input3) {
-    if (this._def.coerce) {
-      input3.data = new Date(input3.data);
-    }
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.date) {
-      const ctx2 = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx2, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.date,
-        received: ctx2.parsedType
-      });
-      return INVALID2;
-    }
-    if (Number.isNaN(input3.data.getTime())) {
-      const ctx2 = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx2, {
-        code: ZodIssueCode2.invalid_date
-      });
-      return INVALID2;
-    }
-    const status2 = new ParseStatus2();
-    let ctx = void 0;
-    for (const check of this._def.checks) {
-      if (check.kind === "min") {
-        if (input3.data.getTime() < check.value) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_small,
-            message: check.message,
-            inclusive: true,
-            exact: false,
-            minimum: check.value,
-            type: "date"
-          });
-          status2.dirty();
-        }
-      } else if (check.kind === "max") {
-        if (input3.data.getTime() > check.value) {
-          ctx = this._getOrReturnCtx(input3, ctx);
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.too_big,
-            message: check.message,
-            inclusive: true,
-            exact: false,
-            maximum: check.value,
-            type: "date"
-          });
-          status2.dirty();
-        }
-      } else {
-        util2.assertNever(check);
-      }
-    }
-    return {
-      status: status2.value,
-      value: new Date(input3.data.getTime())
-    };
-  }
-  _addCheck(check) {
-    return new _ZodDate({
-      ...this._def,
-      checks: [...this._def.checks, check]
-    });
-  }
-  min(minDate, message) {
-    return this._addCheck({
-      kind: "min",
-      value: minDate.getTime(),
-      message: errorUtil2.toString(message)
-    });
-  }
-  max(maxDate, message) {
-    return this._addCheck({
-      kind: "max",
-      value: maxDate.getTime(),
-      message: errorUtil2.toString(message)
-    });
-  }
-  get minDate() {
-    let min = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "min") {
-        if (min === null || ch.value > min)
-          min = ch.value;
-      }
-    }
-    return min != null ? new Date(min) : null;
-  }
-  get maxDate() {
-    let max = null;
-    for (const ch of this._def.checks) {
-      if (ch.kind === "max") {
-        if (max === null || ch.value < max)
-          max = ch.value;
-      }
-    }
-    return max != null ? new Date(max) : null;
-  }
-};
-ZodDate2.create = (params) => {
-  return new ZodDate2({
-    checks: [],
-    coerce: params?.coerce || false,
-    typeName: ZodFirstPartyTypeKind2.ZodDate,
-    ...processCreateParams2(params)
-  });
-};
-var ZodSymbol2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.symbol) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.symbol,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-};
-ZodSymbol2.create = (params) => {
-  return new ZodSymbol2({
-    typeName: ZodFirstPartyTypeKind2.ZodSymbol,
-    ...processCreateParams2(params)
-  });
-};
-var ZodUndefined2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.undefined) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.undefined,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-};
-ZodUndefined2.create = (params) => {
-  return new ZodUndefined2({
-    typeName: ZodFirstPartyTypeKind2.ZodUndefined,
-    ...processCreateParams2(params)
-  });
-};
-var ZodNull2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.null) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.null,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-};
-ZodNull2.create = (params) => {
-  return new ZodNull2({
-    typeName: ZodFirstPartyTypeKind2.ZodNull,
-    ...processCreateParams2(params)
-  });
-};
-var ZodAny2 = class extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this._any = true;
-  }
-  _parse(input3) {
-    return OK2(input3.data);
-  }
-};
-ZodAny2.create = (params) => {
-  return new ZodAny2({
-    typeName: ZodFirstPartyTypeKind2.ZodAny,
-    ...processCreateParams2(params)
-  });
-};
-var ZodUnknown2 = class extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this._unknown = true;
-  }
-  _parse(input3) {
-    return OK2(input3.data);
-  }
-};
-ZodUnknown2.create = (params) => {
-  return new ZodUnknown2({
-    typeName: ZodFirstPartyTypeKind2.ZodUnknown,
-    ...processCreateParams2(params)
-  });
-};
-var ZodNever2 = class extends ZodType2 {
-  _parse(input3) {
-    const ctx = this._getOrReturnCtx(input3);
-    addIssueToContext2(ctx, {
-      code: ZodIssueCode2.invalid_type,
-      expected: ZodParsedType2.never,
-      received: ctx.parsedType
-    });
-    return INVALID2;
-  }
-};
-ZodNever2.create = (params) => {
-  return new ZodNever2({
-    typeName: ZodFirstPartyTypeKind2.ZodNever,
-    ...processCreateParams2(params)
-  });
-};
-var ZodVoid2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.undefined) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.void,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-};
-ZodVoid2.create = (params) => {
-  return new ZodVoid2({
-    typeName: ZodFirstPartyTypeKind2.ZodVoid,
-    ...processCreateParams2(params)
-  });
-};
-var ZodArray2 = class _ZodArray extends ZodType2 {
-  _parse(input3) {
-    const { ctx, status: status2 } = this._processInputParams(input3);
-    const def = this._def;
-    if (ctx.parsedType !== ZodParsedType2.array) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.array,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    if (def.exactLength !== null) {
-      const tooBig = ctx.data.length > def.exactLength.value;
-      const tooSmall = ctx.data.length < def.exactLength.value;
-      if (tooBig || tooSmall) {
-        addIssueToContext2(ctx, {
-          code: tooBig ? ZodIssueCode2.too_big : ZodIssueCode2.too_small,
-          minimum: tooSmall ? def.exactLength.value : void 0,
-          maximum: tooBig ? def.exactLength.value : void 0,
-          type: "array",
-          inclusive: true,
-          exact: true,
-          message: def.exactLength.message
-        });
-        status2.dirty();
-      }
-    }
-    if (def.minLength !== null) {
-      if (ctx.data.length < def.minLength.value) {
-        addIssueToContext2(ctx, {
-          code: ZodIssueCode2.too_small,
-          minimum: def.minLength.value,
-          type: "array",
-          inclusive: true,
-          exact: false,
-          message: def.minLength.message
-        });
-        status2.dirty();
-      }
-    }
-    if (def.maxLength !== null) {
-      if (ctx.data.length > def.maxLength.value) {
-        addIssueToContext2(ctx, {
-          code: ZodIssueCode2.too_big,
-          maximum: def.maxLength.value,
-          type: "array",
-          inclusive: true,
-          exact: false,
-          message: def.maxLength.message
-        });
-        status2.dirty();
-      }
-    }
-    if (ctx.common.async) {
-      return Promise.all([...ctx.data].map((item, i) => {
-        return def.type._parseAsync(new ParseInputLazyPath2(ctx, item, ctx.path, i));
-      })).then((result2) => {
-        return ParseStatus2.mergeArray(status2, result2);
-      });
-    }
-    const result = [...ctx.data].map((item, i) => {
-      return def.type._parseSync(new ParseInputLazyPath2(ctx, item, ctx.path, i));
-    });
-    return ParseStatus2.mergeArray(status2, result);
-  }
-  get element() {
-    return this._def.type;
-  }
-  min(minLength, message) {
-    return new _ZodArray({
-      ...this._def,
-      minLength: { value: minLength, message: errorUtil2.toString(message) }
-    });
-  }
-  max(maxLength, message) {
-    return new _ZodArray({
-      ...this._def,
-      maxLength: { value: maxLength, message: errorUtil2.toString(message) }
-    });
-  }
-  length(len, message) {
-    return new _ZodArray({
-      ...this._def,
-      exactLength: { value: len, message: errorUtil2.toString(message) }
-    });
-  }
-  nonempty(message) {
-    return this.min(1, message);
-  }
-};
-ZodArray2.create = (schema, params) => {
-  return new ZodArray2({
-    type: schema,
-    minLength: null,
-    maxLength: null,
-    exactLength: null,
-    typeName: ZodFirstPartyTypeKind2.ZodArray,
-    ...processCreateParams2(params)
-  });
-};
-function deepPartialify2(schema) {
-  if (schema instanceof ZodObject2) {
-    const newShape = {};
-    for (const key in schema.shape) {
-      const fieldSchema = schema.shape[key];
-      newShape[key] = ZodOptional2.create(deepPartialify2(fieldSchema));
-    }
-    return new ZodObject2({
-      ...schema._def,
-      shape: () => newShape
-    });
-  } else if (schema instanceof ZodArray2) {
-    return new ZodArray2({
-      ...schema._def,
-      type: deepPartialify2(schema.element)
-    });
-  } else if (schema instanceof ZodOptional2) {
-    return ZodOptional2.create(deepPartialify2(schema.unwrap()));
-  } else if (schema instanceof ZodNullable2) {
-    return ZodNullable2.create(deepPartialify2(schema.unwrap()));
-  } else if (schema instanceof ZodTuple2) {
-    return ZodTuple2.create(schema.items.map((item) => deepPartialify2(item)));
-  } else {
-    return schema;
-  }
-}
-var ZodObject2 = class _ZodObject extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this._cached = null;
-    this.nonstrict = this.passthrough;
-    this.augment = this.extend;
-  }
-  _getCached() {
-    if (this._cached !== null)
-      return this._cached;
-    const shape = this._def.shape();
-    const keys = util2.objectKeys(shape);
-    this._cached = { shape, keys };
-    return this._cached;
-  }
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.object) {
-      const ctx2 = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx2, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.object,
-        received: ctx2.parsedType
-      });
-      return INVALID2;
-    }
-    const { status: status2, ctx } = this._processInputParams(input3);
-    const { shape, keys: shapeKeys } = this._getCached();
-    const extraKeys = [];
-    if (!(this._def.catchall instanceof ZodNever2 && this._def.unknownKeys === "strip")) {
-      for (const key in ctx.data) {
-        if (!shapeKeys.includes(key)) {
-          extraKeys.push(key);
-        }
-      }
-    }
-    const pairs = [];
-    for (const key of shapeKeys) {
-      const keyValidator = shape[key];
-      const value = ctx.data[key];
-      pairs.push({
-        key: { status: "valid", value: key },
-        value: keyValidator._parse(new ParseInputLazyPath2(ctx, value, ctx.path, key)),
-        alwaysSet: key in ctx.data
-      });
-    }
-    if (this._def.catchall instanceof ZodNever2) {
-      const unknownKeys = this._def.unknownKeys;
-      if (unknownKeys === "passthrough") {
-        for (const key of extraKeys) {
-          pairs.push({
-            key: { status: "valid", value: key },
-            value: { status: "valid", value: ctx.data[key] }
-          });
-        }
-      } else if (unknownKeys === "strict") {
-        if (extraKeys.length > 0) {
-          addIssueToContext2(ctx, {
-            code: ZodIssueCode2.unrecognized_keys,
-            keys: extraKeys
-          });
-          status2.dirty();
-        }
-      } else if (unknownKeys === "strip") {
-      } else {
-        throw new Error(`Internal ZodObject error: invalid unknownKeys value.`);
-      }
-    } else {
-      const catchall = this._def.catchall;
-      for (const key of extraKeys) {
-        const value = ctx.data[key];
-        pairs.push({
-          key: { status: "valid", value: key },
-          value: catchall._parse(
-            new ParseInputLazyPath2(ctx, value, ctx.path, key)
-            //, ctx.child(key), value, getParsedType(value)
-          ),
-          alwaysSet: key in ctx.data
-        });
-      }
-    }
-    if (ctx.common.async) {
-      return Promise.resolve().then(async () => {
-        const syncPairs = [];
-        for (const pair of pairs) {
-          const key = await pair.key;
-          const value = await pair.value;
-          syncPairs.push({
-            key,
-            value,
-            alwaysSet: pair.alwaysSet
-          });
-        }
-        return syncPairs;
-      }).then((syncPairs) => {
-        return ParseStatus2.mergeObjectSync(status2, syncPairs);
-      });
-    } else {
-      return ParseStatus2.mergeObjectSync(status2, pairs);
-    }
-  }
-  get shape() {
-    return this._def.shape();
-  }
-  strict(message) {
-    errorUtil2.errToObj;
-    return new _ZodObject({
-      ...this._def,
-      unknownKeys: "strict",
-      ...message !== void 0 ? {
-        errorMap: (issue, ctx) => {
-          const defaultError = this._def.errorMap?.(issue, ctx).message ?? ctx.defaultError;
-          if (issue.code === "unrecognized_keys")
-            return {
-              message: errorUtil2.errToObj(message).message ?? defaultError
-            };
-          return {
-            message: defaultError
-          };
-        }
-      } : {}
-    });
-  }
-  strip() {
-    return new _ZodObject({
-      ...this._def,
-      unknownKeys: "strip"
-    });
-  }
-  passthrough() {
-    return new _ZodObject({
-      ...this._def,
-      unknownKeys: "passthrough"
-    });
-  }
-  // const AugmentFactory =
-  //   <Def extends ZodObjectDef>(def: Def) =>
-  //   <Augmentation extends ZodRawShape>(
-  //     augmentation: Augmentation
-  //   ): ZodObject<
-  //     extendShape<ReturnType<Def["shape"]>, Augmentation>,
-  //     Def["unknownKeys"],
-  //     Def["catchall"]
-  //   > => {
-  //     return new ZodObject({
-  //       ...def,
-  //       shape: () => ({
-  //         ...def.shape(),
-  //         ...augmentation,
-  //       }),
-  //     }) as any;
-  //   };
-  extend(augmentation) {
-    return new _ZodObject({
-      ...this._def,
-      shape: () => ({
-        ...this._def.shape(),
-        ...augmentation
-      })
-    });
-  }
-  /**
-   * Prior to zod@1.0.12 there was a bug in the
-   * inferred type of merged objects. Please
-   * upgrade if you are experiencing issues.
-   */
-  merge(merging) {
-    const merged = new _ZodObject({
-      unknownKeys: merging._def.unknownKeys,
-      catchall: merging._def.catchall,
-      shape: () => ({
-        ...this._def.shape(),
-        ...merging._def.shape()
-      }),
-      typeName: ZodFirstPartyTypeKind2.ZodObject
-    });
-    return merged;
-  }
-  // merge<
-  //   Incoming extends AnyZodObject,
-  //   Augmentation extends Incoming["shape"],
-  //   NewOutput extends {
-  //     [k in keyof Augmentation | keyof Output]: k extends keyof Augmentation
-  //       ? Augmentation[k]["_output"]
-  //       : k extends keyof Output
-  //       ? Output[k]
-  //       : never;
-  //   },
-  //   NewInput extends {
-  //     [k in keyof Augmentation | keyof Input]: k extends keyof Augmentation
-  //       ? Augmentation[k]["_input"]
-  //       : k extends keyof Input
-  //       ? Input[k]
-  //       : never;
-  //   }
-  // >(
-  //   merging: Incoming
-  // ): ZodObject<
-  //   extendShape<T, ReturnType<Incoming["_def"]["shape"]>>,
-  //   Incoming["_def"]["unknownKeys"],
-  //   Incoming["_def"]["catchall"],
-  //   NewOutput,
-  //   NewInput
-  // > {
-  //   const merged: any = new ZodObject({
-  //     unknownKeys: merging._def.unknownKeys,
-  //     catchall: merging._def.catchall,
-  //     shape: () =>
-  //       objectUtil.mergeShapes(this._def.shape(), merging._def.shape()),
-  //     typeName: ZodFirstPartyTypeKind.ZodObject,
-  //   }) as any;
-  //   return merged;
-  // }
-  setKey(key, schema) {
-    return this.augment({ [key]: schema });
-  }
-  // merge<Incoming extends AnyZodObject>(
-  //   merging: Incoming
-  // ): //ZodObject<T & Incoming["_shape"], UnknownKeys, Catchall> = (merging) => {
-  // ZodObject<
-  //   extendShape<T, ReturnType<Incoming["_def"]["shape"]>>,
-  //   Incoming["_def"]["unknownKeys"],
-  //   Incoming["_def"]["catchall"]
-  // > {
-  //   // const mergedShape = objectUtil.mergeShapes(
-  //   //   this._def.shape(),
-  //   //   merging._def.shape()
-  //   // );
-  //   const merged: any = new ZodObject({
-  //     unknownKeys: merging._def.unknownKeys,
-  //     catchall: merging._def.catchall,
-  //     shape: () =>
-  //       objectUtil.mergeShapes(this._def.shape(), merging._def.shape()),
-  //     typeName: ZodFirstPartyTypeKind.ZodObject,
-  //   }) as any;
-  //   return merged;
-  // }
-  catchall(index) {
-    return new _ZodObject({
-      ...this._def,
-      catchall: index
-    });
-  }
-  pick(mask) {
-    const shape = {};
-    for (const key of util2.objectKeys(mask)) {
-      if (mask[key] && this.shape[key]) {
-        shape[key] = this.shape[key];
-      }
-    }
-    return new _ZodObject({
-      ...this._def,
-      shape: () => shape
-    });
-  }
-  omit(mask) {
-    const shape = {};
-    for (const key of util2.objectKeys(this.shape)) {
-      if (!mask[key]) {
-        shape[key] = this.shape[key];
-      }
-    }
-    return new _ZodObject({
-      ...this._def,
-      shape: () => shape
-    });
-  }
-  /**
-   * @deprecated
-   */
-  deepPartial() {
-    return deepPartialify2(this);
-  }
-  partial(mask) {
-    const newShape = {};
-    for (const key of util2.objectKeys(this.shape)) {
-      const fieldSchema = this.shape[key];
-      if (mask && !mask[key]) {
-        newShape[key] = fieldSchema;
-      } else {
-        newShape[key] = fieldSchema.optional();
-      }
-    }
-    return new _ZodObject({
-      ...this._def,
-      shape: () => newShape
-    });
-  }
-  required(mask) {
-    const newShape = {};
-    for (const key of util2.objectKeys(this.shape)) {
-      if (mask && !mask[key]) {
-        newShape[key] = this.shape[key];
-      } else {
-        const fieldSchema = this.shape[key];
-        let newField = fieldSchema;
-        while (newField instanceof ZodOptional2) {
-          newField = newField._def.innerType;
-        }
-        newShape[key] = newField;
-      }
-    }
-    return new _ZodObject({
-      ...this._def,
-      shape: () => newShape
-    });
-  }
-  keyof() {
-    return createZodEnum2(util2.objectKeys(this.shape));
-  }
-};
-ZodObject2.create = (shape, params) => {
-  return new ZodObject2({
-    shape: () => shape,
-    unknownKeys: "strip",
-    catchall: ZodNever2.create(),
-    typeName: ZodFirstPartyTypeKind2.ZodObject,
-    ...processCreateParams2(params)
-  });
-};
-ZodObject2.strictCreate = (shape, params) => {
-  return new ZodObject2({
-    shape: () => shape,
-    unknownKeys: "strict",
-    catchall: ZodNever2.create(),
-    typeName: ZodFirstPartyTypeKind2.ZodObject,
-    ...processCreateParams2(params)
-  });
-};
-ZodObject2.lazycreate = (shape, params) => {
-  return new ZodObject2({
-    shape,
-    unknownKeys: "strip",
-    catchall: ZodNever2.create(),
-    typeName: ZodFirstPartyTypeKind2.ZodObject,
-    ...processCreateParams2(params)
-  });
-};
-var ZodUnion2 = class extends ZodType2 {
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    const options = this._def.options;
-    function handleResults(results) {
-      for (const result of results) {
-        if (result.result.status === "valid") {
-          return result.result;
-        }
-      }
-      for (const result of results) {
-        if (result.result.status === "dirty") {
-          ctx.common.issues.push(...result.ctx.common.issues);
-          return result.result;
-        }
-      }
-      const unionErrors = results.map((result) => new ZodError2(result.ctx.common.issues));
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_union,
-        unionErrors
-      });
-      return INVALID2;
-    }
-    if (ctx.common.async) {
-      return Promise.all(options.map(async (option) => {
-        const childCtx = {
-          ...ctx,
-          common: {
-            ...ctx.common,
-            issues: []
-          },
-          parent: null
-        };
-        return {
-          result: await option._parseAsync({
-            data: ctx.data,
-            path: ctx.path,
-            parent: childCtx
-          }),
-          ctx: childCtx
-        };
-      })).then(handleResults);
-    } else {
-      let dirty = void 0;
-      const issues = [];
-      for (const option of options) {
-        const childCtx = {
-          ...ctx,
-          common: {
-            ...ctx.common,
-            issues: []
-          },
-          parent: null
-        };
-        const result = option._parseSync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: childCtx
-        });
-        if (result.status === "valid") {
-          return result;
-        } else if (result.status === "dirty" && !dirty) {
-          dirty = { result, ctx: childCtx };
-        }
-        if (childCtx.common.issues.length) {
-          issues.push(childCtx.common.issues);
-        }
-      }
-      if (dirty) {
-        ctx.common.issues.push(...dirty.ctx.common.issues);
-        return dirty.result;
-      }
-      const unionErrors = issues.map((issues2) => new ZodError2(issues2));
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_union,
-        unionErrors
-      });
-      return INVALID2;
-    }
-  }
-  get options() {
-    return this._def.options;
-  }
-};
-ZodUnion2.create = (types21, params) => {
-  return new ZodUnion2({
-    options: types21,
-    typeName: ZodFirstPartyTypeKind2.ZodUnion,
-    ...processCreateParams2(params)
-  });
-};
-var getDiscriminator2 = (type) => {
-  if (type instanceof ZodLazy2) {
-    return getDiscriminator2(type.schema);
-  } else if (type instanceof ZodEffects2) {
-    return getDiscriminator2(type.innerType());
-  } else if (type instanceof ZodLiteral2) {
-    return [type.value];
-  } else if (type instanceof ZodEnum2) {
-    return type.options;
-  } else if (type instanceof ZodNativeEnum2) {
-    return util2.objectValues(type.enum);
-  } else if (type instanceof ZodDefault2) {
-    return getDiscriminator2(type._def.innerType);
-  } else if (type instanceof ZodUndefined2) {
-    return [void 0];
-  } else if (type instanceof ZodNull2) {
-    return [null];
-  } else if (type instanceof ZodOptional2) {
-    return [void 0, ...getDiscriminator2(type.unwrap())];
-  } else if (type instanceof ZodNullable2) {
-    return [null, ...getDiscriminator2(type.unwrap())];
-  } else if (type instanceof ZodBranded2) {
-    return getDiscriminator2(type.unwrap());
-  } else if (type instanceof ZodReadonly2) {
-    return getDiscriminator2(type.unwrap());
-  } else if (type instanceof ZodCatch2) {
-    return getDiscriminator2(type._def.innerType);
-  } else {
-    return [];
-  }
-};
-var ZodDiscriminatedUnion2 = class _ZodDiscriminatedUnion extends ZodType2 {
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.object) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.object,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    const discriminator = this.discriminator;
-    const discriminatorValue = ctx.data[discriminator];
-    const option = this.optionsMap.get(discriminatorValue);
-    if (!option) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_union_discriminator,
-        options: Array.from(this.optionsMap.keys()),
-        path: [discriminator]
-      });
-      return INVALID2;
-    }
-    if (ctx.common.async) {
-      return option._parseAsync({
-        data: ctx.data,
-        path: ctx.path,
-        parent: ctx
-      });
-    } else {
-      return option._parseSync({
-        data: ctx.data,
-        path: ctx.path,
-        parent: ctx
-      });
-    }
-  }
-  get discriminator() {
-    return this._def.discriminator;
-  }
-  get options() {
-    return this._def.options;
-  }
-  get optionsMap() {
-    return this._def.optionsMap;
-  }
-  /**
-   * The constructor of the discriminated union schema. Its behaviour is very similar to that of the normal z.union() constructor.
-   * However, it only allows a union of objects, all of which need to share a discriminator property. This property must
-   * have a different value for each object in the union.
-   * @param discriminator the name of the discriminator property
-   * @param types an array of object schemas
-   * @param params
-   */
-  static create(discriminator, options, params) {
-    const optionsMap = /* @__PURE__ */ new Map();
-    for (const type of options) {
-      const discriminatorValues = getDiscriminator2(type.shape[discriminator]);
-      if (!discriminatorValues.length) {
-        throw new Error(`A discriminator value for key \`${discriminator}\` could not be extracted from all schema options`);
-      }
-      for (const value of discriminatorValues) {
-        if (optionsMap.has(value)) {
-          throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value)}`);
-        }
-        optionsMap.set(value, type);
-      }
-    }
-    return new _ZodDiscriminatedUnion({
-      typeName: ZodFirstPartyTypeKind2.ZodDiscriminatedUnion,
-      discriminator,
-      options,
-      optionsMap,
-      ...processCreateParams2(params)
-    });
-  }
-};
-function mergeValues2(a, b) {
-  const aType = getParsedType2(a);
-  const bType = getParsedType2(b);
-  if (a === b) {
-    return { valid: true, data: a };
-  } else if (aType === ZodParsedType2.object && bType === ZodParsedType2.object) {
-    const bKeys = util2.objectKeys(b);
-    const sharedKeys = util2.objectKeys(a).filter((key) => bKeys.indexOf(key) !== -1);
-    const newObj = { ...a, ...b };
-    for (const key of sharedKeys) {
-      const sharedValue = mergeValues2(a[key], b[key]);
-      if (!sharedValue.valid) {
-        return { valid: false };
-      }
-      newObj[key] = sharedValue.data;
-    }
-    return { valid: true, data: newObj };
-  } else if (aType === ZodParsedType2.array && bType === ZodParsedType2.array) {
-    if (a.length !== b.length) {
-      return { valid: false };
-    }
-    const newArray = [];
-    for (let index = 0; index < a.length; index++) {
-      const itemA = a[index];
-      const itemB = b[index];
-      const sharedValue = mergeValues2(itemA, itemB);
-      if (!sharedValue.valid) {
-        return { valid: false };
-      }
-      newArray.push(sharedValue.data);
-    }
-    return { valid: true, data: newArray };
-  } else if (aType === ZodParsedType2.date && bType === ZodParsedType2.date && +a === +b) {
-    return { valid: true, data: a };
-  } else {
-    return { valid: false };
-  }
-}
-var ZodIntersection2 = class extends ZodType2 {
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    const handleParsed = (parsedLeft, parsedRight) => {
-      if (isAborted2(parsedLeft) || isAborted2(parsedRight)) {
-        return INVALID2;
-      }
-      const merged = mergeValues2(parsedLeft.value, parsedRight.value);
-      if (!merged.valid) {
-        addIssueToContext2(ctx, {
-          code: ZodIssueCode2.invalid_intersection_types
-        });
-        return INVALID2;
-      }
-      if (isDirty2(parsedLeft) || isDirty2(parsedRight)) {
-        status2.dirty();
-      }
-      return { status: status2.value, value: merged.data };
-    };
-    if (ctx.common.async) {
-      return Promise.all([
-        this._def.left._parseAsync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: ctx
-        }),
-        this._def.right._parseAsync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: ctx
-        })
-      ]).then(([left, right]) => handleParsed(left, right));
-    } else {
-      return handleParsed(this._def.left._parseSync({
-        data: ctx.data,
-        path: ctx.path,
-        parent: ctx
-      }), this._def.right._parseSync({
-        data: ctx.data,
-        path: ctx.path,
-        parent: ctx
-      }));
-    }
-  }
-};
-ZodIntersection2.create = (left, right, params) => {
-  return new ZodIntersection2({
-    left,
-    right,
-    typeName: ZodFirstPartyTypeKind2.ZodIntersection,
-    ...processCreateParams2(params)
-  });
-};
-var ZodTuple2 = class _ZodTuple extends ZodType2 {
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.array) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.array,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    if (ctx.data.length < this._def.items.length) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.too_small,
-        minimum: this._def.items.length,
-        inclusive: true,
-        exact: false,
-        type: "array"
-      });
-      return INVALID2;
-    }
-    const rest = this._def.rest;
-    if (!rest && ctx.data.length > this._def.items.length) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.too_big,
-        maximum: this._def.items.length,
-        inclusive: true,
-        exact: false,
-        type: "array"
-      });
-      status2.dirty();
-    }
-    const items = [...ctx.data].map((item, itemIndex) => {
-      const schema = this._def.items[itemIndex] || this._def.rest;
-      if (!schema)
-        return null;
-      return schema._parse(new ParseInputLazyPath2(ctx, item, ctx.path, itemIndex));
-    }).filter((x) => !!x);
-    if (ctx.common.async) {
-      return Promise.all(items).then((results) => {
-        return ParseStatus2.mergeArray(status2, results);
-      });
-    } else {
-      return ParseStatus2.mergeArray(status2, items);
-    }
-  }
-  get items() {
-    return this._def.items;
-  }
-  rest(rest) {
-    return new _ZodTuple({
-      ...this._def,
-      rest
-    });
-  }
-};
-ZodTuple2.create = (schemas3, params) => {
-  if (!Array.isArray(schemas3)) {
-    throw new Error("You must pass an array of schemas to z.tuple([ ... ])");
-  }
-  return new ZodTuple2({
-    items: schemas3,
-    typeName: ZodFirstPartyTypeKind2.ZodTuple,
-    rest: null,
-    ...processCreateParams2(params)
-  });
-};
-var ZodRecord2 = class _ZodRecord extends ZodType2 {
-  get keySchema() {
-    return this._def.keyType;
-  }
-  get valueSchema() {
-    return this._def.valueType;
-  }
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.object) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.object,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    const pairs = [];
-    const keyType = this._def.keyType;
-    const valueType = this._def.valueType;
-    for (const key in ctx.data) {
-      pairs.push({
-        key: keyType._parse(new ParseInputLazyPath2(ctx, key, ctx.path, key)),
-        value: valueType._parse(new ParseInputLazyPath2(ctx, ctx.data[key], ctx.path, key)),
-        alwaysSet: key in ctx.data
-      });
-    }
-    if (ctx.common.async) {
-      return ParseStatus2.mergeObjectAsync(status2, pairs);
-    } else {
-      return ParseStatus2.mergeObjectSync(status2, pairs);
-    }
-  }
-  get element() {
-    return this._def.valueType;
-  }
-  static create(first, second, third) {
-    if (second instanceof ZodType2) {
-      return new _ZodRecord({
-        keyType: first,
-        valueType: second,
-        typeName: ZodFirstPartyTypeKind2.ZodRecord,
-        ...processCreateParams2(third)
-      });
-    }
-    return new _ZodRecord({
-      keyType: ZodString2.create(),
-      valueType: first,
-      typeName: ZodFirstPartyTypeKind2.ZodRecord,
-      ...processCreateParams2(second)
-    });
-  }
-};
-var ZodMap2 = class extends ZodType2 {
-  get keySchema() {
-    return this._def.keyType;
-  }
-  get valueSchema() {
-    return this._def.valueType;
-  }
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.map) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.map,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    const keyType = this._def.keyType;
-    const valueType = this._def.valueType;
-    const pairs = [...ctx.data.entries()].map(([key, value], index) => {
-      return {
-        key: keyType._parse(new ParseInputLazyPath2(ctx, key, ctx.path, [index, "key"])),
-        value: valueType._parse(new ParseInputLazyPath2(ctx, value, ctx.path, [index, "value"]))
-      };
-    });
-    if (ctx.common.async) {
-      const finalMap = /* @__PURE__ */ new Map();
-      return Promise.resolve().then(async () => {
-        for (const pair of pairs) {
-          const key = await pair.key;
-          const value = await pair.value;
-          if (key.status === "aborted" || value.status === "aborted") {
-            return INVALID2;
-          }
-          if (key.status === "dirty" || value.status === "dirty") {
-            status2.dirty();
-          }
-          finalMap.set(key.value, value.value);
-        }
-        return { status: status2.value, value: finalMap };
-      });
-    } else {
-      const finalMap = /* @__PURE__ */ new Map();
-      for (const pair of pairs) {
-        const key = pair.key;
-        const value = pair.value;
-        if (key.status === "aborted" || value.status === "aborted") {
-          return INVALID2;
-        }
-        if (key.status === "dirty" || value.status === "dirty") {
-          status2.dirty();
-        }
-        finalMap.set(key.value, value.value);
-      }
-      return { status: status2.value, value: finalMap };
-    }
-  }
-};
-ZodMap2.create = (keyType, valueType, params) => {
-  return new ZodMap2({
-    valueType,
-    keyType,
-    typeName: ZodFirstPartyTypeKind2.ZodMap,
-    ...processCreateParams2(params)
-  });
-};
-var ZodSet2 = class _ZodSet extends ZodType2 {
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.set) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.set,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    const def = this._def;
-    if (def.minSize !== null) {
-      if (ctx.data.size < def.minSize.value) {
-        addIssueToContext2(ctx, {
-          code: ZodIssueCode2.too_small,
-          minimum: def.minSize.value,
-          type: "set",
-          inclusive: true,
-          exact: false,
-          message: def.minSize.message
-        });
-        status2.dirty();
-      }
-    }
-    if (def.maxSize !== null) {
-      if (ctx.data.size > def.maxSize.value) {
-        addIssueToContext2(ctx, {
-          code: ZodIssueCode2.too_big,
-          maximum: def.maxSize.value,
-          type: "set",
-          inclusive: true,
-          exact: false,
-          message: def.maxSize.message
-        });
-        status2.dirty();
-      }
-    }
-    const valueType = this._def.valueType;
-    function finalizeSet(elements2) {
-      const parsedSet = /* @__PURE__ */ new Set();
-      for (const element of elements2) {
-        if (element.status === "aborted")
-          return INVALID2;
-        if (element.status === "dirty")
-          status2.dirty();
-        parsedSet.add(element.value);
-      }
-      return { status: status2.value, value: parsedSet };
-    }
-    const elements = [...ctx.data.values()].map((item, i) => valueType._parse(new ParseInputLazyPath2(ctx, item, ctx.path, i)));
-    if (ctx.common.async) {
-      return Promise.all(elements).then((elements2) => finalizeSet(elements2));
-    } else {
-      return finalizeSet(elements);
-    }
-  }
-  min(minSize, message) {
-    return new _ZodSet({
-      ...this._def,
-      minSize: { value: minSize, message: errorUtil2.toString(message) }
-    });
-  }
-  max(maxSize, message) {
-    return new _ZodSet({
-      ...this._def,
-      maxSize: { value: maxSize, message: errorUtil2.toString(message) }
-    });
-  }
-  size(size2, message) {
-    return this.min(size2, message).max(size2, message);
-  }
-  nonempty(message) {
-    return this.min(1, message);
-  }
-};
-ZodSet2.create = (valueType, params) => {
-  return new ZodSet2({
-    valueType,
-    minSize: null,
-    maxSize: null,
-    typeName: ZodFirstPartyTypeKind2.ZodSet,
-    ...processCreateParams2(params)
-  });
-};
-var ZodFunction2 = class _ZodFunction extends ZodType2 {
-  constructor() {
-    super(...arguments);
-    this.validate = this.implement;
-  }
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.function) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.function,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    function makeArgsIssue(args, error) {
-      return makeIssue2({
-        data: args,
-        path: ctx.path,
-        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap2(), en_default2].filter((x) => !!x),
-        issueData: {
-          code: ZodIssueCode2.invalid_arguments,
-          argumentsError: error
-        }
-      });
-    }
-    function makeReturnsIssue(returns, error) {
-      return makeIssue2({
-        data: returns,
-        path: ctx.path,
-        errorMaps: [ctx.common.contextualErrorMap, ctx.schemaErrorMap, getErrorMap2(), en_default2].filter((x) => !!x),
-        issueData: {
-          code: ZodIssueCode2.invalid_return_type,
-          returnTypeError: error
-        }
-      });
-    }
-    const params = { errorMap: ctx.common.contextualErrorMap };
-    const fn = ctx.data;
-    if (this._def.returns instanceof ZodPromise2) {
-      const me = this;
-      return OK2(async function(...args) {
-        const error = new ZodError2([]);
-        const parsedArgs = await me._def.args.parseAsync(args, params).catch((e) => {
-          error.addIssue(makeArgsIssue(args, e));
-          throw error;
-        });
-        const result = await Reflect.apply(fn, this, parsedArgs);
-        const parsedReturns = await me._def.returns._def.type.parseAsync(result, params).catch((e) => {
-          error.addIssue(makeReturnsIssue(result, e));
-          throw error;
-        });
-        return parsedReturns;
-      });
-    } else {
-      const me = this;
-      return OK2(function(...args) {
-        const parsedArgs = me._def.args.safeParse(args, params);
-        if (!parsedArgs.success) {
-          throw new ZodError2([makeArgsIssue(args, parsedArgs.error)]);
-        }
-        const result = Reflect.apply(fn, this, parsedArgs.data);
-        const parsedReturns = me._def.returns.safeParse(result, params);
-        if (!parsedReturns.success) {
-          throw new ZodError2([makeReturnsIssue(result, parsedReturns.error)]);
-        }
-        return parsedReturns.data;
-      });
-    }
-  }
-  parameters() {
-    return this._def.args;
-  }
-  returnType() {
-    return this._def.returns;
-  }
-  args(...items) {
-    return new _ZodFunction({
-      ...this._def,
-      args: ZodTuple2.create(items).rest(ZodUnknown2.create())
-    });
-  }
-  returns(returnType) {
-    return new _ZodFunction({
-      ...this._def,
-      returns: returnType
-    });
-  }
-  implement(func) {
-    const validatedFunc = this.parse(func);
-    return validatedFunc;
-  }
-  strictImplement(func) {
-    const validatedFunc = this.parse(func);
-    return validatedFunc;
-  }
-  static create(args, returns, params) {
-    return new _ZodFunction({
-      args: args ? args : ZodTuple2.create([]).rest(ZodUnknown2.create()),
-      returns: returns || ZodUnknown2.create(),
-      typeName: ZodFirstPartyTypeKind2.ZodFunction,
-      ...processCreateParams2(params)
-    });
-  }
-};
-var ZodLazy2 = class extends ZodType2 {
-  get schema() {
-    return this._def.getter();
-  }
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    const lazySchema = this._def.getter();
-    return lazySchema._parse({ data: ctx.data, path: ctx.path, parent: ctx });
-  }
-};
-ZodLazy2.create = (getter, params) => {
-  return new ZodLazy2({
-    getter,
-    typeName: ZodFirstPartyTypeKind2.ZodLazy,
-    ...processCreateParams2(params)
-  });
-};
-var ZodLiteral2 = class extends ZodType2 {
-  _parse(input3) {
-    if (input3.data !== this._def.value) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        received: ctx.data,
-        code: ZodIssueCode2.invalid_literal,
-        expected: this._def.value
-      });
-      return INVALID2;
-    }
-    return { status: "valid", value: input3.data };
-  }
-  get value() {
-    return this._def.value;
-  }
-};
-ZodLiteral2.create = (value, params) => {
-  return new ZodLiteral2({
-    value,
-    typeName: ZodFirstPartyTypeKind2.ZodLiteral,
-    ...processCreateParams2(params)
-  });
-};
-function createZodEnum2(values, params) {
-  return new ZodEnum2({
-    values,
-    typeName: ZodFirstPartyTypeKind2.ZodEnum,
-    ...processCreateParams2(params)
-  });
-}
-var ZodEnum2 = class _ZodEnum extends ZodType2 {
-  _parse(input3) {
-    if (typeof input3.data !== "string") {
-      const ctx = this._getOrReturnCtx(input3);
-      const expectedValues = this._def.values;
-      addIssueToContext2(ctx, {
-        expected: util2.joinValues(expectedValues),
-        received: ctx.parsedType,
-        code: ZodIssueCode2.invalid_type
-      });
-      return INVALID2;
-    }
-    if (!this._cache) {
-      this._cache = new Set(this._def.values);
-    }
-    if (!this._cache.has(input3.data)) {
-      const ctx = this._getOrReturnCtx(input3);
-      const expectedValues = this._def.values;
-      addIssueToContext2(ctx, {
-        received: ctx.data,
-        code: ZodIssueCode2.invalid_enum_value,
-        options: expectedValues
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-  get options() {
-    return this._def.values;
-  }
-  get enum() {
-    const enumValues = {};
-    for (const val of this._def.values) {
-      enumValues[val] = val;
-    }
-    return enumValues;
-  }
-  get Values() {
-    const enumValues = {};
-    for (const val of this._def.values) {
-      enumValues[val] = val;
-    }
-    return enumValues;
-  }
-  get Enum() {
-    const enumValues = {};
-    for (const val of this._def.values) {
-      enumValues[val] = val;
-    }
-    return enumValues;
-  }
-  extract(values, newDef = this._def) {
-    return _ZodEnum.create(values, {
-      ...this._def,
-      ...newDef
-    });
-  }
-  exclude(values, newDef = this._def) {
-    return _ZodEnum.create(this.options.filter((opt) => !values.includes(opt)), {
-      ...this._def,
-      ...newDef
-    });
-  }
-};
-ZodEnum2.create = createZodEnum2;
-var ZodNativeEnum2 = class extends ZodType2 {
-  _parse(input3) {
-    const nativeEnumValues = util2.getValidEnumValues(this._def.values);
-    const ctx = this._getOrReturnCtx(input3);
-    if (ctx.parsedType !== ZodParsedType2.string && ctx.parsedType !== ZodParsedType2.number) {
-      const expectedValues = util2.objectValues(nativeEnumValues);
-      addIssueToContext2(ctx, {
-        expected: util2.joinValues(expectedValues),
-        received: ctx.parsedType,
-        code: ZodIssueCode2.invalid_type
-      });
-      return INVALID2;
-    }
-    if (!this._cache) {
-      this._cache = new Set(util2.getValidEnumValues(this._def.values));
-    }
-    if (!this._cache.has(input3.data)) {
-      const expectedValues = util2.objectValues(nativeEnumValues);
-      addIssueToContext2(ctx, {
-        received: ctx.data,
-        code: ZodIssueCode2.invalid_enum_value,
-        options: expectedValues
-      });
-      return INVALID2;
-    }
-    return OK2(input3.data);
-  }
-  get enum() {
-    return this._def.values;
-  }
-};
-ZodNativeEnum2.create = (values, params) => {
-  return new ZodNativeEnum2({
-    values,
-    typeName: ZodFirstPartyTypeKind2.ZodNativeEnum,
-    ...processCreateParams2(params)
-  });
-};
-var ZodPromise2 = class extends ZodType2 {
-  unwrap() {
-    return this._def.type;
-  }
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    if (ctx.parsedType !== ZodParsedType2.promise && ctx.common.async === false) {
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.promise,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    const promisified = ctx.parsedType === ZodParsedType2.promise ? ctx.data : Promise.resolve(ctx.data);
-    return OK2(promisified.then((data2) => {
-      return this._def.type.parseAsync(data2, {
-        path: ctx.path,
-        errorMap: ctx.common.contextualErrorMap
-      });
-    }));
-  }
-};
-ZodPromise2.create = (schema, params) => {
-  return new ZodPromise2({
-    type: schema,
-    typeName: ZodFirstPartyTypeKind2.ZodPromise,
-    ...processCreateParams2(params)
-  });
-};
-var ZodEffects2 = class extends ZodType2 {
-  innerType() {
-    return this._def.schema;
-  }
-  sourceType() {
-    return this._def.schema._def.typeName === ZodFirstPartyTypeKind2.ZodEffects ? this._def.schema.sourceType() : this._def.schema;
-  }
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    const effect = this._def.effect || null;
-    const checkCtx = {
-      addIssue: (arg) => {
-        addIssueToContext2(ctx, arg);
-        if (arg.fatal) {
-          status2.abort();
-        } else {
-          status2.dirty();
-        }
-      },
-      get path() {
-        return ctx.path;
-      }
-    };
-    checkCtx.addIssue = checkCtx.addIssue.bind(checkCtx);
-    if (effect.type === "preprocess") {
-      const processed = effect.transform(ctx.data, checkCtx);
-      if (ctx.common.async) {
-        return Promise.resolve(processed).then(async (processed2) => {
-          if (status2.value === "aborted")
-            return INVALID2;
-          const result = await this._def.schema._parseAsync({
-            data: processed2,
-            path: ctx.path,
-            parent: ctx
-          });
-          if (result.status === "aborted")
-            return INVALID2;
-          if (result.status === "dirty")
-            return DIRTY2(result.value);
-          if (status2.value === "dirty")
-            return DIRTY2(result.value);
-          return result;
-        });
-      } else {
-        if (status2.value === "aborted")
-          return INVALID2;
-        const result = this._def.schema._parseSync({
-          data: processed,
-          path: ctx.path,
-          parent: ctx
-        });
-        if (result.status === "aborted")
-          return INVALID2;
-        if (result.status === "dirty")
-          return DIRTY2(result.value);
-        if (status2.value === "dirty")
-          return DIRTY2(result.value);
-        return result;
-      }
-    }
-    if (effect.type === "refinement") {
-      const executeRefinement = (acc) => {
-        const result = effect.refinement(acc, checkCtx);
-        if (ctx.common.async) {
-          return Promise.resolve(result);
-        }
-        if (result instanceof Promise) {
-          throw new Error("Async refinement encountered during synchronous parse operation. Use .parseAsync instead.");
-        }
-        return acc;
-      };
-      if (ctx.common.async === false) {
-        const inner = this._def.schema._parseSync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: ctx
-        });
-        if (inner.status === "aborted")
-          return INVALID2;
-        if (inner.status === "dirty")
-          status2.dirty();
-        executeRefinement(inner.value);
-        return { status: status2.value, value: inner.value };
-      } else {
-        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((inner) => {
-          if (inner.status === "aborted")
-            return INVALID2;
-          if (inner.status === "dirty")
-            status2.dirty();
-          return executeRefinement(inner.value).then(() => {
-            return { status: status2.value, value: inner.value };
-          });
-        });
-      }
-    }
-    if (effect.type === "transform") {
-      if (ctx.common.async === false) {
-        const base = this._def.schema._parseSync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: ctx
-        });
-        if (!isValid2(base))
-          return INVALID2;
-        const result = effect.transform(base.value, checkCtx);
-        if (result instanceof Promise) {
-          throw new Error(`Asynchronous transform encountered during synchronous parse operation. Use .parseAsync instead.`);
-        }
-        return { status: status2.value, value: result };
-      } else {
-        return this._def.schema._parseAsync({ data: ctx.data, path: ctx.path, parent: ctx }).then((base) => {
-          if (!isValid2(base))
-            return INVALID2;
-          return Promise.resolve(effect.transform(base.value, checkCtx)).then((result) => ({
-            status: status2.value,
-            value: result
-          }));
-        });
-      }
-    }
-    util2.assertNever(effect);
-  }
-};
-ZodEffects2.create = (schema, effect, params) => {
-  return new ZodEffects2({
-    schema,
-    typeName: ZodFirstPartyTypeKind2.ZodEffects,
-    effect,
-    ...processCreateParams2(params)
-  });
-};
-ZodEffects2.createWithPreprocess = (preprocess, schema, params) => {
-  return new ZodEffects2({
-    schema,
-    effect: { type: "preprocess", transform: preprocess },
-    typeName: ZodFirstPartyTypeKind2.ZodEffects,
-    ...processCreateParams2(params)
-  });
-};
-var ZodOptional2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType === ZodParsedType2.undefined) {
-      return OK2(void 0);
-    }
-    return this._def.innerType._parse(input3);
-  }
-  unwrap() {
-    return this._def.innerType;
-  }
-};
-ZodOptional2.create = (type, params) => {
-  return new ZodOptional2({
-    innerType: type,
-    typeName: ZodFirstPartyTypeKind2.ZodOptional,
-    ...processCreateParams2(params)
-  });
-};
-var ZodNullable2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType === ZodParsedType2.null) {
-      return OK2(null);
-    }
-    return this._def.innerType._parse(input3);
-  }
-  unwrap() {
-    return this._def.innerType;
-  }
-};
-ZodNullable2.create = (type, params) => {
-  return new ZodNullable2({
-    innerType: type,
-    typeName: ZodFirstPartyTypeKind2.ZodNullable,
-    ...processCreateParams2(params)
-  });
-};
-var ZodDefault2 = class extends ZodType2 {
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    let data2 = ctx.data;
-    if (ctx.parsedType === ZodParsedType2.undefined) {
-      data2 = this._def.defaultValue();
-    }
-    return this._def.innerType._parse({
-      data: data2,
-      path: ctx.path,
-      parent: ctx
-    });
-  }
-  removeDefault() {
-    return this._def.innerType;
-  }
-};
-ZodDefault2.create = (type, params) => {
-  return new ZodDefault2({
-    innerType: type,
-    typeName: ZodFirstPartyTypeKind2.ZodDefault,
-    defaultValue: typeof params.default === "function" ? params.default : () => params.default,
-    ...processCreateParams2(params)
-  });
-};
-var ZodCatch2 = class extends ZodType2 {
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    const newCtx = {
-      ...ctx,
-      common: {
-        ...ctx.common,
-        issues: []
-      }
-    };
-    const result = this._def.innerType._parse({
-      data: newCtx.data,
-      path: newCtx.path,
-      parent: {
-        ...newCtx
-      }
-    });
-    if (isAsync2(result)) {
-      return result.then((result2) => {
-        return {
-          status: "valid",
-          value: result2.status === "valid" ? result2.value : this._def.catchValue({
-            get error() {
-              return new ZodError2(newCtx.common.issues);
-            },
-            input: newCtx.data
-          })
-        };
-      });
-    } else {
-      return {
-        status: "valid",
-        value: result.status === "valid" ? result.value : this._def.catchValue({
-          get error() {
-            return new ZodError2(newCtx.common.issues);
-          },
-          input: newCtx.data
-        })
-      };
-    }
-  }
-  removeCatch() {
-    return this._def.innerType;
-  }
-};
-ZodCatch2.create = (type, params) => {
-  return new ZodCatch2({
-    innerType: type,
-    typeName: ZodFirstPartyTypeKind2.ZodCatch,
-    catchValue: typeof params.catch === "function" ? params.catch : () => params.catch,
-    ...processCreateParams2(params)
-  });
-};
-var ZodNaN2 = class extends ZodType2 {
-  _parse(input3) {
-    const parsedType = this._getType(input3);
-    if (parsedType !== ZodParsedType2.nan) {
-      const ctx = this._getOrReturnCtx(input3);
-      addIssueToContext2(ctx, {
-        code: ZodIssueCode2.invalid_type,
-        expected: ZodParsedType2.nan,
-        received: ctx.parsedType
-      });
-      return INVALID2;
-    }
-    return { status: "valid", value: input3.data };
-  }
-};
-ZodNaN2.create = (params) => {
-  return new ZodNaN2({
-    typeName: ZodFirstPartyTypeKind2.ZodNaN,
-    ...processCreateParams2(params)
-  });
-};
-var BRAND2 = Symbol("zod_brand");
-var ZodBranded2 = class extends ZodType2 {
-  _parse(input3) {
-    const { ctx } = this._processInputParams(input3);
-    const data2 = ctx.data;
-    return this._def.type._parse({
-      data: data2,
-      path: ctx.path,
-      parent: ctx
-    });
-  }
-  unwrap() {
-    return this._def.type;
-  }
-};
-var ZodPipeline2 = class _ZodPipeline extends ZodType2 {
-  _parse(input3) {
-    const { status: status2, ctx } = this._processInputParams(input3);
-    if (ctx.common.async) {
-      const handleAsync = async () => {
-        const inResult = await this._def.in._parseAsync({
-          data: ctx.data,
-          path: ctx.path,
-          parent: ctx
-        });
-        if (inResult.status === "aborted")
-          return INVALID2;
-        if (inResult.status === "dirty") {
-          status2.dirty();
-          return DIRTY2(inResult.value);
-        } else {
-          return this._def.out._parseAsync({
-            data: inResult.value,
-            path: ctx.path,
-            parent: ctx
-          });
-        }
-      };
-      return handleAsync();
-    } else {
-      const inResult = this._def.in._parseSync({
-        data: ctx.data,
-        path: ctx.path,
-        parent: ctx
-      });
-      if (inResult.status === "aborted")
-        return INVALID2;
-      if (inResult.status === "dirty") {
-        status2.dirty();
-        return {
-          status: "dirty",
-          value: inResult.value
-        };
-      } else {
-        return this._def.out._parseSync({
-          data: inResult.value,
-          path: ctx.path,
-          parent: ctx
-        });
-      }
-    }
-  }
-  static create(a, b) {
-    return new _ZodPipeline({
-      in: a,
-      out: b,
-      typeName: ZodFirstPartyTypeKind2.ZodPipeline
-    });
-  }
-};
-var ZodReadonly2 = class extends ZodType2 {
-  _parse(input3) {
-    const result = this._def.innerType._parse(input3);
-    const freeze = (data2) => {
-      if (isValid2(data2)) {
-        data2.value = Object.freeze(data2.value);
-      }
-      return data2;
-    };
-    return isAsync2(result) ? result.then((data2) => freeze(data2)) : freeze(result);
-  }
-  unwrap() {
-    return this._def.innerType;
-  }
-};
-ZodReadonly2.create = (type, params) => {
-  return new ZodReadonly2({
-    innerType: type,
-    typeName: ZodFirstPartyTypeKind2.ZodReadonly,
-    ...processCreateParams2(params)
-  });
-};
-function cleanParams2(params, data2) {
-  const p = typeof params === "function" ? params(data2) : typeof params === "string" ? { message: params } : params;
-  const p2 = typeof p === "string" ? { message: p } : p;
-  return p2;
-}
-function custom2(check, _params = {}, fatal) {
-  if (check)
-    return ZodAny2.create().superRefine((data2, ctx) => {
-      const r = check(data2);
-      if (r instanceof Promise) {
-        return r.then((r2) => {
-          if (!r2) {
-            const params = cleanParams2(_params, data2);
-            const _fatal = params.fatal ?? fatal ?? true;
-            ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-          }
-        });
-      }
-      if (!r) {
-        const params = cleanParams2(_params, data2);
-        const _fatal = params.fatal ?? fatal ?? true;
-        ctx.addIssue({ code: "custom", ...params, fatal: _fatal });
-      }
-      return;
-    });
-  return ZodAny2.create();
-}
-var late2 = {
-  object: ZodObject2.lazycreate
-};
-var ZodFirstPartyTypeKind2;
-(function(ZodFirstPartyTypeKind3) {
-  ZodFirstPartyTypeKind3["ZodString"] = "ZodString";
-  ZodFirstPartyTypeKind3["ZodNumber"] = "ZodNumber";
-  ZodFirstPartyTypeKind3["ZodNaN"] = "ZodNaN";
-  ZodFirstPartyTypeKind3["ZodBigInt"] = "ZodBigInt";
-  ZodFirstPartyTypeKind3["ZodBoolean"] = "ZodBoolean";
-  ZodFirstPartyTypeKind3["ZodDate"] = "ZodDate";
-  ZodFirstPartyTypeKind3["ZodSymbol"] = "ZodSymbol";
-  ZodFirstPartyTypeKind3["ZodUndefined"] = "ZodUndefined";
-  ZodFirstPartyTypeKind3["ZodNull"] = "ZodNull";
-  ZodFirstPartyTypeKind3["ZodAny"] = "ZodAny";
-  ZodFirstPartyTypeKind3["ZodUnknown"] = "ZodUnknown";
-  ZodFirstPartyTypeKind3["ZodNever"] = "ZodNever";
-  ZodFirstPartyTypeKind3["ZodVoid"] = "ZodVoid";
-  ZodFirstPartyTypeKind3["ZodArray"] = "ZodArray";
-  ZodFirstPartyTypeKind3["ZodObject"] = "ZodObject";
-  ZodFirstPartyTypeKind3["ZodUnion"] = "ZodUnion";
-  ZodFirstPartyTypeKind3["ZodDiscriminatedUnion"] = "ZodDiscriminatedUnion";
-  ZodFirstPartyTypeKind3["ZodIntersection"] = "ZodIntersection";
-  ZodFirstPartyTypeKind3["ZodTuple"] = "ZodTuple";
-  ZodFirstPartyTypeKind3["ZodRecord"] = "ZodRecord";
-  ZodFirstPartyTypeKind3["ZodMap"] = "ZodMap";
-  ZodFirstPartyTypeKind3["ZodSet"] = "ZodSet";
-  ZodFirstPartyTypeKind3["ZodFunction"] = "ZodFunction";
-  ZodFirstPartyTypeKind3["ZodLazy"] = "ZodLazy";
-  ZodFirstPartyTypeKind3["ZodLiteral"] = "ZodLiteral";
-  ZodFirstPartyTypeKind3["ZodEnum"] = "ZodEnum";
-  ZodFirstPartyTypeKind3["ZodEffects"] = "ZodEffects";
-  ZodFirstPartyTypeKind3["ZodNativeEnum"] = "ZodNativeEnum";
-  ZodFirstPartyTypeKind3["ZodOptional"] = "ZodOptional";
-  ZodFirstPartyTypeKind3["ZodNullable"] = "ZodNullable";
-  ZodFirstPartyTypeKind3["ZodDefault"] = "ZodDefault";
-  ZodFirstPartyTypeKind3["ZodCatch"] = "ZodCatch";
-  ZodFirstPartyTypeKind3["ZodPromise"] = "ZodPromise";
-  ZodFirstPartyTypeKind3["ZodBranded"] = "ZodBranded";
-  ZodFirstPartyTypeKind3["ZodPipeline"] = "ZodPipeline";
-  ZodFirstPartyTypeKind3["ZodReadonly"] = "ZodReadonly";
-})(ZodFirstPartyTypeKind2 || (ZodFirstPartyTypeKind2 = {}));
-var instanceOfType2 = (cls, params = {
-  message: `Input not instance of ${cls.name}`
-}) => custom2((data2) => data2 instanceof cls, params);
-var stringType2 = ZodString2.create;
-var numberType2 = ZodNumber2.create;
-var nanType2 = ZodNaN2.create;
-var bigIntType2 = ZodBigInt2.create;
-var booleanType2 = ZodBoolean2.create;
-var dateType2 = ZodDate2.create;
-var symbolType2 = ZodSymbol2.create;
-var undefinedType2 = ZodUndefined2.create;
-var nullType2 = ZodNull2.create;
-var anyType2 = ZodAny2.create;
-var unknownType2 = ZodUnknown2.create;
-var neverType2 = ZodNever2.create;
-var voidType2 = ZodVoid2.create;
-var arrayType2 = ZodArray2.create;
-var objectType2 = ZodObject2.create;
-var strictObjectType2 = ZodObject2.strictCreate;
-var unionType2 = ZodUnion2.create;
-var discriminatedUnionType2 = ZodDiscriminatedUnion2.create;
-var intersectionType2 = ZodIntersection2.create;
-var tupleType2 = ZodTuple2.create;
-var recordType2 = ZodRecord2.create;
-var mapType2 = ZodMap2.create;
-var setType2 = ZodSet2.create;
-var functionType2 = ZodFunction2.create;
-var lazyType2 = ZodLazy2.create;
-var literalType2 = ZodLiteral2.create;
-var enumType2 = ZodEnum2.create;
-var nativeEnumType2 = ZodNativeEnum2.create;
-var promiseType2 = ZodPromise2.create;
-var effectsType2 = ZodEffects2.create;
-var optionalType2 = ZodOptional2.create;
-var nullableType2 = ZodNullable2.create;
-var preprocessType2 = ZodEffects2.createWithPreprocess;
-var pipelineType2 = ZodPipeline2.create;
-var ostring2 = () => stringType2().optional();
-var onumber2 = () => numberType2().optional();
-var oboolean2 = () => booleanType2().optional();
-var coerce2 = {
-  string: ((arg) => ZodString2.create({ ...arg, coerce: true })),
-  number: ((arg) => ZodNumber2.create({ ...arg, coerce: true })),
-  boolean: ((arg) => ZodBoolean2.create({
-    ...arg,
-    coerce: true
-  })),
-  bigint: ((arg) => ZodBigInt2.create({ ...arg, coerce: true })),
-  date: ((arg) => ZodDate2.create({ ...arg, coerce: true }))
-};
-var NEVER2 = INVALID2;
 
 // src/safe-error.ts
 var RpcError = class extends Error {
@@ -75603,7 +70476,7 @@ var RpcError = class extends Error {
 };
 function safeErrorCode(error) {
   if (error instanceof RpcError) return error.code;
-  if (error instanceof external_exports2.ZodError) return "INVALID_MESSAGE";
+  if (error instanceof external_exports.ZodError) return "INVALID_MESSAGE";
   return "INTERNAL_ERROR";
 }
 
@@ -76136,14 +71009,14 @@ var BOT_REMOTE_OPERATIONS = [
 function isAllowedPluginRoute(route) {
   return PLUGIN_ROUTE_ALLOWLIST.some((allowed) => allowed === route);
 }
-var callSchema = external_exports2.object({
-  route: external_exports2.enum(PLUGIN_ROUTE_ALLOWLIST),
-  body: external_exports2.object({
-    endpoint: external_exports2.enum(BOT_REMOTE_OPERATIONS),
-    payload: external_exports2.record(external_exports2.string(), external_exports2.unknown()).nullable().optional()
+var callSchema = external_exports.object({
+  route: external_exports.enum(PLUGIN_ROUTE_ALLOWLIST),
+  body: external_exports.object({
+    endpoint: external_exports.enum(BOT_REMOTE_OPERATIONS),
+    payload: external_exports.record(external_exports.string(), external_exports.unknown()).nullable().optional()
   }).strict().superRefine((body, ctx) => {
     if (body.endpoint === "approval-answer" && body.payload?.choice !== "allow" && body.payload?.choice !== "reject") {
-      ctx.addIssue({ code: external_exports2.ZodIssueCode.custom, message: "Only one-time approval or rejection is supported." });
+      ctx.addIssue({ code: external_exports.ZodIssueCode.custom, message: "Only one-time approval or rejection is supported." });
     }
   })
 }).strict();
@@ -76158,7 +71031,7 @@ var PluginRouteBridge = class {
     try {
       params = callSchema.parse(input3);
     } catch (error) {
-      if (error instanceof external_exports2.ZodError) {
+      if (error instanceof external_exports.ZodError) {
         throw new RpcError("INVALID_MESSAGE", "The plugin route call is invalid for the remote channel.");
       }
       throw error;
@@ -79768,16 +74641,16 @@ import { platform } from "node:os";
 // src/server-credentials.ts
 import { chmod, mkdir, readFile as readFile2, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname as dirname2, join as join2 } from "node:path";
-var credentialSchema = external_exports2.object({
-  schemaVersion: external_exports2.literal(1),
-  serverUrl: external_exports2.string().url(),
-  deviceId: external_exports2.string().min(1),
-  authorizationMethod: external_exports2.enum(["account", "host_registration_code", "owned_device"]),
-  account: external_exports2.string().min(1).max(254).optional(),
-  accessToken: external_exports2.string().min(16),
-  accessTokenExpiresAt: external_exports2.number().int().positive(),
-  refreshToken: external_exports2.string().min(16),
-  refreshTokenExpiresAt: external_exports2.number().int().positive()
+var credentialSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  serverUrl: external_exports.string().url(),
+  deviceId: external_exports.string().min(1),
+  authorizationMethod: external_exports.enum(["account", "host_registration_code", "owned_device"]),
+  account: external_exports.string().min(1).max(254).optional(),
+  accessToken: external_exports.string().min(16),
+  accessTokenExpiresAt: external_exports.number().int().positive(),
+  refreshToken: external_exports.string().min(16),
+  refreshTokenExpiresAt: external_exports.number().int().positive()
 }).strict();
 var ServerCredentialStore = class {
   path;
@@ -79901,34 +74774,34 @@ function withVolatileSchema(schema) {
   return typeof volatile === "function" ? volatile.call(schema) : schema;
 }
 var Config = withVolatileSchema(entryConfigSchema);
-var reconnectSchema = external_exports2.union([
-  external_exports2.boolean(),
-  external_exports2.object({
-    initialDelayMs: external_exports2.number().int().min(100).max(6e4).optional(),
-    maxDelayMs: external_exports2.number().int().min(1e3).max(3e5).optional(),
-    jitter: external_exports2.number().min(0).max(1).optional()
+var reconnectSchema = external_exports.union([
+  external_exports.boolean(),
+  external_exports.object({
+    initialDelayMs: external_exports.number().int().min(100).max(6e4).optional(),
+    maxDelayMs: external_exports.number().int().min(1e3).max(3e5).optional(),
+    jitter: external_exports.number().min(0).max(1).optional()
   }).strict()
 ]);
-var configSchema = external_exports2.object({
-  enabled: external_exports2.boolean().optional(),
-  role: external_exports2.enum(["host", "client", "both"]).optional(),
-  serverUrl: external_exports2.string().url().optional(),
-  deviceName: external_exports2.string().trim().min(1).max(80).optional(),
-  terminal: external_exports2.object({ enabled: external_exports2.boolean().optional() }).strict().optional(),
-  hostControl: external_exports2.object({ enabled: external_exports2.boolean().optional() }).strict().optional(),
-  loopback: external_exports2.object({ ports: external_exports2.array(external_exports2.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
-  forceRelay: external_exports2.boolean().optional(),
-  logLevel: external_exports2.enum(["debug", "info", "warn", "error"]).optional(),
+var configSchema = external_exports.object({
+  enabled: external_exports.boolean().optional(),
+  role: external_exports.enum(["host", "client", "both"]).optional(),
+  serverUrl: external_exports.string().url().optional(),
+  deviceName: external_exports.string().trim().min(1).max(80).optional(),
+  terminal: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
+  hostControl: external_exports.object({ enabled: external_exports.boolean().optional() }).strict().optional(),
+  loopback: external_exports.object({ ports: external_exports.array(external_exports.number().int().min(1024).max(65535)).max(16).optional() }).strict().optional(),
+  forceRelay: external_exports.boolean().optional(),
+  logLevel: external_exports.enum(["debug", "info", "warn", "error"]).optional(),
   reconnect: reconnectSchema.optional(),
-  codex: external_exports2.object({
-    enabled: external_exports2.boolean().optional(),
-    binary: external_exports2.string().trim().min(1).max(4096).optional()
+  codex: external_exports.object({
+    enabled: external_exports.boolean().optional(),
+    binary: external_exports.string().trim().min(1).max(4096).optional()
   }).strict().optional(),
-  cursor: external_exports2.object({
-    enabled: external_exports2.boolean().optional(),
-    binary: external_exports2.string().trim().min(1).max(4096).optional()
+  cursor: external_exports.object({
+    enabled: external_exports.boolean().optional(),
+    binary: external_exports.string().trim().min(1).max(4096).optional()
   }).strict().optional(),
-  acp: external_exports2.object({ enabled: external_exports2.boolean().optional(), backends: external_exports2.array(external_exports2.object({ id: external_exports2.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled: external_exports2.boolean().optional(), command: external_exports2.string().trim().min(1).max(4096).optional(), args: external_exports2.array(external_exports2.string().max(4096)).max(32).optional(), cwd: external_exports2.string().max(4096).optional() }).strict()).max(12).optional(), backend: external_exports2.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command: external_exports2.string().trim().min(1).max(4096).optional(), args: external_exports2.array(external_exports2.string().max(4096)).max(32).optional(), cwd: external_exports2.string().max(4096).optional() }).strict().optional()
+  acp: external_exports.object({ enabled: external_exports.boolean().optional(), backends: external_exports.array(external_exports.object({ id: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i), enabled: external_exports.boolean().optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict()).max(12).optional(), backend: external_exports.string().trim().regex(/^[a-z0-9][a-z0-9._-]{0,31}$/i).optional(), command: external_exports.string().trim().min(1).max(4096).optional(), args: external_exports.array(external_exports.string().max(4096)).max(32).optional(), cwd: external_exports.string().max(4096).optional() }).strict().optional()
 }).strict();
 function resolveConfig(input3 = {}, env = process.env) {
   const parsed = configSchema.parse(input3);
@@ -80510,12 +75383,12 @@ function requireRecord(value, name2) {
 }
 
 // src/terminal-carrier-compat.ts
-var identity = external_exports2.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
-var attachmentArgs = external_exports2.object({ agentId: identity, id: identity, attachmentId: identity }).strict();
-var dimensions = { cols: external_exports2.number().int().min(1).max(1e3), rows: external_exports2.number().int().min(1).max(1e3) };
-var input = external_exports2.discriminatedUnion("type", [
-  external_exports2.object({ type: external_exports2.literal("write"), sequence: external_exports2.number().int().positive().safe(), data: external_exports2.string().max(64 * 1024) }).strict(),
-  external_exports2.object({ type: external_exports2.literal("resize"), sequence: external_exports2.number().int().positive().safe(), ...dimensions }).strict()
+var identity = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var attachmentArgs = external_exports.object({ agentId: identity, id: identity, attachmentId: identity }).strict();
+var dimensions = { cols: external_exports.number().int().min(1).max(1e3), rows: external_exports.number().int().min(1).max(1e3) };
+var input = external_exports.discriminatedUnion("type", [
+  external_exports.object({ type: external_exports.literal("write"), sequence: external_exports.number().int().positive().safe(), data: external_exports.string().max(64 * 1024) }).strict(),
+  external_exports.object({ type: external_exports.literal("resize"), sequence: external_exports.number().int().positive().safe(), ...dimensions }).strict()
 ]);
 function usesDuplexTerminal(version) {
   const match = /^(?:dsh-)?v?0\.(\d+)\.(\d+)(?:-([^+]+))?(?:\+.*)?$/.exec(version ?? "");
@@ -80574,7 +75447,7 @@ var TerminalCarrierCompat = class {
   attachments = /* @__PURE__ */ new Map();
   async open(payload, signal) {
     signal.throwIfAborted();
-    const args = attachmentArgs.parse(external_exports2.object({ args: external_exports2.unknown() }).strict().parse(payload).args);
+    const args = attachmentArgs.parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
     const key = `${args.agentId}/${args.id}`;
     this.attachments.get(key)?.control.abort();
     const control = new AbortController();
@@ -80619,8 +75492,8 @@ var TerminalCarrierCompat = class {
     })();
   }
   async call(endpoint, payload, signal) {
-    const fields = endpoint === "terminal/write" ? { data: external_exports2.string().max(64 * 1024) } : dimensions;
-    const args = attachmentArgs.extend(fields).parse(external_exports2.object({ args: external_exports2.unknown() }).strict().parse(payload).args);
+    const fields = endpoint === "terminal/write" ? { data: external_exports.string().max(64 * 1024) } : dimensions;
+    const args = attachmentArgs.extend(fields).parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
     const entry = this.attachments.get(`${args.agentId}/${args.id}`);
     if (!entry || entry.args.attachmentId !== args.attachmentId || !entry.writable) throw new RpcError("PERMISSION_DENIED", "This terminal input attachment is not writable.");
     if (entry.pending.size >= 32) throw new RpcError("RATE_LIMITED", "Too many unacknowledged terminal inputs.");
@@ -80651,7 +75524,7 @@ var TerminalCarrierCompat = class {
   }
 };
 async function openRemoteTerminal(target2, payload, signal, uplink) {
-  const args = external_exports2.object({ agentId: identity, id: identity }).strict().parse(external_exports2.object({ args: external_exports2.unknown() }).strict().parse(payload).args);
+  const args = external_exports.object({ agentId: identity, id: identity }).strict().parse(external_exports.object({ args: external_exports.unknown() }).strict().parse(payload).args);
   const attachmentId = uuidV7();
   const control = new AbortController();
   const lifetime = AbortSignal.any([signal, control.signal]);
@@ -81009,21 +75882,21 @@ function resolveExternalNodeBinaryForRtc() {
 }
 function nodeBinaryCandidates() {
   const candidates = [];
-  const add4 = (value) => {
+  const add3 = (value) => {
     if (value === void 0 || value.trim() === "") return;
     if (!candidates.includes(value)) candidates.push(value);
   };
-  add4(process.env.DSH_REMOTE_NODE);
-  add4(process.env.NODE);
-  add4(process.execPath);
-  for (const part of (process.env.PATH ?? "").split(delimiter)) add4(join3(part, process.platform === "win32" ? "node.exe" : "node"));
-  add4("/opt/homebrew/bin/node");
-  add4("/usr/local/bin/node");
-  add4("/usr/bin/node");
-  add4(join3(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  add4(join3(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
-  add4(join3(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
-  for (const nvmNode of nvmNodeCandidates()) add4(nvmNode);
+  add3(process.env.DSH_REMOTE_NODE);
+  add3(process.env.NODE);
+  add3(process.execPath);
+  for (const part of (process.env.PATH ?? "").split(delimiter)) add3(join3(part, process.platform === "win32" ? "node.exe" : "node"));
+  add3("/opt/homebrew/bin/node");
+  add3("/usr/local/bin/node");
+  add3("/usr/bin/node");
+  add3(join3(process.env.HOME ?? "", ".volta", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join3(process.env.HOME ?? "", ".asdf", "shims", process.platform === "win32" ? "node.exe" : "node"));
+  add3(join3(process.env.HOME ?? "", ".local", "bin", process.platform === "win32" ? "node.exe" : "node"));
+  for (const nvmNode of nvmNodeCandidates()) add3(nvmNode);
   return candidates;
 }
 function nvmNodeCandidates() {
@@ -82031,6 +76904,7 @@ var ClientModeRuntime = class {
     this.host = host;
     this.rtcFactoryProvider = rtcFactoryProvider;
     const owner = this;
+    this.reconnect = new ClientReconnect(config.reconnect);
     this.connection = new ClientConnection({
       get connectionProgressRun() {
         return owner.connectionProgressRun;
@@ -82056,24 +76930,6 @@ var ClientModeRuntime = class {
       },
       get logger() {
         return owner.logger;
-      },
-      get connected() {
-        return owner.connected;
-      },
-      set connected(value) {
-        owner.connected = value;
-      },
-      closePreview: (...args) => owner.closePreview(...args),
-      get pendingWorkspaceSelection() {
-        return owner.pendingWorkspaceSelection;
-      },
-      set pendingWorkspaceSelection(value) {
-        owner.pendingWorkspaceSelection = value;
-      },
-      closeCodexVirtual: (...args) => owner.closeCodexVirtual(...args),
-      closeCursorVirtual: (...args) => owner.closeCursorVirtual(...args),
-      get gatewaySwitch() {
-        return owner.gatewaySwitch;
       },
       get identities() {
         return owner.identities;
@@ -82139,6 +76995,11 @@ var ClientModeRuntime = class {
       await remote.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
+    if (!remote.client.getStats().connected) {
+      await remote.client.close().catch(() => void 0);
+      throw new ClientModeError("TRANSPORT_CLOSED", "The Remote connection closed before it became ready.", true);
+    }
+    remote.client.onClose((error) => this.handleRemoteClose(remote, error));
     return remote;
   }
   handleControl(endpoint, payload, signal) {
@@ -82163,6 +77024,10 @@ var ClientModeRuntime = class {
   connectionProgressRun = 0;
   closed = false;
   remoteLifetime = new AbortController();
+  selectionLifetime = new AbortController();
+  reconnect;
+  recoverable;
+  recoveryGeneration = 0;
   async start() {
     if (this.closed) throw new Error("client remote-mode runtime is closed");
     this.identity = await this.identities.loadOrCreate(this.config.deviceName);
@@ -82207,6 +77072,7 @@ var ClientModeRuntime = class {
       serverUrl: this.config.serverUrl,
       ...targetStatus,
       connected: this.connected !== void 0,
+      recoveryGeneration: this.recoveryGeneration,
       transport: this.connected?.client.getStats().mode ?? "Disconnected",
       connectedTargetDeviceId: this.connected?.target.deviceId,
       preferredTransports: this.config.forceRelay ? ["relay"] : ["lan", "p2p", "turn", "relay"],
@@ -82332,6 +77198,7 @@ var ClientModeRuntime = class {
     if (targetDeviceId === void 0 || targetDeviceId.length === 0) {
       throw new ClientModeError("INVALID_MESSAGE", "A targetDeviceId is required for remote mode.");
     }
+    signal = this.beginSelection(signal);
     const lifetime = this.remoteLifetime.signal;
     const next = await this.connect(targetDeviceId, signal);
     try {
@@ -82343,7 +77210,7 @@ var ClientModeRuntime = class {
     }
     const previous = this.connected;
     await this.closePreview();
-    if (lifetime.aborted || this.closed) {
+    if (signal.aborted || lifetime.aborted || this.closed) {
       await next.client.close().catch(() => void 0);
       throw new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed.");
     }
@@ -82584,6 +77451,7 @@ var ClientModeRuntime = class {
     }
   }
   async leaveRemote() {
+    this.beginSelection();
     this.remoteLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection was closed."));
     this.remoteLifetime = new AbortController();
     const previous = this.connected;
@@ -82628,6 +77496,7 @@ var ClientModeRuntime = class {
     this.assertRemoteCompatible(remote);
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(this.remoteTypertGateway(remote), void 0, target2);
+    this.recoverable = remote;
   }
   remoteTypertGateway(remote) {
     const localSessionGeneration = harnessSessionGeneration(this.host?.localHarnessVersion?.());
@@ -82638,6 +77507,7 @@ var ClientModeRuntime = class {
     );
   }
   selectCodexTarget(virtual, remote) {
+    this.recoverable = void 0;
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
@@ -82665,6 +77535,7 @@ var ClientModeRuntime = class {
     await virtual?.close();
   }
   selectCursorTarget(virtual, remote) {
+    this.recoverable = void 0;
     const target2 = { deviceId: remote.target.deviceId, name: remote.target.name };
     this.gatewaySwitch.selectRemote(virtual, void 0, target2);
   }
@@ -82693,6 +77564,7 @@ var ClientModeRuntime = class {
   async ensureConnected(targetDeviceId, signal, isCurrent) {
     const lifetime = this.remoteLifetime.signal;
     if (this.connected?.target.deviceId === targetDeviceId) return this.connected;
+    signal = this.beginSelection(signal);
     const next = await this.connect(targetDeviceId, signal);
     const assertCurrent = () => {
       signal?.throwIfAborted();
@@ -82725,6 +77597,46 @@ var ClientModeRuntime = class {
     if (this.identity === void 0) throw new ClientModeError("IDENTITY_INVALID", "The client identity is not ready.");
     return this.identity;
   }
+  beginSelection(signal) {
+    this.reconnect.cancel();
+    this.recoverable = void 0;
+    this.selectionLifetime.abort(new ClientModeError("CANCELLED", "The Remote connection request was superseded or closed."));
+    this.selectionLifetime = new AbortController();
+    return AbortSignal.any([this.selectionLifetime.signal, this.remoteLifetime.signal, ...signal === void 0 ? [] : [signal]]);
+  }
+  handleRemoteClose(remote, error) {
+    if (this.connected !== remote) return;
+    const recover = this.recoverable === remote;
+    this.recoverable = void 0;
+    this.connected = void 0;
+    this.connectionProgress = void 0;
+    this.pendingWorkspaceSelection = void 0;
+    this.gatewaySwitch.disconnectRemote();
+    const cleanup = Promise.allSettled([
+      this.closePreview(),
+      this.closeCodexVirtual(),
+      this.closeCursorVirtual(),
+      this.codexStreamBridge.closeCodexStreams(remote.client),
+      remote.client.close()
+    ]);
+    this.logger.warn("remote Harness transport closed", { targetDeviceId: shortId(remote.target.deviceId) });
+    if (!recover || this.closed) return;
+    this.reconnect.start(async (signal) => {
+      await cleanup;
+      signal.throwIfAborted();
+      const next = await this.connect(remote.target.deviceId, signal);
+      try {
+        signal.throwIfAborted();
+        this.selectRemoteTarget(next);
+        this.connected = next;
+        this.connection.clearConnectionProgress(next.progressRunId);
+        this.recoveryGeneration += 1;
+      } catch (error2) {
+        await next.client.close().catch(() => void 0);
+        throw error2;
+      }
+    }, error);
+  }
 };
 
 // src/control-runtime.ts
@@ -82736,24 +77648,24 @@ import { createHash as createHash5 } from "node:crypto";
 import { chmod as chmod2, mkdir as mkdir2, readFile as readFile3, rename as rename2, rm as rm2, stat as stat2, writeFile as writeFile2 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname as dirname4, join as join4 } from "node:path";
-var identitySchema = external_exports2.object({
-  schemaVersion: external_exports2.literal(1),
-  deviceId: external_exports2.string().uuid(),
-  name: external_exports2.string().min(1).max(80),
-  publicKey: external_exports2.string().min(1)
+var identitySchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  deviceId: external_exports.string().uuid(),
+  name: external_exports.string().min(1).max(80),
+  publicKey: external_exports.string().min(1)
 }).strict();
-var trustedPeerSchema = external_exports2.object({
-  deviceId: external_exports2.string().min(1),
-  name: external_exports2.string().min(1).max(80),
-  platform: external_exports2.string().min(1).max(40),
-  publicKey: external_exports2.string().min(1),
-  fingerprint: external_exports2.string().min(1),
-  trustedAt: external_exports2.number().int().nonnegative(),
-  membershipId: external_exports2.string().min(1).optional()
+var trustedPeerSchema = external_exports.object({
+  deviceId: external_exports.string().min(1),
+  name: external_exports.string().min(1).max(80),
+  platform: external_exports.string().min(1).max(40),
+  publicKey: external_exports.string().min(1),
+  fingerprint: external_exports.string().min(1),
+  trustedAt: external_exports.number().int().nonnegative(),
+  membershipId: external_exports.string().min(1).optional()
 }).strict();
-var trustedPeersSchema = external_exports2.object({
-  schemaVersion: external_exports2.literal(1),
-  peers: external_exports2.array(trustedPeerSchema)
+var trustedPeersSchema = external_exports.object({
+  schemaVersion: external_exports.literal(1),
+  peers: external_exports.array(trustedPeerSchema)
 }).strict();
 var IdentityInvalidError = class extends Error {
   code = "IDENTITY_INVALID";
@@ -83310,100 +78222,100 @@ function isRecord11(value) {
 }
 
 // src/codex/method-policy.ts
-var id2 = external_exports2.string().min(1).max(256);
-var cursor = external_exports2.string().min(1).max(4096).nullable().optional();
-var textInput = external_exports2.object({
-  type: external_exports2.literal("text"),
-  text: external_exports2.string().min(1).max(256 * 1024)
+var id2 = external_exports.string().min(1).max(256);
+var cursor = external_exports.string().min(1).max(4096).nullable().optional();
+var textInput = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
-var imageMediaType = external_exports2.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-var canonicalBase64 = external_exports2.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
+var imageMediaType = external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+var canonicalBase64 = external_exports.string().min(4).max(288 * 1024 * 1024).refine((value) => value.length % 4 === 0 && /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value), {
   message: "Image data must use canonical base64."
 });
-var imageInput = external_exports2.object({
-  type: external_exports2.literal("image"),
+var imageInput = external_exports.object({
+  type: external_exports.literal("image"),
   mediaType: imageMediaType,
   data: canonicalBase64
 }).strict();
-var input2 = external_exports2.array(external_exports2.union([textInput, imageInput])).min(1).max(16);
-var permissionPreset = external_exports2.enum(["workspace-write", "danger-full-access"]);
-var projectRoot = external_exports2.object({
-  path: external_exports2.string().min(1).max(4096)
+var input2 = external_exports.array(external_exports.union([textInput, imageInput])).min(1).max(16);
+var permissionPreset = external_exports.enum(["workspace-write", "danger-full-access"]);
+var projectRoot = external_exports.object({
+  path: external_exports.string().min(1).max(4096)
 }).strict();
 var schemas = {
-  "account/read": external_exports2.object({ refreshToken: external_exports2.literal(false).optional() }).strict(),
-  "model/list": external_exports2.object({
+  "account/read": external_exports.object({ refreshToken: external_exports.literal(false).optional() }).strict(),
+  "model/list": external_exports.object({
     cursor,
-    limit: external_exports2.number().int().min(1).max(100).optional(),
-    includeHidden: external_exports2.boolean().optional()
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    includeHidden: external_exports.boolean().optional()
   }).strict(),
-  "project/list": external_exports2.object({
+  "project/list": external_exports.object({
     cursor,
-    limit: external_exports2.number().int().min(1).max(100).optional()
+    limit: external_exports.number().int().min(1).max(100).optional()
   }).strict(),
-  "project/create": external_exports2.object({
-    name: external_exports2.string().trim().min(1).max(256),
-    roots: external_exports2.array(projectRoot).length(1),
-    idempotencyKey: external_exports2.string().min(16).max(256)
+  "project/create": external_exports.object({
+    name: external_exports.string().trim().min(1).max(256),
+    roots: external_exports.array(projectRoot).length(1),
+    idempotencyKey: external_exports.string().min(16).max(256)
   }).strict(),
-  "thread/list": external_exports2.object({
+  "thread/list": external_exports.object({
     cursor,
-    limit: external_exports2.number().int().min(1).max(100).optional(),
-    sortKey: external_exports2.enum(["created_at", "updated_at", "recency_at"]).optional(),
-    sortDirection: external_exports2.enum(["asc", "desc"]).optional(),
-    modelProviders: external_exports2.array(external_exports2.string().min(1).max(128)).max(32).nullable().optional(),
-    sourceKinds: external_exports2.array(external_exports2.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
-    archived: external_exports2.boolean().optional(),
-    isPinned: external_exports2.boolean().optional(),
-    cwd: external_exports2.union([external_exports2.string().min(1).max(4096), external_exports2.array(external_exports2.string().min(1).max(4096)).min(1).max(32)]).optional(),
-    useStateDbOnly: external_exports2.boolean().optional(),
-    searchTerm: external_exports2.string().max(1024).optional()
+    limit: external_exports.number().int().min(1).max(100).optional(),
+    sortKey: external_exports.enum(["created_at", "updated_at", "recency_at"]).optional(),
+    sortDirection: external_exports.enum(["asc", "desc"]).optional(),
+    modelProviders: external_exports.array(external_exports.string().min(1).max(128)).max(32).nullable().optional(),
+    sourceKinds: external_exports.array(external_exports.enum(["cli", "vscode", "exec", "appServer", "unknown"])).max(8).optional(),
+    archived: external_exports.boolean().optional(),
+    isPinned: external_exports.boolean().optional(),
+    cwd: external_exports.union([external_exports.string().min(1).max(4096), external_exports.array(external_exports.string().min(1).max(4096)).min(1).max(32)]).optional(),
+    useStateDbOnly: external_exports.boolean().optional(),
+    searchTerm: external_exports.string().max(1024).optional()
   }).strict(),
-  "thread/read": external_exports2.object({ threadId: id2, includeTurns: external_exports2.boolean().optional() }).strict(),
-  "dsh/sessionHistory": external_exports2.object({
+  "thread/read": external_exports.object({ threadId: id2, includeTurns: external_exports.boolean().optional() }).strict(),
+  "dsh/sessionHistory": external_exports.object({
     threadId: id2,
-    beforeSeq: external_exports2.number().int().nonnegative().optional(),
-    throughSeq: external_exports2.number().int().min(-1).optional(),
-    maxMessages: external_exports2.number().int().min(1).max(200).optional()
+    beforeSeq: external_exports.number().int().nonnegative().optional(),
+    throughSeq: external_exports.number().int().min(-1).optional(),
+    maxMessages: external_exports.number().int().min(1).max(200).optional()
   }).strict(),
-  "dsh/sessionAttachment": external_exports2.object({
+  "dsh/sessionAttachment": external_exports.object({
     threadId: id2,
     attachmentId: id2
   }).strict(),
-  "dsh/directoryList": external_exports2.object({
-    path: external_exports2.string().min(1).max(4096)
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
   }).strict(),
-  "thread/start": external_exports2.object({
-    cwd: external_exports2.string().min(1).max(4096),
-    model: external_exports2.string().min(1).max(128).optional(),
-    personality: external_exports2.string().min(1).max(64).optional(),
+  "thread/start": external_exports.object({
+    cwd: external_exports.string().min(1).max(4096),
+    model: external_exports.string().min(1).max(128).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "thread/resume": external_exports2.object({
+  "thread/resume": external_exports.object({
     threadId: id2,
-    model: external_exports2.string().min(1).max(128).optional(),
+    model: external_exports.string().min(1).max(128).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "thread/fork": external_exports2.object({
+  "thread/fork": external_exports.object({
     threadId: id2,
     lastTurnId: id2.optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "thread/name/set": external_exports2.object({ threadId: id2, name: external_exports2.string().trim().min(1).max(256) }).strict(),
-  "thread/archive": external_exports2.object({ threadId: id2 }).strict(),
-  "thread/unarchive": external_exports2.object({ threadId: id2 }).strict(),
-  "thread/unsubscribe": external_exports2.object({ threadId: id2 }).strict(),
-  "turn/start": external_exports2.object({
+  "thread/name/set": external_exports.object({ threadId: id2, name: external_exports.string().trim().min(1).max(256) }).strict(),
+  "thread/archive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unarchive": external_exports.object({ threadId: id2 }).strict(),
+  "thread/unsubscribe": external_exports.object({ threadId: id2 }).strict(),
+  "turn/start": external_exports.object({
     threadId: id2,
     input: input2,
-    model: external_exports2.string().min(1).max(128).optional(),
-    effort: external_exports2.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
-    summary: external_exports2.enum(["auto", "concise", "detailed", "none"]).optional(),
-    personality: external_exports2.string().min(1).max(64).optional(),
+    model: external_exports.string().min(1).max(128).optional(),
+    effort: external_exports.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"]).optional(),
+    summary: external_exports.enum(["auto", "concise", "detailed", "none"]).optional(),
+    personality: external_exports.string().min(1).max(64).optional(),
     permissionPreset: permissionPreset.optional()
   }).strict(),
-  "turn/steer": external_exports2.object({ threadId: id2, input: input2, expectedTurnId: id2 }).strict(),
-  "turn/interrupt": external_exports2.object({ threadId: id2, turnId: id2 }).strict()
+  "turn/steer": external_exports.object({ threadId: id2, input: input2, expectedTurnId: id2 }).strict(),
+  "turn/interrupt": external_exports.object({ threadId: id2, turnId: id2 }).strict()
 };
 var CODEX_APP_ALLOWLIST = Object.freeze(Object.keys(schemas));
 function parseCodexCall(method, params) {
@@ -83539,23 +78451,23 @@ async function previewCall(peer, input3, invoke) {
 
 // src/codex/peer-bridge.ts
 import { Buffer as Buffer3 } from "node:buffer";
-var streamOpenSchema = external_exports2.object({
-  streamId: external_exports2.string().min(1).max(128),
-  threadId: external_exports2.string().min(1).max(256)
+var streamOpenSchema = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
+  threadId: external_exports.string().min(1).max(256)
 }).strict();
-var streamCloseSchema = external_exports2.object({ streamId: external_exports2.string().min(1).max(128) }).strict();
-var transferOpenSchema = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  totalBytes: external_exports2.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
-  totalChunks: external_exports2.number().int().positive()
+var streamCloseSchema = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferOpenSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_CODEX_APP_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  index: external_exports2.number().int().nonnegative(),
-  data: external_exports2.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
+var transferChunkSchema = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1).max(Math.ceil(CODEX_APP_TRANSFER_CHUNK_BYTES / 3) * 4)
 }).strict();
-var transferIdSchema = external_exports2.object({ transferId: external_exports2.string().uuid() }).strict();
-var transferReadSchema = external_exports2.object({ transferId: external_exports2.string().uuid(), index: external_exports2.number().int().nonnegative() }).strict();
+var transferIdSchema = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
 var MAX_ACTIVE_STREAMS = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
 var INLINE_TRANSFER_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -86687,7 +81599,7 @@ var TERMINAL_CALLS = /* @__PURE__ */ new Set([
   "terminal/close"
 ]);
 var TERMINAL_STREAMS = /* @__PURE__ */ new Set(["terminal/follow", "terminal/retain"]);
-var id3 = external_exports2.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
+var id3 = external_exports.string().regex(/^[A-Za-z0-9_:-]{1,256}$/);
 var TerminalPolicy = class _TerminalPolicy {
   constructor(enabled, deviceId, owners) {
     this.enabled = enabled;
@@ -86710,13 +81622,13 @@ var TerminalPolicy = class _TerminalPolicy {
       "Remote terminal is disabled on this Host. Enable Remote terminal in the Host Remote settings; the switch saves and applies immediately. / \u8FDC\u7A0B\u7EC8\u7AEF\u672A\u5F00\u542F\uFF0C\u8BF7\u5728 Host \u7684 Remote \u8BBE\u7F6E\u4E2D\u5F00\u542F\u300C\u8FDC\u7A0B\u7EC8\u7AEF\u300D\uFF0C\u5F00\u5173\u5207\u6362\u540E\u7ACB\u5373\u4FDD\u5B58\u5E76\u751F\u6548\u3002"
     );
     for (const [key2, attachment] of this.attachments) if (this.owners.get(key2) !== this.deviceId || this.claims.get(key2) !== attachment.claim) this.attachments.delete(key2);
-    const args = external_exports2.object({ args: external_exports2.record(external_exports2.unknown()) }).strict().parse(payload).args;
+    const args = external_exports.object({ args: external_exports.record(external_exports.unknown()) }).strict().parse(payload).args;
     const rawSessionId = args.agentId ?? args.sessionId;
     const sessionId = id3.parse(rawSessionId);
     const codexSession = parseCodexSessionId(sessionId);
     void codexSession;
     if (endpoint === "terminal/environment" || endpoint === "terminal/shells" || endpoint === "terminal/list") return {};
-    const request = endpoint === "terminal/create" ? external_exports2.object({ id: id3 }).passthrough().parse(args.request) : void 0;
+    const request = endpoint === "terminal/create" ? external_exports.object({ id: id3 }).passthrough().parse(args.request) : void 0;
     const terminalId = id3.parse(request?.id ?? args.id);
     const key = `${sessionId}/${terminalId}`;
     if (endpoint === "terminal/create") {
@@ -88503,14 +83415,14 @@ function isRecord16(value) {
 }
 
 // src/acp/method-policy.ts
-var id4 = external_exports2.string().min(1).max(256);
-var cwd = external_exports2.string().min(1).max(4096);
-var mode = external_exports2.enum(["agent", "plan", "ask"]);
-var textBlock = external_exports2.object({
-  type: external_exports2.literal("text"),
-  text: external_exports2.string().min(1).max(256 * 1024)
+var id4 = external_exports.string().min(1).max(256);
+var cwd = external_exports.string().min(1).max(4096);
+var mode = external_exports.enum(["agent", "plan", "ask"]);
+var textBlock = external_exports.object({
+  type: external_exports.literal("text"),
+  text: external_exports.string().min(1).max(256 * 1024)
 }).strict();
-var imageBlock = external_exports2.object({ type: external_exports2.literal("image"), mimeType: external_exports2.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports2.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
+var imageBlock = external_exports.object({ type: external_exports.literal("image"), mimeType: external_exports.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]), data: external_exports.string().min(4).max(Math.ceil(8 * 1024 * 1024 / 3) * 4) }).strict().refine((value) => {
   try {
     parseAcpImage(value);
     return true;
@@ -88518,73 +83430,73 @@ var imageBlock = external_exports2.object({ type: external_exports2.literal("ima
     return false;
   }
 });
-var promptBlock = external_exports2.union([textBlock, imageBlock]);
-var acpToolStreamSchema = external_exports2.object({
-  backend: external_exports2.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
-  endpoint: external_exports2.enum(ACP_TOOL_STREAM_ENDPOINTS),
-  args: external_exports2.record(external_exports2.unknown())
+var promptBlock = external_exports.union([textBlock, imageBlock]);
+var acpToolStreamSchema = external_exports.object({
+  backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
+  endpoint: external_exports.enum(ACP_TOOL_STREAM_ENDPOINTS),
+  args: external_exports.record(external_exports.unknown())
 }).strict();
 var schemas2 = {
-  "dsh/sessionArchive": external_exports2.object({ sessionId: id4.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports2.literal("opencode") }).strict(),
-  "dsh/toolCall": external_exports2.object({
+  "dsh/sessionArchive": external_exports.object({ sessionId: id4.regex(/^[A-Za-z0-9_-]+$/), backend: external_exports.literal("opencode") }).strict(),
+  "dsh/toolCall": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
-    endpoint: external_exports2.enum(ACP_TOOL_CALL_ENDPOINTS),
-    args: external_exports2.record(external_exports2.unknown())
+    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
+    endpoint: external_exports.enum(ACP_TOOL_CALL_ENDPOINTS),
+    args: external_exports.record(external_exports.unknown())
   }).strict(),
-  "dsh/sessionModels": external_exports2.object({ sessionId: id4, backend: external_exports2.enum(["cursor", "claude", "antigravity", "pi", "opencode"]) }).strict(),
-  "dsh/selectModel": external_exports2.object({
+  "dsh/sessionModels": external_exports.object({ sessionId: id4, backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]) }).strict(),
+  "dsh/selectModel": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
+    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]),
     model: id4,
     reasoningEffort: id4.optional()
   }).strict(),
-  "dsh/selectPermission": external_exports2.object({
+  "dsh/selectPermission": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "claude", "antigravity", "pi", "opencode"]).optional(),
-    preset: external_exports2.enum(["workspace-write", "danger-full-access"])
+    backend: external_exports.enum(["cursor", "claude", "antigravity", "pi", "opencode"]).optional(),
+    preset: external_exports.enum(["workspace-write", "danger-full-access"])
   }).strict(),
-  "initialize": external_exports2.object({
-    protocolVersion: external_exports2.number().int().positive().optional(),
-    backend: external_exports2.string().min(1).max(64).optional(),
-    clientInfo: external_exports2.object({
-      name: external_exports2.string().min(1).max(128).optional(),
-      version: external_exports2.string().min(1).max(128).optional()
+  "initialize": external_exports.object({
+    protocolVersion: external_exports.number().int().positive().optional(),
+    backend: external_exports.string().min(1).max(64).optional(),
+    clientInfo: external_exports.object({
+      name: external_exports.string().min(1).max(128).optional(),
+      version: external_exports.string().min(1).max(128).optional()
     }).strict().optional()
   }).strict(),
-  "session/new": external_exports2.object({
+  "session/new": external_exports.object({
     cwd,
-    backend: external_exports2.string().min(1).max(64).optional(),
-    mcpServers: external_exports2.array(external_exports2.unknown()).max(0).optional(),
+    backend: external_exports.string().min(1).max(64).optional(),
+    mcpServers: external_exports.array(external_exports.unknown()).max(0).optional(),
     mode: mode.optional()
   }).strict(),
-  "session/load": external_exports2.object({
+  "session/load": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.string().min(1).max(64).optional()
+    backend: external_exports.string().min(1).max(64).optional()
   }).strict(),
-  "session/prompt": external_exports2.object({
+  "session/prompt": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.enum(["cursor", "antigravity", "pi", "claude", "opencode"]).optional(),
-    prompt: external_exports2.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
+    backend: external_exports.enum(["cursor", "antigravity", "pi", "claude", "opencode"]).optional(),
+    prompt: external_exports.array(promptBlock).min(1).max(16).refine((parts) => parts.filter((part) => part.type === "image").length <= 4)
   }).strict(),
-  "session/cancel": external_exports2.object({
+  "session/cancel": external_exports.object({
     sessionId: id4
   }).strict(),
-  "dsh/directoryList": external_exports2.object({
-    path: external_exports2.string().min(1).max(4096)
+  "dsh/directoryList": external_exports.object({
+    path: external_exports.string().min(1).max(4096)
   }).strict(),
-  "dsh/workspaceList": external_exports2.object({
-    backend: external_exports2.string().min(1).max(64).optional()
+  "dsh/workspaceList": external_exports.object({
+    backend: external_exports.string().min(1).max(64).optional()
   }).strict().optional(),
-  "dsh/sessionList": external_exports2.object({
-    path: external_exports2.string().min(1).max(4096).or(external_exports2.literal("")),
-    backend: external_exports2.string().min(1).max(64).optional(),
-    limit: external_exports2.number().int().positive().max(100).optional(),
-    prewarm: external_exports2.boolean().optional()
+  "dsh/sessionList": external_exports.object({
+    path: external_exports.string().min(1).max(4096).or(external_exports.literal("")),
+    backend: external_exports.string().min(1).max(64).optional(),
+    limit: external_exports.number().int().positive().max(100).optional(),
+    prewarm: external_exports.boolean().optional()
   }).strict(),
-  "dsh/sessionHistory": external_exports2.object({
+  "dsh/sessionHistory": external_exports.object({
     sessionId: id4,
-    backend: external_exports2.string().min(1).max(64).optional()
+    backend: external_exports.string().min(1).max(64).optional()
   }).strict()
 };
 var ACP_METHOD_ALLOWLIST = Object.freeze(Object.keys(schemas2));
@@ -88918,24 +83830,24 @@ async function transcriptPath(baseDir, conversationId) {
 
 // src/acp/peer-bridge.ts
 import { Buffer as Buffer8 } from "node:buffer";
-var streamOpenSchema2 = external_exports2.object({
-  streamId: external_exports2.string().min(1).max(128),
-  sessionId: external_exports2.string().min(1).max(256),
+var streamOpenSchema2 = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
+  sessionId: external_exports.string().min(1).max(256),
   tool: acpToolStreamSchema.optional()
 }).strict();
-var streamCloseSchema2 = external_exports2.object({ streamId: external_exports2.string().min(1).max(128) }).strict();
-var transferOpenSchema2 = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  totalBytes: external_exports2.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
-  totalChunks: external_exports2.number().int().positive()
+var streamCloseSchema2 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var transferOpenSchema2 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_AGENT_ACP_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema2 = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  index: external_exports2.number().int().nonnegative(),
-  data: external_exports2.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
+var transferChunkSchema2 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1).max(Math.ceil(AGENT_ACP_TRANSFER_CHUNK_BYTES / 3) * 4)
 }).strict();
-var transferIdSchema2 = external_exports2.object({ transferId: external_exports2.string().uuid() }).strict();
-var transferReadSchema2 = external_exports2.object({ transferId: external_exports2.string().uuid(), index: external_exports2.number().int().nonnegative() }).strict();
+var transferIdSchema2 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema2 = external_exports.object({ transferId: external_exports.string().uuid(), index: external_exports.number().int().nonnegative() }).strict();
 var MAX_ACTIVE_STREAMS2 = 16;
 var MAX_ACTIVE_TRANSFERS2 = 2;
 var TRANSFER_IDLE_MS2 = 2 * 6e4;
@@ -90947,9 +85859,9 @@ import { link, lstat as lstat2, open as open2, realpath as realpath6, stat as st
 import { extname, isAbsolute as isAbsolute7, join as join12 } from "node:path";
 var WORKSPACE_UPLOAD_BYTES = 20 * 1024 * 1024;
 var WORKSPACE_UPLOAD_CHUNK = 64 * 1024;
-var scope = external_exports2.object({ sessionId: external_exports2.string().min(1).max(512), uploadId: external_exports2.string().uuid() }).strict();
-var openParams = scope.extend({ name: external_exports2.string().min(1), totalBytes: external_exports2.number().int().min(0).max(WORKSPACE_UPLOAD_BYTES) }).strict();
-var chunkParams = scope.extend({ offset: external_exports2.number().int().min(0), data: external_exports2.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
+var scope = external_exports.object({ sessionId: external_exports.string().min(1).max(512), uploadId: external_exports.string().uuid() }).strict();
+var openParams = scope.extend({ name: external_exports.string().min(1), totalBytes: external_exports.number().int().min(0).max(WORKSPACE_UPLOAD_BYTES) }).strict();
+var chunkParams = scope.extend({ offset: external_exports.number().int().min(0), data: external_exports.string().min(1).max(Math.ceil(WORKSPACE_UPLOAD_CHUNK / 3) * 4) }).strict();
 var WorkspaceUploadHost = class {
   constructor(resolveRoot, ttlMs = 12e4) {
     this.resolveRoot = resolveRoot;
@@ -90991,7 +85903,7 @@ var WorkspaceUploadHost = class {
         const p = scope.safeParse(input3 && typeof input3 === "object" ? { sessionId: input3.sessionId, uploadId: input3.uploadId } : input3);
         const upload = p.success ? this.uploads.get(p.data.uploadId) : void 0;
         if (p.success && upload?.sessionId === p.data.sessionId) await this.discard(p.data.uploadId, upload);
-        if (error instanceof external_exports2.ZodError || error instanceof RpcError) throw error;
+        if (error instanceof external_exports.ZodError || error instanceof RpcError) throw error;
         throw failure3("UPLOAD_FAILED");
       }
     });
@@ -91345,9 +86257,9 @@ function shortId2(value) {
 }
 
 // src/rpc-router.ts
-var wireRequestSchema = external_exports2.object({ method: external_exports2.string().min(1), params: external_exports2.unknown() }).strict();
-var emptyParamsSchema = external_exports2.object({}).strict();
-var historyConfigureSchema = external_exports2.object({ compact: external_exports2.boolean() }).strict();
+var wireRequestSchema = external_exports.object({ method: external_exports.string().min(1), params: external_exports.unknown() }).strict();
+var emptyParamsSchema = external_exports.object({}).strict();
+var historyConfigureSchema = external_exports.object({ compact: external_exports.boolean() }).strict();
 var apiMethods = /* @__PURE__ */ new Set([
   "harness.transport.describe",
   "remote.history.configure",
@@ -91603,51 +86515,51 @@ var MAX_REMOTE_FILE_LOCATOR_CHARS = 4096;
 var MAX_REMOTE_DIRECTORY_ENTRIES = 1e3;
 
 // src/file-viewer-bridge.ts
-var locatorSchema = external_exports2.string().min(1).max(MAX_REMOTE_FILE_LOCATOR_CHARS);
-var callSchema2 = external_exports2.discriminatedUnion("endpoint", [
-  external_exports2.object({
-    endpoint: external_exports2.literal("stat"),
-    payload: external_exports2.object({ path: locatorSchema }).strict()
+var locatorSchema = external_exports.string().min(1).max(MAX_REMOTE_FILE_LOCATOR_CHARS);
+var callSchema2 = external_exports.discriminatedUnion("endpoint", [
+  external_exports.object({
+    endpoint: external_exports.literal("stat"),
+    payload: external_exports.object({ path: locatorSchema }).strict()
   }).strict(),
-  external_exports2.object({
-    endpoint: external_exports2.literal("readRange"),
-    payload: external_exports2.object({
+  external_exports.object({
+    endpoint: external_exports.literal("readRange"),
+    payload: external_exports.object({
       path: locatorSchema,
-      offset: external_exports2.number().int().nonnegative().safe(),
-      length: external_exports2.number().int().positive().max(REMOTE_FILE_CHUNK_BYTES)
+      offset: external_exports.number().int().nonnegative().safe(),
+      length: external_exports.number().int().positive().max(REMOTE_FILE_CHUNK_BYTES)
     }).strict()
   }).strict(),
-  external_exports2.object({
-    endpoint: external_exports2.literal("list"),
-    payload: external_exports2.object({ path: locatorSchema }).strict()
+  external_exports.object({
+    endpoint: external_exports.literal("list"),
+    payload: external_exports.object({ path: locatorSchema }).strict()
   }).strict()
 ]);
-var statResultSchema = external_exports2.object({
+var statResultSchema = external_exports.object({
   path: locatorSchema,
-  name: external_exports2.string().min(1).max(1024),
-  ext: external_exports2.string().max(128),
-  mime: external_exports2.string().min(1).max(256),
-  size: external_exports2.number().int().nonnegative().safe(),
-  mtimeMs: external_exports2.number().nonnegative().optional(),
-  isDirectory: external_exports2.boolean(),
-  exists: external_exports2.boolean()
+  name: external_exports.string().min(1).max(1024),
+  ext: external_exports.string().max(128),
+  mime: external_exports.string().min(1).max(256),
+  size: external_exports.number().int().nonnegative().safe(),
+  mtimeMs: external_exports.number().nonnegative().optional(),
+  isDirectory: external_exports.boolean(),
+  exists: external_exports.boolean()
 }).strict();
-var rangeResultSchema = external_exports2.object({
-  data: external_exports2.string().max(Math.ceil(REMOTE_FILE_CHUNK_BYTES / 3) * 4 + 4),
-  offset: external_exports2.number().int().nonnegative().safe(),
-  size: external_exports2.number().int().nonnegative().safe(),
-  eof: external_exports2.boolean()
+var rangeResultSchema = external_exports.object({
+  data: external_exports.string().max(Math.ceil(REMOTE_FILE_CHUNK_BYTES / 3) * 4 + 4),
+  offset: external_exports.number().int().nonnegative().safe(),
+  size: external_exports.number().int().nonnegative().safe(),
+  eof: external_exports.boolean()
 }).strict();
-var directoryEntrySchema = external_exports2.object({
-  name: external_exports2.string().min(1).max(1024),
+var directoryEntrySchema = external_exports.object({
+  name: external_exports.string().min(1).max(1024),
   path: locatorSchema,
-  isDirectory: external_exports2.boolean(),
-  size: external_exports2.number().int().nonnegative().safe().optional(),
-  mtimeMs: external_exports2.number().nonnegative().optional()
+  isDirectory: external_exports.boolean(),
+  size: external_exports.number().int().nonnegative().safe().optional(),
+  mtimeMs: external_exports.number().nonnegative().optional()
 }).strict();
-var listResultSchema = external_exports2.object({
+var listResultSchema = external_exports.object({
   path: locatorSchema,
-  entries: external_exports2.array(directoryEntrySchema).max(MAX_REMOTE_DIRECTORY_ENTRIES)
+  entries: external_exports.array(directoryEntrySchema).max(MAX_REMOTE_DIRECTORY_ENTRIES)
 }).strict();
 var RemoteFileViewerBridge = class {
   constructor(service, logger2) {
@@ -91679,7 +86591,7 @@ var RemoteFileViewerBridge = class {
       });
       return value;
     } catch (error) {
-      if (error instanceof external_exports2.ZodError && params.endpoint === "list" && isOversizedListing(result.value)) {
+      if (error instanceof external_exports.ZodError && params.endpoint === "list" && isOversizedListing(result.value)) {
         throw new RpcError(
           "RESPONSE_TOO_LARGE",
           `The remote directory contains more than ${MAX_REMOTE_DIRECTORY_ENTRIES} entries.`,
@@ -92692,50 +87604,50 @@ function crumbs(path) {
 }
 
 // src/harness-remote-bridge.ts
-var endpointSchema = external_exports2.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
-var callSchema3 = external_exports2.object({ endpoint: endpointSchema, payload: external_exports2.unknown() }).strict();
-var streamOpenSchema3 = external_exports2.object({
-  streamId: external_exports2.string().min(1).max(128),
+var endpointSchema = external_exports.string().min(1).max(128).regex(/^(?:\$events(?:\/result)?|[A-Za-z0-9_$.-]+\/[A-Za-z0-9_$.-]+)$/);
+var callSchema3 = external_exports.object({ endpoint: endpointSchema, payload: external_exports.unknown() }).strict();
+var streamOpenSchema3 = external_exports.object({
+  streamId: external_exports.string().min(1).max(128),
   endpoint: endpointSchema,
-  payload: external_exports2.unknown(),
-  transferFrames: external_exports2.boolean().optional()
+  payload: external_exports.unknown(),
+  transferFrames: external_exports.boolean().optional()
 }).strict();
-var streamCloseSchema3 = external_exports2.object({ streamId: external_exports2.string().min(1).max(128) }).strict();
-var commandExecuteArgsSchema = external_exports2.object({
-  agentId: external_exports2.string().min(1).max(128),
-  line: external_exports2.string().min(1).max(2048),
+var streamCloseSchema3 = external_exports.object({ streamId: external_exports.string().min(1).max(128) }).strict();
+var commandExecuteArgsSchema = external_exports.object({
+  agentId: external_exports.string().min(1).max(128),
+  line: external_exports.string().min(1).max(2048),
   // dsh-commands <= 0.1.2 calls this field `images`; dsh-commands 0.1.5
   // renamed it to `submittedAttachments`. Only empty arrays are exposed by
   // the Remote bridge; command attachments are deliberately out of scope.
-  images: external_exports2.array(external_exports2.never()).length(0).optional(),
-  submittedAttachments: external_exports2.array(external_exports2.never()).length(0).optional()
+  images: external_exports.array(external_exports.never()).length(0).optional(),
+  submittedAttachments: external_exports.array(external_exports.never()).length(0).optional()
 }).strict().superRefine((value, context) => {
   if (value.images !== void 0 && value.submittedAttachments !== void 0) {
     context.addIssue({
-      code: external_exports2.ZodIssueCode.custom,
+      code: external_exports.ZodIssueCode.custom,
       message: "Use either images or submittedAttachments, not both.",
       path: ["submittedAttachments"]
     });
   }
 });
-var commandExecutePayloadSchema = external_exports2.object({ args: commandExecuteArgsSchema }).strict();
-var transferOpenSchema3 = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  totalBytes: external_exports2.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
-  totalChunks: external_exports2.number().int().positive()
+var commandExecutePayloadSchema = external_exports.object({ args: commandExecuteArgsSchema }).strict();
+var transferOpenSchema3 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  totalBytes: external_exports.number().int().positive().max(MAX_HARNESS_API_TRANSFER_BYTES),
+  totalChunks: external_exports.number().int().positive()
 }).strict();
-var transferChunkSchema3 = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  index: external_exports2.number().int().nonnegative(),
-  data: external_exports2.string().min(1)
+var transferChunkSchema3 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative(),
+  data: external_exports.string().min(1)
 }).strict();
-var transferIdSchema3 = external_exports2.object({ transferId: external_exports2.string().uuid() }).strict();
-var transferReadSchema3 = external_exports2.object({
-  transferId: external_exports2.string().uuid(),
-  index: external_exports2.number().int().nonnegative()
+var transferIdSchema3 = external_exports.object({ transferId: external_exports.string().uuid() }).strict();
+var transferReadSchema3 = external_exports.object({
+  transferId: external_exports.string().uuid(),
+  index: external_exports.number().int().nonnegative()
 }).strict();
-var directoryListSchema = external_exports2.object({
-  path: external_exports2.string().min(1).max(4096).optional()
+var directoryListSchema = external_exports.object({
+  path: external_exports.string().min(1).max(4096).optional()
 }).strict();
 var MAX_ACTIVE_STREAMS3 = MAX_ALPHA_STREAMS_PER_CONNECTION;
 var MAX_ACTIVE_TRANSFERS3 = MAX_ACTIVE_TRANSFERS_PER_DIRECTION;
@@ -93068,9 +87980,9 @@ var HarnessRemoteBridge = class {
     if (endpoint !== "pluginManager/setPluginEnabled" && endpoint !== "pluginManager/setBundleEnabled") return;
     const plugin = endpoint === "pluginManager/setPluginEnabled";
     const key = plugin ? "id" : "name";
-    const parsed = external_exports2.object({ args: external_exports2.object({
-      [key]: external_exports2.string().min(1).max(4096),
-      enabled: external_exports2.boolean()
+    const parsed = external_exports.object({ args: external_exports.object({
+      [key]: external_exports.string().min(1).max(4096),
+      enabled: external_exports.boolean()
     }).strict() }).strict().safeParse(payload);
     if (!parsed.success) throw new RpcError("INVALID_MESSAGE", "Invalid plugin enablement request.");
     const args = parsed.data.args;
@@ -94979,6 +89891,27 @@ export {
 };
 /*! Bundled license information:
 
+@noble/hashes/esm/utils.js:
+  (*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
+@noble/curves/esm/utils.js:
+@noble/curves/esm/abstract/modular.js:
+@noble/curves/esm/abstract/curve.js:
+@noble/curves/esm/abstract/weierstrass.js:
+@noble/curves/esm/_shortw_utils.js:
+@noble/curves/esm/nist.js:
+@noble/curves/esm/p256.js:
+@noble/curves/esm/abstract/edwards.js:
+@noble/curves/esm/abstract/montgomery.js:
+@noble/curves/esm/ed25519.js:
+@noble/curves/utils.js:
+@noble/curves/abstract/modular.js:
+@noble/curves/abstract/curve.js:
+@noble/curves/abstract/edwards.js:
+@noble/curves/abstract/montgomery.js:
+@noble/curves/ed25519.js:
+  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
+
 reflect-metadata/Reflect.js:
   (*! *****************************************************************************
   Copyright (C) Microsoft. All rights reserved.
@@ -95118,31 +90051,6 @@ is-plain-object/index.js:
    * Copyright (c) 2014-2017, Jon Schlinkert.
    * Released under the MIT License.
    *)
-
-@noble/hashes/esm/utils.js:
-@noble/hashes/esm/utils.js:
-  (*! noble-hashes - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
-
-@noble/curves/esm/utils.js:
-@noble/curves/esm/abstract/modular.js:
-@noble/curves/esm/abstract/curve.js:
-@noble/curves/esm/abstract/weierstrass.js:
-@noble/curves/esm/_shortw_utils.js:
-@noble/curves/esm/nist.js:
-@noble/curves/esm/p256.js:
-@noble/curves/esm/utils.js:
-@noble/curves/esm/abstract/modular.js:
-@noble/curves/esm/abstract/curve.js:
-@noble/curves/esm/abstract/edwards.js:
-@noble/curves/esm/abstract/montgomery.js:
-@noble/curves/esm/ed25519.js:
-@noble/curves/utils.js:
-@noble/curves/abstract/modular.js:
-@noble/curves/abstract/curve.js:
-@noble/curves/abstract/edwards.js:
-@noble/curves/abstract/montgomery.js:
-@noble/curves/ed25519.js:
-  (*! noble-curves - MIT License (c) 2022 Paul Miller (paulmillr.com) *)
 
 @noble/ciphers/utils.js:
   (*! noble-ciphers - MIT License (c) 2023 Paul Miller (paulmillr.com) *)

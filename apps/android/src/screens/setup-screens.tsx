@@ -45,6 +45,7 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   const [account, setAccount] = useState(config?.account ?? '')
   const [password, setPassword] = useState('')
   const [prefilled, setPrefilled] = useState(false)
+  const connectionError = useAppStore(state => state.connection.error)
 
   // Password lives only in SecureStore; prefill it once so a retry after a
   // password change starts from the last known credentials.
@@ -96,6 +97,9 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                 placeholder={zhCN.setup.passwordPlaceholder}
                 hint={zhCN.setup.passwordHint}
               />
+              {connectionError !== undefined && connectionError.length > 0 && (
+                <Text style={styles.preferenceError} accessibilityRole="alert">{connectionError}</Text>
+              )}
               <Button label={zhCN.setup.title} onPress={() => void submit()} loading={connecting} disabled={!canSubmit || connecting} />
             </View>
           </KeyboardAvoidingView>

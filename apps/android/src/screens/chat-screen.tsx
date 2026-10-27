@@ -1387,7 +1387,11 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         <View style={styles.connectionBanner} accessibilityRole="alert">
           <View style={styles.connectionDot} />
           <Text style={styles.connectionBannerText}>
-            {connectionRetrying ? <>{zhCN.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></> : zhCN.chat.offline}
+            {connectionRetrying
+              ? <>{zhCN.chat.reconnecting.replace(/…$/, '')}<AnimatedEllipsis /></>
+              : connection.error !== undefined
+                ? `${zhCN.chat.offline}（${connection.error}）`
+                : zhCN.chat.offline}
           </Text>
         </View>
       )}

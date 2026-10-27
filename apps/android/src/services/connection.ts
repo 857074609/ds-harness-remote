@@ -6,6 +6,12 @@ import { DirectTransport, type DirectCredentials, type DirectEndpoint } from './
 import { DirectSecureTransport, SecureTransport } from './secure-transport'
 import { BotRemoteClient } from './bot-catalog'
 
+/**
+ * Inbound silence that counts as a dead tunnel. The heartbeat answers every
+ * 25s, so this tolerates several missed rounds before closing.
+ */
+const SILENT_TUNNEL_MS = 120_000
+
 export type MuxFrameHandler = (frame: MuxStreamFrame) => void
 export type CloseHandler = (options?: { retryable: boolean }) => void
 type RemoteHarnessClient = HarnessAlphaClient
@@ -217,25 +223,21 @@ export class AndroidRemoteConnection {
     this.healthTimer = setTimeout(() => {
       this.healthTimer = undefined
       if (this.core !== core) return
-      void this.checkHealth().then(healthy => {
-        if (this.core !== core) return
-        if (healthy) {
-          this.healthFailures = 0
-          this.scheduleHealthCheck(core)
-          return
-        }
-        this.healthFailures += 1
-        if (this.healthFailures < 3) {
-          console.info('[dsh-remote] Carrier health check missed; retrying', { attempt: this.healthFailures })
-          this.scheduleHealthCheck(core)
-          return
-        }
-        console.info('[dsh-remote] Carrier health check failed; closing carrier')
-        // close() on the core publishes the same offline/recovery transition
-        // as a socket close, including when the OS never delivered onclose.
-        void core.close().catch(() => undefined)
-      })
-    }, 45_000)
+      // Passive liveness only: the 25s heartbeat keeps this stamp fresh while
+      // the tunnel works, so silence — never a slow RPC — decides health. A
+      // probe here used to tear down healthy tunnels whenever the Host was
+      // busy running an agent.
+      const lastAt = (this.transport as DirectTransport | undefined)?.lastMessageAt ?? 0
+      const silentMs = lastAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - lastAt
+      if (silentMs < SILENT_TUNNEL_MS) {
+        this.scheduleHealthCheck(core)
+        return
+      }
+      console.info('[dsh-remote] Carrier silent; closing', { silentMs })
+      // close() on the core publishes the same offline/recovery transition
+      // as a socket close, including when the OS never delivered onclose.
+      void core.close().catch(() => undefined)
+    }, 60_000)
   }
 
   private clearHealthTimer(): void {

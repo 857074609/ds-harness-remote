@@ -49,6 +49,7 @@ export class DirectTransport implements SecureHandshakeTransport {
   private heartbeatTimer?: ReturnType<typeof setInterval>
   /** Wall clock of the last inbound frame; the Host-side liveness signal. */
   lastMessageAt = 0
+  private heartbeatFailures = 0
   private relayCounter = 0
   private stats: TransportStats = { mode: 'Relay', connected: false }
   private closed = false
@@ -212,8 +213,16 @@ export class DirectTransport implements SecureHandshakeTransport {
 
   private startHeartbeat(intervalMs: number): void {
     this.stopHeartbeat()
+    this.heartbeatFailures = 0
     this.heartbeatTimer = setInterval(() => {
-      void this.sendFrame('ping', { nonce: nonce() }).catch(() => undefined)
+      void this.sendFrame('ping', { nonce: nonce() })
+        .then(() => { this.heartbeatFailures = 0 })
+        .catch(() => {
+          this.heartbeatFailures += 1
+          // Three lost beats (~75s) mean the socket is gone even when the OS
+          // never delivered onclose.
+          if (this.heartbeatFailures >= 3) this.handleClose(new Error(strings.runtime.hostClosed))
+        })
     }, Math.max(5000, intervalMs))
   }
 

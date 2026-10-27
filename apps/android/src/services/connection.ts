@@ -188,12 +188,19 @@ export class AndroidRemoteConnection {
   }
 
   private async probeHealth(core: RemoteClientCore): Promise<boolean> {
-    try {
-      // Existing authenticated, encrypted capability RPC; no new wire heartbeat.
-      await core.rpc('harness.transport.describe', {}, undefined, { timeoutMs: 5_000 })
-      return this.core === core
-    } catch {
-      return false
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // Existing authenticated, encrypted capability RPC; no new wire heartbeat.
+        // A Host busy with an agent run can miss a short window, so allow a
+        // generous timeout and one retry before declaring the tunnel dead.
+        await core.rpc('harness.transport.describe', {}, undefined, { timeoutMs: 12_000 })
+        return this.core === core
+      } catch {
+        if (this.core !== core) return false
+        if (attempt >= 1) return false
+        await new Promise(resolve => setTimeout(resolve, 2_000))
+        if (this.core !== core) return false
+      }
     }
   }
 
@@ -212,7 +219,7 @@ export class AndroidRemoteConnection {
           void core.close().catch(() => undefined)
         }
       })
-    }, 25_000)
+    }, 45_000)
   }
 
   private clearHealthTimer(): void {

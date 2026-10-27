@@ -101,17 +101,17 @@ export type ConfigInput = Config | VolatileSnapshot<Config>
  * the plain schema required by the namespace-registration API.
  */
 const entryConfigSchema = s.object({
-  enabled: s.boolean(),
-  role: s.union(['host', 'client', 'both'] as const),
-  serverUrl: s.string(),
+  enabled: s.boolean().description('启用远程访问'),
+  role: s.union(['host', 'client', 'both'] as const).description('角色：被控端(host) / 控制端(client) / 两者'),
+  serverUrl: s.string().description('中继服务器地址（直连模式不需要）'),
   listen: s.object({
-    host: s.string(),
-    port: s.number(),
-    autoPort: s.boolean(),
-  }),
-  directAccount: s.string(),
-  directPassword: s.string().role('secret'),
-  deviceName: s.string(),
+    host: s.string().description('监听地址，0.0.0.0 表示所有网卡'),
+    port: s.number().description('直连监听端口，手机端填这个端口'),
+    autoPort: s.boolean().description('端口被占用时自动换一个'),
+  }).description('直连监听'),
+  directAccount: s.string().description('手机登录用的账号'),
+  directPassword: s.string().role('secret').description('手机登录用的密码'),
+  deviceName: s.string().description('这台电脑显示给手机的名字'),
   terminal: s.object({ enabled: s.boolean() }),
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),

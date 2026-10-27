@@ -4,7 +4,7 @@ import * as Application from 'expo-application'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
 import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronRight, ExternalLink, KeyRound, Laptop, LockKeyhole, MoreVertical, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
+import { Check, ChevronRight, ExternalLink, KeyRound, Laptop, LockKeyhole, MoreVertical, Plus, RotateCcw, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { BlurHeaderFrame, Button, Field, IconButton, KeyValue, Screen, TopBar } from '../ui/components'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -16,7 +16,7 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ThemePreference, TypographyDensity } from '../ui/theme'
 import { parseDirectTarget } from '../lib/server-url'
-import { loadDirectConnect } from '../services/storage'
+import { loadDirectConnect, loadServers, removeServer, type SavedServer } from '../services/storage'
 
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 
@@ -114,7 +114,104 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   )
 }
 
-export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onReset: () => void }) {
+/** Saved Hosts: switch between them with one tap, or add another. */
+export function ServersScreen({ onBack, onAdd, onSwitched }: {
+  onBack: () => void
+  onAdd: () => void
+  onSwitched: () => void
+}) {
+  const config = useAppStore(state => state.config)
+  const connectDirectHost = useAppStore(state => state.connectDirectHost)
+  const disconnect = useAppStore(state => state.disconnect)
+  const [servers, setServers] = useState<SavedServer[]>([])
+  const [busyKey, setBusyKey] = useState<string>()
+  const { colors } = useTheme()
+  const styles = useThemedStyles(createStyles)
+
+  useEffect(() => {
+    let active = true
+    void loadServers().then(list => { if (active) setServers(list) })
+    return () => { active = false }
+  }, [])
+
+  const keyOf = (server: { host: string; port: number; account: string }): string => `${server.account}@${server.host}:${server.port}`
+
+  const switchTo = async (server: SavedServer) => {
+    if (busyKey !== undefined) return
+    setBusyKey(keyOf(server))
+    try {
+      await disconnect()
+      const ok = await connectDirectHost({ host: server.host, port: server.port, account: server.account, password: server.password })
+      if (ok) {
+        onSwitched()
+        return
+      }
+      Alert.alert(zhCN.setup.serversTitle, zhCN.setup.serverSwitchFailed)
+    } finally {
+      setBusyKey(undefined)
+    }
+  }
+
+  const confirmRemove = (server: SavedServer) => {
+    const key = keyOf(server)
+    Alert.alert(zhCN.setup.serverRemoveTitle(key), zhCN.setup.serverRemoveBody, [
+      { text: zhCN.common.cancel, style: 'cancel' },
+      {
+        text: zhCN.setup.serverRemove,
+        style: 'destructive',
+        onPress: () => {
+          void removeServer(server).then(() => loadServers()).then(setServers)
+        },
+      },
+    ])
+  }
+
+  return (
+    <View style={styles.flex}>
+      <BlurHeaderFrame header={<TopBar title={zhCN.setup.serversTitle} onBack={onBack} />}>
+        <Screen>
+          <Text style={styles.groupLabel}>{zhCN.setup.serversTitle}</Text>
+          <View style={styles.preferenceList}>
+            {servers.length === 0 && (
+              <View style={styles.preferenceOption}>
+                <View style={styles.preferenceCopy}>
+                  <Text style={styles.preferenceName}>{zhCN.setup.serversEmpty}</Text>
+                  <Text style={styles.preferenceDescription}>{zhCN.setup.serversEmptyHint}</Text>
+                </View>
+              </View>
+            )}
+            {servers.map(server => {
+              const key = keyOf(server)
+              const current = config !== undefined && config.host === server.host && config.port === server.port && config.account === server.account
+              const busy = busyKey === key
+              return (
+                <View key={key} style={styles.preferenceOption}>
+                  <Pressable accessibilityRole="button" onPress={() => void switchTo(server)} disabled={busyKey !== undefined}
+                    style={({ pressed }) => [styles.preferenceCopy, styles.serverPress, pressed && styles.preferenceActionPressed]}>
+                    <Text style={styles.preferenceName}>{key}</Text>
+                    <Text style={styles.preferenceDescription}>
+                      {current ? zhCN.setup.currentServer : busy ? zhCN.setup.serverSwitching : `${server.host}:${server.port}`}
+                    </Text>
+                  </Pressable>
+                  {busy ? <ActivityIndicator color={colors.muted} /> : (
+                    <IconButton label={zhCN.setup.serverRemove} icon={Trash2} onPress={() => confirmRemove(server)} />
+                  )}
+                </View>
+              )
+            })}
+            <Pressable accessibilityRole="button" onPress={onAdd}
+              style={({ pressed }) => [styles.preferenceOption, styles.preferenceAction, pressed && styles.preferenceActionPressed]}>
+              <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.setup.addServer}</Text>
+              <Plus size={17} color={colors.muted} />
+            </Pressable>
+          </View>
+        </Screen>
+      </BlurHeaderFrame>
+    </View>
+  )
+}
+
+export function SettingsScreen({ onBack, onReset, onServers }: { onBack: () => void; onReset: () => void; onServers: () => void }) {
   const config = useAppStore(state => state.config)
   const identity = useAppStore(state => state.identity)
   const account = useAppStore(state => state.account)
@@ -387,6 +484,13 @@ export function SettingsScreen({ onBack, onReset }: { onBack: () => void; onRese
               <KeyValue label={zhCN.settings.account} value={account ?? zhCN.settings.notSignedIn} />
               <KeyValue label={zhCN.settings.protocol} value="DSH Remote v1" />
             </View>
+            <View style={styles.preferenceList}>
+              <Pressable accessibilityRole="button" onPress={onServers}
+                style={({ pressed }) => [styles.preferenceOption, styles.preferenceAction, pressed && styles.preferenceActionPressed]}>
+                <Text style={[styles.preferenceName, styles.languageName]}>{zhCN.setup.serversTitle}</Text>
+                <ChevronRight size={17} color={colors.muted} />
+              </Pressable>
+            </View>
 
             <Text style={styles.groupLabel}>{zhCN.settings.identity}</Text>
             <View style={styles.group}>
@@ -569,6 +673,7 @@ function createStyles(colors: ThemeColors) {
   preferenceOptionChosen: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   permissionOption: { minHeight: 48 },
   preferenceCopy: { flex: 1 },
+  serverPress: { minHeight: 44, justifyContent: 'center' },
   preferenceName: { ...type.smallStrong, color: colors.ink },
   languageName: { flex: 1 },
   preferenceDescription: { ...type.caption, color: colors.muted, marginTop: 2 },

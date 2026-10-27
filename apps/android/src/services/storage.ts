@@ -11,6 +11,7 @@ import type { AgentBackend, CodexPermissionPreset, DefaultPermissionPreset, Devi
 
 const KEYS = {
   directConnect: 'dshremote.direct-connect.v1',
+  servers: 'dshremote.servers.v1',
   identity: 'dshremote.identity.v1',
   credentials: 'dshremote.credentials.v1',
   trustedHosts: 'dshremote.trusted-hosts.v1',
@@ -52,6 +53,56 @@ function asDirectConnect(value: unknown): DirectConnectCredentials | undefined {
   if (typeof account !== 'string' || account.trim() === '') return undefined
   if (typeof password !== 'string' || password === '') return undefined
   return { host, port, account, password }
+}
+
+/** A Host this device has signed in to, for one-tap switching. */
+export interface SavedServer extends DirectConnectCredentials {
+  lastUsedAt: number
+}
+
+function asSavedServer(value: unknown): SavedServer | undefined {
+  const base = asDirectConnect(value)
+  if (base === undefined) return undefined
+  const { lastUsedAt } = value as Record<string, unknown>
+  return { ...base, lastUsedAt: typeof lastUsedAt === 'number' ? lastUsedAt : 0 }
+}
+
+/**
+ * Every Host this device has signed in to, most recently used first. A build
+ * that only ever stored one server seeds the list from it on first read.
+ */
+export async function loadServers(): Promise<SavedServer[]> {
+  const stored = await readJson<unknown>(KEYS.servers)
+  if (Array.isArray(stored)) {
+    return stored
+      .map(asSavedServer)
+      .filter((item): item is SavedServer => item !== undefined)
+      .sort((left, right) => right.lastUsedAt - left.lastUsedAt)
+  }
+  const legacy = await loadDirectConnect()
+  return legacy === undefined ? [] : [{ ...legacy, lastUsedAt: 0 }]
+}
+
+function sameServer(left: { host: string; port: number; account: string }, right: { host: string; port: number; account: string }): boolean {
+  return left.host === right.host && left.port === right.port && left.account === right.account
+}
+
+/** Record a successful sign-in so it can be switched back to later. */
+export async function saveServer(credentials: DirectConnectCredentials): Promise<void> {
+  const list = await loadServers()
+  const next = [{ ...credentials, lastUsedAt: Date.now() }, ...list.filter(item => !sameServer(item, credentials))]
+  await writeJson(KEYS.servers, next)
+  // Keep the single-server key in step: the sign-in form prefills from it.
+  await writeJson(KEYS.directConnect, credentials)
+}
+
+export async function removeServer(entry: { host: string; port: number; account: string }): Promise<void> {
+  const list = await loadServers()
+  const next = list.filter(item => !sameServer(item, entry))
+  await writeJson(KEYS.servers, next)
+  const [first] = next
+  if (first === undefined) await SecureStore.deleteItemAsync(KEYS.directConnect, secureOptions)
+  else await writeJson(KEYS.directConnect, { host: first.host, port: first.port, account: first.account, password: first.password })
 }
 
 export async function loadDirectConnect(): Promise<DirectConnectCredentials | undefined> {

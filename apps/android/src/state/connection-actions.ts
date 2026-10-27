@@ -1,7 +1,7 @@
 import { browseScope, useBrowseMemory } from '../services/browse-memory'
 import { friendlyError } from '../lib/errors'
 import { strings as zhCN } from '../locales/i18n'
-import { saveDirectConnect, loadDirectConnect, saveLastConnectedDeviceId } from '../services/storage'
+import { saveDirectConnect, saveServer, loadDirectConnect, saveLastConnectedDeviceId } from '../services/storage'
 import type { SessionAccess } from './session-runtime'
 import type { AppState } from './store-state'
 import { disconnected } from './store-state'
@@ -169,6 +169,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         })
         if (ok) {
           await saveDirectConnect(spec)
+          await saveServer(spec)
           set(state => ({
             config: { baseUrl: `direct://${spec.host}:${spec.port}`, host: spec.host, port: spec.port, account: spec.account },
             account: spec.account,

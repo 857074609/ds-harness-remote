@@ -937,6 +937,7 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
     setAwayFromLatest(false)
     setNewContent(false)
     scheduleScrollToBottom()
+    Keyboard.dismiss()
     const outcome = await sendMessage(text, submittedImages)
     if (outcome === 'rejected') {
       if (session.sessionId === targetSessionId && scrollIntentGenerationRef.current === sendGeneration) {
@@ -1638,19 +1639,6 @@ export function ChatScreen({ onBack, onOpenDevices, onNewSession, onOpenWorkspac
         </View>
         {draft.length > LONG_DRAFT_HINT && (
           <Text style={styles.composerHint}>{zhCN.chat.draftLong(draft.length)}</Text>
-        )}
-        {/* Landscape phones leave almost no space above the IME once the
-            composer is visible; keep the privacy note for roomier windows. */}
-        {!compactComposer && (
-          <Text style={styles.composerHint}>
-            {session.backend === 'codex'
-              ? zhCN.chat.codexPolicyHint
-              : session.backend === 'cursor'
-                ? zhCN.chat.cursorPolicyHint
-                : session.backend === 'claude' ? zhCN.chat.claudePolicyHint : session.backend === 'opencode' ? zhCN.chat.opencodePolicyHint : session.backend === 'pi' ? zhCN.chat.piPolicyHint : session.backend === 'antigravity'
-                  ? zhCN.chat.antigravityPolicyHint
-                  : zhCN.chat.policyHint}
-          </Text>
         )}
         </View>
       </View>

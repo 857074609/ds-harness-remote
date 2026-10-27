@@ -9497,17 +9497,17 @@ var NEVER = INVALID;
 
 // src/config.ts
 var entryConfigSchema = s.object({
-  enabled: s.boolean(),
-  role: s.union(["host", "client", "both"]),
-  serverUrl: s.string(),
+  enabled: s.boolean().description("\u542F\u7528\u8FDC\u7A0B\u8BBF\u95EE"),
+  role: s.union(["host", "client", "both"]).description("\u89D2\u8272\uFF1A\u88AB\u63A7\u7AEF(host) / \u63A7\u5236\u7AEF(client) / \u4E24\u8005"),
+  serverUrl: s.string().description("\u4E2D\u7EE7\u670D\u52A1\u5668\u5730\u5740\uFF08\u76F4\u8FDE\u6A21\u5F0F\u4E0D\u9700\u8981\uFF09"),
   listen: s.object({
-    host: s.string(),
-    port: s.number(),
-    autoPort: s.boolean()
-  }),
-  directAccount: s.string(),
-  directPassword: s.string().role("secret"),
-  deviceName: s.string(),
+    host: s.string().description("\u76D1\u542C\u5730\u5740\uFF0C0.0.0.0 \u8868\u793A\u6240\u6709\u7F51\u5361"),
+    port: s.number().description("\u76F4\u8FDE\u76D1\u542C\u7AEF\u53E3\uFF0C\u624B\u673A\u7AEF\u586B\u8FD9\u4E2A\u7AEF\u53E3"),
+    autoPort: s.boolean().description("\u7AEF\u53E3\u88AB\u5360\u7528\u65F6\u81EA\u52A8\u6362\u4E00\u4E2A")
+  }).description("\u76F4\u8FDE\u76D1\u542C"),
+  directAccount: s.string().description("\u624B\u673A\u767B\u5F55\u7528\u7684\u8D26\u53F7"),
+  directPassword: s.string().role("secret").description("\u624B\u673A\u767B\u5F55\u7528\u7684\u5BC6\u7801"),
+  deviceName: s.string().description("\u8FD9\u53F0\u7535\u8111\u663E\u793A\u7ED9\u624B\u673A\u7684\u540D\u5B57"),
   terminal: s.object({ enabled: s.boolean() }),
   hostControl: s.object({ enabled: s.boolean() }),
   loopback: s.object({ ports: s.array(s.number()) }),
@@ -18981,7 +18981,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.27";
+var PLUGIN_VERSION = "0.5.28";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;
@@ -29930,7 +29930,7 @@ function apply(ctx, entry = void 0) {
   ctx.inject(["settings"], (settingsContext) => {
     const settings = settingsContext.settings;
     if (typeof settings.configure !== "function") return;
-    settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber));
+    settingsContext.effect(() => settings.configure({ auto: true }, ctx.fiber));
   });
   const activateWhenCarrierReady = (runtimeContext) => {
     const gateway = runtimeContext.get("typertGateway");

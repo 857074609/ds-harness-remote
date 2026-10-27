@@ -8,7 +8,7 @@ import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
-import { HomeActionsMenu, ServerSetupScreen, SettingsScreen } from './src/screens/setup-screens'
+import { HomeActionsMenu, ServerSetupScreen, ServersScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
@@ -33,6 +33,7 @@ type Route =
   | { name: 'workspaces'; focusWorkspaceKey?: string; botConversationId?: string }
   | { name: 'chat' }
   | { name: 'settings' }
+  | { name: 'servers' }
 
 export default function App() {
   const locales = useLocales()
@@ -378,7 +379,8 @@ function AppNavigator() {
         }}
       />}
       {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey })} />}
-      {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} />}
+      {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} onServers={() => push({ name: 'servers' })} />}
+      {route.name === 'servers' && <ServersScreen onBack={pop} onAdd={() => push({ name: 'server' })} onSwitched={() => reset({ name: 'workspaces' })} />}
       {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
         <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
           <ErrorBanner message={error} onDismiss={clearError} />
@@ -386,10 +388,10 @@ function AppNavigator() {
       )}
       <HomeActionsMenu
         visible={homeMenuVisible}
-        onSwitchServer={route.name === 'server' ? () => {
+        onSwitchServer={() => {
           setHomeMenuOpen(false)
-          setServerEditorOpen(true)
-        } : undefined}
+          push({ name: 'servers' })
+        }}
         onClose={() => setHomeMenuOpen(false)}
         onDevices={route.name === 'workspaces'
           ? () => {

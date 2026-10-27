@@ -102,7 +102,7 @@ export function apply(ctx: Context, entry: EntryConfig | ConfigShape | undefined
   ctx.inject(['settings'], (settingsContext) => {
     const settings = settingsContext.settings
     if (typeof (settings as { configure?: unknown }).configure !== 'function') return
-    settingsContext.effect(() => settings.configure({ auto: false }, ctx.fiber))
+    settingsContext.effect(() => settings.configure({ auto: true }, ctx.fiber))
   })
 
   // A terminal-only dsh-TUI profile has no browser `connection` service.

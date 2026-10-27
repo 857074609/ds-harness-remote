@@ -10,7 +10,7 @@ import {
 import { applyCursorFrame, cursorNativeId } from '../services/cursor'
 import type { ChatItem, RemoteSession } from '../types'
 import { applyMuxFrameToMessages, sessionRunningForMuxFrame } from './event-reducer'
-import { inboxRpcIds } from './message-helpers'
+import { settleInboxDelivery } from './message-helpers'
 import type { SessionAccess } from './session-runtime'
 import { isHarnessPromptStarted, isRecord } from './session-state'
 import type { AppState } from './store-state'
@@ -35,20 +35,7 @@ export function createSessionEventActions({ get, set, runtime }: SessionAccess):
           // Leaving the inbox may mean execution, steering, or removal; keep the
           // row visible as unconfirmed until an echo/history or explicit action
           // settles it. No second projection or timer is needed for visibility.
-          const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => {
-            const queued = inboxRpcIds(value)
-            return items.map(item => {
-              if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
-                || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
-              if (queued.has(item.requestRpcId)) {
-                return { ...item, sendState: 'queued', queuedAdopted: true, sendError: undefined }
-              }
-              if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
-                return { ...item, sendState: 'unconfirmed', sendError: undefined }
-              }
-              return item
-            })
-          } : undefined
+          const settle = key === 'inbox' ? (items: ChatItem[]): ChatItem[] => settleInboxDelivery(items, value) : undefined
           return {
             sessions: state.sessions.map(update),
             selectedSession: state.selectedSession === undefined ? undefined : update(state.selectedSession),

@@ -18652,7 +18652,14 @@ var RpcRouter = class {
       return createRpcError(message.id, "METHOD_NOT_FOUND", "The requested method does not exist.");
     }
     const request = message;
+    const callEndpoint = typeof request.payload.params?.endpoint === "string" ? String(request.payload.params.endpoint) : void 0;
     if (this.active >= this.maxPending) {
+      this.logger?.warn("host rpc rejected", {
+        method: request.payload.method,
+        ...callEndpoint === void 0 ? {} : { endpoint: callEndpoint },
+        active: this.active,
+        maxPending: this.maxPending
+      });
       return createRpcError(request.id, "RATE_LIMITED", "Too many Host requests are already pending.", void 0, true);
     }
     this.active += 1;
@@ -18660,10 +18667,12 @@ var RpcRouter = class {
     try {
       const result = await this.invoke(request.payload.method, request.payload.params);
       const subMethod = typeof request.payload.params?.method === "string" ? String(request.payload.params.method) : void 0;
-      this.logger?.info("host rpc ok", {
+      const durationMs = Math.round(performance.now() - startedAt);
+      this.logger?.[durationMs > 2e3 ? "warn" : "info"]("host rpc ok", {
         method: request.payload.method,
+        ...callEndpoint === void 0 ? {} : { endpoint: callEndpoint },
         ...subMethod ? { subMethod } : {},
-        durationMs: Math.round(performance.now() - startedAt)
+        durationMs
       });
       return createRpcResponse(request.id, result);
     } catch (error) {
@@ -18983,7 +18992,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.36";
+var PLUGIN_VERSION = "0.5.37";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;

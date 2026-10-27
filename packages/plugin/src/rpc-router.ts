@@ -109,7 +109,20 @@ export class RpcRouter {
       return createRpcError(message.id, 'METHOD_NOT_FOUND', 'The requested method does not exist.')
     }
     const request = message as RemoteMessage<RpcRequestPayload>
+    // A `harness.remote.call` names the Harness endpoint inside its params; the
+    // outer method alone cannot tell a prompt from a session list, which made
+    // "the phone says the send timed out but the Host looks healthy" impossible
+    // to read from the log.
+    const callEndpoint = typeof (request.payload.params as Record<string, unknown> | undefined)?.endpoint === 'string'
+      ? String((request.payload.params as Record<string, unknown>).endpoint)
+      : undefined
     if (this.active >= this.maxPending) {
+      this.logger?.warn('host rpc rejected', {
+        method: request.payload.method,
+        ...(callEndpoint === undefined ? {} : { endpoint: callEndpoint }),
+        active: this.active,
+        maxPending: this.maxPending,
+      })
       return createRpcError(request.id, 'RATE_LIMITED', 'Too many Host requests are already pending.', undefined, true)
     }
     this.active += 1
@@ -119,10 +132,14 @@ export class RpcRouter {
       const subMethod = typeof (request.payload.params as Record<string, unknown> | undefined)?.method === 'string'
         ? String((request.payload.params as Record<string, unknown>).method)
         : undefined
-      this.logger?.info('host rpc ok', {
+      const durationMs = Math.round(performance.now() - startedAt)
+      // Anything past a few seconds is worth naming: the client times the call
+      // out at 35s and shows "send unconfirmed" with no hint of what stalled.
+      this.logger?.[durationMs > 2_000 ? 'warn' : 'info']('host rpc ok', {
         method: request.payload.method,
+        ...(callEndpoint === undefined ? {} : { endpoint: callEndpoint }),
         ...(subMethod ? { subMethod } : {}),
-        durationMs: Math.round(performance.now() - startedAt),
+        durationMs,
       })
       return createRpcResponse(request.id, result)
     } catch (error: unknown) {

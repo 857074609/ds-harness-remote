@@ -90,6 +90,35 @@ export function inboxRpcIds(inbox: unknown): Set<string> {
 }
 
 /**
+ * Track one optimistic row against the authoritative `inbox` projection.
+ *
+ * A prompt enters the inbox while it waits and leaves it when the Host starts
+ * executing it. The old rule called that departure "unconfirmed" and painted a
+ * red retry row over every queued prompt that had just begun running — the
+ * agent was answering while the user was told the send might have been lost.
+ * Dequeuing into a turn *is* delivery: the only other ways out of the inbox are
+ * this client's own queue actions (`sessionUpdateQueue`), which settle the row
+ * themselves. Rows that never reached the inbox keep their own state, so a real
+ * RPC timeout still surfaces as `unconfirmed` with its error text.
+ */
+export function settleInboxDelivery(items: ChatItem[], inbox: unknown): ChatItem[] {
+  const queued = inboxRpcIds(inbox)
+  return items.map(item => {
+    if (item.kind !== 'message' || item.role !== 'user' || !item.id.startsWith('local:')
+      || item.nativeSeq !== undefined || item.requestRpcId === undefined || item.sendState === 'canceled') return item
+    if (queued.has(item.requestRpcId)) {
+      return { ...item, sendState: 'queued', queuedAdopted: true, sendError: undefined }
+    }
+    if (item.queuedAdopted === true && (item.sendState === 'queued' || item.sendState === undefined)) {
+      // Delivered: the Host dequeued it into a running turn.
+      return { ...item, sendState: undefined, queuedAdopted: undefined, sendError: undefined }
+    }
+    return item
+  })
+}
+
+
+/**
  * Delivery-state reconciliation against Host truth (no timers, no deletions):
  * after a fresh history load plus an `inbox` snapshot, an optimistic row whose
  * prompt is in neither source and that predates the current connection is

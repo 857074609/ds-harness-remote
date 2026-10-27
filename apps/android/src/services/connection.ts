@@ -283,8 +283,43 @@ export class AndroidRemoteConnection {
     }
     // The direct path must expose the business client exactly like the
     // probe-verified stack: RPCs (hostDescribe, session list) go through it.
-    this.proxy = new HarnessAlphaClient(core)
+    //
+    // Three constructor details decide whether the phone streams at all:
+    // `sessionFormat: 3` makes `session/follow` ask for assistant chunks (a
+    // Host that advertises `harness.remote.v3`), `onFrame` is the only way the
+    // store ever sees live events, and `start()` opens the `$events` /
+    // `session/control` pumps that carry approvals, questions and projections.
+    // Omitting any of them left the app with a silent timeline: replies only
+    // appeared when history was re-read, and approvals never arrived.
+    const proxy = new HarnessAlphaClient(
+      core,
+      await this.describeHarnessHost(core),
+      frame => {
+        // HarnessClientFrame.payload is an open record; the store's MuxStreamFrame
+        // requires a discriminant. Every frame the client emits carries one, so
+        // gate on it instead of casting blindly.
+        if (typeof frame.payload.type !== 'string') return
+        this.muxHandler?.(frame as unknown as MuxStreamFrame)
+      },
+    )
+    this.proxy = proxy
+    proxy.start()
     return transport.getHostDeviceId()
+  }
+
+  /**
+   * The Host states its Session wire generation in `harness.transport.describe`.
+   * A failed probe keeps the client on the legacy path rather than guessing a
+   * format the Host may not implement.
+   */
+  private async describeHarnessHost(core: RemoteClientCore): Promise<{ sessionFormat?: 3 }> {
+    try {
+      const description = await core.rpc('harness.transport.describe', {}) as { capabilities?: unknown }
+      const capabilities = Array.isArray(description.capabilities) ? description.capabilities : []
+      return capabilities.includes('harness.remote.v3') ? { sessionFormat: 3 } : {}
+    } catch {
+      return {}
+    }
   }
 
   async close(): Promise<void> {
@@ -307,6 +342,7 @@ export class AndroidRemoteConnection {
     this.unsubscribeArchived?.()
     this.unsubscribeArchived = undefined
     this.transport = undefined
+    const proxy = this.proxy
     this.proxy = undefined
     this.codex = undefined
     this.codexAvailable = false
@@ -314,6 +350,9 @@ export class AndroidRemoteConnection {
     this.acpBackends.clear()
     this.sessionTools = undefined
     if (mux !== undefined) await mux(false).catch(() => undefined)
+    // Release the two permanent pumps before the transport goes away so their
+    // stream slots are returned while the RPC channel still works.
+    if (proxy !== undefined) await proxy.close(false).catch(() => undefined)
     if (core !== undefined) await core.close()
   }
 }

@@ -18983,7 +18983,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.35";
+var PLUGIN_VERSION = "0.5.36";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;

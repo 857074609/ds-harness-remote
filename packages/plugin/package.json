@@ -1,6 +1,6 @@
 {
   "name": "ds-harness-remote",
-  "version": "0.5.28",
+  "version": "0.5.29",
   "description": "End-to-end encrypted remote access to DeepSeek Harness and experimental Codex workspaces from desktop, web, and Android, with dsh-TUI Host support.",
   "keywords": [
     "deepseek",
@@ -37,10 +37,12 @@
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./client.js"
   },
   "files": [
     "dist",
+    "client.js",
     "dsh-plugin.json",
     "cordis.patch.yml",
     "locale",
@@ -51,6 +53,11 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
     }
   },
   "scripts": {

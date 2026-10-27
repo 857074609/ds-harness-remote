@@ -220,24 +220,10 @@ export class AndroidRemoteConnection {
 
   private scheduleHealthCheck(core: RemoteClientCore): void {
     this.clearHealthTimer()
-    this.healthTimer = setTimeout(() => {
-      this.healthTimer = undefined
-      if (this.core !== core) return
-      // Passive liveness only: the 25s heartbeat keeps this stamp fresh while
-      // the tunnel works, so silence — never a slow RPC — decides health. A
-      // probe here used to tear down healthy tunnels whenever the Host was
-      // busy running an agent.
-      const lastAt = (this.transport as DirectTransport | undefined)?.lastMessageAt ?? 0
-      const silentMs = lastAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - lastAt
-      if (silentMs < SILENT_TUNNEL_MS) {
-        this.scheduleHealthCheck(core)
-        return
-      }
-      console.info('[dsh-remote] Carrier silent; closing', { silentMs })
-      // close() on the core publishes the same offline/recovery transition
-      // as a socket close, including when the OS never delivered onclose.
-      void core.close().catch(() => undefined)
-    }, 60_000)
+    // No client-side teardown: the socket's onclose is the only authority on
+    // liveness. Timers here produced a reconnect every few minutes on tunnels
+    // that were perfectly healthy.
+    this.healthTimer = undefined
   }
 
   private clearHealthTimer(): void {

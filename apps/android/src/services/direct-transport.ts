@@ -215,14 +215,9 @@ export class DirectTransport implements SecureHandshakeTransport {
     this.stopHeartbeat()
     this.heartbeatFailures = 0
     this.heartbeatTimer = setInterval(() => {
-      void this.sendFrame('ping', { nonce: nonce() })
-        .then(() => { this.heartbeatFailures = 0 })
-        .catch(() => {
-          this.heartbeatFailures += 1
-          // Three lost beats (~75s) mean the socket is gone even when the OS
-          // never delivered onclose.
-          if (this.heartbeatFailures >= 3) this.handleClose(new Error(strings.runtime.hostClosed))
-        })
+      // A failed beat only means the write buffer was busy: closing here used
+      // to tear down healthy tunnels. onclose is the only authority.
+      void this.sendFrame('ping', { nonce: nonce() }).catch(() => undefined)
     }, Math.max(5000, intervalMs))
   }
 

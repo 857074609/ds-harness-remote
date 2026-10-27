@@ -33,6 +33,8 @@ export class AndroidRemoteConnection {
   private transport?: DirectTransport
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
+  /** Consecutive probe misses; a teardown needs more than one. */
+  private healthFailures = 0
 
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
 
@@ -192,8 +194,7 @@ export class AndroidRemoteConnection {
     // Live traffic is stronger evidence than a probe: an agent run streams
     // frames continuously, and probing a busy Host only produces false alarms
     // (the "device disconnected" banner while the tunnel is perfectly fine).
-    const transport = this.transport as unknown as { getLastMessageAt?: () => number } | undefined
-    const lastAt = transport?.getLastMessageAt?.() ?? 0
+    const lastAt = (this.transport as DirectTransport | undefined)?.lastMessageAt ?? 0
     if (lastAt > 0 && Date.now() - lastAt < 90_000) return this.core === core
     for (let attempt = 0; ; attempt += 1) {
       try {
@@ -218,13 +219,21 @@ export class AndroidRemoteConnection {
       if (this.core !== core) return
       void this.checkHealth().then(healthy => {
         if (this.core !== core) return
-        if (healthy) this.scheduleHealthCheck(core)
-        else {
-          console.info('[dsh-remote] Carrier health check failed; closing carrier')
-          // close() on the core publishes the same offline/recovery transition
-          // as a socket close, including when the OS never delivered onclose.
-          void core.close().catch(() => undefined)
+        if (healthy) {
+          this.healthFailures = 0
+          this.scheduleHealthCheck(core)
+          return
         }
+        this.healthFailures += 1
+        if (this.healthFailures < 3) {
+          console.info('[dsh-remote] Carrier health check missed; retrying', { attempt: this.healthFailures })
+          this.scheduleHealthCheck(core)
+          return
+        }
+        console.info('[dsh-remote] Carrier health check failed; closing carrier')
+        // close() on the core publishes the same offline/recovery transition
+        // as a socket close, including when the OS never delivered onclose.
+        void core.close().catch(() => undefined)
       })
     }, 45_000)
   }
@@ -264,6 +273,7 @@ export class AndroidRemoteConnection {
       35_000,
     )
     this.core = core
+    this.healthFailures = 0
     this.unsubscribeClose = core.onClose(() => {
       if (this.core !== core) return
       this.clearHealthTimer()

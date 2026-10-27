@@ -136,7 +136,11 @@ export class HostDirectServer {
         else if (frame.type === 'connect.request') { await this.handleConnectRequest(ws, tunnel) }
         else if (frame.type === 'secure.handshake') { await this.handleHandshake(ws, tunnel, frame.payload) }
         else if (frame.type === 'relay') { await this.handleRelay(tunnel, frame.payload) }
-        else if (frame.type === 'ping') { this.send(ws, 'pong', (frame.payload as { nonce: string }).nonce) }
+        else if (frame.type === 'ping') {
+          // The pong payload is an object; sending the bare nonce string made
+          // the frame schema reject it and closed the socket on every beat.
+          this.send(ws, 'pong', { nonce: (frame.payload as { nonce: string }).nonce })
+        }
       }).catch(error => {
         this.logger.warn('direct-connect control frame failed', { code: errorCode(error), reason: String(error) })
         finish(4008, 'invalid control frame')

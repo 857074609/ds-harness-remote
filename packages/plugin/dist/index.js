@@ -18983,7 +18983,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.33";
+var PLUGIN_VERSION = "0.5.34";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;
@@ -19076,7 +19076,7 @@ var HostDirectServer = class {
         } else if (frame.type === "relay") {
           await this.handleRelay(tunnel, frame.payload);
         } else if (frame.type === "ping") {
-          this.send(ws, "pong", frame.payload.nonce);
+          this.send(ws, "pong", { nonce: frame.payload.nonce });
         }
       }).catch((error) => {
         this.logger.warn("direct-connect control frame failed", { code: errorCode(error), reason: String(error) });

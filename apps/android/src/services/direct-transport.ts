@@ -14,6 +14,15 @@ import { strings } from '../locales/i18n'
 export interface DirectEndpoint {
   host: string
   port: number
+  /**
+   * Full dial URL, e.g. `wss://dsh.example.com/direct`.
+   *
+   * Required when the Host sits behind a reverse proxy: the public scheme,
+   * domain and path cannot be derived from `host`/`port` alone. When omitted
+   * the transport falls back to `ws://host:port/ws/v1/connect`, preserving the
+   * LAN-only behaviour of earlier builds.
+   */
+  url?: string
 }
 
 /** Local Host credentials; the password also derives the Noise PSK. */
@@ -75,7 +84,9 @@ export class DirectTransport implements SecureHandshakeTransport {
   async connect(): Promise<void> {
     if (this.ws !== undefined) return
     this.closed = false
-    const url = `ws://${this.endpoint.host}:${this.endpoint.port}/ws/v1/connect`
+    // A reverse-proxied Host is reached by its public URL (wss:// + domain +
+    // path); a LAN Host keeps the legacy `ws://host:port/ws/v1/connect`.
+    const url = this.endpoint.url ?? `ws://${this.endpoint.host}:${this.endpoint.port}/ws/v1/connect`
     await new Promise<void>((resolve, reject) => {
       let settled = false
       const finish = (error?: Error): void => {

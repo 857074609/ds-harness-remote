@@ -26,6 +26,11 @@ export interface DirectConfig {
   host: string
   port: number
   account?: string
+  /**
+   * Dial URL for a reverse-proxied Host (`wss://domain/path`). Present only
+   * for public-domain sessions; LAN sessions use `ws://host:port/...`.
+   */
+  url?: string
 }
 
 export interface DeviceIdentity {

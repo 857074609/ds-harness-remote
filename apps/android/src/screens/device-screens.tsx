@@ -36,7 +36,6 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
 }) {
   const devices = useAppStore(state => state.devices)
   const favoriteWorkspaces = useAppStore(state => state.favoriteWorkspaces)
-  const recentWorkspaces = useAppStore(state => state.recentWorkspaces)
   const removeFavoriteWorkspace = useAppStore(state => state.removeFavoriteWorkspace)
   const connectedDevice = useAppStore(state => state.selectedDevice)
   const connectedWorkspaces = useAppStore(state => state.workspaces)
@@ -85,12 +84,10 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   const favorites = isHome
     ? [...favoriteWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
     : []
-  const recents = isHome
-    ? [...recentWorkspaces].sort((left, right) => right.addedAt - left.addedAt)
-    : []
-  // With nothing saved yet, fall back to the workspaces visited most recently.
-  const showingFavorites = favorites.length > 0
-  const shortcuts = showingFavorites ? favorites : recents
+  // Only explicit favourites are surfaced. Implicit "recently visited" entries
+  // were removed on request: the home screen stays predictable and every link
+  // there is one the user chose to keep.
+  const shortcuts = favorites
 
   return (
     <View style={styles.flex}>
@@ -106,32 +103,28 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
             ? <>
                 {shortcuts.length > 0 && onShortcut !== undefined && (
                   <View>
-                    <SectionTitle>{showingFavorites ? zhCN.devices.favorites : zhCN.devices.recent}</SectionTitle>
+                    <SectionTitle>{zhCN.devices.favorites}</SectionTitle>
                     <View style={styles.favoriteLinks}>
                       {shortcuts.map(shortcut => (
                         <View key={`${shortcut.deviceId}:${shortcut.key}`} style={styles.favoriteRow}>
                           <Pressable
                             accessibilityRole="link"
-                            accessibilityLabel={showingFavorites
-                              ? zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))
-                              : zhCN.devices.openRecent(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
+                            accessibilityLabel={zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
                             onPress={() => onShortcut(shortcut)}
                             style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
                           >
                             <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
                             <Text style={styles.favoriteLinkMeta} numberOfLines={1}>· {shortcutDeviceName(shortcut)}</Text>
                           </Pressable>
-                          {showingFavorites && (
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
-                              hitSlop={8}
-                              onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
-                              style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
-                            >
-                              <X size={16} color={colors.muted} />
-                            </Pressable>
-                          )}
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={zhCN.devices.removeFavorite(shortcutTitle(shortcut))}
+                            hitSlop={8}
+                            onPress={() => void removeFavoriteWorkspace(shortcut.deviceId, shortcut.key)}
+                            style={({ pressed }) => [styles.favoriteRemove, pressed && styles.favoriteLinkPressed]}
+                          >
+                            <X size={16} color={colors.muted} />
+                          </Pressable>
                         </View>
                       ))}
                     </View>

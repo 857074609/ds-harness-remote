@@ -108,7 +108,8 @@ export interface AppState {
   trustDevice(device: RemoteDevice): Promise<boolean>
   forgetDevice(deviceId: string): Promise<boolean>
   connectDevice(device: RemoteDevice, options?: { forceRelay?: boolean }): Promise<boolean>
-  connectDirectHost(spec: { host: string; port: number; account: string; password: string }): Promise<boolean>
+  /** `url` dials a reverse-proxied Host (`wss://domain/path`); omit it for LAN `host:port`. */
+  connectDirectHost(spec: { host: string; port: number; account: string; password: string; url?: string }): Promise<boolean>
   reconnect(options?: { forceRelay?: boolean; restoreSession?: boolean }): Promise<boolean>
   disconnect(): Promise<void>
   openSession(session: RemoteSession): Promise<boolean>

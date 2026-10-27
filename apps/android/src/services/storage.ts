@@ -43,16 +43,25 @@ export interface DirectConnectCredentials {
   port: number
   account: string
   password: string
+  /**
+   * Dial URL when the Host is reached through a reverse proxy
+   * (`wss://domain/path`). Absent for LAN `host:port` Hosts, which keep using
+   * the legacy `ws://host:port/ws/v1/connect`.
+   */
+  url?: string
 }
 
 function asDirectConnect(value: unknown): DirectConnectCredentials | undefined {
   if (typeof value !== 'object' || value === null) return undefined
-  const { host, port, account, password } = value as Record<string, unknown>
+  const { host, port, account, password, url } = value as Record<string, unknown>
   if (typeof host !== 'string' || host.trim() === '') return undefined
   if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) return undefined
   if (typeof account !== 'string' || account.trim() === '') return undefined
   if (typeof password !== 'string' || password === '') return undefined
-  return { host, port, account, password }
+  // A stored URL is only trusted when it parses and speaks ws(s)/http(s);
+  // dropping a malformed one degrades to the LAN form instead of failing.
+  const dialUrl = typeof url === 'string' && /^wss?:\/\/[^\s]+$/i.test(url) ? url : undefined
+  return dialUrl === undefined ? { host, port, account, password } : { host, port, account, password, url: dialUrl }
 }
 
 /** A Host this device has signed in to, for one-tap switching. */

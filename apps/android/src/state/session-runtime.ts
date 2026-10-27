@@ -41,8 +41,12 @@ export class SessionRuntime {
   sessionReadRetry = false
   sessionLoadGeneration = 0
   reconnectFlight: Promise<boolean> | undefined
-  /** Serverless direct-connect credentials for the current direct session. */
-  pendingDirectConnect: { host: string; port: number; account: string; password: string } | undefined
+  /**
+   * Serverless direct-connect credentials for the current direct session.
+   * `url` carries the reverse-proxy dial URL (`wss://domain/path`) when the
+   * Host is public; LAN sessions omit it.
+   */
+  pendingDirectConnect: { host: string; port: number; account: string; password: string; url?: string } | undefined
 
   constructor(private readonly store: StoreAccess) {}
 

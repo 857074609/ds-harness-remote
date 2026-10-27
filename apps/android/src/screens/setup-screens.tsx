@@ -43,7 +43,9 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
     })
     return () => subscription.remove()
   }, [])
-  const [target, setTarget] = useState(config === undefined ? '' : `${config.host}:${config.port}`)
+  // Prefill the last target. A reverse-proxied Host keeps its full URL so the
+// user does not have to retype the domain/path; LAN Hosts show `host:port`.
+  const [target, setTarget] = useState(config === undefined ? '' : (config.url ?? `${config.host}:${config.port}`))
   const [account, setAccount] = useState(config?.account ?? '')
   const [password, setPassword] = useState('')
   const [prefilled, setPrefilled] = useState(false)

@@ -72,7 +72,9 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         runtime.pendingDirectConnect = directSpec
         set({ connectionStage: 'secure' })
         const connectedDeviceId = await runtime.connection.connectDirect(
-          { host: directSpec.host, port: directSpec.port },
+          directSpec.url === undefined
+            ? { host: directSpec.host, port: directSpec.port }
+            : { host: directSpec.host, port: directSpec.port, url: directSpec.url },
           { account: directSpec.account, password: directSpec.password },
           identity,
           frame => runtime.enqueueMuxFrame(generation, frame),
@@ -171,7 +173,10 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           await saveDirectConnect(spec)
           await saveServer(spec)
           set(state => ({
-            config: { baseUrl: `direct://${spec.host}:${spec.port}`, host: spec.host, port: spec.port, account: spec.account },
+            config: {
+              baseUrl: `direct://${spec.host}:${spec.port}`, host: spec.host, port: spec.port, account: spec.account,
+              ...(spec.url === undefined ? {} : { url: spec.url }),
+            },
             account: spec.account,
             devices: state.devices.some(device => device.deviceId === 'direct')
               ? state.devices.map(device => device.deviceId === 'direct' ? { ...device, name: spec.account } : device)

@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
 import { Check, ChevronRight, ExternalLink, KeyRound, Laptop, LockKeyhole, MoreVertical, RotateCcw, Settings, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import { BlurHeaderFrame, Button, Field, IconButton, KeyValue, Screen, TopBar } from '../ui/components'
@@ -34,6 +34,15 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   const { width } = useResponsiveLayout()
   const largeScreen = width >= 720
 
+  const loginScrollRef = useRef<ScrollView>(null)
+  useEffect(() => {
+    // The keyboard covers the lower fields on short screens; the sign-in form
+    // is the last content block, so revealing its end reveals the button.
+    const subscription = Keyboard.addListener('keyboardDidShow', () => {
+      loginScrollRef.current?.scrollToEnd({ animated: true })
+    })
+    return () => subscription.remove()
+  }, [])
   const [target, setTarget] = useState(config === undefined ? '' : `${config.host}:${config.port}`)
   const [account, setAccount] = useState(config?.account ?? '')
   const [password, setPassword] = useState('')
@@ -61,9 +70,8 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
   return (
     <View style={styles.flex}>
       <BlurHeaderFrame header={<TopBar title="DSH Remote" onBack={onBack} action={<IconButton label={zhCN.settings.more} icon={MoreVertical} onPress={onMore} />} />}>
-        <Screen fill>
-          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
-            <ScrollView style={styles.flex} contentContainerStyle={styles.loginScrollContent} keyboardShouldPersistTaps="handled" bounces={false}>
+        <Screen fill scrollRef={loginScrollRef}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
               <View style={styles.loginIntro}>
                 <Text style={styles.lead}>{zhCN.setup.lead}</Text>
               </View>
@@ -85,6 +93,9 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
                   textContentType="password"
                   returnKeyType="go"
                   onSubmitEditing={() => { if (canSubmit) void submit() }}
@@ -96,7 +107,6 @@ export function ServerSetupScreen({ onComplete, onBack, onMore, serverExpanded, 
                 )}
                 <Button label={zhCN.setup.title} onPress={() => void submit()} loading={connecting} disabled={!canSubmit || connecting} />
               </View>
-            </ScrollView>
           </KeyboardAvoidingView>
         </Screen>
       </BlurHeaderFrame>
@@ -433,6 +443,7 @@ export function HomeActionsMenu({ visible, onClose, onSettings, onDevices, onSwi
             <HomeMenuRow icon={Laptop} label={zhCN.devices.myDevices} onPress={onDevices} />
           )}
           {onSwitchServer !== undefined && <HomeMenuRow icon={RotateCcw} label={zhCN.setup.switchServer} onPress={onSwitchServer} />}
+          <HomeMenuRow icon={Settings} label={zhCN.settings.title} onPress={onSettings} last />
         </ScrollView>
       </View>
     </View>

@@ -692,6 +692,8 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
   const leaving = useRef(false)
   const onConnectedRef = useRef(onConnected)
   onConnectedRef.current = onConnected
+  const mounted = useRef(true)
+  useEffect(() => () => { mounted.current = false }, [])
 
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
@@ -703,7 +705,13 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
 
   useEffect(() => {
     const current = useAppStore.getState()
-    if (current.selectedDevice?.deviceId === device.deviceId && current.connection.phase === 'connected') {
+    // A direct host keeps the same tunnel across screens; the store rewrites
+    // selectedDevice.deviceId to the host id after the handshake, so compare
+    // the platform as well instead of dialling a second tunnel.
+    const connectedToTarget = current.connection.phase === 'connected'
+      && current.selectedDevice !== undefined
+      && (current.selectedDevice.deviceId === device.deviceId || device.platform === 'direct')
+    if (connectedToTarget) {
       if (completedAttempt.current !== attempt) {
         completedAttempt.current = attempt
         onConnectedRef.current()
@@ -714,18 +722,17 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
       && (current.connection.phase === 'connecting' || current.connection.phase === 'reconnecting')) return
     if (launchedAttempt.current === attempt) return
     launchedAttempt.current = attempt
-    let active = true
     void connect(device).then(async connected => {
       if (!connected) return
       // Match the Plugin hand-off: let assistive technology and the visible
       // progress state announce completion before replacing this screen.
       await new Promise(resolve => setTimeout(resolve, 220))
-      if (active && !leaving.current && completedAttempt.current !== attempt) {
+      if (mounted.current && !leaving.current && completedAttempt.current !== attempt) {
         completedAttempt.current = attempt
         onConnectedRef.current()
       }
     })
-    return () => { active = false }
+    return () => undefined
   }, [attempt, connect, connection.phase, device, selectedDevice?.deviceId])
 
   const currentStage = connectionStage ?? 'authenticating'

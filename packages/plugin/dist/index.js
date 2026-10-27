@@ -18356,6 +18356,7 @@ var ConnectionController = class {
     const replaced = [...this.active.values()].filter((connection2) => connection2.channel.peerDeviceId === channel.peerDeviceId || connection2.channel.security.connectionId === connectionId);
     if (replaced.length > 0) {
       this.logger?.warn("replacing active peer connection", {
+        at: (/* @__PURE__ */ new Date()).toISOString(),
         peerDeviceId: shortId(channel.peerDeviceId),
         replacedCount: replaced.length,
         replacedPeerDeviceIds: replaced.map((connection2) => shortId(connection2.channel.peerDeviceId))
@@ -18488,6 +18489,7 @@ var ConnectionController = class {
       await connection.channel.close(code);
     }
     this.logger?.info("peer connection disconnected", {
+      at: (/* @__PURE__ */ new Date()).toISOString(),
       peerDeviceId: shortId(connection.channel.peerDeviceId),
       connectionId: shortId(connection.channel.security.connectionId),
       code: code ?? "closed",
@@ -18981,7 +18983,7 @@ var SerialSend = class {
 };
 
 // src/version.ts
-var PLUGIN_VERSION = "0.5.32";
+var PLUGIN_VERSION = "0.5.33";
 
 // src/host-server.ts
 var MAX_CONTROL_FRAME_BYTES2 = 65536;
@@ -19162,7 +19164,7 @@ var HostDirectServer = class {
     );
     tunnel.channel = channel;
     await this.connections.accept(channel);
-    this.logger.info("direct-connect peer channel ready", { connectionId: tunnel.connectionId, account: tunnel.account });
+    this.logger.info("direct-connect peer channel ready", { connectionId: tunnel.connectionId, account: tunnel.account, at: (/* @__PURE__ */ new Date()).toISOString() });
   }
   async handleRelay(tunnel, payload) {
     if (tunnel?.channel === void 0) return;

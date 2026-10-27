@@ -228,7 +228,7 @@ export class HostDirectServer {
     )
     tunnel.channel = channel
     await this.connections.accept(channel)
-    this.logger.info('direct-connect peer channel ready', { connectionId: tunnel.connectionId, account: tunnel.account })
+    this.logger.info('direct-connect peer channel ready', { connectionId: tunnel.connectionId, account: tunnel.account, at: new Date().toISOString() })
   }
 
   private async handleRelay(tunnel: DirectTunnel | undefined, payload: unknown): Promise<void> {

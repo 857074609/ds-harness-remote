@@ -91,6 +91,7 @@ export class ConnectionController {
     ))
     if (replaced.length > 0) {
       this.logger?.warn('replacing active peer connection', {
+        at: new Date().toISOString(),
         peerDeviceId: shortId(channel.peerDeviceId),
         replacedCount: replaced.length,
         replacedPeerDeviceIds: replaced.map(connection => shortId(connection.channel.peerDeviceId)),
@@ -238,6 +239,7 @@ export class ConnectionController {
       await connection.channel.close(code)
     }
     this.logger?.info('peer connection disconnected', {
+      at: new Date().toISOString(),
       peerDeviceId: shortId(connection.channel.peerDeviceId),
       connectionId: shortId(connection.channel.security.connectionId),
       code: code ?? 'closed',

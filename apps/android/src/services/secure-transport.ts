@@ -180,6 +180,11 @@ export class DirectSecureTransport implements RemoteTransport {
     private readonly credentials: DirectCredentials,
   ) {}
 
+  /** Wall clock of the last frame the socket delivered (0 before the first). */
+  getLastMessageAt(): number {
+    return this.inner.lastMessageAt
+  }
+
   async connect(): Promise<void> {
     this.closed = false
     this.incoming.reset()

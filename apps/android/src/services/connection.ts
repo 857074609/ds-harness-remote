@@ -33,6 +33,7 @@ export class AndroidRemoteConnection {
   private transport?: DirectTransport
   private connectionAttempt = 0
   private healthTimer?: ReturnType<typeof setTimeout>
+
   private healthFlight?: { core: RemoteClientCore; result: Promise<boolean> }
 
   async configureHistory(compact: boolean): Promise<void> {
@@ -188,6 +189,12 @@ export class AndroidRemoteConnection {
   }
 
   private async probeHealth(core: RemoteClientCore): Promise<boolean> {
+    // Live traffic is stronger evidence than a probe: an agent run streams
+    // frames continuously, and probing a busy Host only produces false alarms
+    // (the "device disconnected" banner while the tunnel is perfectly fine).
+    const transport = this.transport as unknown as { getLastMessageAt?: () => number } | undefined
+    const lastAt = transport?.getLastMessageAt?.() ?? 0
+    if (lastAt > 0 && Date.now() - lastAt < 90_000) return this.core === core
     for (let attempt = 0; ; attempt += 1) {
       try {
         // Existing authenticated, encrypted capability RPC; no new wire heartbeat.

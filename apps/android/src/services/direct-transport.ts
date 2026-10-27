@@ -47,6 +47,8 @@ export class DirectTransport implements SecureHandshakeTransport {
   private connectionId?: string
   private hostDeviceId?: string
   private heartbeatTimer?: ReturnType<typeof setInterval>
+  /** Wall clock of the last inbound frame; the Host-side liveness signal. */
+  lastMessageAt = 0
   private relayCounter = 0
   private stats: TransportStats = { mode: 'Relay', connected: false }
   private closed = false
@@ -96,6 +98,7 @@ export class DirectTransport implements SecureHandshakeTransport {
         })
       }
       ws.onmessage = event => {
+        this.lastMessageAt = Date.now()
         let frame: WireFrame
         try {
           const parsed = decodeControlFrame(String(event.data))

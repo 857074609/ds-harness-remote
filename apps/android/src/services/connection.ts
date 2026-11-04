@@ -73,6 +73,12 @@ export class AndroidRemoteConnection {
   }
 
   /** Harness business client; only available while connected. */
+  /** Generic Typert RPC over the authenticated direct channel. */
+  async rpc<T = unknown>(method: string, params: unknown, signal?: AbortSignal): Promise<T> {
+    if (this.core === undefined) throw new Error(strings.runtime.connectHostFirst)
+    return this.core.rpc<T>(method, params, signal)
+  }
+
   requireProxy(): RemoteHarnessClient {
     if (this.proxy === undefined) throw new Error(strings.runtime.connectHostFirst)
     return this.proxy
@@ -177,6 +183,15 @@ export class AndroidRemoteConnection {
 
   hasClaude(): boolean {
     return this.cursor !== undefined && this.acpBackends.has('claude')
+  }
+
+  requireHermes(): AgentAcpClient {
+    if (this.cursor === undefined || !this.acpBackends.has('hermes')) throw new Error(strings.runtime.hermesUnavailable)
+    return this.cursor
+  }
+
+  hasHermes(): boolean {
+    return this.cursor !== undefined && this.acpBackends.has('hermes')
   }
 
   getStats() {

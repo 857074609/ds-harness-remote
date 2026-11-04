@@ -53,6 +53,17 @@ describe('Codex display projection', () => {
     })
   })
 
+  it('projects the current model from the latest CodeX Turn', () => {
+    expect(projectCodexThread({
+      id: 'thr_model',
+      model: 'stale-model',
+      turns: [
+        { id: 'turn_old', model: 'old-model', reasoningEffort: 'low' },
+        { id: 'turn_new', model: 'gpt-5.6-terra', effort: 'high' },
+      ],
+    })).toMatchObject({ model: 'gpt-5.6-terra', reasoningEffort: 'high' })
+  })
+
   it('derives deterministic fallback workspaces from unique Thread cwd values', () => {
     const workspaces = deriveCodexCwdWorkspaces([
       { id: 'thr_1', cwd: '/workspace/repo/', createdAt: 20, updatedAt: 30 },
@@ -233,6 +244,38 @@ describe('Codex display projection', () => {
     expect(state.approval).toBeUndefined()
     expect(state.session.status).toBe('idle')
     expect(state.items[0]).toMatchObject({ text: 'Hello world.', status: 'completed' })
+  })
+
+  it('clears an active turn when the App Server reports an idle or system error status', () => {
+    let state = createCodexTimelineState({
+      id: 'thr_status', cwd: '/workspace/repo', createdAt: 1, updatedAt: 2,
+      status: { type: 'idle' }, turns: [],
+    })!
+    state = reduceCodexTimelineFrame(state, {
+      method: 'turn/started',
+      params: { turn: { id: 'turn_status', status: 'inProgress', items: [] } },
+    })
+    expect(state.activeTurnId).toBe('turn_status')
+
+    state = reduceCodexTimelineFrame(state, {
+      method: 'thread/status/changed',
+      params: { status: { type: 'idle' } },
+    })
+    expect(state).toMatchObject({ session: { status: 'idle' } })
+    expect(state.activeTurnId).toBeUndefined()
+    expect(state.items.every(item => item.status !== 'running')).toBe(true)
+
+    state = reduceCodexTimelineFrame(state, {
+      method: 'turn/started',
+      params: { turn: { id: 'turn_error', status: 'inProgress', items: [] } },
+    })
+    state = reduceCodexTimelineFrame(state, {
+      method: 'thread/status/changed',
+      params: { status: { type: 'systemError' } },
+    })
+    expect(state).toMatchObject({ session: { status: 'failed' } })
+    expect(state.activeTurnId).toBeUndefined()
+    expect(state.items.every(item => item.status !== 'running')).toBe(true)
   })
 
   it('merges command, file-change, and approval-resolution notifications by native item id', () => {

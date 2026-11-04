@@ -2,7 +2,7 @@ import type { TransportStats } from '@dsh-remote/protocol'
 import type { AdaptiveConnectionDetails } from '@dsh-remote/webrtc'
 import { strings as zhCN } from './locales/i18n'
 
-export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'
+export type AgentBackend = 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'
 
 export type ConnectionPhase =
   | 'disconnected'
@@ -495,3 +495,12 @@ export function transportPreferenceOptions(): TransportPreferenceOption[] {
     { value: 'relay', name: zhCN.transport.relay, description: zhCN.transport.relayDescription },
   ]
 }
+
+export type {
+  ScheduleCatalogEntry,
+  ScheduleDeleteResult,
+  ScheduleDeliveryHistoryResult,
+  ScheduleDeliveryReceipt,
+  ScheduleDeliveryRecord,
+  ScheduleKind,
+} from '@dsh-remote/client-core'

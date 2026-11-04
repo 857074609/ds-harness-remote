@@ -1,11 +1,125 @@
 # Repository Guide for Agents
 
+## werift 0.26.0 upgrade (2026-11-03, Issue #259)
+
+按 #259 清单把 werift 从 0.24.4 升到 0.26.0（plugin 与 apps/vscode 同步升级，消除 hoisted
+node_modules 双版本），不再需要 `patches/werift@0.24.4.patch`（#245 的止血补丁，随分支基线
+移除）。0.26 的 `StreamTransport` 重写移除了 `end` 后的静默自动重拨（#241 崩溃类的根源），
+改为失败即 terminal，并内置连接超时（`connectTimeoutMs`，bundle 内可见 `connect timed out
+after` 标记）。插件使用的全部 ICE 配置键（`iceUseIpv4`/`iceFilterCandidatePair` 等）在 0.26
+类型中保持不变。回归测试改为 0.26 语义（`werift-turn-transport.test.ts`）：连接拒绝与连接中
+RST 均不产生 unhandled rejection、无重拨代际、`send()` 对调用方 reject；bundle 守卫断言
+0.26 标记存在且旧补丁守卫不存在。验证：plugin 481 tests、四共享包 186 tests、vscode check、
+`NODE_ENV=production` 重建与 `verify-dsh-plugin` 通过；`verify-packed-webrtc.mjs` 在 main
+上因 schemastery 新增 `@standard-schema/spec` 闭包失败（存量问题，未在本轮处理）。
+`orderIceServersForWerift` 的 TURN TCP 优先排序本轮保持不变，待真机验证后再评估。
+
+## Android Mermaid rendering (2026-11-02, Issue #255)
+
+Android 聊天 Markdown 的 ```mermaid 代码块改为图表。`scripts/build-mermaid.mjs` 将固定版本
+`mermaid@12.2.0` 与 `scripts/mermaid-renderer.js` 打包为忽略的 `src/generated/mermaid-html.ts`
+（已加入 `build:renderers`）；App 根部的单例隐藏 WebView 在首次出现 mermaid 块时才创建，
+串行渲染并按「源码 + 主题」缓存（LRU 48），源码稳定 700ms 后才渲染以避开流式中间态。
+页面 CSP 禁网络/worker，屏蔽 console、弹窗与跳转，`securityLevel: 'strict'`、`htmlLabels: false`、
+`look: 'classic'`；源码上限 20K 字符、SVG 上限 1 MiB、单图 20 秒超时，崩溃/超时重建页面。
+
+内联图用 react-native-svg 原生绘制，但其 Android 渲染器遇到无法解析的属性值会抛异常并
+使整个 App 闪退（实测 marker `orient="auto-start-reverse"`、`AlignmentBaseline` 未知值）。
+因此内联 SVG 不得透传 mermaid 输出：渲染页按白名单重建元素与属性，逐值正则校验，计算样式
+写为属性（仅写与父元素不同的值），marker/渐变提升到 `<defs>` 且其子树写完整样式。
+含 `foreignObject` 的图（journey）只走全屏查看：Modal 中 `javaScriptEnabled={false}` 的
+WebView 以 `<img src="data:image/svg+xml">` 显示原始 SVG，支持双指缩放与复制源码。
+图表与分类色板跟随亮/暗主题；7 种语言补齐 `diagram` 文案。不执行插件 JS，不改 Host/协议。
+
+本轮验证：Android check、49 文件 / 447 tests、production Hermes export（bundle 29.6 MB，
+其中 Mermaid 页面约 5.7 MB）与 diff check 通过；浏览器中 16 种图的白名单内联 SVG 均可解析，
+与原图像素差 ≤2.2%。模拟器（Android 15，WebView 124）以临时本地样例页（未提交）人工检查
+flowchart/sequence/class/state/ER/gantt/pie/mindmap/xychart 亮暗两色、journey 全屏与语法错误
+回退。未在真实 Host 会话或真机验证，未测流式过程、TalkBack、大字体与抓包。
+
+## Startup plugin update check (2026-11-02)
+
+启用状态且存在 Desktop/Web connection 服务时，插件启动时及此后每 24 小时对 npm dist-tags
+端点做一次匿名查询：npmjs.org 与 npmmirror **并发竞速**，首个有效应胜出（国内网络不再等
+npmjs 超时）。结果 `{currentVersion, latestVersion, checkedAt}` 经 `withUpdate` 合并进
+control `status`、`host.reconnect` 与 `mode.set local`，随既有 SSE 推送；失败仅记 debug
+日志，不阻塞启动。无 connection 的 dsh-TUI Host 与 disabled 插件不发起请求。semver 比较在
+client-safe 的 `version-compare.ts`（无法解析的版本比较为相等，不产生提示），host 与
+client bundle 共用。不新增配置项与自动化测试（非核心展示功能，按测试政策）。
+
+UI 展示：侧栏 Remote 入口（保持 0.6.0 的内容自适应几何）在本地版本落后时套用宿主
+DesktopUpdateIndicator 的品牌色外观（8% 底 + 20% 描边），标准形态标签右侧追加
+「⬆ {latest}」后缀，轨/紧凑形态为官方同款 6px 品牌色圆点；Remote 弹窗账号 footer 行内
+追加「{latest} 可用」品牌色链接（title 为完整版本信息），点击直达 GitHub Releases；
+主机列表与所选主机详情对 `clientVersion` 落后的远端主机追加「⬆ 可更新」文本标记。
+不写「设置 → 插件」指引：官方一键更新仅覆盖 npm registry 安装，GitHub/本地安装无入口，
+且第三方插件无法直达宿主设置分区（launcher 座位官方占用，`openSettings()` 无分区参数）。
+
+客户端 statusFeed 订阅由「弹窗打开时」改为挂载即生效：此前侧栏入口只在挂载时拉一次
+status，启动后的 registry 结果推送到不了按钮，直至打开弹窗才重放最新状态。
+
+本轮验证：Plugin check/build（bundle 字节复现）、DSH bundle 校验、67 文件 / 469 tests、
+checker 注入 fetch 冒烟与 compareVersions 语义 15 项（scratch，未提交）通过；以临时
+0.5.90 演示构建经 tarball 安装到真实 Desktop profile，人工确认启动数秒内入口自动出现
+更新态、弹窗 footer 链接与跳转正常。未做跨设备回归验收。
+## Remote popup portals (2026-11-01, Issue #222)
+
+Workspace、连接线路、Host reference 和旧模式切换面板复用宿主 ReactDOM Portal，
+挂到 document.body，避开 shell 祖先 filter/transform 的包含块与层叠上下文。
+宿主未提供 Portal 或 body 不可用时保留原位渲染。遮罩、关闭行为和状态条插槽不变。
+Plugin check、build、DSH bundle 与 diff check 通过，样式检测无发现；未在 Windows
+壁纸插件环境做交互验收，body/html 自身的 filter 不在本次修复覆盖范围。
+
+## Self-hosted heartbeat recovery (2026-10-31)
+
+AdaptiveTransport 将自部署 Server 的精确 close `4001 / CONNECTION_FAILED` 视为可重试；
+其余应用关闭原因不放宽，恢复沿用成员/固定公钥校验与新 Noise 握手，不重放业务请求。
+回归覆盖八小时睡眠后的延迟 close、随后三十分钟离线的封顶退避与恢复；时间均为模拟。
+全仓 check、985 tests、串行生产 build、DSH bundle 与 diff check 通过；既有 Metro
+noble/hashes exports fallback 警告保留。Desktop 0.6.0 仅回移该 classifier 的实测中，
+冻结本机 SSH 转发三分钟，恢复后约 2.3 秒自动建立新连接并刷新原会话；Host 未重启。
+这不是整机休眠/隔夜稳定性验收，未新增 Android 原生或其他平台的本轮验证。
+
 ## ApiProxy retirement (2026-10-25)
 
 Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` ApiProxy 兼容。请使用提供官方 Typert Remote carrier 的 Host；仅提供 ApiProxy 或不支持能力发现的旧 Host 会被拒绝，不再降级。CodeX/ACP 保留独立数据面，Desktop 内存投影统一使用 Typert。本轮不改独立 VS Code Client 或独立 Remote Web 仓库。
 旧日期的 rc.2 验证记录仅为历史，不代表当前兼容性。共享 protocol/client-core 保留 VS Code 使用的历史类型和检测分支，不能据此重新启用 Host 或 Android ApiProxy。
 
 本轮验证：全仓 check 与串行生产 build（含 Android Hermes export）、Plugin 57 文件 / 397 tests、Android 35 文件 / 201 tests、DSH bundle 校验、根 GitHub 入口加载与 npm dry-run 检查通过；发布包不包含退役模块。未验证 APK、原生真机或本轮加密跨设备 E2E。Metro noble/hashes exports fallback 警告仍存在。
+
+## Android plugin management (2026-10-27)
+
+Android 新增插件页（工作区标题栏拼图图标与会话侧栏「插件」），只调用 Host 已放行的官方
+pluginManager list/setBundleEnabled/setPluginEnabled 与 settings/describe/mutate，不改 Host allowlist。
+分组为「Remote 适配」（客户端原生渲染的插件，`REMOTE_ADAPTED_PLUGINS`，未安装也提示）、已安装、实验性；
+基础/运行时 bundle 与缺失目录项不显示。设置 namespace 为 entry 的 `patchId`（非 `include:` entryId），
+官方 settings 只暴露 Schemastery `volatile` 字段；表单按 schema 生成，保存带 expectedRevision，
+「恢复默认」对用户覆盖字段执行 unset。deepseek-harness-intelligent-ui 同步将 Widget 策略字段改为
+volatile（读取改为惰性 getter）并加 zh-CN 描述。插件只能在电脑安装：Remote 适配插件未安装或版本过旧（无可编辑设置）时，详情页给出可复制的
+Desktop/CLI 安装命令；`scripts/install.sh` 支持 `INTELLIGENT_UI=1` 安装到同一 profile，README 增加推荐搭配说明。模拟器 + 真实 web profile Host 验证：列表/图标/分组、
+保存并持久化、越界本地拦截、恢复默认、插件停用/启用（profile 恢复原状）。未验证真机、Desktop profile
+（其 intelligent-ui 为独立旧副本）与暗色模式人工烟测。
+
+## Android visual refresh (2026-10-29)
+
+重做 Android 前端视觉，仅改前端样式与布局，不改 Host/Server、协议或状态逻辑。
+色板改为 DeepSeek 黑 / 蓝 / 白（`#4D6BFE`），新增 grouped/elevated/inverse token 与 xl/xxl 圆角；
+TopBar 改为浮动圆钮 / 胶囊，新增 GroupCard/GroupRow/FilterChip，新增平滑 Toggle 组件（`src/ui/toggle.tsx`）全量替代 8 处旧 Switch 控件；
+Settings 改为分组列表、外观预览卡与底部红色高危操作行（退出登录/重置配置）；
+列表全面推行扁平设计：首页设备卡与最近访问使用半透明白色卡片及线性图标，工作区与侧边栏采用扁平文件夹列表（chevron、文件夹、名称、计数）；
+侧边栏改为大标题 + 图标导航 + 右下浮动「新建对话」黑色胶囊（清理了旧版标题下方的状态/版本行）；聊天欢迎页突出蓝鲸 Logo 与大标题（不设上下文胶囊）。
+新增文案仅 `devices.summary`，已补齐 7 种语言。详见 docs/design/DESIGN.md。
+
+2026-10-30 配色调整：浅色画布与 splash 使用 `#F0F4FD`；卡片使用独立 `card` token，
+浅色白色 60%、深色白色 5%，不设置容器整体 opacity。`surface` 继续用于不透明浮层和输入框。
+设备滑动行使用卡片与画布的合成实色 `cardOpaque`，避免下方红色删除层透出；其他卡片直接使用 RGBA。
+本轮共享包/Plugin build、Android renderer 构建（Intelligent UI 未安装，走安全 fallback）、
+workspace data-plane 校验、`tsc --noEmit`、DSH bundle 与 diff check 通过。因宿主默认 pnpm 11
+与仓库 pnpm 9 安装布局不一致，check 的各子步骤直接执行；未增加 UI 测试、构建 APK 或真机验收。
+
+本轮验证：Android check（含 tsc）与 42 文件 / 271 tests 通过；模拟器（debug 包 + Metro）浅色/深色
+逐页人工检查。未构建 APK，未验证真机、平板/横屏、大字体、TalkBack；未在会话中实际发送消息，
+用户气泡、工具卡与审批卡新样式未经真实对话验收。
 
 ## WebRTC runtime probe isolation (2026-10-25)
 
@@ -66,6 +180,12 @@ docs/
 `dsh.bundle.patch`、Host/Client exports、CLI bin 和 `cordis.patch.yml`；GitHub 默认禁用
 构建脚本，所以根 `index.js`、`packages/plugin/dist/index.js`、`client.github.js` 与
 `packages/plugin/bin/ds-harness-remote.js` 是需要提交的发布入口。
+
+根包不标记 `private: true`，兼容仅读取根清单、遇到 private 就跳过 npm 查询的插件索引。
+根包与 npm 包保持相同 name/version，但安装入口布局不同；npm 发布仍只能由 release
+workflow 在 `packages/plugin` 执行，不在仓库根目录运行 `npm publish`。
+实际发布包通过标准 `repository.directory: "packages/plugin"` 标明源码位置，
+根包的 repository 不带 directory，以保持 GitHub 安装入口语义。
 
 Plugin bundle 构建统一 esbuild 的依赖模块路径标签，避免 pnpm isolated / hoisted 安装布局
 造成已提交 JS 差异；保留 source map 的真实路径以便本地调试。CI 重建后必须同时检查
@@ -146,9 +266,11 @@ macOS 仍使用普通用户，优先复用 Desktop 官方 launcher，否则已�
 Desktop 默认保留的 `desktop` profile，只能由其官方 launcher 管理。一次性 Token 复用官方身份/凭据与既有注册码接口，
 不得记录或作为持久设备凭据使用。Windows 用户使用官方插件管理或已有 Harness 的官方命令。
 卸载先按安装指南停用 Linux 系统服务，再通过官方插件管理或 `dsh plugin remove` 移除 Remote；不自动删除 runtime、
-凭据或迁移旧 service。当前待发布版本为 `0.5.19`，Android `versionCode` / Expo iOS `buildNumber` 为 `64`；发版准备已将安装说明同步到 `ds-harness-remote@0.5.19`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
+凭据或迁移旧 service。当前待发布版本为 `0.6.2`（跳过 0.6.1，未发布过），Android `versionCode` / Expo iOS `buildNumber` 为 `70`；发版准备已将安装说明同步到 `ds-harness-remote@0.6.2`，Tag、npm 与 GitHub Release 的发布状态以实际发布结果为准。
 
 ## Validation Baseline
+
+以下为历史验收快照，不代表当前源码基线。最近构建结果见文末 `Post-merge 0.5.20 rebuild (2026-10-27)`；当前兼容范围见 `docs/compatibility.zh.md`。
 
 截至 2026-09-16：
 
@@ -224,6 +346,7 @@ fixtures 全部保留，按操作及 Control frame 类型注册为 24 个契约�
 
 ## Documentation Rules
 
+- 调试、验收截图与录屏不提交到仓库；本地留档使用已忽略的 `artifacts/` 或 `docs/screenshots/`。README 使用的 `docs/images/` 展示图与应用运行所需图片资源保留。
 - 对外发布说明与新版本 Changelog 只写用户可感知的功能、修复、兼容性变化和贡献者；不附测试数量、构建命令、bundle 校验、未验收清单或构建警告等验证流水账。内部验证结果与边界保留在 AGENTS.md / TODO。
 - `README.md`：面向用户的默认英文入口，也是 GitHub 默认 README；写项目介绍、特性、安全边界、Plugin/Client 使用和开源 Server 自部署入口。
 - `README.en.md`：保留的英文入口，与默认 `README.md` 保持内容一致。
@@ -275,7 +398,7 @@ workspace 全量 check 在 Server web 类型检查处停滞，不作为通过记
 原生键盘、TalkBack 和跨设备行为尚未验证。
 
 Android 只读预览（Issue #72）：`workspace-file-preview.ts` 复用官方 stat/readBytes 和
-Office generation/render，校验文件版本、分块、大小和取消；图片/PDF 上限 8 MiB，Office
+Office generation/render，校验文件版本、分块、大小和取消；图片上限 8 MiB、PDF 上限 16 MiB，Office
 源文件上限 50 MiB。PDF.js 固定版本与 xterm 一起经 `build:renderers` 本地打包；prepare/check、
 CI/release APK 均需生成忽略的 renderer 源文件。PDF 仅单页画布预览，无脚本、外链、导出、
 明文文件缓存或文本选择；不增加 Host 端点或写权限。Office 单次调用使用更长客户端超时，
@@ -649,7 +772,7 @@ Android production Hermes export 与 diff 检查通过；保留既有 Metro nobl
 内置自动化任务沿用官方 Typert carrier，固定放行 schedule/list、catalog、history、update、delete。
 更新保留官方 expected record 冲突校验与 session/task 绑定，Remote 不实现第二套调度器或持久化。
 schedule/changed 复用官方 $events；创建由会话中的 schedule_create 工具执行，不开放不存在的
-schedule/create Remote 端点。只覆盖原生 Desktop/浏览器界面，不新增 Android 管理页。
+schedule/create Remote 端点。该日期仅覆盖原生 Desktop/浏览器界面；2026-10-27 已合并 #176 的 Android 管理页，当前验收缺口见 docs/TODO.md。
 本次共享包/Plugin build、Plugin check、三个 carrier/bridge 测试文件 39 tests、DSH bundle
 校验和 git diff --check 通过；真实跨设备 UI 和多 Client 变更刷新验收仍待完成，未发布。
 
@@ -733,3 +856,53 @@ Plugin check、共享包/Plugin build、DSH bundle 校验、生产重建哈希�
 通过。真实 Desktop 更新/回滚、Windows/Electron 与跨设备 E2E 未新增验收。
 旧 generation 的依赖树不会被新插件重写；恢复旧包仍需要宿主正确识别 builtin 或使用
 官方插件管理恢复路径，不能宣称本修复覆盖所有历史回滚。
+
+## Desktop signed-out account recovery (2026-10-26)
+
+Client 的 loopback control 错误必须保留 `details.remoteCode`（优先）及外层 `code`，
+不能仅转成普通 Error 文案，否则未登录/授权失效会被当作临时网络失败，重新打开 Remote
+仍展示空主机列表与退出账号，而不显示登录入口。保持 Host 设备发现的授权拦截。
+既有核心授权矩阵补齐未登录/无归属，并贯通真实 control envelope 到 Client 解码。
+共享包及 Plugin build、Plugin check、相关 26 tests、DSH bundle 与 diff check 通过。
+本机当前窗口可显示登录页；未执行完整 Desktop 退出重启或重新登录的跨设备验收。
+
+未登录的插件设置页提供「登录账号」，通过同一插件实例的回调打开已有 Remote 登录窗口；
+Server 地址未保存时提示先保存并禁用入口。0.5.20 Plugin check/build、DSH bundle 与 diff
+check 通过；隔离浏览器加载真实 client bundle 验证入口打开登录页及地址草稿的禁用/恢复。
+纯 UI 不新增自动化测试，未完成真实账号重新登录或 Desktop 重启验收。
+
+## Post-merge 0.5.20 rebuild (2026-10-27)
+
+合并 #172、#174、#175、#176，并保留本地 Desktop 登录修复后重新构建；版本维持
+`0.5.20`，Android `versionCode` / Expo iOS `buildNumber` 为 `65`。共享包和 Plugin
+build、全仓 check、847 tests（Plugin 404、Android 250）、串行生产 build（包含
+Android Hermes）通过。Android 使用 CI 固定提交及文件哈希的 Intelligent UI renderer。
+两份已提交 Plugin bundle 重建无差异，普通与生产构建 SHA256 一致；DSH bundle、
+根 GitHub 入口加载、npm 实际打包、浏览器扩展 ZIP 与 diff check 通过。
+
+GitHub/npm packed WebRTC 的生产依赖闭包、原生不可用时的回退及双向 DataChannel
+校验通过。macOS 默认临时目录 `/var` 与 realpath `/private/var` 的差异会触发既有
+校验脚本的路径边界误判，本轮使用规范化的 `TMPDIR=/private/tmp` 运行原脚本通过。
+产物与日志保留在忽略的 `artifacts/rebuild-0.5.20/`；未新增 APK、原生真机或跨设备
+验收，未发布 npm/Tag/Release。Metro noble/hashes exports fallback 警告仍存在。
+
+## Remote Agent tools (2026-10-27)
+
+从独立功能分支选择性恢复 Remote Tools 至 main；不引入 @ 主机补全、mention control endpoints、派发或自动导航。通过官方 tools 服务注册 Host/Workspace 发现及 Harness 会话 list/read/create/send/wait/interrupt/operation 工具，复用账户授权、identity 固定及加密 carrier；CodeX/ACP 仅发现工作区。UI 已连接同一 Host 时复用连接，否则使用查询生命周期内的临时连接，不改变 UI 选择。操作回执仅内存保存，未知投递不得自动重发。保留主线 ClientReconnect 状态机。
+
+本轮 Plugin check、61 文件 / 417 tests、Plugin build、DSH bundle 校验与 git diff --check 通过。未进行本轮真实跨设备 E2E 或全仓构建。
+
+Remote Tools 文件下载：remote_download_file 只读官方 workspaceFiles/stat/readBytes，先校验 Harness workspace/session 归属，拒绝绝对路径与父级越界。固定最大 50 MiB / 分块 256 KiB，校验版本、大小、offset/eof，取消/失败删除临时下载目录。本机 Downloads/dsh-remote-* 私有独立目录保存，不覆盖文件，不把内容放入工具返回。此本机下载写入按本轮用户明确要求实现，不增加 Host 写入权限。
+
+Remote upload tool (2026-10-27)：remote_upload_file 仅支持 Harness，先验证 Host/workspace/session 归属，再读取插件运行机器的绝对 localPath，拒绝最终路径符号链接和非普通文件。沿用 workspace.upload.open/chunk/commit/abort 专用上传协议、20 MiB / 64 KiB 上限与 Host 不覆盖发布规则。使用 operationId 内存回执去重，提交结果不确定返回 unknown，不自动重发。返回路径与元数据，不返回文件内容。不增加通用 Host filesystem RPC。
+
+Remote Tools 大文件上传：实际 LAN / 直连 P2P 最大 1 GiB（1024³ bytes），TURN / Relay / unknown 保持 20 MiB；Host 从认证 channel.mode 的动态 getter 取得路径，open/chunk/commit 复查，回退中继后拒绝大文件并清理临时数据；Client 同步检查 getStats().mode。64 KiB 分块不变，工具总超时 1 小时。旧 Host 仍可能按 20 MiB 拒绝。下载限额未调整。
+
+## First-install Remote authorization view (2026-10-27)
+
+Remote 窗口先通过 loopback `client.authorization.status` 只读检查本地 Client 凭据，
+不刷新凭据、不注册设备、不发起 Server 请求。无凭据显示登录；有凭据再发现 Host，
+成功后展示列表。首次检查期间保持未决状态；网络或本地读取失败展示错误并允许刷新，
+保留已知列表，不将失败解释为退出登录；明确授权错误码才回登录。空主机文案仅用于
+成功的空列表，不用于请求失败。Plugin check、client-runtime 17 个核心测试、build、
+DSH bundle 与 diff check 通过；未新增 Windows 首次安装或跨设备验收。

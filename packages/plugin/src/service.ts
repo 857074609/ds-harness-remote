@@ -140,7 +140,7 @@ export class HostPluginRuntime {
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        )),
+        ), undefined, context.transportMode),
       )
     }, this.logger)
   }
@@ -243,6 +243,9 @@ export class HostPluginRuntime {
     const listen = this.directServer?.listenAddress()
     return {
       ...(this.identity === undefined ? {} : { deviceId: this.identity.deviceId }),
+      // Direct-connect Host: there is no relay Server to configure against, so
+      // `configured` is always true and the status derives from the built-in
+      // listener plus the local credential store.
       configured: true,
       online: this.directServer !== undefined,
       reconnecting: false,
@@ -404,7 +407,7 @@ export class HostPluginRuntime {
     for (const backend of this.acp.enabledBackends()) {
       types.push({
         id: backend,
-        name: backend === 'claude' ? 'Claude' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
+        name: backend === 'claude' ? 'Claude' : backend === 'hermes' ? 'Hermes' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend),
       })

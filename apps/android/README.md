@@ -82,16 +82,21 @@ reads are cancelled, and their late results cannot replace the selected conversa
 Large Codex tool results load when expanded on supporting Hosts; older Hosts retain the
 existing bounded-transfer path.
 
-Text drafts, favorites and reading anchors are local to the server/account/Host identity.
-Text previews are encrypted with a device-local SecureStore key: the 12 most recently visited
-conversations retain up to 16 confirmed text messages and 128 KiB each. Image drafts last only
+Text drafts, favorites, reading anchors and recent visits are stored encrypted and isolated by
+server/account/Host identity. Conversation text previews are no longer persisted; hydration
+removes legacy previews while preserving drafts and preferences. Image drafts remain in memory
 for the current process. Approval handles, pending sends, permissions and tool output are not
-saved as previews. They are not an offline task queue or a copy of full Host history.
+persisted as conversation previews.
 
 Settings offers optional last-conversation restoration (off by default), completion/live-input
-notifications, system notification settings and preview cleanup. Notifications require a live
-connection and Android permission; the app does not add a push service. Sign-out and local
-reset clear this private browsing state. Clearing previews alone keeps drafts and favorites.
+notifications and system notification settings. Notifications require a live connection and
+Android permission; the app does not add a push service. Sign-out and local reset clear private
+browsing state. There is no separate conversation-preview cleanup control.
+
+The Host sidebar includes automation tasks: search and filter active/inactive tasks, inspect
+rules and records, delete a task, and open its session. New tasks are created through a
+conversation with the Host's native scheduling tool, not a separate mobile scheduler.
+Native-device and cross-device acceptance of this recently merged interface remains pending.
 
 ## Development
 
@@ -190,7 +195,7 @@ and deep Doze can still suspend networking; a foreground service and wake lock d
 the app from those policies. If necessary, allow notifications and unrestricted battery use in
 Android app settings. Long screen-off/background behavior still requires device validation.
 
-Harness conversations expose **Files** and **Terminal** from `+` → **Tool access** through the Host's fixed official Typert allowlist, requiring the native APIs in DSH 0.1.6-alpha.2 or later. Files lists workspace directories and previews UTF-8 text in 200-line pages without mutations; its title-bar Back returns from a file to its directory and closes the panel only at the workspace root, and refresh stays in the title bar. PNG/JPEG/GIF/WebP images and PDFs use bounded `workspaceFiles/stat` / `readBytes` reads, with size, offset, version, and content validation. DOC/DOCX/XLS/XLSX/PPT/PPTX use the Host's existing `officeToPdf` service, when available, and the same PDF viewer. The app allows up to 8 MiB per binary preview and 50 MiB per Office source. Unsupported binary formats are not opened as text; HTML and SVG are never executed.
+Harness conversations expose **Files** and **Terminal** from `+` → **Tool access** through the Host's fixed official Typert allowlist, requiring the native APIs in DSH 0.1.6-alpha.2 or later. Files lists workspace directories and previews UTF-8 text in 200-line pages without mutations; its title-bar Back returns from a file to its directory and closes the panel only at the workspace root, and refresh stays in the title bar. PNG/JPEG/GIF/WebP images and PDFs use bounded `workspaceFiles/stat` / `readBytes` reads, with size, offset, version, and content validation. DOC/DOCX/XLS/XLSX/PPT/PPTX use the Host's existing `officeToPdf` service, when available, and the same PDF viewer. The app allows up to 8 MiB per image preview, 16 MiB per PDF preview, and 50 MiB per Office source. Unsupported binary formats are not opened as text; HTML and SVG are never executed.
 
 PDF.js is pinned and bundled into a local, navigation-blocked WebView with no external resources, PDF scripts, links, forms, or downloads. Documents stay in memory: there is no app-managed plaintext file cache or external viewer handoff. Only one page is rendered at a time with a bounded canvas. Office conversions get a longer client request timeout, but Host limits still apply. Large conversion responses use the existing transfer carrier; mobile limits do not change the Host conversion limits. Encrypted PDFs and text selection in the PDF canvas are not supported. The bounded text overlay is best-effort; TalkBack still needs device validation. External CMaps and WebAssembly decoders are not bundled, so some legacy CJK PDFs or JPEG2000 images may render incompletely. Missing Host fonts are shown as a layout warning. Images are capped at 8192 pixels per side and 16 million pixels total. Closing or navigating away cancels pending reads and discards preview state.
 

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatedEllipsis } from '../ui/animated-ellipsis'
 import * as Haptics from 'expo-haptics'
 import { AccessibilityInfo, ActivityIndicator, Alert, Animated, BackHandler, Easing, PanResponder, Pressable, StyleSheet, Text, View } from 'react-native'
-import { Archive, ArrowLeft, ChevronRight, CircleCheck, Code2, Laptop, MessageSquareText, MoreVertical, ShieldCheck, Sparkles, Trash2, X } from 'lucide-react-native'
+import { Archive, ArrowLeft, Check, ChevronRight, Code2, FolderOpen, Laptop, MessageSquareText, Monitor, MoreVertical, Pencil, Server, ShieldCheck, Sparkles, Star, Trash2, X, type LucideIcon } from 'lucide-react-native'
 import { useAppStore } from '../state/store'
 import type { ConnectionProbeTransport, ConnectionStage, RemoteDevice, RemoteSession, WorkspaceShortcut } from '../types'
 import { workspaceStableKey } from '../lib/workspace-key'
@@ -11,6 +11,7 @@ import {
   BlurHeaderFrame,
   Button,
   EmptyState,
+  GroupCard,
   IconButton,
   KeyValue,
   LoadingRows,
@@ -20,13 +21,14 @@ import {
   StatusBadge,
   TopBar,
 } from '../ui/components'
-import { radius, spacing, type } from '../ui/theme'
+import { floatingShadow, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { resolveSessionDisplayTitle } from './session-title'
+import { ConnectionHero } from './connection-hero'
 
 export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
   onDevice: (device: RemoteDevice) => void
@@ -104,17 +106,20 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                 {shortcuts.length > 0 && onShortcut !== undefined && (
                   <View>
                     <SectionTitle>{zhCN.devices.favorites}</SectionTitle>
-                    <View style={styles.favoriteLinks}>
-                      {shortcuts.map(shortcut => (
-                        <View key={`${shortcut.deviceId}:${shortcut.key}`} style={styles.favoriteRow}>
+                    <GroupCard style={styles.flatCard}>
+                      {shortcuts.map((shortcut, index) => (
+                        <View key={`${shortcut.deviceId}:${shortcut.key}`} style={[styles.favoriteRow, index > 0 && styles.favoriteRowDivider]}>
                           <Pressable
                             accessibilityRole="link"
                             accessibilityLabel={zhCN.devices.openFavorite(shortcutTitle(shortcut), shortcutDeviceName(shortcut))}
                             onPress={() => onShortcut(shortcut)}
                             style={({ pressed }) => [styles.favoriteLink, pressed && styles.favoriteLinkPressed]}
                           >
-                            <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
-                            <Text style={styles.favoriteLinkMeta} numberOfLines={1}>· {shortcutDeviceName(shortcut)}</Text>
+                            <Star size={19} color={colors.primary} fill={colors.primary} strokeWidth={1.8} />
+                            <View style={styles.favoriteLinkContent}>
+                              <Text style={styles.favoriteLinkText} numberOfLines={1}>{shortcutTitle(shortcut)}</Text>
+                              <Text style={styles.favoriteLinkMeta} numberOfLines={1}>{shortcutDeviceName(shortcut)}</Text>
+                            </View>
                           </Pressable>
                           <Pressable
                             accessibilityRole="button"
@@ -127,11 +132,14 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                           </Pressable>
                         </View>
                       ))}
-                    </View>
+                    </GroupCard>
                   </View>
                 )}
                 <SectionTitle action={<RefreshAction refreshing={refreshing} onPress={() => void refresh()} />}>
                   {zhCN.devices.myDevices}
+                  {deviceRows.length > 0 && (
+                    <Text style={styles.deviceSummary}>{'  '}{zhCN.devices.summary(devices.length, devices.filter(device => device.online).length)}</Text>
+                  )}
                 </SectionTitle>
               </>
             : <View style={styles.pageHeading}>
@@ -150,10 +158,11 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                   title={zhCN.devices.emptyTitle}
                   body={zhCN.devices.emptyBody}
                 />
-              : <View>{deviceRows.map(({ device, exiting }) => (
+              : <GroupCard style={styles.deviceCard}>{deviceRows.map(({ device, exiting }, index) => (
                   <SwipeableDeviceRow
                     key={device.deviceId}
                     device={device}
+                    first={index === 0}
                     open={openRowId === device.deviceId}
                     exiting={exiting}
                     animateIn={!initialDeviceIds.current.has(device.deviceId)}
@@ -169,7 +178,7 @@ export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {
                     onRemove={() => removeDevice(device)}
                     onExited={() => forgetLeaving(device.deviceId)}
                   />
-                ))}</View>}
+                ))}</GroupCard>}
         </Screen>
       </BlurHeaderFrame>
       {isHome && (
@@ -246,7 +255,8 @@ const SWIPE_SPRING = { damping: 18, stiffness: 220, mass: 0.9, useNativeDriver: 
 const nudge = (value: Animated.Value, toValue: number, duration: number) =>
   Animated.timing(value, { toValue, duration, easing: Easing.inOut(Easing.quad), useNativeDriver: true })
 
-function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onExited }: {
+function SwipeableDeviceRow({ device, first = true, open, exiting, animateIn, locked, onOpenChange, onPress, onRemove, onExited }: {
+  first?: boolean
   device: RemoteDevice
   open: boolean
   exiting: boolean
@@ -407,7 +417,7 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
       }}
     >
       <Animated.View style={[styles.swipeRow, { opacity: presence, transform: [{ translateY: enterShift }] }]}>
-        <View style={styles.swipeDeleteAction}>
+        <View style={[styles.swipeDeleteAction, styles.swipeDeleteActionCard]}>
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={zhCN.devices.forgetTitle(device.name)}
@@ -423,8 +433,8 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
             </Animated.View>
           </Pressable>
         </View>
-        <Animated.View style={[styles.swipeContent, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
-          <View style={styles.listRow}>
+        <Animated.View style={[styles.swipeContent, styles.swipeContentCard, { transform: [{ translateX: offset }] }]} {...responder.panHandlers}>
+          <View style={[styles.deviceRow, !first && styles.deviceRowDivider]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={device.name}
@@ -432,22 +442,29 @@ function SwipeableDeviceRow({ device, open, exiting, animateIn, locked, onOpenCh
               onAccessibilityAction={event => { if (event.nativeEvent.actionName === 'delete') void requestRemove() }}
               disabled={busy || exiting}
               onPress={onPress}
-              style={({ pressed }) => [styles.swipeContentInner, pressed && styles.listRowPressed, busy && styles.swipeContentBusy]}
+              style={({ pressed }) => [styles.deviceRowInner, pressed && styles.listRowPressed, busy && styles.swipeContentBusy]}
             >
-              <View style={styles.rowIcon}><Laptop size={21} color={colors.primary} /></View>
-              <View style={styles.rowCopy}>
+              {(() => {
+                const PlatformIcon = platformIcon(device.platform)
+                return (
+                  <View style={styles.deviceGlyph}>
+                    <PlatformIcon size={22} color={colors.ink} strokeWidth={1.8} />
+                  </View>
+                )
+              })()}
+              <View style={styles.deviceRowCopy}>
                 <View style={styles.rowTitleLine}>
-                  <Text style={styles.rowTitle} numberOfLines={1}>{device.name}</Text>
+                  <Text style={styles.deviceRowName} numberOfLines={1}>{device.name}</Text>
                   <Text style={[styles.deviceStatus, device.online && styles.deviceStatusOnline]}>
                     {device.online ? zhCN.status.online : zhCN.status.offline}
                   </Text>
                 </View>
                 <View style={styles.rowDetailLine}>
-                  <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{deviceSubtitle(device)}</Text>
-                  <Text style={styles.rowMeta} numberOfLines={1}>{lastSeenText(device.lastSeenAt)}</Text>
+                  <Text style={styles.deviceRowSubtitle} numberOfLines={1}>{deviceSubtitle(device)}</Text>
+                  <Text style={styles.deviceRowMeta} numberOfLines={1}>{lastSeenText(device.lastSeenAt)}</Text>
                 </View>
               </View>
-              <ChevronRight size={20} color={colors.subtle} />
+              <ChevronRight size={18} color={colors.subtle} />
             </Pressable>
           </View>
         </Animated.View>
@@ -467,7 +484,9 @@ export function useLiveSessionStatus(enabled = true): void {
   }, [phase, enabled])
 }
 
-export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, title, meta, onOpenChange, onPress, onArchive }: {
+export function SwipeableSessionRow({ session, open, locked, busy, opening = false, compact = false, first = false, title, meta, onOpenChange, onPress, onArchive }: {
+  /** Compact rows draw a divider above every row but the first in a folder. */
+  first?: boolean
   session: RemoteSession
   open: boolean
   locked: boolean
@@ -641,21 +660,22 @@ export function SwipeableSessionRow({ session, open, locked, busy, opening = fal
                   : (compact
                     ? <View style={styles.compactStatusSlot}><SessionIcon size={17} color={colors.muted} /></View>
                     : <View style={styles.rowIcon}><SessionIcon size={21} color={colors.primary} /></View>)}
-            <View style={compact ? styles.compactSessionCopy : styles.rowCopy}>
+            <View style={compact ? [styles.compactSessionCopy, !first && styles.compactSessionDivider] : styles.rowCopy}>
               <View style={styles.rowTitleLine}>
                 <Text style={compact ? styles.compactSessionTitle : styles.rowTitle} numberOfLines={1}>{displayTitle}</Text>
                 {!compact && running && <StatusBadge status="running" />}
+                {compact && (opening
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <Text style={[styles.compactSessionMeta, running && styles.compactSessionRunning]}>{running ? zhCN.status.running : displayMeta}</Text>)}
               </View>
-              {compact
-                ? <Text style={styles.compactSessionMeta}>{running ? zhCN.status.running : displayMeta}</Text>
-                : <View style={styles.rowDetailLine}>
-                    <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
-                    <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
-                  </View>}
+              {!compact && <View style={styles.rowDetailLine}>
+                <Text style={[styles.rowSubtitle, styles.rowInlineSubtitle]} numberOfLines={1}>{session.cwd}</Text>
+                <Text style={styles.rowMeta} numberOfLines={1}>{displayMeta}</Text>
+              </View>}
             </View>
-            {opening
+            {!compact && (opening
               ? <ActivityIndicator size="small" color={colors.primary} />
-              : <ChevronRight size={compact ? 17 : 20} color={colors.subtle} />}
+              : <ChevronRight size={20} color={colors.subtle} />)}
           </Pressable>
         </View>
       </Animated.View>
@@ -782,68 +802,74 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
           <IconButton label={zhCN.common.back} icon={ArrowLeft} onPress={cancel} />
         </View>
       )}
-      <Screen>
+      <Screen fill>
         <View style={[styles.connectionHero, compactHero && styles.connectionHeroCompact]}>
-          <View style={styles.connectionDeviceIcon}><Laptop size={30} color={colors.primary} /></View>
+          <ConnectionHero
+            secured={currentIndex > connectionStages.indexOf('secure')}
+            ready={currentStage === 'ready'}
+            failed={failed}
+          />
           <View style={styles.connectionHeading}>
-            <Text accessibilityLiveRegion="polite" style={styles.connectionStatus}>
-              {currentStage === 'ready' ? zhCN.devices.connectionReady : zhCN.devices.connecting}
-              {currentStage !== 'ready' && !failed && <AnimatedEllipsis />}
-            </Text>
-            <Text style={styles.connectionDeviceName} numberOfLines={2}>{device.name}</Text>
-            <Text style={styles.connectionVersions} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
-              {`${zhCN.devices.harnessShort} ${device.harnessVersion ?? zhCN.devices.unknownVersion} | ${zhCN.devices.pluginShort} ${device.clientVersion ?? zhCN.devices.unknownVersion}`}
-            </Text>
+            <View style={styles.connectionStatusLine}>
+              <View style={[styles.connectionStatusDot, currentStage === 'ready' && styles.connectionStatusDotReady, failed && styles.connectionStatusDotFailed]} />
+              <Text accessibilityLiveRegion="polite" style={[styles.connectionStatus, failed && styles.connectionStatusFailed]}>
+                {failed ? zhCN.devices.connectionInterrupted : currentStage === 'ready' ? zhCN.devices.connectionReady : zhCN.devices.connecting}
+                {currentStage !== 'ready' && !failed && <AnimatedEllipsis />}
+              </Text>
+            </View>
+            <Text style={styles.connectionDeviceName} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.7}>{device.name}</Text>
+            <View style={styles.connectionVersions}>
+              <View style={styles.versionItem}>
+                <Text style={styles.versionLabel}>{zhCN.devices.harnessShort}</Text>
+                <Text style={styles.versionValue} numberOfLines={1}>{device.harnessVersion ?? zhCN.devices.unknownVersion}</Text>
+              </View>
+              <View style={styles.versionItem}>
+                <Text style={styles.versionLabel}>{zhCN.devices.pluginShort}</Text>
+                <Text style={styles.versionValue} numberOfLines={1}>{device.clientVersion ?? zhCN.devices.unknownVersion}</Text>
+              </View>
+            </View>
           </View>
         </View>
 
         <View style={styles.connectionSteps}>
           {connectionStages.map((stage, index) => {
-            const completed = index < currentIndex
+            const done = index < currentIndex
             const active = index === currentIndex && !failed
             const stepFailed = index === currentIndex && failed
             const copy = zhCN.devices.connectionSteps[stage]
             return (
               <View key={stage} style={styles.connectionStep}>
                 <View style={styles.stepMarker}>
-                  <View style={[
-                    styles.stepCircle,
-                    completed && styles.stepCircleComplete,
-                    active && styles.stepCircleActive,
-                    stepFailed && styles.stepCircleFailed,
-                  ]}>
-                    {completed
-                      ? <CircleCheck size={18} color={colors.white} />
+                  <View style={[styles.stepCircle, done && styles.stepCircleComplete, active && styles.stepCircleActive, stepFailed && styles.stepCircleFailed]}>
+                    {done
+                      ? <Check size={18} color={colors.white} />
                       : active
                         ? <ActivityIndicator size="small" color={colors.primary} />
                         : <View style={[styles.stepDot, stepFailed && styles.stepDotFailed]} />}
                   </View>
-                  {index < connectionStages.length - 1 && <View style={[styles.stepConnector, completed && styles.stepConnectorComplete]} />}
+                  {index < connectionStages.length - 1 && <View style={[styles.stepConnector, done && styles.stepConnectorComplete]} />}
                 </View>
                 <View style={styles.stepCopy}>
-                  <Text accessibilityLiveRegion={active ? 'polite' : 'none'} style={[styles.stepTitle, (active || completed) && styles.stepTitleCurrent]}>{copy.title}</Text>
+                  <Text accessibilityLiveRegion={active ? 'polite' : 'none'} style={[styles.stepTitle, (active || done) && styles.stepTitleCurrent]}>{copy.title}</Text>
                   {(stage !== 'transport' || connectionProbeOrder.length === 0) && <Text style={styles.stepBody}>{copy.body}</Text>}
                   {stage === 'transport' && connectionProbeOrder.length > 0 && (
                     <View style={styles.progressRoute}>
                       {connectionProbeOrder.map((transport, probeIndex) => (
                         <View key={`${transport}:${probeIndex}`} style={styles.progressRouteSegment}>
-                          {probeIndex > 0 && <Text style={styles.progressRouteArrow}>→</Text>}
-                          <Text style={[
-                            styles.progressRouteLabel,
-                            selectedProbe === transport && styles.progressRouteLabelActive,
-                          ]}>
+                          {probeIndex > 0 && <ChevronRight size={12} color={colors.subtle} />}
+                          <Text style={[styles.progressRouteLabel, selectedProbe === transport && styles.progressRouteLabelActive]}>
                             {probeTransportDiagnosticLabel(transport)}
                           </Text>
                         </View>
                       ))}
                     </View>
                   )}
+                  {stepFailed && connection.error !== undefined && <Text style={styles.stepBodyFailed}>{connection.error}</Text>}
                 </View>
               </View>
             )
           })}
         </View>
-
         {failed && (
           <View style={styles.connectionError}>
             <Text style={styles.connectionErrorTitle}>{zhCN.devices.connectionInterrupted}</Text>
@@ -851,6 +877,7 @@ export function ConnectionScreen({ device, onBack, onConnected }: {
             <Button label={zhCN.devices.retryConnection} variant="secondary" onPress={retry} />
           </View>
         )}
+        <View style={styles.connectionBottomSpace} />
       </Screen>
     </View>
   )
@@ -885,7 +912,7 @@ export function DeviceDetailScreen({ device, onBack, onConnect, onWorkspaces }: 
         <Screen>
           <View style={[styles.contentColumn, landscape && { maxWidth: contentMaxWidth }]}>
             <View style={styles.deviceHero}>
-              <View style={styles.deviceIcon}><Laptop size={28} color={colors.primary} /></View>
+              <View style={styles.deviceIcon}>{(() => { const PlatformIcon = platformIcon(device.platform); return <PlatformIcon size={28} color={colors.primary} strokeWidth={1.8} /> })()}</View>
               <View style={styles.deviceHeroCopy}>
                 <Text style={styles.deviceName}>{device.name}</Text>
               </View>
@@ -1000,11 +1027,16 @@ function platformName(platform: string): string {
   return names[platform] ?? platform
 }
 
+function platformIcon(platform: string): LucideIcon {
+  if (platform === 'win32') return Monitor
+  if (platform === 'linux') return Server
+  return Laptop
+}
+
 function deviceSubtitle(device: RemoteDevice): string {
   return [
     platformName(device.platform),
     device.harnessVersion,
-    device.clientVersion,
   ].filter(Boolean).join(' · ')
 }
 
@@ -1094,25 +1126,44 @@ function createStyles(colors: ThemeColors) {
   subtitle: { ...type.small, color: colors.muted, marginTop: 2 },
   homeFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.md },
   homeFooterText: { ...type.small, color: colors.muted, textAlign: 'center' },
-  favoriteLinks: { gap: spacing.xxs },
-  favoriteRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  // Two fixed columns so the "· machine" text starts at the same x on every row.
-  favoriteLink: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.xxs },
-  favoriteRemove: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
+  favoriteRow: { flexDirection: 'row', alignItems: 'center', paddingRight: spacing.xs },
+  favoriteRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  favoriteLink: { flex: 1, minWidth: 0, minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingLeft: spacing.md, paddingRight: spacing.xs },
+  favoriteRemove: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
   favoriteLinkPressed: { opacity: 0.6 },
-  favoriteLinkText: { ...type.bodyStrong, color: colors.primary, textDecorationLine: 'underline', flexGrow: 2, flexShrink: 1, flexBasis: 0 },
-  favoriteLinkMeta: { ...type.caption, color: colors.muted, flexGrow: 1, flexShrink: 1, flexBasis: 0 },
+  favoriteLinkContent: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm },
+  favoriteLinkText: { ...type.body, color: colors.ink, flex: 1, minWidth: 0 },
+  favoriteLinkMeta: { ...type.caption, color: colors.muted, maxWidth: '45%', textAlign: 'right' },
+  deviceSummary: { ...type.small, color: colors.muted, fontWeight: '500' },
+  deviceCard: { marginTop: spacing.xxs, backgroundColor: colors.card },
+  flatCard: { backgroundColor: colors.card },
+  deviceRowName: { ...type.bodyStrong, fontSize: 16, lineHeight: 22, color: colors.ink, flex: 1, minWidth: 0, marginRight: spacing.sm },
+  deviceStatus: { ...type.body, fontSize: 16, lineHeight: 22, color: colors.muted },
+  deviceStatusOnline: { color: colors.success },
+  deviceRowSubtitle: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, flex: 1, minWidth: 0, marginRight: spacing.sm },
+  deviceRowMeta: { ...type.small, fontSize: 13, lineHeight: 18, color: colors.muted, textAlign: 'right' },
   swipeRow: { position: 'relative', overflow: 'hidden' },
   swipeDeleteAction: { position: 'absolute', left: 0, right: 0, top: 6, bottom: 6, backgroundColor: colors.danger, borderRadius: radius.md, overflow: 'hidden', alignItems: 'flex-end' },
   swipeDeleteButton: { width: SWIPE_ACTION_WIDTH, height: '100%', alignItems: 'center', justifyContent: 'center' },
   swipeDeleteInner: { alignItems: 'center', justifyContent: 'center', gap: 2 },
   swipeDeleteText: { ...type.caption, color: colors.white },
   swipeContent: { backgroundColor: colors.background },
+  swipeContentCard: { backgroundColor: colors.cardOpaque },
+  // Inset so the red layer never bleeds through the card's anti-aliased corners.
+  swipeDeleteActionCard: { top: 2, bottom: 2, left: 2, right: 2, borderRadius: radius.lg },
+  deviceRow: { minHeight: 64, flexDirection: 'row' },
+  deviceRowInner: { flex: 1, flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.md, paddingRight: spacing.md, paddingVertical: spacing.md, gap: spacing.md },
+  deviceRowCopy: { flex: 1, minWidth: 0, justifyContent: 'center', gap: 3 },
+  deviceRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  deviceGlyph: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  deviceStatusPill: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  deviceStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.disabled },
+  deviceStatusDotOnline: { backgroundColor: colors.success },
   swipeContentInner: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   swipeContentBusy: { opacity: 0.55 },
   listRow: { minHeight: 82, paddingVertical: spacing.md, flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator },
   listRowPressed: { backgroundColor: colors.surface },
-  compactStatusSlot: { width: 24, alignItems: 'center', justifyContent: 'center' },
+  compactStatusSlot: { width: 24, marginRight: spacing.sm, alignItems: 'center', justifyContent: 'center' },
   statusDotFailed: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.danger },
   statusDotFailedLarge: { width: 14, height: 14, borderRadius: 7, backgroundColor: colors.danger },
   statusDotDone: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.success },
@@ -1121,27 +1172,35 @@ function createStyles(colors: ThemeColors) {
   rowCopy: { flex: 1, gap: 3 },
   rowTitleLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.xs },
   rowTitle: { ...type.bodyStrong, color: colors.ink, flex: 1 },
-  deviceStatus: { ...type.smallStrong, color: colors.muted },
-  deviceStatusOnline: { color: colors.success },
   rowDetailLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   rowSubtitle: { ...type.small, color: colors.muted },
   rowInlineSubtitle: { flex: 1 },
-  rowMeta: { ...type.caption, color: colors.subtle },
-  compactSessionContent: { backgroundColor: colors.surface },
-  compactSessionPressTarget: { minHeight: 58, borderRadius: radius.md, overflow: 'hidden', paddingHorizontal: spacing.sm, paddingVertical: spacing.sm },
+  rowMeta: { ...type.caption, color: colors.muted },
+  compactSessionContent: { backgroundColor: colors.background },
+  compactSessionPressTarget: { minHeight: 56, paddingLeft: 52, paddingRight: spacing.xs, alignItems: 'stretch' },
   compactSessionPressed: { backgroundColor: colors.surfaceStrong },
-  compactSessionRow: { paddingVertical: spacing.xxs, flexDirection: 'row', alignItems: 'center', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator },
-  compactSessionCopy: { flex: 1 },
-  compactSessionTitle: { ...type.smallStrong, color: colors.ink },
-  compactSessionMeta: { ...type.caption, color: colors.muted, marginTop: 2 },
-  connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.sm, zIndex: 2 },
-  connectionHero: { alignItems: 'center', paddingTop: spacing.xxxl, paddingBottom: spacing.xxl },
-  connectionHeroCompact: { paddingTop: spacing.lg, paddingBottom: spacing.md },
-  connectionDeviceIcon: { width: 68, height: 68, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md },
-  connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xxs },
-  connectionStatus: { ...type.smallStrong, color: colors.muted, textAlign: 'center' },
-  connectionDeviceName: { ...type.title, color: colors.ink, textAlign: 'center' },
-  connectionVersions: { ...type.small, color: colors.muted, alignSelf: 'stretch', marginTop: spacing.xs, textAlign: 'center' },
+  compactSessionRow: { flexDirection: 'row', alignItems: 'stretch' },
+  compactSessionCopy: { flex: 1, minWidth: 0, justifyContent: 'center', paddingVertical: spacing.sm },
+  compactSessionDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  compactSessionTitle: { ...type.body, fontSize: 16, color: colors.ink, flex: 1 },
+  compactSessionMeta: { ...type.small, fontSize: 13, color: colors.subtle },
+  compactSessionRunning: { color: colors.primary },
+  connectionBack: { position: 'absolute', top: spacing.sm, left: spacing.md, zIndex: 2, width: 46, height: 46, borderRadius: radius.pill, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.elevated, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator, ...floatingShadow(colors) },
+  connectionHero: { flexGrow: 1, alignItems: 'center', justifyContent: 'flex-end', paddingTop: spacing.xl, paddingBottom: spacing.xxl + spacing.xs, gap: spacing.xl },
+  connectionBottomSpace: { flexGrow: 1.4 },
+  connectionHeroCompact: { paddingTop: spacing.xs, paddingBottom: spacing.md, gap: spacing.sm },
+  connectionHeading: { alignSelf: 'stretch', alignItems: 'center', gap: spacing.xs },
+  connectionStatusLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  connectionStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  connectionStatusDotReady: { backgroundColor: colors.success },
+  connectionStatusDotFailed: { backgroundColor: colors.danger },
+  connectionStatus: { ...type.small, color: colors.muted, textAlign: 'center' },
+  connectionStatusFailed: { color: colors.danger },
+  connectionDeviceName: { ...type.title, color: colors.ink, textAlign: 'center', alignSelf: 'stretch', paddingHorizontal: spacing.xs },
+  connectionVersions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', columnGap: spacing.md, marginTop: 2 },
+  versionItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  versionLabel: { ...type.small, color: colors.subtle },
+  versionValue: { ...type.small, color: colors.muted },
   connectionSteps: { marginTop: spacing.xs },
   connectionStep: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm },
   stepMarker: { width: 30, alignItems: 'center' },
@@ -1157,26 +1216,26 @@ function createStyles(colors: ThemeColors) {
   stepTitle: { ...type.bodyStrong, color: colors.muted },
   stepTitleCurrent: { color: colors.ink },
   stepBody: { ...type.small, color: colors.muted, marginTop: 2 },
+  stepBodyFailed: { ...type.caption, color: colors.danger },
   progressRoute: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', marginTop: spacing.sm },
   progressRouteSegment: { flexDirection: 'row', alignItems: 'center' },
-  progressRouteArrow: { ...type.small, color: colors.subtle, paddingHorizontal: spacing.xxs },
   progressRouteLabel: { ...type.small, color: colors.muted },
   progressRouteLabelActive: { ...type.smallStrong, color: colors.success },
   deviceHero: { paddingVertical: spacing.xxl, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  deviceIcon: { width: 56, height: 56, borderRadius: radius.lg, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
+  deviceIcon: { width: 56, height: 56, borderRadius: radius.xl, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   deviceHeroCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.xxs },
   deviceName: { ...type.title, color: colors.ink, flexShrink: 1 },
   devicePlatform: { ...type.small, color: colors.muted, maxWidth: '30%', flexShrink: 1, textAlign: 'right' },
-  connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.lg, backgroundColor: colors.surface, gap: spacing.lg },
+  connectArea: { marginTop: spacing.lg, padding: spacing.lg, borderRadius: radius.xl, backgroundColor: colors.card, gap: spacing.lg },
   connectCopy: { ...type.body, color: colors.muted },
   trustHeader: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start' },
   trustIcon: { width: 40, height: 40, borderRadius: radius.md, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' },
   trustCopy: { flex: 1 },
   fingerprint: { ...type.caption, color: colors.primary, fontFamily: 'monospace', marginTop: spacing.xs },
-  connectionError: { padding: spacing.md, borderRadius: radius.lg, backgroundColor: colors.dangerSoft, gap: spacing.sm },
+  connectionError: { padding: spacing.md, borderRadius: radius.xl, backgroundColor: colors.dangerSoft, gap: spacing.sm },
   connectionErrorTitle: { ...type.bodyStrong, color: colors.ink },
   connectionErrorBody: { ...type.small, color: colors.muted },
-  group: { borderRadius: radius.lg, backgroundColor: colors.surface, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
+  group: { borderRadius: radius.xl, backgroundColor: colors.card, paddingHorizontal: spacing.md, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.separator },
   primaryArea: { marginTop: spacing.xxl },
   secondaryArea: { marginTop: spacing.sm },
   contentCounts: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.md },

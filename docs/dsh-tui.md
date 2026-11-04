@@ -3,6 +3,12 @@
 DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插件安装到
 `dsh-tui` profile 后，可以直接在 TUI 中使用 `/remote`，为本机 Harness 开启远程访问权限。
 
+> 兼容边界（2026-11-01）：Remote 插件当前按 DeepSeek Harness `dsh-v0.2.1-rc.5`
+> 做开发基线验证；当前公开 dsh-TUI `0.17.0` 的主适配线仍是 DSH `0.2.1-rc.3`。
+> 因此 `dsh-TUI 0.17.0 + DSH 0.2.1-rc.5` 尚未列为已验收组合。请优先使用
+> dsh-TUI 发布说明中对应的 DSH 版本，或等待 dsh-TUI 明确发布 `rc.5` 适配。
+> Remote 插件的 TUI 命令、补全树和场景服务已做可选降级，缺少后两者不会阻塞 Host 启动。
+
 ## 支持版本
 
 | DSH 版本 | 需要挂载的官方组件 |
@@ -11,6 +17,7 @@ DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插�
 | `dsh-v0.1.5-rc.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway |
 | `dsh-v0.1.6-alpha.1` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway（与 v0.1.5 rc.1 同一个 Session V3 profile） |
 | `dsh-v0.2.0-rc.2` | `@deepseek-ai/dsh-api-gateway` 提供的 Session V3 Typert Remote Gateway（沿用同一 carrier） |
+| `dsh-v0.2.1-rc.5` | Remote Plugin 已按该版本验证；当前 dsh-TUI 公开主适配线尚未覆盖该版本 |
 
 ## 1. 安装插件
 
@@ -18,7 +25,7 @@ DSH Remote 已适配 [dsh-TUI](https://github.com/ccch1mneyyy/dsh-TUI)。将插�
 安装到同一个 profile：
 
 ```sh
-dsh plugin --profile dsh-tui add -w ds-harness-remote@0.5.2
+dsh plugin --profile dsh-tui add -w ds-harness-remote@0.6.2
 ```
 
 ## 2. 启动前挂载 Remote carrier
@@ -110,7 +117,7 @@ TUI 会显示二维码，并在二维码下方显示可点击的授权 URL：
 如果希望先在普通终端中完成登录，可以使用配套 CLI：
 
 ```sh
-npm install -g ds-harness-remote@0.5.2
+npm install -g ds-harness-remote@0.6.2
 ds-harness-remote login github
 ds-harness-remote status
 dsh-tui

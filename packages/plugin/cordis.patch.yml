@@ -4,6 +4,7 @@
       config:
         enabled: true
         role: host
+
         codex:
           enabled: true
           binary: codex

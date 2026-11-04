@@ -18,6 +18,7 @@ import {
   createCursorSession,
   createOpencodeSession,
   createClaudeSession,
+  createHermesSession,
   createPiSession,
   cursorNativeId,
   foldAcpHistory,
@@ -26,9 +27,10 @@ import {
 import { forkMessage } from '../services/message-actions'
 import { readOpencodeHistory, selectOpencodeModel } from '../services/opencode'
 import { readClaudeHistory, selectClaudeModel } from '../services/claude'
+import { loadHermesCatalog, mergeHermesCatalog, readHermesHistory, selectHermesModel } from '../services/hermes'
 import { readPiHistory, selectPiModel } from '../services/pi'
 import { saveCodexPermissionPreset } from '../services/storage'
-import { browseKey, browseScope } from '../services/browse-memory'
+import { browseKey, browseScope, updateBrowseEntry, useBrowseMemory } from '../services/browse-memory'
 import type { RemoteSession } from '../types'
 import { loadSavedCodexPermissions, withBestCodexPermission, withCodexPermissionState } from './codex-session-state'
 import { foldHistory, settleTurnItems } from './event-reducer'
@@ -39,7 +41,16 @@ import type { AppState } from './store-state'
 
 /** Session actions use the store's single connection/session runtime. */
 export function createSessionActions({ get, set, runtime }: SessionAccess): Pick<AppState,
-  'refreshSessionStatus' | 'openSession' | 'forkChatMessage' | 'rateMessage' | 'createSession' | 'archiveSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
+  'refreshSessionStatus' | 'openSession' | 'forkChatMessage' | 'quoteChatMessage' | 'rateMessage' | 'createSession' | 'forkSession' | 'archiveSession' | 'unarchiveSession' | 'pinSession' | 'unpinSession' | 'renameSession' | 'selectModel' | 'selectPermission' | 'loadAgentPresets' | 'selectAgentPreset' | 'loadOlderHistory'> {
+  const isHarnessBackend = (backend?: RemoteSession['backend']) =>
+    (backend ?? 'harness') === 'harness'
+
+  const isHarnessTarget = (sessionId: string, backend?: RemoteSession['backend']) => {
+    const target = get().sessions.find(item => item.sessionId === sessionId)
+    const effectiveBackend = backend ?? target?.backend ?? 'harness'
+    return isHarnessBackend(effectiveBackend) && (!target || isHarnessBackend(target.backend))
+  }
+
   return {
     async refreshSessionStatus() {
       if (get().connection.phase !== 'connected') return
@@ -232,11 +243,11 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           void runtime.refreshCodexModels(session.sessionId)
           return
         }
-        if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
+        if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
           await runtime.closeActiveCodexStream()
           await runtime.closeActiveCursorStream()
           if (!current()) return
-          const hasHistory = session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude'
+          const hasHistory = session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes'
           // History replaces the previous connection's projection. Start the new
           // subscription on an empty projection, so only this subscription's
           // deltas survive the load (and stale bubbles cannot suppress catchUp).
@@ -245,13 +256,14 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
             ...(hasHistory && state.messages[session.sessionId] !== undefined
               ? { messages: { ...state.messages, [session.sessionId]: [] } } : {}),
           }))
-          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'opencode'
+          const acpClient = session.backend === 'claude' ? runtime.connection.requireClaude() : session.backend === 'hermes' ? runtime.connection.requireHermes() : session.backend === 'opencode'
             ? runtime.connection.requireOpencode()
             : session.backend === 'pi'
               ? runtime.connection.requirePi()
               : session.backend === 'antigravity' ? runtime.connection.requireAntigravity() : runtime.connection.requireCursor()
           const [history] = await Promise.all([
-            session.backend === 'claude' ? readClaudeHistory(acpClient, cursorNativeId(session)) : session.backend === 'opencode'
+            session.backend === 'claude' ? readClaudeHistory(acpClient, cursorNativeId(session)) : session.backend === 'hermes'
+              ? readHermesHistory(acpClient, cursorNativeId(session)) : session.backend === 'opencode'
               ? readOpencodeHistory(acpClient, cursorNativeId(session))
               : session.backend === 'pi'
                 ? readPiHistory(acpClient, cursorNativeId(session))
@@ -282,6 +294,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           if (session.backend === 'pi') void runtime.refreshPiModels(session, current)
           if (session.backend === 'opencode') void runtime.refreshOpencodeModels(session, current)
           if (session.backend === 'claude') void runtime.refreshClaudeModels(session, current)
+          if (session.backend === 'hermes') void runtime.refreshHermesModels(session, current)
           if (session.backend === 'cursor') void runtime.refreshCursorModels(session, current)
           return
         }
@@ -409,167 +422,238 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       }
     },
 
-    async createSession(workspaceId) {
+    quoteChatMessage(text, sessionId) {
+      const targetId = sessionId ?? get().selectedSession?.sessionId
+      if (!targetId || !text.trim()) return
+      const scope = browseScope({ config: get().config, selectedDevice: get().selectedDevice })
+      const key = browseKey(scope, targetId)
+      const existing = useBrowseMemory.getState().entries[key]?.quotes ?? []
+      updateBrowseEntry(scope, targetId, { quotes: [...existing, text.trim()] })
+    },
+
+    async createSession(workspaceId, targetBackend) {
       if (get().connection.phase !== 'connected') return false
-      const generation = runtime.connectionGeneration
-      const defaultPermission = get().defaultPermissionPreset
-      set({ busyAction: 'create-session', error: undefined })
-      try {
-        const workspace = workspaceId === undefined ? undefined : get().workspaces.find(item => item.workspaceId === workspaceId)
-        if (workspace?.backend === 'codex') {
-          const client = runtime.connection.requireCodex()
-          const result = record(await client.request('thread/start', {
-            cwd: workspace.path,
-            permissionPreset: defaultPermission === 'default' ? 'workspace-write' : defaultPermission,
-          }))
-          if (generation !== runtime.connectionGeneration) return false
-          const display = projectCodexThread(result.thread)
-          if (display === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
-          const effectivePreset = codexPermissionPresetFromResponse(result)
-            ?? (defaultPermission === 'default' ? 'workspace-write' : defaultPermission)
-          const created = codexSession(display, effectivePreset)
-          const hostDeviceId = get().selectedDevice?.deviceId
-          if (hostDeviceId === undefined) throw new Error(zhCN.runtime.connectHostFirst)
-          await saveCodexPermissionPreset(hostDeviceId, display.nativeId, effectivePreset)
-          if (generation !== runtime.connectionGeneration) return false
-          set(state => ({
-            sessions: [created, ...state.sessions.filter(item => item.sessionId !== created.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? { ...item, sessionIds: [created.sessionId, ...item.sessionIds.filter(id => id !== created.sessionId)] }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(created)
-        }
-        if (workspace?.backend === 'cursor') {
-          const created = await runtime.connection.requireCursor().createSession(workspace.path, 'agent', 'cursor')
-          const session = createCursorSession({
-            acpSessionId: created.sessionId,
-            cwd: workspace.path,
-            title: workspace.title,
-          })
-          set(state => ({
-            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? {
-                ...item,
-                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
-                updatedAt: new Date().toISOString(),
-              }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(session)
-        }
-        if (workspace?.backend === 'antigravity') {
-          const created = await runtime.connection.requireAntigravity().createSession(workspace.path, 'agent', 'antigravity')
-          const session = createAntigravitySession({
-            acpSessionId: created.sessionId,
-            cwd: workspace.path,
-          })
-          set(state => ({
-            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? {
-                ...item,
-                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
-                updatedAt: new Date().toISOString(),
-              }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(session)
-        }
-        if (workspace?.backend === 'pi') {
-          const created = await runtime.connection.requirePi().createSession(workspace.path, 'agent', 'pi')
-          if (generation !== runtime.connectionGeneration) return false
-          const session = createPiSession({
-            acpSessionId: created.sessionId,
-            cwd: workspace.path,
-          })
-          set(state => ({
-            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? {
-                ...item,
-                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
-                updatedAt: new Date().toISOString(),
-              }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(session)
-        }
-        if (workspace?.backend === 'opencode') {
-          const created = await runtime.connection.requireOpencode().createSession(workspace.path, 'agent', 'opencode')
-          if (generation !== runtime.connectionGeneration) return false
-          const session = createOpencodeSession({
-            acpSessionId: created.sessionId,
-            cwd: workspace.path,
-          })
-          set(state => ({
-            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? {
-                ...item,
-                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
-                updatedAt: new Date().toISOString(),
-              }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(session)
-        }
-        if (workspace?.backend === 'claude') {
-          const created = await runtime.connection.requireClaude().createSession(workspace.path, 'agent', 'claude')
-          if (generation !== runtime.connectionGeneration) return false
-          const session = createClaudeSession({
-            acpSessionId: created.sessionId,
-            cwd: workspace.path,
-          })
-          set(state => ({
-            sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? {
-                ...item,
-                sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
-                updatedAt: new Date().toISOString(),
-              }
-              : item),
-            busyAction: undefined,
-          }))
-          return get().openSession(session)
-        }
-        const proxy = runtime.connection.requireProxy()
-        const { sessionId } = await proxy.sessionCreate(workspaceId)
-        if (generation !== runtime.connectionGeneration) return false
-        if (defaultPermission !== 'default') {
-          await proxy.sessionSelectPermission(sessionId, defaultPermission)
-          if (generation !== runtime.connectionGeneration) return false
-        }
-        const sessions = await proxy.sessionList()
-        if (generation !== runtime.connectionGeneration) return false
-        const created = sessions.find(session => session.sessionId === sessionId)
-        if (defaultPermission !== 'default') {
-          const permissions = created?.projections?.values?.permissions
-          if (typeof permissions !== 'object' || permissions === null || !('currentValue' in permissions) || permissions.currentValue !== defaultPermission) {
-            throw new Error(zhCN.settings.defaultPermissionNotConfirmed)
+      if (runtime.createSessionFlight !== undefined || get().busyAction === 'create-session') return false
+      const task = (async () => {
+        const generation = runtime.connectionGeneration
+        const defaultPermission = get().defaultPermissionPreset
+        set({ busyAction: 'create-session', error: undefined })
+        try {
+          const workspace = workspaceId === undefined ? undefined : get().workspaces.find(item => item.workspaceId === workspaceId)
+          const backend = targetBackend ?? workspace?.backend ?? 'harness'
+          const existingPath = workspace?.path || get().workspaces.find(w => !!w.path)?.path
+          const isWin = get().selectedDevice?.platform === 'windows'
+          const cwd = existingPath || (isWin ? 'C:\\' : '/')
+          if (backend === 'codex') {
+            const client = runtime.connection.requireCodex()
+            const result = record(await client.request('thread/start', {
+              cwd,
+              permissionPreset: defaultPermission === 'default' ? 'workspace-write' : defaultPermission,
+            }))
+            if (generation !== runtime.connectionGeneration) return false
+            const display = projectCodexThread(result.thread)
+            if (display === undefined) throw new Error(zhCN.runtime.codexInvalidResponse)
+            const effectivePreset = codexPermissionPresetFromResponse(result)
+              ?? (defaultPermission === 'default' ? 'workspace-write' : defaultPermission)
+            const created = codexSession(display, effectivePreset)
+            const hostDeviceId = get().selectedDevice?.deviceId
+            if (hostDeviceId === undefined) throw new Error(zhCN.runtime.connectHostFirst)
+            await saveCodexPermissionPreset(hostDeviceId, display.nativeId, effectivePreset)
+            if (generation !== runtime.connectionGeneration) return false
+            set(state => ({
+              sessions: [created, ...state.sessions.filter(item => item.sessionId !== created.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? { ...item, sessionIds: [created.sessionId, ...item.sessionIds.filter(id => id !== created.sessionId)] }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(created)
           }
+          if (backend === 'cursor') {
+            const created = await runtime.connection.requireCursor().createSession(cwd, 'agent', 'cursor')
+            const session = createCursorSession({
+              acpSessionId: created.sessionId,
+              cwd,
+              title: workspace?.title ?? 'Cursor',
+            })
+            set(state => ({
+              sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? {
+                    ...item,
+                    sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                    updatedAt: new Date().toISOString(),
+                  }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(session)
+          }
+          if (backend === 'antigravity') {
+            const created = await runtime.connection.requireAntigravity().createSession(cwd, 'agent', 'antigravity')
+            const session = createAntigravitySession({
+              acpSessionId: created.sessionId,
+              cwd,
+            })
+            set(state => ({
+              sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? {
+                    ...item,
+                    sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                    updatedAt: new Date().toISOString(),
+                  }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(session)
+          }
+          if (backend === 'pi') {
+            const created = await runtime.connection.requirePi().createSession(cwd, 'agent', 'pi')
+            if (generation !== runtime.connectionGeneration) return false
+            const session = createPiSession({
+              acpSessionId: created.sessionId,
+              cwd,
+            })
+            set(state => ({
+              sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? {
+                    ...item,
+                    sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                    updatedAt: new Date().toISOString(),
+                  }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(session)
+          }
+          if (backend === 'opencode') {
+            const created = await runtime.connection.requireOpencode().createSession(cwd, 'agent', 'opencode')
+            if (generation !== runtime.connectionGeneration) return false
+            const session = createOpencodeSession({
+              acpSessionId: created.sessionId,
+              cwd,
+            })
+            set(state => ({
+              sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? {
+                    ...item,
+                    sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                    updatedAt: new Date().toISOString(),
+                  }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(session)
+          }
+          if (backend === 'claude' || backend === 'hermes') {
+            const created = backend === 'hermes'
+              ? await runtime.connection.requireHermes().createSession(cwd, 'agent', 'hermes')
+              : await runtime.connection.requireClaude().createSession(cwd, 'agent', 'claude')
+            if (generation !== runtime.connectionGeneration) return false
+            const session = backend === 'hermes'
+              ? createHermesSession({ acpSessionId: created.sessionId, cwd })
+              : createClaudeSession({
+                acpSessionId: created.sessionId,
+                cwd,
+              })
+            set(state => ({
+              sessions: [session, ...state.sessions.filter(item => item.sessionId !== session.sessionId)],
+              ...(workspace === undefined ? {} : {
+                workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                  ? {
+                    ...item,
+                    sessionIds: [session.sessionId, ...item.sessionIds.filter(id => id !== session.sessionId)],
+                    updatedAt: new Date().toISOString(),
+                  }
+                  : item),
+              }),
+              busyAction: undefined,
+            }))
+            return get().openSession(session)
+          }
+          const proxy = runtime.connection.requireProxy()
+          const { sessionId } = await proxy.sessionCreate(workspaceId)
+          if (generation !== runtime.connectionGeneration) return false
+          if (defaultPermission !== 'default') {
+            await proxy.sessionSelectPermission(sessionId, defaultPermission)
+            if (generation !== runtime.connectionGeneration) return false
+          }
+          const sessions = await proxy.sessionList()
+          if (generation !== runtime.connectionGeneration) return false
+          const created = sessions.find(session => session.sessionId === sessionId)
+          if (defaultPermission !== 'default') {
+            const permissions = created?.projections?.values?.permissions
+            if (typeof permissions !== 'object' || permissions === null || !('currentValue' in permissions) || permissions.currentValue !== defaultPermission) {
+              throw new Error(zhCN.settings.defaultPermissionNotConfirmed)
+            }
+          }
+          set(state => ({
+            sessions,
+            busyAction: undefined,
+            ...(workspace === undefined ? {} : {
+              workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
+                ? { ...item, sessionIds: [sessionId, ...item.sessionIds.filter(id => id !== sessionId)] }
+                : item),
+            }),
+          }))
+          if (created === undefined) return false
+          return get().openSession(created)
+        } catch (error) {
+          set({ busyAction: undefined, error: friendlyError(error) })
+          return false
         }
+      })()
+      runtime.createSessionFlight = task
+      void task.finally(() => { if (runtime.createSessionFlight === task) runtime.createSessionFlight = undefined })
+      return task
+    },
+
+    async forkSession(sessionId, backend) {
+      if (get().connection.phase !== 'connected') return undefined
+      if (!isHarnessTarget(sessionId, backend)) return undefined
+      const generation = runtime.connectionGeneration
+      set({ busyAction: `fork:${sessionId}`, error: undefined })
+      try {
+        const proxy = runtime.connection.requireProxy()
+        const { sessionId: childId } = await proxy.sessionFork(sessionId)
+        if (generation !== runtime.connectionGeneration) return undefined
+        const [sessions, workspaceList] = await Promise.all([proxy.sessionList(), proxy.workspaceList()])
+        if (generation !== runtime.connectionGeneration) return undefined
+        const created = sessions.find(s => s.sessionId === childId)
         set(state => ({
-          sessions,
+          sessions: [
+            ...(state.sessions ?? []).filter(item => !isHarnessBackend(item.backend)),
+            ...sessions,
+          ],
+          workspaces: [
+            ...(state.workspaces ?? []).filter(item => !isHarnessBackend(item.backend)),
+            ...workspaceList.items,
+          ],
+          archivedSessionIds: workspaceList.archivedSessionIds,
+          ...(workspaceList.pinnedSessionIds ? { pinnedSessionIds: workspaceList.pinnedSessionIds } : {}),
           busyAction: undefined,
-          ...(workspace === undefined ? {} : {
-            workspaces: state.workspaces.map(item => item.workspaceId === workspace.workspaceId
-              ? { ...item, sessionIds: [sessionId, ...item.sessionIds.filter(id => id !== sessionId)] }
-              : item),
-          }),
         }))
-        if (created === undefined) return false
-        return get().openSession(created)
+        if (created) {
+          await get().openSession(created)
+        }
+        return created
       } catch (error) {
+        if (generation !== runtime.connectionGeneration) return undefined
         set({ busyAction: undefined, error: friendlyError(error) })
-        return false
+        return undefined
       }
     },
 
@@ -596,7 +680,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           }))
           return true
         }
-        if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') {
+        if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude' || session?.backend === 'hermes') {
           if (session.backend !== 'opencode') throw new Error(`Native session archiving is unavailable for ${session.backend}.`)
           await runtime.connection.requireOpencode().archiveSession(cursorNativeId(session), 'opencode')
           if (generation !== runtime.connectionGeneration) return false
@@ -621,9 +705,91 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         // catalog membership, and do not let a second read hide a successful write.
         set(state => ({
           archivedSessionIds,
+          pinnedSessionIds: state.pinnedSessionIds.filter(id => id !== sessionId),
           busyAction: undefined,
           selectedSession: state.selectedSession?.sessionId === sessionId ? undefined : state.selectedSession,
           sessionModels: state.selectedSession?.sessionId === sessionId ? undefined : state.sessionModels,
+        }))
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async unarchiveSession(sessionId, backend) {
+      if (get().connection.phase !== 'connected') return false
+      if (!isHarnessTarget(sessionId, backend)) return false
+      const generation = runtime.connectionGeneration
+      set({ busyAction: `unarchive:${sessionId}`, error: undefined })
+      try {
+        const proxy = runtime.connection.requireProxy()
+        const archivedSessionIds = await proxy.workspaceUnarchiveSession(sessionId)
+        if (generation !== runtime.connectionGeneration) return false
+        set({ archivedSessionIds, busyAction: undefined })
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async pinSession(sessionId, backend) {
+      if (get().connection.phase !== 'connected') return false
+      if (!isHarnessTarget(sessionId, backend)) return false
+      const generation = runtime.connectionGeneration
+      set({ busyAction: `pin:${sessionId}`, error: undefined })
+      try {
+        const proxy = runtime.connection.requireProxy()
+        const pinnedSessionIds = await proxy.workspacePinSession(sessionId)
+        if (generation !== runtime.connectionGeneration) return false
+        set({ pinnedSessionIds, busyAction: undefined })
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async unpinSession(sessionId, backend) {
+      if (get().connection.phase !== 'connected') return false
+      if (!isHarnessTarget(sessionId, backend)) return false
+      const generation = runtime.connectionGeneration
+      set({ busyAction: `unpin:${sessionId}`, error: undefined })
+      try {
+        const proxy = runtime.connection.requireProxy()
+        const pinnedSessionIds = await proxy.workspaceUnpinSession(sessionId)
+        if (generation !== runtime.connectionGeneration) return false
+        set({ pinnedSessionIds, busyAction: undefined })
+        return true
+      } catch (error) {
+        if (generation !== runtime.connectionGeneration) return false
+        set({ busyAction: undefined, error: friendlyError(error) })
+        return false
+      }
+    },
+
+    async renameSession(sessionId, title, backend) {
+      if (get().connection.phase !== 'connected') return false
+      if (!isHarnessTarget(sessionId, backend)) return false
+      const generation = runtime.connectionGeneration
+      const trimmed = title.trim()
+      if (!trimmed) return false
+      set({ busyAction: `rename:${sessionId}`, error: undefined })
+      try {
+        const proxy = runtime.connection.requireProxy()
+        const result = await proxy.sessionRename(sessionId, trimmed)
+        if (generation !== runtime.connectionGeneration) return false
+        const updatedTitle = result?.title ?? trimmed
+        set(state => ({
+          busyAction: undefined,
+          sessions: state.sessions.map(s => (s.sessionId === sessionId ? { ...s, title: updatedTitle } : s)),
+          selectedSession: state.selectedSession?.sessionId === sessionId
+            ? { ...state.selectedSession, title: updatedTitle }
+            : state.selectedSession,
         }))
         return true
       } catch (error) {
@@ -660,8 +826,10 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
           set({ sessionModels: models, modelSelecting: false })
           return true
         }
-        if (session.backend === 'claude') {
-          const models = await selectClaudeModel(runtime.connection.requireClaude(), cursorNativeId(session), selection)
+        if (session.backend === 'claude' || session.backend === 'hermes') {
+          const models = session.backend === 'hermes'
+            ? await selectHermesModel(runtime.connection.requireHermes(), cursorNativeId(session), selection)
+            : await selectClaudeModel(runtime.connection.requireClaude(), cursorNativeId(session), selection)
           if (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId) return false
           set({ sessionModels: models, modelSelecting: false })
           return true
@@ -685,7 +853,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
         }))
         return true
       } catch (error) {
-        if ((session.backend === 'cursor' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'antigravity') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
+        if ((session.backend === 'cursor' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes' || session.backend === 'antigravity') && (generation !== runtime.connectionGeneration || get().selectedSession?.sessionId !== session.sessionId)) return false
         set({ modelSelecting: false, error: friendlyError(error) })
         return false
       }
@@ -693,7 +861,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async selectPermission(preset) {
       const session = get().selectedSession
-      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude') return false
+      if (session?.backend === 'cursor' || session?.backend === 'antigravity' || session?.backend === 'pi' || session?.backend === 'opencode' || session?.backend === 'claude' || session?.backend === 'hermes') return false
       if (session === undefined || get().connection.phase !== 'connected' || get().permissionSelecting) return false
       const generation = runtime.connectionGeneration
       set({ permissionSelecting: true, error: undefined })
@@ -747,7 +915,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
 
     async loadAgentPresets() {
       const backend = get().selectedSession?.backend
-      if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude') return false
+      if (backend === 'cursor' || backend === 'antigravity' || backend === 'pi' || backend === 'opencode' || backend === 'claude' || backend === 'hermes') return false
       if (get().connection.phase !== 'connected') return false
       if (get().agentPresetLoading) return false
       set({ agentPresetLoading: true, error: undefined })
@@ -764,7 +932,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
     async selectAgentPreset(preset) {
       const session = get().selectedSession
       if (session === undefined || get().connection.phase !== 'connected') return false
-      if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') return false
+      if (session.backend === 'codex' || session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') return false
       set({ agentPresetSelecting: true, error: undefined })
       try {
         const committed = await runtime.connection.requireProxy().agentPresetSelect(session.sessionId, preset)
@@ -792,7 +960,7 @@ export function createSessionActions({ get, set, runtime }: SessionAccess): Pick
       const generation = runtime.sessionLoadGeneration
       const connectionGeneration = runtime.connectionGeneration
       const current = () => generation === runtime.sessionLoadGeneration && connectionGeneration === runtime.connectionGeneration
-      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude') {
+      if (session.backend === 'cursor' || session.backend === 'antigravity' || session.backend === 'pi' || session.backend === 'opencode' || session.backend === 'claude' || session.backend === 'hermes') {
         set({ historyHasMore: false, historyLoadingOlder: false })
         return
       }

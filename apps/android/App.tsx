@@ -1,14 +1,15 @@
 import { hydrateBrowseMemory, useBrowseMemory, browseScope, saveHostMode } from './src/services/browse-memory'
 import { startBrowseTracking } from './src/services/browse-tracking'
 import { useEffect, useRef, useState } from 'react'
-import { AppState, BackHandler, Image, Linking, StyleSheet, Text, View } from 'react-native'
+import { AppState, BackHandler, Linking, StyleSheet, Text, View } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
 import { useLocales } from 'expo-localization'
+import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { ChatScreen } from './src/screens/chat-screen'
 import { ConnectionScreen, DeviceDetailScreen, DevicesScreen } from './src/screens/device-screens'
-import { HomeActionsMenu, ServerSetupScreen, ServersScreen, SettingsScreen } from './src/screens/setup-screens'
+import { AboutScreen, HomeActionsMenu, ServerSetupScreen, ServersScreen, SettingsScreen } from './src/screens/setup-screens'
 import { WorkspacesScreen } from './src/screens/workspaces-screen'
 import { stopConnectionRecovery, useAppStore } from './src/state/store'
 import { ForegroundConnectionRecovery } from './src/services/connection-recovery'
@@ -19,21 +20,26 @@ import {
   type NetworkRoute,
 } from './src/lib/network-route'
 import { Button, ErrorBanner } from './src/ui/components'
-import { useResponsiveLayout } from './src/ui/responsive'
-import { radius, spacing, type } from './src/ui/theme'
+import { spacing, type } from './src/ui/theme'
 import { ThemeProvider, useTheme, type ThemeColors } from './src/ui/theme-context'
+import { MermaidRendererHost } from './src/ui/mermaid/mermaid-renderer'
 import { useThemedStyles } from './src/ui/use-themed-styles'
 import { strings as zhCN } from './src/locales/i18n'
+import { sessionBackendFromId } from './src/lib/session-backend'
+// Keep the native first frame visible until boot completes. The native splash
+// is the only startup view; the app then enters the login or device route.
+void SplashScreen.preventAutoHideAsync().catch(() => undefined)
 
 type Route =
   | { name: 'server' }
   | { name: 'devices' }
   | { name: 'device'; deviceId: string; source?: 'workspaces' }
   | { name: 'connecting'; deviceId: string; focusWorkspaceKey?: string; sessionId?: string }
-  | { name: 'workspaces'; focusWorkspaceKey?: string; botConversationId?: string }
+  | { name: 'workspaces'; focusWorkspaceKey?: string; botConversationId?: string; source?: 'chat' }
   | { name: 'chat' }
   | { name: 'settings' }
   | { name: 'servers' }
+  | { name: 'about' }
 
 export default function App() {
   const locales = useLocales()
@@ -49,6 +55,7 @@ export default function App() {
     <ThemeProvider>
       <SafeAreaProvider>
         <AppShell />
+        <MermaidRendererHost />
       </SafeAreaProvider>
     </ThemeProvider>
   )
@@ -103,6 +110,12 @@ function AppNavigator() {
   const insets = useSafeAreaInsets()
   const { colors } = useTheme()
   const styles = useThemedStyles(createStyles)
+
+  useEffect(() => {
+    if (bootPhase === 'error' || (bootPhase === 'ready' && browseReady)) {
+      void SplashScreen.hideAsync().catch(() => undefined)
+    }
+  }, [bootPhase, browseReady])
 
   const push = (next: Route) => setRoutes(current => [...current, next])
   const replace = (next: Route) => setRoutes(current => [...current.slice(0, -1), next])
@@ -166,7 +179,7 @@ function AppNavigator() {
   useEffect(() => {if (browseReady) return startBrowseTracking()}, [browseReady])
 
   const openKnownSession = async (id: string) => {
-    const backend = id.startsWith('codex:') ? 'codex' : id.startsWith('cursor:') ? 'cursor' : id.startsWith('antigravity:') ? 'antigravity' : id.startsWith('pi:') ? 'pi' : id.startsWith('opencode:') ? 'opencode' : id.startsWith('claude:') ? 'claude' : 'harness'
+    const backend = sessionBackendFromId(id)
     const expectedScope = browseScope(useAppStore.getState())
     await useAppStore.getState().refreshWorkspaces(backend)
     if (browseScope(useAppStore.getState()) !== expectedScope || useAppStore.getState().connection.phase !== 'connected') return
@@ -256,6 +269,10 @@ function AppNavigator() {
         reset({ name: 'devices' })
         return true
       }
+      if (current.name === 'workspaces' && current.source === 'chat') {
+        reset({ name: 'devices' })
+        return true
+      }
       pop()
       return true
     })
@@ -319,8 +336,8 @@ function AppNavigator() {
     return () => subscription.remove()
   }, [reconnect])
 
-  if (bootPhase === 'loading' || !browseReady) return <LoadingScreen />
   if (bootPhase === 'error') return <BootError onRetry={() => void bootstrap()} message={error} />
+  if (bootPhase === 'loading' || !browseReady) return null
 
   const deviceForRoute = route.name === 'device' || route.name === 'connecting'
     ? devices.find(device => device.deviceId === route.deviceId) ?? selectedDevice
@@ -370,7 +387,7 @@ function AppNavigator() {
           setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'workspaces' ? { ...entry, botConversationId: undefined } : entry))
         }}
         onSelectBot={botConversationId => setRoutes(current => current.map((entry, index) => index === current.length - 1 && entry.name === 'workspaces' ? { ...entry, botConversationId } : entry))}
-        onBack={backFromWorkspaces}
+        onBack={route.source === 'chat' ? () => reset({ name: 'devices' }) : backFromWorkspaces}
         onOpenDevices={() => reset({ name: 'devices' })}
         onSession={() => push({ name: 'chat' })}
         focusWorkspaceKey={route.focusWorkspaceKey}
@@ -381,6 +398,7 @@ function AppNavigator() {
       {route.name === 'chat' && <ChatScreen onBack={pop} onOpenDevices={() => reset({ name: 'devices' })} onOpenWorkspaces={focusWorkspaceKey => push({ name: 'workspaces', focusWorkspaceKey })} />}
       {route.name === 'settings' && <SettingsScreen onBack={pop} onReset={() => reset({ name: 'server' })} onServers={() => push({ name: 'servers' })} />}
       {route.name === 'servers' && <ServersScreen onBack={pop} onAdd={() => push({ name: 'server' })} onSwitched={() => reset({ name: 'workspaces' })} />}
+      {route.name === 'about' && <AboutScreen onBack={pop} />}
       {error !== undefined && route.name !== 'connecting' && route.name !== 'chat' && (
         <View pointerEvents="box-none" style={[styles.globalError, { top: insets.top }]}>
           <ErrorBanner message={error} onDismiss={clearError} />
@@ -393,6 +411,10 @@ function AppNavigator() {
           push({ name: 'servers' })
         }}
         onClose={() => setHomeMenuOpen(false)}
+        onAbout={() => {
+          setHomeMenuOpen(false)
+          push({ name: 'about' })
+        }}
         onDevices={route.name === 'workspaces'
           ? () => {
               setHomeMenuOpen(false)
@@ -409,34 +431,7 @@ function AppNavigator() {
 }
 
 function LoadingScreen() {
-  const insets = useSafeAreaInsets()
-  const { colors } = useTheme()
-  const styles = useThemedStyles(createStyles)
-  // The splash-like boot view must fit in landscape phones (~360dp tall)
-  // without clipping; keep its portrait composition otherwise.
-  const { landscape } = useResponsiveLayout()
-  const padding = landscape ? spacing.lg : spacing.xxxl
-  return (
-    <View style={[styles.loadingScreen, { paddingTop: padding + insets.top, paddingBottom: padding + insets.bottom }]}>
-      <View style={styles.loadingBrand}>
-        <Image
-          source={require('./assets/android-icon-foreground-adaptive.png')}
-          style={[styles.logo, landscape && { width: 72, height: 72 }]}
-          resizeMode="contain"
-          accessible={false}
-        />
-        <Text style={styles.loadingTitle}>DSH Remote</Text>
-        <Text style={styles.loadingCredit}>{zhCN.app.credit}</Text>
-      </View>
-      <View style={styles.loadingDetails}>
-        <Text style={styles.loadingTagline}>{zhCN.app.loadingTagline}</Text>
-        <View style={styles.loadingStatus} accessibilityRole="text">
-          <View style={styles.loadingDot} />
-          <Text style={styles.loadingStatusText}>{zhCN.app.loadingIdentity}</Text>
-        </View>
-      </View>
-    </View>
-  )
+  return null
 }
 
 function BootError({ message, onRetry }: { message?: string; onRetry: () => void }) {
@@ -471,16 +466,7 @@ function createStyles(colors: ThemeColors) {
   flex: { flex: 1 },
   globalError: { position: 'absolute', left: 0, right: 0, zIndex: 10 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.xl, backgroundColor: colors.background },
-  loadingScreen: { flex: 1, width: '100%', maxWidth: 420, alignSelf: 'center', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.xl, paddingTop: spacing.xxxl, paddingBottom: spacing.xxxl, backgroundColor: colors.background },
-  loadingBrand: { alignItems: 'center' },
-  loadingDetails: { width: '100%', alignItems: 'center' },
-  logo: { width: 144, height: 144, marginBottom: spacing.md },
   loadingTitle: { ...type.title, color: colors.ink, textAlign: 'center' },
-  loadingCredit: { ...type.caption, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
-  loadingTagline: { ...type.smallStrong, color: colors.ink, textAlign: 'center', alignSelf: 'stretch' },
-  loadingStatus: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, alignSelf: 'stretch', borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.separator, marginTop: spacing.xl, paddingTop: spacing.lg },
-  loadingDot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: colors.primary },
-  loadingStatusText: { ...type.small, color: colors.muted },
   loadingBody: { ...type.body, color: colors.muted, textAlign: 'center', marginTop: spacing.xs },
   retry: { alignSelf: 'stretch', marginTop: spacing.xl },
   })

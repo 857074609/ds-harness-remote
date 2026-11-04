@@ -243,25 +243,15 @@ export class HostPluginRuntime {
     const listen = this.directServer?.listenAddress()
     return {
       ...(this.identity === undefined ? {} : { deviceId: this.identity.deviceId }),
-<<<<<<< HEAD
+      // Direct-connect Host: there is no relay Server to configure against, so
+      // `configured` is always true and the status derives from the built-in
+      // listener plus the local credential store.
       configured: true,
       online: this.directServer !== undefined,
       reconnecting: false,
       ...(listen === undefined ? {} : { directListen: listen }),
       authorized: this.credentialStore !== undefined,
       accountRequired: false,
-=======
-      configured: this.serverApi !== undefined,
-      online: this.serverConnection?.isOnline() ?? false,
-      reconnecting: this.serverConnection?.isReconnecting() ?? false,
-      ...(this.serverConnection?.lastActivity() === undefined
-        ? {}
-        : { lastActiveAt: this.serverConnection.lastActivity() }),
-      ...(error === undefined ? {} : { error }),
-      ...(authorization?.account === undefined ? {} : { account: authorization.account }),
-      authorized: authorization !== undefined,
-      accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED' || error === 'DEVICE_REVOKED' || error === 'DEVICE_OWNERSHIP_REQUIRED',
->>>>>>> upstream-liguobao/main
       connectedClients: this.listConnectedClients(),
     }
   }

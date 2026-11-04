@@ -1020,21 +1020,18 @@ export const helloPayloadSchema = z.object({
   recoveryTickets: z.array(z.string().min(1).max(4096)).max(64).optional(),
   role: z.enum(['host', 'client']),
   deviceId: z.string().min(1),
-<<<<<<< HEAD
+  // Direct-connect keeps accessToken optional: the phone authenticates with the
+  // Host-local account/password pair instead of a relay-issued token. Upstream's
+  // bounded list validation is kept for the shared protocol surface.
   accessToken: z.string().min(1).optional(),
   account: z.string().min(1).max(254).optional(),
   password: z.string().min(1).max(4096).optional(),
-  protocols: z.array(z.number().int().nonnegative().safe()).min(1).refine(uniqueNumbers),
-  capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
-=======
-  accessToken: z.string().min(1),
   protocols: z.array(z.unknown()).min(1).max(MAX_PROTOCOL_LIST_ENTRIES).pipe(
     z.array(z.number().int().nonnegative().safe()).refine(uniqueNumbers),
   ),
   capabilities: z.array(z.unknown()).max(MAX_CAPABILITY_ENTRIES).pipe(
     z.array(z.string().min(1)).refine(uniqueStrings),
   ),
->>>>>>> upstream-liguobao/main
   clientVersion: z.string().optional(),
   harnessVersion: z.string().optional(),
 })
@@ -1043,12 +1040,8 @@ export const helloAckPayloadSchema = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string().min(1),
   connectionSessionId: z.string().min(1),
-<<<<<<< HEAD
   hostDeviceId: z.string().min(1).optional(),
-  heartbeatIntervalMs: z.number().int().positive(),
-=======
   heartbeatIntervalMs: z.number().int().positive().safe(),
->>>>>>> upstream-liguobao/main
   maxControlFrameBytes: z.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: z.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
   capabilities: z.array(z.unknown()).max(MAX_CAPABILITY_ENTRIES).pipe(

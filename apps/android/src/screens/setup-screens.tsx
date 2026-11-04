@@ -1,41 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
-import { useBrowseMemory, browsePreference } from '../services/browse-memory'
 import * as Application from 'expo-application'
+import { File, Paths } from 'expo-file-system'
 import { getContentUriAsync } from 'expo-file-system/legacy'
 import * as IntentLauncher from 'expo-intent-launcher'
-import { ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native'
-import { Check, ChevronRight, ExternalLink, KeyRound, Laptop, LockKeyhole, MoreVertical, Plus, RotateCcw, Settings, Trash2, type LucideIcon } from 'lucide-react-native'
-import { useAppStore } from '../state/store'
-import { BlurHeaderFrame, Button, Field, IconButton, KeyValue, Screen, TopBar } from '../ui/components'
+import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
+import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderOpen, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, Plus, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, Smartphone, Star, Trash2, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
+import Svg, { Path, Polygon } from 'react-native-svg'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import type { DefaultPermissionPreset } from '../types'
-import { radius, spacing, type } from '../ui/theme'
+import { useAppStore } from '../state/store'
+import { useBrowseMemory, browsePreference } from '../services/browse-memory'
+import { foregroundService } from '../services/foreground-service'
+import { loadDirectConnect, loadServers, removeServer, type SavedServer } from '../services/storage'
+import { parseDirectTarget } from '../lib/server-url'
+import { SOURCE_CODE_URL } from '../lib/links'
+import { BlurHeaderFrame, Button, Field, GroupCard, GroupRow, IconButton, KeyValue, Screen, SectionTitle, TopBar } from '../ui/components'
+import { Toggle } from '../ui/toggle'
+import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
+import { GithubIcon, GoogleIcon, ZhihuIcon } from '../ui/brand-icons'
+import { darkColors, floatingShadow, lightColors, radius, spacing, type } from '../ui/theme'
 import { useTheme, type ThemeColors } from '../ui/theme-context'
 import { useResponsiveLayout } from '../ui/responsive'
 import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN, type LanguagePreference } from '../locales/i18n'
 import type { ThemePreference, TypographyDensity } from '../ui/theme'
-import { parseDirectTarget } from '../lib/server-url'
-import { loadDirectConnect, loadServers, removeServer, type SavedServer } from '../services/storage'
-
-
-import { ActivityIndicator, Alert, Image, Keyboard, KeyboardAvoidingView, Linking, Modal, PixelRatio, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native'
-import { Toggle } from '../ui/toggle'
-import { BatteryCharging, Bell, BellRing, Cable, Check, ChevronRight, Download, ExternalLink, Fingerprint, FolderOpen, FolderPen, Globe, Hash, History, Info, KeyRound, Languages, Laptop, ListCollapse, LockKeyhole, LogOut, Mail, MoreVertical, PanelTop, Plus, QrCode as QrCodeIcon, RotateCcw, Route, Settings, ShieldAlert, ShieldCheck, Smartphone, Star, Trash2, Type, UserRound, X, type LucideIcon } from 'lucide-react-native'
-import { GroupCard, GroupRow, SectionTitle } from '../ui/components'
-import { foregroundService } from '../services/foreground-service'
-import Svg, { Path, Polygon } from 'react-native-svg'
-import { FISH_LOGO_PATH, FISH_LOGO_VIEWBOX } from '../ui/fish-logo'
-import { GithubIcon, GoogleIcon, ZhihuIcon } from '../ui/brand-icons'
-import { darkColors, floatingShadow, lightColors } from '../ui/theme'
-import { SOURCE_CODE_URL } from '../lib/links'
-import { useBrowseMemory, browsePreference } from '../services/browse-memory'
-import * as Application from 'expo-application'
-import { File, Paths } from 'expo-file-system'
-import * as IntentLauncher from 'expo-intent-launcher'
-import { useResponsiveLayout } from '../ui/responsive'
-import { useThemedStyles } from '../ui/use-themed-styles'
-import { strings as zhCN } from '../locales/i18n'
+import type { DefaultPermissionPreset } from '../types'
+/** Links surfaced by the About screen. */
+const updateUrl = 'https://github.com/857074609/ds-harness-remote/releases/latest'
+const releaseApiUrl = 'https://api.github.com/repos/857074609/ds-harness-remote/releases/latest'
+const developerUrl = 'https://www.zhihu.com/people/codelover'
+const twitterUrl = 'https://x.com/liguobao2077'
 /** Default DSH Remote Server; a build can override it via EXPO_PUBLIC_DSH_REMOTE_SERVER. */
 
 /**
@@ -904,6 +897,12 @@ function createStyles(colors: ThemeColors) {
   flex: { flex: 1, backgroundColor: colors.background },
   // Reading cap for wide landscape tablets; the live width style is applied by
   // the screens that opt in (portrait phones never exceed the cap).
+  loginIntro: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
+  },
+  serverPress: { flex: 1 },
   contentColumn: { width: '100%', alignSelf: 'center' },
   hero: { width: '100%', maxWidth: 400, alignSelf: 'center', alignItems: 'center', paddingTop: spacing.xl, paddingHorizontal: spacing.lg },
   wordmarkRow: { alignItems: 'center', marginTop: spacing.md },

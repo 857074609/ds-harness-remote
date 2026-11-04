@@ -28,7 +28,6 @@ import { useThemedStyles } from '../ui/use-themed-styles'
 import { strings as zhCN } from '../locales/i18n'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { resolveSessionDisplayTitle } from './session-title'
-import { DeviceRenameModal } from './device-rename-modal'
 import { ConnectionHero } from './connection-hero'
 
 export function DevicesScreen({ onDevice, onBack, onMore, onShortcut }: {

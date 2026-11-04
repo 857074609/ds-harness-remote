@@ -98,14 +98,14 @@ describe('Quote helpers (upstream deepseek-harness conformance)', () => {
 describe('Quote state and session integration', () => {
   it('adds quotes to browse-memory for target session via quoteChatMessage', () => {
     const scope = browseScope({
-      config: { baseUrl: 'https://test.server', account: 'test@example.com' },
+      config: { baseUrl: 'direct://test.server:18888', host: 'test.server', port: 18888, account: 'test@example.com' },
       selectedDevice: { deviceId: 'dev-1', identityKey: 'key-1' } as any,
     })
     const sessionId = 'session-quote-1'
     const key = browseKey(scope, sessionId)
 
     const stateMock = {
-      config: { baseUrl: 'https://test.server', account: 'test@example.com' },
+      config: { baseUrl: 'direct://test.server:18888', host: 'test.server', port: 18888, account: 'test@example.com' },
       selectedDevice: { deviceId: 'dev-1', identityKey: 'key-1' },
       selectedSession: { sessionId, backend: 'harness' },
       connection: { phase: 'connected' },
@@ -136,14 +136,14 @@ describe('Quote state and session integration', () => {
 
   it('ignores empty or whitespace-only quotes', () => {
     const scope = browseScope({
-      config: { baseUrl: 'https://test.server', account: 'test@example.com' },
+      config: { baseUrl: 'direct://test.server:18888', host: 'test.server', port: 18888, account: 'test@example.com' },
       selectedDevice: { deviceId: 'dev-1', identityKey: 'key-1' } as any,
     })
     const sessionId = 'session-quote-empty'
     const key = browseKey(scope, sessionId)
 
     const stateMock = {
-      config: { baseUrl: 'https://test.server', account: 'test@example.com' },
+      config: { baseUrl: 'direct://test.server:18888', host: 'test.server', port: 18888, account: 'test@example.com' },
       selectedDevice: { deviceId: 'dev-1', identityKey: 'key-1' },
       selectedSession: { sessionId, backend: 'harness' },
     }

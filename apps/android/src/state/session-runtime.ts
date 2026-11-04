@@ -1,5 +1,6 @@
 import { loadAcpModels } from '../services/acp-models'
 import type { AcpStream, CodexStream, CodexTimelineState } from '@dsh-remote/client-core'
+import type { AgentAcpFrameData } from '@dsh-remote/protocol'
 import { workspaceStableKey } from '../lib/workspace-key'
 import { strings as zhCN } from '../locales/i18n'
 import { loadAntigravityCatalog, mergeAntigravityCatalog } from '../services/antigravity'
@@ -255,7 +256,7 @@ export class SessionRuntime {
     const nativeId = cursorNativeId(session)
     const stream = await client.openStream(
       nativeId,
-      frame => { if (current()) this.store.get().handleCursorFrame(frame) },
+      (frame: AgentAcpFrameData) => { if (current()) this.store.get().handleCursorFrame(frame) },
       closed => {
         if (!current()) return
         if (this.store.get().selectedSession?.sessionId !== session.sessionId) return

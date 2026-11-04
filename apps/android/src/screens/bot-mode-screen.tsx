@@ -126,7 +126,7 @@ export function BotModeScreen({ selectedId, onSelect, onAgentMode, onBack, onDev
   const header = <TopBar title={bot?.name ?? room?.name ?? device?.name ?? s.bots.title} titleLines={1} centered={80}
     titleAccessory={null}
     onBack={selectedId ? () => onSelect(undefined) : onBack} onTitlePress={selectedId ? () => setDetails(true) : onDeviceInfo}
-    action={<><IconButton dense label={s.workspaces.title} icon={LayoutGrid} tint={colors.primary} onPress={onAgentMode} /><IconButton dense label={selectedId ? s.bots.details : s.settings.more} icon={MoreVertical} onPress={() => selectedId ? setDetails(true) : onMore()} /></>} />
+    action={<><IconButton dense label={s.workspaces.title} icon={LayoutGrid} onPress={onAgentMode} /><IconButton dense label={selectedId ? s.bots.details : s.settings.more} icon={MoreVertical} onPress={() => selectedId ? setDetails(true) : onMore()} /></>} />
   return <KeyboardInset><View style={styles.flex}><BlurHeaderFrame header={header} inset={selectedId !== undefined}>
     {selectedId === undefined ? <Screen refreshing={loading} onRefresh={() => void refresh()}>
       <View style={styles.rosterHeader}><View style={styles.row}><Text style={styles.rosterTitle}>DS Bot</Text><View style={styles.grow} /><IconButton label={s.bots.refresh} icon={RefreshCw} onPress={() => void refresh()} disabled={busy} /></View>

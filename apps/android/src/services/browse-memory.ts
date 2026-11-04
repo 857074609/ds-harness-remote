@@ -6,7 +6,7 @@ import type { DirectConfig, PromptImage, RemoteDevice, RemoteSession, WorkspaceV
 
 export type ReadingPosition = { key?: string; offset: number; atBottom: boolean }
 export type BrowseEntry = {
-  draft?: string; images?: PromptImage[]; position?: ReadingPosition; starred?: boolean
+  draft?: string; images?: PromptImage[]; quotes?: string[]; position?: ReadingPosition; starred?: boolean
   seenAt?: number; visitedAt?: number; session?: RemoteSession
 }
 type Snapshot = {

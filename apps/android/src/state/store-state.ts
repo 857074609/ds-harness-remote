@@ -17,6 +17,8 @@ import type {
   PromptImage,
   RemoteDevice,
   RemoteSession,
+  ScheduleCatalogEntry,
+  ScheduleDeliveryRecord,
   SendMessageResult,
   DirectConfig,
   SessionModels,
@@ -48,12 +50,14 @@ export interface AppState {
   piAvailable: boolean
   opencodeAvailable: boolean
   claudeAvailable: boolean
+  hermesAvailable: boolean
   workspaceCatalog?: { backend: AgentBackend; loading: boolean; error?: string }
   workspaces: WorkspaceView[]
   favoriteWorkspaces: WorkspaceShortcut[]
   /** Newest first; the home screen falls back to these when Favorites is empty. */
   recentWorkspaces: WorkspaceShortcut[]
   archivedSessionIds: string[]
+  pinnedSessionIds: string[]
   sessions: RemoteSession[]
   selectedSession?: RemoteSession
   /** History and the current connection's Codex event subscription are ready. */
@@ -84,6 +88,9 @@ export interface AppState {
   themePreference: ThemePreference
   typographyDensity: TypographyDensity
   defaultPermissionPreset: DefaultPermissionPreset
+  scheduleTasks: ScheduleCatalogEntry[]
+  scheduleLoading: boolean
+  scheduleError?: string
   refreshing: boolean
   busyAction?: string
   error?: string
@@ -98,6 +105,9 @@ export interface AppState {
   /** True when credentials are invalid and the UI should show the sign-in screen. */
   reauthRequired: boolean
 
+  loadScheduleTasks(): Promise<void>
+  deleteScheduleTask(sessionId: string, id: string): Promise<boolean>
+  loadScheduleHistory(sessionId: string, id: string): Promise<ScheduleDeliveryRecord[]>
   bootstrap(): Promise<void>
   requireReauth(message?: string): Promise<void>
   consumePendingAutoConnect(): string | undefined
@@ -117,18 +127,24 @@ export interface AppState {
   retrySendMessage(itemId: string): Promise<boolean>
   updateQueueItem(itemId: string, action: 'remove' | 'steer', rpcId?: string): Promise<boolean>
   forkChatMessage(message: ChatMessage): Promise<boolean>
+  quoteChatMessage(text: string, sessionId?: string): void
   rateMessage(message: ChatMessage, rating: 'positive' | 'negative'): Promise<boolean>
   stopSession(): Promise<void>
   respondApproval(itemId: string, outcome: 'allowed-once' | 'rejected'): Promise<void>
   respondQuestion(itemId: string, selected: Record<string, string[]>, custom?: Record<string, string>): Promise<void>
-  createSession(workspaceId?: string): Promise<boolean>
+  createSession(workspaceId?: string, backend?: AgentBackend): Promise<boolean>
+  forkSession(sessionId: string, backend?: RemoteSession['backend']): Promise<RemoteSession | undefined>
   archiveSession(sessionId: string): Promise<boolean>
+  unarchiveSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
+  pinSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
+  unpinSession(sessionId: string, backend?: RemoteSession['backend']): Promise<boolean>
+  renameSession(sessionId: string, title: string, backend?: RemoteSession['backend']): Promise<boolean>
   selectModel(selection: ModelSelection): Promise<boolean>
   selectPermission(preset: string): Promise<boolean>
   loadAgentPresets(): Promise<boolean>
   selectAgentPreset(preset: string): Promise<boolean>
   loadOlderHistory(): Promise<void>
-  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude'): Promise<WorkspaceView | undefined>
+  workspaceCreate(path: string, backend?: 'harness' | 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | 'claude' | 'hermes'): Promise<WorkspaceView | undefined>
   workspaceRename(workspaceId: string, title: string): Promise<boolean>
   workspaceDelete(workspaceId: string): Promise<boolean>
   workspaceMove(workspaceId: string, beforeWorkspaceId?: string): Promise<boolean>
@@ -161,8 +177,8 @@ export const disconnected: ConnectionSnapshot = {
 }
 
 export function initialData(): Pick<AppState,
-  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'workspaceCatalog' | 'workspaces' |
-  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
+  'config' | 'account' | 'devices' | 'selectedDevice' | 'connection' | 'hostDescriptor' | 'codexAvailable' | 'cursorAvailable' | 'antigravityAvailable' | 'piAvailable' | 'opencodeAvailable' | 'claudeAvailable' | 'hermesAvailable' | 'workspaceCatalog' | 'workspaces' |
+  'favoriteWorkspaces' | 'recentWorkspaces' | 'archivedSessionIds' | 'pinnedSessionIds' | 'sessions' | 'selectedSession' | 'codexReadySessionId' | 'currentWorkSessionIds' | 'messages' | 'sessionModels' | 'modelSelecting' | 'permissionSelecting' |
   'historyHasMore' | 'historyLoadingOlder' | 'oldestLoadedSeq' | 'transportPreference' | 'refreshing' | 'busyAction' | 'error' |
   'connectionProbeOrder' | 'connectionNetworkDetails' | 'reauthRequired' | 'feedbackBySession' | 'commandResult' | 'sessionLifecycles' | 'sessionProjectionSeqs'> {
   return {
@@ -180,11 +196,13 @@ export function initialData(): Pick<AppState,
     piAvailable: false,
     opencodeAvailable: false,
     claudeAvailable: false,
+    hermesAvailable: false,
     workspaceCatalog: undefined,
     workspaces: [],
     favoriteWorkspaces: [],
     recentWorkspaces: [],
     archivedSessionIds: [],
+    pinnedSessionIds: [],
     sessions: [],
     selectedSession: undefined,
     codexReadySessionId: undefined,

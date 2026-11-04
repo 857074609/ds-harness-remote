@@ -140,7 +140,7 @@ export class HostPluginRuntime {
           () => harnessSessionGeneration(this.harnessVersion) === 'v3',
           threadId => this.codex.resolveThreadWorkspace(context.connectionId, threadId),
           sessionId => this.acp.resolveUploadWorkspace(context.connectionId, sessionId),
-        )),
+        ), undefined, context.transportMode),
       )
     }, this.logger)
   }
@@ -243,12 +243,25 @@ export class HostPluginRuntime {
     const listen = this.directServer?.listenAddress()
     return {
       ...(this.identity === undefined ? {} : { deviceId: this.identity.deviceId }),
+<<<<<<< HEAD
       configured: true,
       online: this.directServer !== undefined,
       reconnecting: false,
       ...(listen === undefined ? {} : { directListen: listen }),
       authorized: this.credentialStore !== undefined,
       accountRequired: false,
+=======
+      configured: this.serverApi !== undefined,
+      online: this.serverConnection?.isOnline() ?? false,
+      reconnecting: this.serverConnection?.isReconnecting() ?? false,
+      ...(this.serverConnection?.lastActivity() === undefined
+        ? {}
+        : { lastActiveAt: this.serverConnection.lastActivity() }),
+      ...(error === undefined ? {} : { error }),
+      ...(authorization?.account === undefined ? {} : { account: authorization.account }),
+      authorized: authorization !== undefined,
+      accountRequired: error === 'ACCOUNT_AUTH_REQUIRED' || error === 'AUTH_REQUIRED' || error === 'AUTH_INVALID' || error === 'TOKEN_EXPIRED' || error === 'DEVICE_REVOKED' || error === 'DEVICE_OWNERSHIP_REQUIRED',
+>>>>>>> upstream-liguobao/main
       connectedClients: this.listConnectedClients(),
     }
   }
@@ -404,7 +417,7 @@ export class HostPluginRuntime {
     for (const backend of this.acp.enabledBackends()) {
       types.push({
         id: backend,
-        name: backend === 'claude' ? 'Claude' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
+        name: backend === 'claude' ? 'Claude' : backend === 'hermes' ? 'Hermes' : backend === 'pi' ? 'Pi' : backend === 'cursor' ? 'Cursor' : backend === 'antigravity' ? 'Antigravity' : backend === 'opencode' ? 'OpenCode' : backend,
         capability: `agent.acp.${backend}.v1`,
         available: readyBackends.includes(backend),
       })

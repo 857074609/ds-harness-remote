@@ -95,6 +95,9 @@ REST、Control frame 和解密后的 Remote message 使用 UTF-8 JSON。发送�
 - 对未识别的必需 enum 值 fail closed。
 - 不把原始 parser 错误直接展示给用户。
 
+共享 Control 和解密消息解码器拒绝同一对象内的重复字段。转义后相同的字段名也视为重复。
+原始字节必须是有效 UTF-8。REST 入口尚未接入此检查。
+
 ### 4.2 标识符
 
 - `deviceId`：UUID 或 ULID 字符串。新实现应该生成 UUIDv7 或 ULID。
@@ -292,7 +295,8 @@ deviceId 或相同 role，并为新角色签发独立 token pair、同步同账�
 }
 ```
 
-Server 必须轮换 refresh token。旧 token 重用触发 token family revoke。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+Server 必须轮换 refresh token。完整多账号 Server 对未再次轮换、未撤销且未过期的后继 token 提供幂等恢复，不使用固定两分钟窗口；过时 token 被拒绝但不撤销当前有效凭据。恢复数据异常或数据库繁忙返回可重试 503。自部署 Server 的策略以其实现为准。Client 必须原子替换本地 token；不能在日志或 URL 中传 token。
+HTTP `401/403` 的空响应、非 JSON 响应或不符合协议的错误体应保留凭据并退避重试，不单凭状态码判定设备授权失效。完整 Server 握手时的授权快照竞争使用 WebSocket `1013`（稍后重试），Client 保留凭据重连，不消耗授权刷新恢复次数。
 成功响应必须使用 §8.1 的 token pair schema。请求和响应禁止包含未定义字段。
 
 ### 8.3 Remote Web 授权换取 Browser Launcher 凭证
@@ -439,6 +443,7 @@ Server 不能返回 Client 未宣告的 capability。Client 后续只能使用�
 
 `maxControlFrameBytes` 和 `maxRelayFrameBytes` 可以声明更小的上限。
 双方必须对后续收发 frame 使用该上限。大于 v1 默认值的声明必须拒绝。
+`heartbeatIntervalMs` 必须是正安全整数。
 
 `webrtcEnabled` 是可选实现扩展。值为 `false` 时，Client 只能使用 Relay。
 字段缺失时，Client 可以协商 WebRTC。Client 仍必须遵守 `hello.ack.capabilities`。
@@ -483,10 +488,24 @@ Server 校验 membership、双方账号归属一致且 Host online 后创建 `co
     "clientDeviceId": "01KCLIENT...",
     "clientIdentityKey": "...",
     "authorization": "account",
-    "preferredTransports": ["lan", "p2p", "turn", "relay"]
+    "preferredTransports": ["lan", "p2p", "turn", "relay"],
+    "relayEndpoint": "wss://relay.example/ws",
+    "relayTicket": "dshrt.<payload>.<signature>",
+    "relayNodeId": "relay-bj-1",
+    "relayEpoch": 7
   }
 }
 ```
+
+当双方声明 `transport.relay.attach` 且 Server 选择独立 Relay 时，`connect.accepted` 同样
+携带 `relayEndpoint`、节点绑定的短期 `relayTicket`、`relayNodeId` 和 `relayEpoch`。Host 和
+Client 必须分别使用自己收到的 ticket 连接该 endpoint；ticket 不能发送到 Control WebSocket
+或复用到另一条 connection。缺少这些字段时，双方继续使用旧的 Control WebSocket Relay 兼容路径。
+
+当 Host、Client 和实时 Relay 节点同时声明 `transport.relay.resume.v1` 时，Server 还可以
+附带可选的 `relayRecoveryTicket`。该票据绑定 connection、双方身份、Relay 节点和 epoch，
+只用于 Server 重启后的双端 control lease 恢复，不能用于重新附着 Relay data socket。
+旧版本会忽略该字段；任一参与方未声明能力时，Server 不会下发或接受该恢复票据。
 
 WebRTC DataChannel 建立后，Initiator 必须先发送 `transport.selected`，再开始 Noise
 握手。Host 必须按同一 Control WebSocket 上的消息顺序，在创建 authenticated channel 前应用该
@@ -556,10 +575,13 @@ Noise handshake bytes 通过 Control frame 转发：
 ```
 
 Server 只校验 connection ownership、step 上限和 frame size，不解析 Noise payload。
+`step` 只允许 `1` 或 `2`。`data` 必须是规范的无 padding Base64URL。
 
 ### 12.3 Transport frames
 
-Noise handshake 完成后，Remote message JSON 作为 Noise transport plaintext。Relay 时 Noise ciphertext 放入 `relay` control frame；WebRTC 时直接发送 binary ciphertext。
+Noise handshake 完成后，Remote message JSON 作为 Noise transport plaintext。独立 Relay 时
+Noise ciphertext 放入 data WebSocket 的 `relay` frame；没有 attach 能力的旧客户端继续放入
+`relay` control frame；WebRTC 时直接发送 binary ciphertext。
 
 Noise transport 单消息最大为 65,535 bytes（包含 AEAD tag）。编码后的 Remote message
 超过 48 KiB 时，发送方必须先切成 DSH secure fragments，再逐片 Noise 加密。fragment
@@ -597,8 +619,31 @@ TLS/WSS 保护到 Server 的链路，但不能替代本节 E2EE。
 
 `counter` 必须是 `0..Number.MAX_SAFE_INTEGER` 范围内的整数。它用于 Server 基础限速和排序诊断，
 不作为解密 nonce 的权威来源。Noise frame 内部状态才是认证依据。
+`ciphertext` 必须是规范的无 padding Base64URL。
 
 Server 禁止解密、解析、缓存到数据库或记录 `ciphertext`。
+
+独立 Relay data WebSocket 使用同样的 v1 envelope，但连接建立后的第一帧必须是：
+
+```json
+{
+  "v": 1,
+  "id": "01K...",
+  "type": "relay.attach",
+  "timestamp": 1786000000000,
+  "payload": {
+    "connectionId": "01KCONN...",
+    "deviceId": "01KDEVICE...",
+    "peerDeviceId": "01KPEER...",
+    "ticket": "dshrt.<payload>.<signature>"
+  }
+}
+```
+
+Relay node 验证 ticket 的签名、`aud`、`nodeId`、`connectionId`、设备对、`epoch` 和有效期，
+并确保每个设备端在同一 connection 只有一个 active attach。成功后返回 `relay.ready`；之后
+只接受目标匹配的 `relay` frame 和心跳。任一端断开时，另一端收到 `relay.detach`，必须关闭
+当前 Noise connection 并重新建立完整的 connection，不能继续复用旧的 Noise 状态。
 
 ## 14. WebRTC Signaling
 
@@ -1180,7 +1225,7 @@ Host 固定 allowlist 仅增加该只读 endpoint；预设切换继续使用官�
 ### Native sidebar: read-only files and Host-configurable terminal
 
 Harness `0.1.6-alpha.2` 原生侧栏通过现有 `harness.remote.*` carrier 传输；不新增 Harness wire format。
-Android 用户可显式下载工作区原文件到系统目录选择器授权的手机目录（每文件最多 100 MiB，包含恰好 100 MiB；独立于 8 MiB 预览上限）。复用下述 `stat` / `readBytes` 分块读取及路径、版本、大小和取消校验，不新增 download RPC，不写 Host 文件；Office 下载保存原文件，转换后的 PDF 仅用于预览。
+Android 用户可显式下载工作区原文件到系统目录选择器授权的手机目录（每文件最多 100 MiB，包含恰好 100 MiB；独立于移动端预览上限：PDF 16 MiB、图片 8 MiB）。复用下述 `stat` / `readBytes` 分块读取及路径、版本、大小和取消校验，不新增 download RPC，不写 Host 文件；Office 下载保存原文件，转换后的 PDF 仅用于预览。
 
 固定只读 allowlist：`workspaceFiles/list|stat|read|readBytes|readAll|readRelated|changes`，以及
 `officeToPdf/generation|render`。Host 官方 Session lookup、组合文件系统、分页与大小限制继续生效。
@@ -1347,8 +1392,8 @@ Web / Desktop 可在 Client 内存中把 ACP Workspace / Session 投影到原生
 新工作区 ID 分别使用 `cursor:cwd:<encoded-path>` 和 `antigravity:cwd:<encoded-path>`；
 工作区只接受所属后端前缀，不兼容旧 AGY 的 `cursor:cwd:` ID，也不接受无前缀路径作为 ID。既有 Session ID（Cursor `cursor:`、AGY `acp:`）
 保持不变。`agent.acp.v1` 仅表示公共 ACP 数据面；Cursor 和 AGY 分别必须明确声明
-`agent.acp.cursor.v1` 和 `agent.acp.antigravity.v1`。ACP 尚未发布使用，不提供旧 ACP
-配置或工作区 ID 的迁移逻辑。
+`agent.acp.cursor.v1` 和 `agent.acp.antigravity.v1`。不提供早期 ACP
+配置或工作区 ID 的迁移逻辑；该限制不表示 ACP 尚未实现或发布。
 `dsh/sessionHistory` 使用有界 ACP transfer 读取含图片或大文本的响应；图片 Prompt 的
 transfer commit 使用与普通 Prompt 相同的长超时，chunk 顺序、大小与连接归属校验不变。
 History 显式后端及 Session 前缀必须与已绑定的后端一致；Cursor History 不读取 AGY transcript。
@@ -1523,7 +1568,7 @@ ACP 同时要求调用连接的 peer 仍有效、backend 可用、session owner 
 | `workspace.upload.commit` | `{sessionId, uploadId}` | `{name, path, bytes}` |
 | `workspace.upload.abort` | `{sessionId, uploadId}` | `{aborted:true}` |
 
-- `open`：`totalBytes` 是 0–20 MiB 的整数。`name` 是单个文件名，UTF-8 编码最多
+- `open`：`totalBytes` 是非负整数：Host 验证当前连接为 LAN 或直接 P2P 时最大 1 GiB（1,073,741,824 bytes）；TURN、Relay、未知路径最大 20 MiB。Host 在 open、chunk 和 commit 重新检查实际路径；大文件传输回退至中继时拒绝并清理未提交数据。旧 Host 可保留 20 MiB 限额，Client 不得自动重传。`name` 是单个文件名，UTF-8 编码最多
   220 bytes；禁止 `/`、`\`、ASCII 控制字符、DEL、`<>:"|?*`、`.`、`..`、尾部点/空格、
   Windows 保留名，以及 Host 临时文件前缀 `.dsh-upload-`。不能传 `cwd`、目标目录或目标路径。
   Host 当前返回 `chunkBytes: 65536`，表示后续每块**解码后**最多 64 KiB。
@@ -1704,7 +1749,13 @@ Event 去重 key 为 `(hostDeviceId, seq)`。收到 `seq <= lastSeq` 的重放�
 
 应用层 `connection.ping` 已退出 Plugin；只保留 Control Channel heartbeat。
 
-Control Channel heartbeat 默认 25 秒，75 秒未收到有效 pong 视为断开。应用层可通过 `connection.ping` 估计 Host RTT。
+Control Channel heartbeat 默认 25 秒。75 秒未收到有效 pong 时，连接断开。
+Control ping/pong 的 nonce 可用于估计 Server RTT。
+
+开源自部署 Server 的心跳超时可能只发送 WebSocket close `4001` / `CONNECTION_FAILED`，
+不向超时的 peer 发送 `error` 帧。Client 将这一精确组合视为可重试的连接故障，重新进行
+授权与加密握手；不能重放业务请求。`4001` 也用于授权失败，因此不能仅按 close code
+重试；未知 reason 与 `4003`（连接被替换）仍须停止自动恢复。
 
 Control ping：
 
@@ -1795,7 +1846,7 @@ pong 回显 nonce。Heartbeat 不能携带业务数据。
 | File Viewer range / RPC | 512 KiB |
 | File Viewer directory entries / RPC | 1,000 |
 | RPC text input | 64 KiB |
-| Workspace upload file | 20 MiB；允许零字节 |
+| Workspace upload file | LAN / direct P2P：1 GiB；TURN / Relay / 未知：20 MiB；允许零字节 |
 | Workspace upload chunk（解码后） | 64 KiB；以 open 返回的 chunkBytes 为准 |
 | Workspace active uploads / connection | 2；2 min idle 后回收 |
 | Workspace upload authority lookup | 每次最多 15 s |
@@ -2024,3 +2075,10 @@ Plugin configuration continues through the existing official `settings` endpoint
 Remote access namespaces remain local-only. Installation, removal, arbitrary
 plugin-manager methods and legacy ApiProxy plugin management remain disallowed.
 This adds no new wire format or capability and requires an updated Host plugin.
+
+
+## Optional WebRTC control recovery (implementation in progress)
+
+The additive `transport.webrtc.resume.v1` contract is specified in
+[WebRTC control recovery](design/webrtc-control-recovery.md). Protocol v1 and
+legacy control lifetimes remain unchanged unless all three parties negotiate it.

@@ -12,6 +12,7 @@ import {
 class FakeWebSocket {
   static readonly OPEN = 1
   static latest?: FakeWebSocket
+  static instances: FakeWebSocket[] = []
   readyState = 0
   binaryType = ''
   sent: string[] = []
@@ -22,6 +23,7 @@ class FakeWebSocket {
 
   constructor(readonly url: string) {
     FakeWebSocket.latest = this
+    FakeWebSocket.instances.push(this)
   }
 
   open(): void {
@@ -51,10 +53,44 @@ const cleanupScenario1 = () => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   FakeWebSocket.latest = undefined
+  FakeWebSocket.instances = []
 }
 afterEach(cleanupScenario1)
 
 describe('RelayTransport control handshake', () => {
+  it('attaches an independent data socket when the Server assigns one', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = new RelayTransport('wss://remote.example/ws/v1/connect', {
+      role: 'client', deviceId: 'client-1', accessToken: 'access-token', targetDeviceId: 'host-1',
+    })
+    const connecting = transport.connect()
+    const control = FakeWebSocket.latest!
+    control.open()
+    control.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach'] }))
+    await Promise.resolve()
+    control.receive(createControlFrame('connect.accepted', {
+      connectionId: 'connection-1',
+      relayEndpoint: 'wss://relay.example/ws',
+      relayTicket: 'dshrt.payload.signature',
+      relayNodeId: 'relay-1',
+      relayEpoch: 4,
+    }))
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const data = FakeWebSocket.instances[1]!
+    data.open()
+    expect(JSON.parse(data.sent[0]!)).toMatchObject({
+      type: 'relay.attach',
+      payload: { connectionId: 'connection-1', deviceId: 'client-1', peerDeviceId: 'host-1', ticket: 'dshrt.payload.signature' },
+    })
+    data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
+    await connecting
+    await transport.sendHandshake(1, new Uint8Array([1, 2, 3]))
+    await transport.send(new TextEncoder().encode('encrypted-frame'))
+    expect(control.sent.filter(frame => JSON.parse(frame).type === 'secure.handshake')).toHaveLength(1)
+    expect(JSON.parse(data.sent[1]!)).toMatchObject({ type: 'relay', payload: { connectionId: 'connection-1', targetDeviceId: 'host-1', counter: 0 } })
+    expect(control.sent.filter(frame => JSON.parse(frame).type === 'relay')).toHaveLength(0)
+  })
+
   it('waits for authorization and sends canonical relay frames', async () => {
     vi.stubGlobal('WebSocket', FakeWebSocket)
     const transport = new RelayTransport('wss://remote.example/ws/v1/connect', {
@@ -181,6 +217,185 @@ describe('RelayTransport control handshake', () => {
 })
 
 describe('AdaptiveTransport capability negotiation', () => {
+  it('moves Relay ciphertext to the assigned data socket while keeping handshake on control', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport({ forceRelay: true })
+    const connecting = transport.connect()
+    const control = FakeWebSocket.latest!
+    control.open()
+    control.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach'] }))
+    await Promise.resolve()
+    control.receive(createControlFrame('connect.accepted', {
+      connectionId: 'connection-1',
+      relayEndpoint: 'wss://relay.example/ws',
+      relayTicket: 'dshrt.payload.signature',
+      relayNodeId: 'relay-1',
+      relayEpoch: 4,
+    }))
+    await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+    const data = FakeWebSocket.instances[1]!
+    data.open()
+    expect(JSON.parse(data.sent[0]!)).toMatchObject({ type: 'relay.attach', payload: { connectionId: 'connection-1' } })
+    data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
+    await connecting
+    await transport.sendHandshake(1, new Uint8Array([7]))
+    await transport.send(new Uint8Array([8, 9]))
+    expect(lastSentPayload(control, 'secure.handshake')).toMatchObject({ connectionId: 'connection-1' })
+    expect(JSON.parse(data.sent[1]!)).toMatchObject({ type: 'relay', payload: { connectionId: 'connection-1', counter: 0 } })
+    expect(lastSentPayload(control, 'transport.selected')).toMatchObject({ transport: 'relay' })
+  })
+
+  it('retains a confirmed independent Relay socket across control loss without resetting the relay counter', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const transport = createAdaptiveTransport({ forceRelay: true, refreshAccessToken: async () => 'fresh-token' })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const control = FakeWebSocket.latest!
+      control.open()
+      control.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      control.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', relayEndpoint: 'wss://relay.example/ws', relayTicket: 'attach', relayEpoch: 4, relayRecoveryTicket: 'recovery' }))
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2))
+      const data = FakeWebSocket.instances[1]!
+      data.open()
+      data.receive({ v: 1, id: 'ready', type: 'relay.ready', timestamp: Date.now(), payload: { connectionId: 'connection-1', epoch: 4 } })
+      await connecting
+      transport.markSecureReady()
+      const lease = lastSentPayload(control, 'connection.lease.request')
+      control.receive(createControlFrame('connection.lease.ack', { ...lease, ticket: 'renewed', leaseMs: 300_000 }))
+      await transport.send(Uint8Array.of(1))
+      control.readyState = 3
+      control.onclose?.({ code: 1012, reason: 'restart' })
+      await transport.send(Uint8Array.of(2))
+      const relayFrames = data.sent.map(raw => JSON.parse(raw)).filter(frame => frame.type === 'relay')
+      expect(relayFrames.map(frame => frame.payload.counter)).toEqual([0, 1])
+      expect(transport.getStats().connected).toBe(true)
+      expect(closed).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(3))
+      const recovered = FakeWebSocket.latest!
+      recovered.open()
+      recovered.receive(helloAck({ capabilities: ['transport.relay', 'transport.relay.attach', 'transport.relay.resume.v1'] }))
+      expect(lastSentPayload(recovered, 'connection.lease.request')).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+      data.readyState = 3
+      data.onclose?.({ code: 1006, reason: '' })
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+    } finally { await transport.close() }
+  })
+
+  it('closes an established WebRTC data channel when the Control socket closes', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const rtc = stalledRtc()
+    const disconnected = vi.fn()
+    const closed = vi.fn()
+    const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, onDisconnect: disconnected })
+    transport.onClose(closed)
+
+    const connecting = transport.connect()
+    const socket = FakeWebSocket.latest!
+    socket.open()
+    socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.relay'] }))
+    socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+    await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+    rtc.channel.readyState = 'open'
+    rtc.channel.onopen?.()
+    await connecting
+    expect(transport.getStats().connected).toBe(true)
+
+    await transport.send(Uint8Array.of(1, 2, 3))
+    expect(rtc.channel.send).toHaveBeenCalledOnce()
+    socket.readyState = 3
+    socket.onclose?.({ code: 1012, reason: 'Server restart' })
+
+    await vi.waitFor(() => expect(rtc.channel.close).toHaveBeenCalledOnce())
+    expect(rtc.pc.close).toHaveBeenCalledOnce()
+    expect(transport.getStats().connected).toBe(false)
+    expect(disconnected).toHaveBeenCalledWith({ reason: 'control-closed', closeCode: 1012 })
+    expect(closed).toHaveBeenCalledOnce()
+    await expect(transport.send(Uint8Array.of(4))).rejects.toThrow('not been authorized')
+  })
+
+  it('retains confirmed WebRTC data while reauthenticating control without creating a new logical connection', async () => {
+    vi.stubGlobal('WebSocket', FakeWebSocket)
+    const rtc = stalledRtc()
+    const refresh = vi.fn(async () => 'fresh-access-token')
+    const transport = createAdaptiveTransport({ rtcFactory: rtc.factory, refreshAccessToken: refresh })
+    const closed = vi.fn()
+    transport.onClose(closed)
+    try {
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1', recoveryTicket: 'initial' }))
+      await vi.waitFor(() => expect(rtc.channel.onopen).toBeTypeOf('function'))
+      rtc.channel.readyState = 'open'
+      rtc.channel.onopen?.()
+      await connecting
+      transport.markSecureReady()
+      const request = lastSentPayload(socket, 'connection.lease.request')
+      socket.receive(createControlFrame('connection.lease.ack', { ...request, ticket: 'renewed', leaseMs: 300_000 }))
+      socket.readyState = 3
+      socket.onclose?.({ code: 1012, reason: 'restart' })
+      await transport.connect() // Idempotent while only control is detached.
+      await transport.send(Uint8Array.of(1))
+      expect(closed).not.toHaveBeenCalled()
+      expect(rtc.pc.close).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(FakeWebSocket.latest).not.toBe(socket))
+      const recovered = FakeWebSocket.latest!
+      // The old control heartbeat is stale, but the new socket is still
+      // handshaking. A forced lease tick must not close it.
+      const internals = transport as unknown as { lastControlReceivedAt: number; lease: { tick(force: boolean): void } }
+      internals.lastControlReceivedAt = Date.now() - 80_000
+      internals.lease.tick(true)
+      expect(FakeWebSocket.latest).toBe(recovered)
+      expect(recovered.readyState).toBe(0)
+      recovered.open()
+      expect(lastSentPayload(recovered, 'hello')).toMatchObject({ accessToken: 'fresh-access-token' })
+      recovered.receive(helloAck({ capabilities: ['transport.p2p', 'transport.webrtc.resume.v1'] }))
+      const renewal = lastSentPayload(recovered, 'connection.lease.request')
+      expect(renewal).toMatchObject({ connectionId: 'connection-1', ticket: 'renewed' })
+      expect(recovered.sent.map(raw => JSON.parse(raw).type)).not.toContain('connect.request')
+      recovered.receive(createControlFrame('connection.lease.ack', { ...renewal, ticket: 'recovered', leaseMs: 300_000 }))
+      // Old-socket callbacks must not close the retained session.
+      socket.onclose?.({ code: 4003, reason: 'stale replacement' })
+      await transport.send(Uint8Array.of(2))
+      expect(rtc.channel.send).toHaveBeenCalledTimes(2)
+      expect(closed).not.toHaveBeenCalled()
+      recovered.receive(createControlFrame('error', { code: 'DEVICE_REVOKED', message: 'revoked', retryable: false }))
+      await vi.waitFor(() => expect(closed).toHaveBeenCalledOnce())
+    } finally { await transport.close() }
+  })
+
+  it('retries the self-hosted heartbeat close without retrying authorization or unknown application closes', async () => {
+    await runScenarios([
+      { code: 4001, reason: 'CONNECTION_FAILED', retryable: true },
+      { code: 4001, reason: 'AUTH_INVALID', retryable: false },
+      { code: 4001, reason: 'DEVICE_REVOKED', retryable: false },
+      { code: 4001, reason: '', retryable: false },
+      { code: 4001, reason: 'CONNECTION_FAILED: unknown detail', retryable: false },
+      { code: 4003, reason: 'CONNECTION_FAILED', retryable: false },
+      { code: 1008, reason: 'CONNECTION_FAILED', retryable: false },
+    ].map(row => ({ name: `${row.code}/${row.reason}`, run: async () => {
+      vi.stubGlobal('WebSocket', FakeWebSocket)
+      const transport = createAdaptiveTransport({ forceRelay: true })
+      const closed = vi.fn()
+      transport.onClose(closed)
+      const connecting = transport.connect()
+      const socket = FakeWebSocket.latest!
+      socket.open()
+      socket.receive(helloAck({ capabilities: ['transport.relay'] }))
+      socket.receive(createControlFrame('connect.accepted', { connectionId: 'connection-1' }))
+      await connecting
+      socket.onclose?.(row)
+      expect(closed).toHaveBeenCalledOnce()
+      expect(closed).toHaveBeenCalledWith(expect.objectContaining({
+        code: row.code === 4003 ? 'CONNECTION_REPLACED' : 'TRANSPORT_CLOSED', retryable: row.retryable,
+      }))
+      await transport.close()
+    } })), cleanupScenario1)
+  })
+
   it('reports established carrier failures without leaking control payloads or retrying old closes', async () => {
     await runScenarios(['control-closed', 'control-error', 'invalid-control-frame', 'webrtc-closed', 'local-close'].map(reason => ({
       name: reason, run: async () => {

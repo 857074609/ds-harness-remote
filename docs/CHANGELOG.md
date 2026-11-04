@@ -1,7 +1,154 @@
-## Unreleased
+## 0.6.2 — 2026-11-03
 
-- Automatically reconnect Desktop Harness Remote after transient transport loss, revalidate the Host identity and membership, and ask the native Connection to reopen subscriptions. Cancel retries on exit/sign-out/Host switch; stop on terminal authorization/security errors or connection replacement. Never replay mutations. CodeX/ACP virtual workspaces still require manual reopening.
-- 修复 Desktop Harness Remote 临时断线后不会自动恢复的问题：重连重新校验 Host 身份和授权，并通知原生 Connection 重开订阅；退出、注销或切换主机时取消重试，权限/安全异常或连接被替换时停止。不会重发操作；CodeX/ACP 虚拟工作区仍需手动重新打开。
+Android build 70.
+
+### English
+
+- Add Hermes Agent as an opt-in remote backend through its built-in ACP server (`hermes acp`), with workspaces, history, streamed thinking and tool output, text prompts, approvals, and model selection on Desktop and Android.
+- Check npm for the latest plugin version at startup and every 24 hours; show update hints on the sidebar Remote entry, the Remote dialog, and the host list, linking to GitHub Releases.
+- Add a Standard / Compact style setting for the sidebar Remote entry.
+- Redesign the Android visual system with the DeepSeek black/blue/white palette, grouped card lists, smooth toggles, and a new settings page.
+- Upgrade Android chat typography and rich interactive components to align 1:1 with desktop link syntax and icons; add native text-selection quoting and desktop-aligned icons and usage panel; make Markdown links and bare URLs in AI replies tappable.
+- Recover remote credentials across server outages and retry unstructured gateway authorization responses.
+- Reconnect automatically after self-hosted server heartbeat timeouts.
+- Render floating dialog backdrops through a body portal to avoid clipping by host containers, and expand the login form inline instead of the full-screen settings page.
+- Isolate ACP live output per connection and failures per backend.
+- Offload Android attachments to the workspace via chunked upload with path references in prompts, keeping drafts on upload failures.
+- Upgrade the Intelligent UI offline renderer for schema compatibility, inline rendering within assistant turns, mobile styles, and question option descriptions.
+- Degrade missing dsh-TUI completion and scenario services optionally so Host startup is never blocked; start reconnect backoff at four seconds.
+- Compatible with and validated against DSH 0.2.1-rc.5.
+
+Thanks 择梦舟 (@dreamfarer-space), @vccddd, @SternChiri, @bluesmilery, and @luojiyin1987 for their contributions.
+
+### 中文
+
+- 新增 Hermes Agent 远程后端：通过其自带 ACP 服务端（`hermes acp`）接入，默认关闭、可在 Remote 设置中开启；Desktop/Android 支持工作区、历史、流式思考与工具输出、文字消息、审批与模型选择。
+- 插件启动时及每 24 小时匿名查询 npm 最新版本，本地落后时在侧栏 Remote 入口、Remote 弹窗与主机列表显示更新提示，直达 GitHub Releases。
+- 侧栏 Remote 入口新增「标准 / 简洁」样式设置。
+- Android 重做视觉系统：DeepSeek 黑/蓝/白配色、分组卡片列表、平滑开关与全新设置页。
+- Android 升级会话排版与富交互组件，1:1 对齐桌面端链接语法与多态图标；接入系统原生选词引用与桌面端对齐的图标、用量面板；AI 回答中的 Markdown 链接与裸 URL 支持点击跳转。
+- 修复 Server 故障或授权响应结构异常时远程凭据无法恢复、需要重新登录的问题。
+- 修复自部署 Server 心跳超时后不再自动重连的问题。
+- 浮层弹窗遮罩改经 body portal 渲染，不再被宿主容器裁剪；登录表单改为卡片内就地折叠展开。
+- 修复 ACP 多连接同时在线时实时输出串到其他连接、单个后端失败影响其他后端的问题。
+- Android 附件改为分块上传到工作区并以路径引用注入 Prompt；上传失败保留草稿，重试不重复上传。
+- 升级 Intelligent UI 离线渲染器并完善 schema 兼容：组件在助手消息内联渲染、适配移动端样式与触控目标，问答选项描述正常显示。
+- dsh-TUI 补全树与场景服务改为可选降级，缺少时不再阻塞 Host 启动；重连退避从 4 秒起步。
+- 适配并验证 DSH 0.2.1-rc.5。
+
+感谢择梦舟（@dreamfarer-space）、@vccddd、@SternChiri、@bluesmilery、@luojiyin1987 的贡献。
+
+## 0.6.0 — 2026-10-29
+
+Android build 69.
+
+### English
+
+- Update the Plugin and Android app release version to 0.6.0.
+
+### 中文
+
+- 将 Plugin 与 Android App 发布版本更新为 0.6.0。
+
+## 0.5.23 — 2026-10-29
+
+Android build 68.
+
+### English
+
+- Refresh Remote settings copy across supported languages to describe encrypted P2P access to DeepSeek Harness, Codex, Claude Code, and Pi workspaces on desktop, web, iOS, and Android.
+- Simplify the Remote settings layout by removing the unused Server address field and keeping account authorization details together.
+- Fix Remote panel refresh and close actions being blocked by the draggable panel header.
+- Keep ACP settings available while removing the unused add-workspace entry from the Remote settings flow.
+- Enable Remote Tools by default while preserving the setting to disable them, and keep Host discovery working when settings are unavailable.
+- Harden deadlines and size limits for large responses, search projections, and connection lifecycle cleanup.
+- Preserve CodeX session model metadata and stabilize settings writes during HMR reloads.
+
+### 中文
+
+- 更新所有支持语言的 Remote 设置文案，说明通过端到端加密的 P2P 网络访问 DeepSeek Harness、CodeX、Claude Code 和 Pi 工作区，并支持桌面、网页、iOS 与 Android 客户端。
+- 简化 Remote 设置布局，移除不再需要的 Server 地址字段，并将账号授权说明与账号值放在同一行。
+- 修复 Remote 面板弹出后刷新和关闭按钮有时无法点击的问题。
+- 保留 ACP 设置入口，移除 Remote 设置流程中不再使用的新增工作区入口。
+- 默认开启 Remote Tools，并在设置中保留关闭开关；修复设置不可用时仍能发现 Host 的问题。
+- 加固大响应传输、搜索投影和连接生命周期的超时与大小边界，避免异常远端数据拖住连接。
+- 修复 CodeX 会话模型元数据恢复，并稳定 HMR 重载期间的设置写入。
+
+## 0.5.22 — 2026-10-28
+
+Android build 67.
+
+### English
+
+- Add Android plugin management with Remote-adapted, installed, and experimental plugin groups, official settings editing, enable/disable controls, and desktop installation guidance.
+- Refresh the Android sign-in setup with a modern branded layout, localized OAuth guidance, and more reliable callback loading and error handling.
+- Enable Remote tools injection by default, with a setting to disable it, and hide Host mentions when Remote tools are disabled.
+- Preserve native Remote settings navigation and compatibility with Hosts that omit optional control-route capabilities.
+- Add Remote Host mentions with a reference popup that opens the selected Host or workspace from the native UI.
+- Keep Remote settings on the native settings launcher across supported Harness versions and route the detailed settings entry through the plugin manager when required.
+- Improve Android Host and plugin error presentation, including localized OAuth selection, callback loading, and clearer Host titles.
+- Support rotating a pinned peer key without requiring a new membership when the peer remains authorized.
+
+Thanks @dreamfarer-space for the Android plugin management and login setup redesign, Hui Xu for same-membership pinned-peer key rotation, and @liguobao for the Plugin, Android, and release integration work.
+
+### 中文
+
+- 新增 Android 插件管理：支持 Remote 适配、已安装和实验性插件分组，提供官方设置编辑、启用/停用控制及电脑端安装指引。
+- 更新 Android 登录设置页，采用新的品牌布局，补齐本地化 OAuth 引导，并改进回调加载与错误处理。
+- Remote 工具注入默认开启，支持在设置中关闭；关闭时隐藏主机提及入口。
+- 保留原生 Remote 设置导航，并兼容缺少可选 control-route 能力的 Host。
+- 新增 Remote 主机提及和引用弹窗，可从原生界面直接打开对应主机或工作区。
+- 在支持的 Harness 版本中保持 Remote 设置使用原生设置入口，并在需要时通过插件管理器打开详细设置。
+- 改进 Android 主机与插件错误展示，包括本地化 OAuth 选择、回调加载和更清晰的主机标题。
+- 在设备仍具备成员授权时支持轮换固定 Peer 密钥，无需重新注册成员关系。
+
+感谢 @dreamfarer-space 贡献 Android 插件管理与登录设置页改版，感谢 Hui Xu 贡献同成员固定 Peer 密钥轮换，也感谢 @liguobao 完成 Plugin、Android 及发版整合工作。
+
+## 0.5.21 — 2026-10-27
+
+Android build 66.
+
+### English
+
+- Fix the Remote login page showing Hosts before local credentials have been checked, and restore the sign-in state correctly after local sign-out.
+
+### 中文
+
+- 修复 Remote 登录页在本地凭据检查完成前提前展示主机列表的问题，并在本地退出登录后正确恢复登录状态。
+
+## 0.5.20 — 2026-10-27
+
+Android build 65.
+
+### English
+
+- Add native Remote Agent tools to discover online Hosts and workspaces, create and message Harness sessions, read history, wait for execution, and request interruption.
+- Download Harness workspace files to the plugin machine and upload authorized local files into a Harness workspace; uploads support 1 GiB over LAN/direct P2P and retain the 20 MiB limit over relays, without overwriting existing files.
+- Restore backend-aware Android Host session browsing, per-Host group expansion state, recent sessions, and the workspace switch entry.
+- Fix the Remote workspace selection footer being obscured, and hide the sidebar browser entry that would still open a local browser while Remote mode is active.
+- Fix Remote upload receipts incorrectly reporting local-file and target preflight failures as unknown.
+- Restore Remote sign-in after Desktop sign-out and automatically reconnect Harness sessions after transient connection loss (#173), without replaying operations. CodeX/ACP virtual workspaces still require manual reopening.
+- Fix WebRTC fallback dependency loading in Desktop plugin installations (#149).
+- Add Android automation task lists, filters, details and deletion, with localized Host sidebar labels (#176).
+- Add attachments from Android's system file picker (#174).
+- Prevent repeated new-session taps from creating redundant empty conversations (#175).
+- Improve Android screen-off connections and recovery on resume (#172).
+
+### 中文
+
+- 新增原生 Remote Agent 工具，可发现在线 Host 与工作区、创建和发送 Harness 会话任务、读取历史、等待执行及请求中断。
+- 支持将 Harness 工作区文件下载到插件运行的本机，并将获准发送的本地文件上传到 Harness 工作区；上传在 LAN/直连 P2P 下支持 1 GiB，中继连接保持 20 MiB，已有文件不会被覆盖。
+- Android Host 会话抽屉恢复按 Agent 后端浏览、按 Host 保存分组展开状态、最近会话和工作区切换入口。
+- 修复 Remote 工作区浏览器底部选择栏被遮挡的问题，并在 Remote 模式隐藏仍会打开本机浏览器的侧栏入口。
+- 修复 Remote 上传在本地文件或目标预检失败时错误返回 unknown 回执的问题。
+- 修复 Desktop 退出账号后 Remote 登录入口无法恢复的问题，并支持临时断线后自动重连 Harness 会话（#173），不重放操作；CodeX/ACP 虚拟工作区仍需手动重新打开。
+- 修复 Desktop 插件安装时 WebRTC 回退依赖加载失败的问题（#149）。
+- Android 新增自动化任务列表、筛选、详情与删除入口，并补齐主机侧栏多语言文案（#176）。
+- Android 支持从系统文件选择器添加附件（#174）。
+- 修复连续点击新会话按钮创建多余空会话的问题（#175）。
+- 改进 Android 息屏连接与唤醒恢复（#172）。
+
+感谢 @dreamfarer-space（#172、#174、#175、#176）、@bluesmilery（#173）和 @seewhyme（#179）的贡献，也感谢 @xiongyuyang 与 @Sandwich-git 对本版本相关工作的支持。
 
 ## 0.5.19 — 2026-10-26
 

@@ -1,8 +1,8 @@
 # TODO
 
-更新日期：2026-10-24。当前内部待发布版本统一为 `0.5.19`，Android `versionCode 64`，Expo iOS `buildNumber 64`；尚未为此版本创建 Tag 或 Release。
+更新日期：2026-11-03。当前源码版本为 `0.6.2`，Android `versionCode 70`，Expo iOS `buildNumber 70`；Tag、npm 与 GitHub Release 状态以实际发布结果为准。
 
-本次全仓 check 与 794 tests 通过（Plugin 407、Android 195；7+78+1+12+44+43+7+407+195=794）。生产 build（含 Android Hermes export）与 DSH bundle 校验通过，未新增原生真机或跨设备验收；既有 Metro noble/hashes exports fallback 警告仍保留。
+最近一次构建验证见 [AGENTS.md 的 0.5.20 合并后重建记录](../AGENTS.md#post-merge-0520-rebuild-2026-10-27)：全仓 check、847 tests、串行生产 build（含 Android Hermes）、DSH bundle 与打包检查通过。这是既有验证记录，本轮文档清理未重新运行；未新增 APK、原生真机或跨设备验收。Metro noble/hashes exports fallback 警告仍保留。
 
 Harness `0.2.1-rc.1` 为开发基线。保留 `0.2.0-rc.2` / rc.1 的官方 Typert Session V3。
 peer range 接纳 `0.2.2` 预发布版。版本范围不代表 runtime 验收通过。
@@ -12,6 +12,13 @@ Host 插件、随包 Remote 客户端和 Android 已移除 Harness `0.1.1-rc.2` 
 
 状态规则：勾选项只表示条目所述范围完成。源码实现、自动化验证与真机验收分别记录。
 RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真机验收。
+
+## 2026-11-02 Android Mermaid 渲染（Issue #255）
+
+- [x] 第一阶段：内置固定版本 mermaid 12.2.0，聊天中的 ```mermaid 离线渲染为原生 SVG；HTML 标签图（journey）走全屏图片查看；失败/超限回退源码。
+- [ ] 真实会话验收：真实 Host 回复中的 mermaid（含流式输出过程）、长会话滚动与单元格回收、真机（非模拟器）性能与内存、大字体/TalkBack、横屏/平板。
+- [ ] 抓包确认渲染全程无网络请求（目前由 CSP 与导航拦截保证，未实测抓包）。
+- [ ] 中期：可移植渲染产物通道；长期：并入 #186 Remote Plugin 渲染契约。Remote Web 由独立 Server 仓库评估。
 
 ## 2026-10-24 DS Bot 0.2.1 适配
 
@@ -25,9 +32,11 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
 - [ ] 真机/跨设备验收：ds-bot 0.2.0 创建/删除、群聊实时与历史、会话换段、卡片提交、断线恢复、主机切换、键盘和大屏布局。
 - [ ] Bot 专属文案补齐简中/英文之外的语言；当前其他语言回退英文。
 
-## 2026-10-22 原生自动化任务
+## 原生自动化任务（2026-10-27 更新）
 
 - [x] 放行官方 schedule/history、schedule/update、schedule/delete，复用既有列表和事件 carrier。
+- [x] Android 已合并自动化任务列表、搜索/状态筛选、规则/记录查看、删除及会话入口（#176）；不代表已完成真机验收。
+- [ ] Android 自动化任务、文件选择器（#174）、新会话防抖（#175）与息屏恢复改进（#172）的原生真机及跨设备回归。
 - [ ] 更新 Host 插件后，在真实 Desktop/浏览器远程连接中验收任务修改、删除、历史分页和跨 Client 变更刷新；本地契约验证不等于跨设备验收。
 
 ## 2026-10-21 移动端精简历史
@@ -43,7 +52,8 @@ RC.1 的源码适配与本地自动化验证见兼容性说明；不能替代真
   - 同日 16:20 覆盖安装后，保持现有省电设置；16:21 建立 P2P，约四分钟息屏后唤醒于 16:25:47 收到 control-error，16:25:50 已完成新加密连接并更新 connected 通知，聊天恢复，同一进程未退出。约 2.3 秒恢复通过；未修改电池优化白名单，息屏期间 wake lock 仍被禁用，不能将其记为持续联网或 15 分钟稳定性通过。
   - 同日后续系统日志确认小米息屏冻结：16:40:33.987 `Going to sleep`，16:40:39.696 以 `reason: greeze` 禁用本 App wake lock，16:40:39.699 同时记录 `Destroyed live tcp sockets for uids={10440}` 与 `frozen uid = 10440 reason=screen off`。约 5.7 秒即主动断开 TCP；16:40:40.981 唤醒、16:40:41.142 才向 JS 投递 control-error，16:40:44.332 重建 P2P。此前 16:21 与 16:35 两次息屏也在约 5.7 秒后以 greeze 禁用锁。该手机在 FGS/procState 4 下仍受厂商冻结，不能靠 JS 心跳/重连或普通部分唤醒锁保证息屏持续联网；用户要求保持省电设置，未修改白名单或厂商策略。尚需在用户选择的省电策略下验收，不能将唤醒重连成功记作后台保活成功。
 - [x] 修复 ACP/CodeX 异步结果隔离、归属回滚、旧 Prompt、OpenCode history reader、Pi 模型确认及文件预览内存限额；全仓 check、689 个测试及生产 build 通过。修复尚未发布。
-- [ ] 消除剩余 5 项依赖公告（4 high / 1 moderate）：Expo/xcode 的 uuid、Metro 的 image-size（2 项）及 braces、Expo CLI 的 node-forge。image-size/uuid 需要兼容升级；node-forge/braces 本轮 audit 尚无修复版本。不得直接覆盖不兼容大版本或将构建链依赖视为无风险。
+- [x] 修复 Plugin/Server/Protocol 的 Zod 高危公告：生产直接依赖升级至 `zod@4.6.7`，所有远程数组输入增加明确数量上限，能力发现与工作区目录解析在手动遍历前先做上限校验；协议回归覆盖超限且子项非法的输入。发布包不再包含 `zod@3`。
+- [ ] 继续处理 `pnpm audit --prod --registry=https://registry.npmjs.org` 报告的构建链依赖公告（当前仍为 4 high / 1 moderate / 1 low）：Expo/Metro 的 zod、image-size（2 项）、node-forge、uuid，以及 deepmerge。它们不进入 Plugin 生产 bundle；image-size/uuid 需要兼容升级，node-forge/deepmerge 当前无可用修复。不得把构建链依赖视为无风险。
 - [ ] 在 Windows、Android APK/真机、独立 Remote Web 与加密跨设备环境回归本轮断线/后端替换修复；本机 check/test/Hermes 构建不替代目标平台验收。
 
 ## Harness 0.2.1-rc.1
@@ -144,7 +154,7 @@ transport 状态机；普通 UI、文案和辅助脚本不单独补测试。
 - [x] 用两台真实 Harness + 外部 Server 跑通同账号授权、选择 Remote、创建/继续会话
 - [x] 验证原生 mux/host stream、approval/question respond 与断线关闭行为
 - [x] 用手机 Web 与电脑 Web 同时连接一个真实 Host，验证并发操作、同设备重连和流隔离
-- [ ] 验证 allowlist 覆盖官方 UI 的必需方法；允许已认证 Remote peer 通过官方 seam 管理 Host 实时注册的 settings 命名空间与全局 credential 引用（credential 值只写），并保持 `settings.openDocument`、native path、目录写入、任意文件访问、attachment upload 和 download 禁止
+- [ ] 验证 allowlist 覆盖官方 UI 的必需方法；允许已认证 Remote peer 通过官方 seam 管理 Host 实时注册的 settings 命名空间与全局 credential 引用（credential 值只写），并保持 `settings.openDocument`、native path、任意文件访问及通用 attachment upload/download 禁止；官方 `workspace/create` 目录创建和独立 `workspace.upload.v1` 按协议限定范围
 - [x] 用两台真实 Harness 验证 dsh-file-viewer 文本、图片、PDF、大文件分块与断线回落
 - [ ] 在 macOS、Windows、Linux 验证 native picker 只读目录兜底、symlink、权限错误和大目录截断
 - [ ] 完善账号过期、`DEVICE_OWNERSHIP_REQUIRED` 和 legacy owner 的显式恢复体验
@@ -211,7 +221,6 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 
 ## P0：协议与安全
 
-2026-10-16 WSL 核对结果见[协议与 Relay 验证报告](protocol-validation-2026-10-16.md)。
 本地集成验证不替代真实跨设备验收。
 
 - [ ] 将 `packages/protocol` 与 `docs/protocol.md` 的 Control、Account Authorization、Connect、Relay、ApiProxy tunnel、Error 和 Limits schema 逐项对齐
@@ -240,6 +249,7 @@ Codex 属于同一个 Remote Plugin，但在 Plugin 内保持独立业务领域�
 - [ ] 完善 `connecting -> direct -> relay -> reconnecting -> offline` UI 状态机和网络切换恢复
 - [ ] 核对 direct 超时和 Relay fallback。验证切换不重复提交 Typert mutation。
 - [ ] 核对 Desktop 重连后的官方 stream 与 history baseline 恢复。补齐缺失路径。
+  - WSL 模拟已覆盖旧 stream 中断、新连接重订阅，以及从 Host 读取新的快照和历史。已修复关闭后清理 RPC 等待超时。真实 Desktop 验收仍待完成。
 - [ ] 验证休眠唤醒、Wi-Fi/蜂窝切换与高延迟 Relay。检查 Prompt 和审批不重放。
 
 ## P1：跨仓库 Server 联调（已完成）
@@ -309,7 +319,7 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 ## 不在本仓库实现
 
 - 完整多账号 Server、Remote Web、Admin runtime 及其数据库、队列和部署代码（`apps/server` 最小自部署版本除外）
-- 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的原生 terminal 和受限 loopback 预览除外
+- 绕过官方 Session 文件系统或 dsh-file-viewer provider 的任意文件访问、独立文件写入 RPC、远程桌面或通用 Harness tool RPC；用户明确授权的原生 terminal、受限 loopback 预览、`workspace.upload.v1` 及官方 `workspace/create` 目录创建除外，边界以协议为准
 - 绕过 ApiProxy allowlist 的 Cordis service 反射
 
 ## 第一版完成标准
@@ -338,6 +348,7 @@ Typert Remote contract，不得在 Plugin Host 恢复 `sessions.*`、`session.se
 - [ ] 验证 Windows/Linux PTY、shell 配置、resize 与 job control。单独记录 pipe fallback 限制。
 - [ ] 验证无窗口持有者与 follower 时的两小时 idle 回收。验证活跃终端保持运行。
 - [x] 白名单 IPv4 loopback HTTP/WebSocket 通道与独立本机预览 origin
+- [ ] 接入 Harness 浏览器地址解析前的异步导航扩展点，将远程模式下的 localhost/端口输入转为已授权的 Remote 预览 URL。当前仅有后端 preview.open，无前端入口；暂时隐藏远程模式下原生侧栏开始页的浏览器入口，避免误访问 Desktop 本机。此隐藏不禁用已有浏览器标签页、快捷键或聊天链接打开。
 - [x] Relay 背压、串行加密发送、有界 stream 消费队列
 - [ ] Windows/Linux 真机、跨机高延迟 Relay、大输出终端、多设备回归
 - [ ] 真实应用复杂 HMR、硬编码 localhost、Cookie/CSP 和浏览器兼容性回归

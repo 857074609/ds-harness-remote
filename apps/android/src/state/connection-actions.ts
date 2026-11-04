@@ -46,10 +46,12 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
+        hermesAvailable: false,
         workspaceCatalog: undefined,
         workspaces: sameHost ? state.workspaces : cached?.workspaces ?? [],
         sessions: sameHost ? state.sessions : cached?.sessions ?? [],
         archivedSessionIds: sameHost ? state.archivedSessionIds : [],
+        pinnedSessionIds: sameHost ? state.pinnedSessionIds : [],
         sessionModels: undefined,
         error: undefined,
       }))
@@ -79,6 +81,15 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           identity,
           frame => runtime.enqueueMuxFrame(generation, frame),
           {
+            onOpencodeArchived: nativeId => {
+              if (generation !== runtime.connectionGeneration) return
+              const sessionId = `opencode:${nativeId}`
+              set(state => ({
+                sessions: state.sessions.filter(item => item.sessionId !== sessionId),
+                workspaces: state.workspaces.map(workspace => ({ ...workspace, sessionIds: workspace.sessionIds.filter(id => id !== sessionId) })),
+              }))
+              if (get().workspaceCatalog?.backend === 'opencode') void get().refreshWorkspaces('opencode')
+            },
             onSecureHandshake: () => {
               if (generation !== runtime.connectionGeneration) return
               set(state => ({
@@ -103,6 +114,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
                   piAvailable: false,
                   opencodeAvailable: false,
                   claudeAvailable: false,
+                  hermesAvailable: false,
                   busyAction: undefined,
                 })
               }
@@ -127,6 +139,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: runtime.connection.hasPi(),
           opencodeAvailable: runtime.connection.hasOpencode(),
           claudeAvailable: runtime.connection.hasClaude(),
+        hermesAvailable: runtime.connection.hasHermes(),
           connectionStage: 'ready',
           connectionNetworkDetails: undefined,
           lastConnectedDeviceId: connectedDeviceId,
@@ -149,6 +162,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: false,
           opencodeAvailable: false,
           claudeAvailable: false,
+          hermesAvailable: false,
           error: message,
         })
         return false
@@ -219,20 +233,30 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
       }
       if (connection.phase !== 'connected') return
       const generation = runtime.connectionGeneration
-      const healthy = await runtime.connection.checkHealth()
-      const current = get()
-      if (current.selectedDevice?.deviceId !== selectedDevice.deviceId) return
-      // onClose may have invalidated the generation while the probe was in
-      // flight. Resume must still recover that newly confirmed offline state.
-      if (current.connection.phase === 'offline') {
-        if (current.connection.retryable === false) return
-        await get().reconnect()
-        return
+      // Both probes may race onClose, explicit disconnect or Host replacement.
+      const canContinueAfterProbe = async () => {
+        const current = get()
+        if (current.selectedDevice?.deviceId !== selectedDevice.deviceId) return false
+        // onClose can invalidate the generation while confirming a retryable
+        // offline carrier. Recover it before rejecting stale probe results.
+        if (current.connection.phase === 'offline') {
+          if (current.connection.retryable !== false) await get().reconnect()
+          return false
+        }
+        return generation === runtime.connectionGeneration && current.connection.phase === 'connected'
       }
-      if (generation !== runtime.connectionGeneration || current.connection.phase !== 'connected') return
+      const healthy = await runtime.connection.checkHealth().catch(() => false)
+      if (!await canContinueAfterProbe()) return
       if (!healthy) {
-        console.info('[dsh-remote] Resume health check failed; reconnecting')
-        await get().reconnect()
+        const retryHealthy = await runtime.connection.checkHealth().catch(() => false)
+        if (!await canContinueAfterProbe()) return
+        if (!retryHealthy) {
+          console.info('[dsh-remote] Resume health check failed; reconnecting')
+          await get().reconnect()
+        } else {
+          console.info('[dsh-remote] Resume health restored after retry')
+          await get().refreshConnectionNetworkDetails()
+        }
       }
     },
 
@@ -271,11 +295,16 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
         piAvailable: false,
         opencodeAvailable: false,
         claudeAvailable: false,
+        hermesAvailable: false,
         workspaceCatalog: undefined,
         workspaces: [],
         archivedSessionIds: [],
+        pinnedSessionIds: [],
         sessions: [],
         selectedSession: undefined,
+        scheduleTasks: [],
+        scheduleLoading: false,
+        scheduleError: undefined,
         currentWorkSessionIds: [],
         sessionLifecycles: {},
         sessionProjectionSeqs: {},
@@ -301,6 +330,7 @@ export function createConnectionActions({ get, set, runtime }: SessionAccess): P
           piAvailable: false,
           opencodeAvailable: false,
           claudeAvailable: false,
+          hermesAvailable: false,
         })
       }
     },

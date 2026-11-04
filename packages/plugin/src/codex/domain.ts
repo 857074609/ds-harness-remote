@@ -88,6 +88,21 @@ export class CodexRemoteDomain {
   private restartAttempt = 0
   private available = false
   private closed = false
+  /**
+   * Workspace authority is intentionally not cached after a request finishes:
+   * project roots can change outside this process and must stay fail-closed.
+   * Concurrent calls during one catalog/history refresh do share this promise,
+   * though, so they do not each page the same project list independently.
+   */
+  private workspaceAuthorityPromise?: Promise<CodexWorkspaceAuthority>
+  /**
+   * Authorization checks are intentionally not retained after they settle:
+   * workspace roots can change outside this process and every new request must
+   * still revalidate them.  Calls that overlap one another may share the same
+   * bounded thread/read, though, which avoids duplicate first-open checks when
+   * a session history and its first prompt arrive together.
+   */
+  private readonly knownThreadPromises = new Map<string, Promise<{ thread: Record<string, unknown>; cwd?: string }>>()
   private state: 'disabled' | 'starting' | 'ready' | 'restarting' | 'unavailable' = 'disabled'
   private unavailableCode?: string
 
@@ -409,6 +424,7 @@ export class CodexRemoteDomain {
     await Promise.all([...this.peers.values()].map(peer => peer.failStreams('failed')))
     this.turnOwners.clear()
     this.permissionPresets.clear()
+    this.knownThreadPromises.clear()
     this.approvals.clear()
     if (this.approvalExpiryTimer !== undefined) clearTimeout(this.approvalExpiryTimer)
     this.approvalExpiryTimer = undefined
@@ -562,6 +578,20 @@ export class CodexRemoteDomain {
     }
     if (message.method === 'thread/closed' && threadId !== undefined) this.permissionPresets.delete(threadId)
     if (message.method === 'turn/completed' && threadId !== undefined) this.turnOwners.delete(threadId)
+    if (message.method === 'thread/status/changed' && threadId !== undefined
+      && isTerminalThreadStatus(message.params)) {
+      // Some App Server failure/interruption paths publish only the terminal
+      // Thread status and omit turn/completed. Release the Host-side writer
+      // lease as soon as the authoritative status is no longer active, or a
+      // later Prompt can be rejected as owned by a dead connection.
+      this.turnOwners.delete(threadId)
+      for (const [handle, approval] of this.approvals) {
+        if (approval.threadId !== threadId) continue
+        this.approvals.delete(handle)
+        void this.appServer?.respond(approval.upstreamId, { decision: 'decline' }).catch(() => undefined)
+      }
+      this.scheduleApprovalExpiry()
+    }
     if (message.method === 'turn/started' && threadId !== undefined) {
       const owner = this.turnOwners.get(threadId)
       const turnId = extractTurnId(message.params)
@@ -683,7 +713,18 @@ export class CodexRemoteDomain {
     }
   }
 
-  private async readKnownThread(threadId: string): Promise<{ thread: Record<string, unknown>; cwd?: string }> {
+  private readKnownThread(threadId: string): Promise<{ thread: Record<string, unknown>; cwd?: string }> {
+    const pending = this.knownThreadPromises.get(threadId)
+    if (pending !== undefined) return pending
+    const current = this.readKnownThreadUncached(threadId)
+    this.knownThreadPromises.set(threadId, current)
+    void current.finally(() => {
+      if (this.knownThreadPromises.get(threadId) === current) this.knownThreadPromises.delete(threadId)
+    }).catch(() => undefined)
+    return current
+  }
+
+  private async readKnownThreadUncached(threadId: string): Promise<{ thread: Record<string, unknown>; cwd?: string }> {
     const authority = await this.readWorkspaceAuthority()
     let result: unknown
     try {
@@ -774,7 +815,10 @@ export class CodexRemoteDomain {
         throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid Turn page.')
       }
       const pageResult = result
-      for (const rawTurn of result.data) {
+      // Turn item pages are independent once the turn page is available. Fetch
+      // them together to avoid making a long history wait for every prior turn;
+      // Promise.all preserves the upstream turn order in the resulting array.
+      const pageTurns = await Promise.all(result.data.map(async rawTurn => {
         if (!isRecord(rawTurn) || typeof rawTurn.id !== 'string' || rawTurn.id.length === 0
           || rawTurn.itemsView === 'full' && !Array.isArray(rawTurn.items)) {
           throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history Turn.')
@@ -785,8 +829,9 @@ export class CodexRemoteDomain {
         if (items.some(item => !isRecord(item))) {
           throw new RpcError('CODEX_INVALID_RESPONSE', 'Codex App Server returned an invalid history Item.')
         }
-        turns.push({ ...rawTurn, items })
-      }
+        return { ...rawTurn, items }
+      }))
+      turns.push(...pageTurns)
       cursor = historyNextCursor(pageResult.nextCursor)
       if (cursor === undefined) return turns
     }
@@ -946,7 +991,21 @@ export class CodexRemoteDomain {
     }
   }
 
-  private async readWorkspaceAuthority(
+  private readWorkspaceAuthority(
+    listedThreads?: Record<string, unknown>[],
+  ): Promise<CodexWorkspaceAuthority> {
+    const pending = this.workspaceAuthorityPromise
+    if (pending !== undefined) return pending
+    const current = this.readWorkspaceAuthorityUncached(listedThreads)
+    this.workspaceAuthorityPromise = current
+    current.then(
+      () => { if (this.workspaceAuthorityPromise === current) this.workspaceAuthorityPromise = undefined },
+      () => { if (this.workspaceAuthorityPromise === current) this.workspaceAuthorityPromise = undefined },
+    )
+    return current
+  }
+
+  private async readWorkspaceAuthorityUncached(
     listedThreads?: Record<string, unknown>[],
   ): Promise<CodexWorkspaceAuthority> {
     const projectIds = new Set<string>()
@@ -1370,6 +1429,11 @@ function extractThreadId(params: unknown): string | undefined {
   if (isRecord(params.thread) && typeof params.thread.id === 'string') return params.thread.id
   if (isRecord(params.turn) && typeof params.turn.threadId === 'string') return params.turn.threadId
   return undefined
+}
+
+function isTerminalThreadStatus(params: unknown): boolean {
+  if (!isRecord(params) || !isRecord(params.status) || typeof params.status.type !== 'string') return false
+  return params.status.type !== 'active'
 }
 
 function optionalInteger(value: unknown): number | undefined {

@@ -25,7 +25,7 @@ const trustedPeerSchema = z.object({
 
 const trustedPeersSchema = z.object({
   schemaVersion: z.literal(1),
-  peers: z.array(trustedPeerSchema),
+  peers: z.array(trustedPeerSchema).max(256),
 }).strict()
 
 export interface HostIdentity {

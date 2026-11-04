@@ -29,6 +29,26 @@ async function put(host: WorkspaceUploadHost, p = request(), bytes = Buffer.from
   return host.call('workspace.upload.commit', scope(p))
 }
 
+it('allows 1 GiB only on live direct paths and discards a large upload after relay fallback', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-upload-path-'))
+  directories.push(root)
+  for (const initial of ['LAN', 'P2P', 'TURN', 'Relay', undefined]) {
+    let mode = initial
+    const host = new WorkspaceUploadHost(async () => root, undefined, () => mode)
+    hosts.push(host)
+    const params = request('large.bin', 1024 * 1024 * 1024)
+    if (initial === 'LAN' || initial === 'P2P') {
+      await host.call('workspace.upload.open', params)
+      mode = 'Relay'
+      await expect(host.call('workspace.upload.chunk', { sessionId: params.sessionId, uploadId: params.uploadId, offset: 0, data: 'YQ==' })).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+    } else {
+      await expect(host.call('workspace.upload.open', params)).rejects.toMatchObject({ code: 'UPLOAD_LIMIT' })
+    }
+    expect(await readdir(root)).toEqual([])
+    await expect(host.call('workspace.upload.open', request('too-large', 1024 * 1024 * 1024 + 1))).rejects.toThrow()
+  }
+})
+
 describe('workspace-root upload authority and lifecycle', () => {
   it('publishes exact binary bytes without overwriting files or following target symlinks, and commits idempotently', async () => {
     const { root, host } = await setup()

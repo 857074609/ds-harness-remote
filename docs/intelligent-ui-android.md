@@ -22,7 +22,7 @@ For a future npm release that includes `renderer/renderer.js`, alternatively ins
 
 The WebView top page is locally authored and CSP locked; never interpolate Host HTML into the top page. Arbitrary Widget JavaScript remains inside the upstream renderer's opaque-origin sandbox. Android validates a per-card nonce, scopes the action to the currently connected Host and Session, enforces a message length/rate limit, and **requires native confirmation** for every model-directed action, including buttons and forms. An unconfirmed send is reported as such; no automatic retry occurs. The only exposed action is the existing store `sendMessage` / Session Prompt path. A native navigation denylist prevents generated UI links from opening uncontrolled in the WebView.
 
-Host tool event metadata (especially `meta.ok` and `meta.ui` for patches) must survive `session.history` and mux unmodified. The submitted screenshots show a real Host connection, Android WebView rendering, and local chart interactions (see [docs/screenshots/issue-124/](screenshots/issue-124/README.md)). They do not establish the native-confirmation → Session Prompt → successive Patch flow, reconnect behavior, or rejection of malicious WebView messages; those device-level checks remain pending.
+Host tool event metadata (especially `meta.ok` and `meta.ui` for patches) must survive `session.history` and mux unmodified. The verification record for PR #126 covers a real Host connection, Android WebView rendering, and local chart interactions; screenshots are no longer stored in this repository. This does not establish the native-confirmation → Session Prompt → successive Patch flow, reconnect behavior, or rejection of malicious WebView messages; those device-level checks remain pending.
 
 A successful patch updates the original UI card in place (same uiId/React/WebView instance while mounted); the later Turn shows a version pointer rather than remounting the controls. Android virtualization can still unmount an off-screen card, so purely local input preferences are not a durable cross-device contract.
 
@@ -31,8 +31,8 @@ A successful patch updates the original UI card in place (same uiId/React/WebVie
 为避免 CI/Release 依赖可变开发分支，构建时检出经审核的上游提交，并在打包前分别校验 Git commit 和 Renderer blob SHA：
 
 - 上游仓库：`dreamfarer-space/deepseek-harness-intelligent-ui`
-- 审核提交：`bfb6b35f7ee94291629796d2b5eb577d20d8fa29`（已合并的 Intelligent UI PR #24 合并提交）
-- `renderer/renderer.js` Git blob：`b8cb5e17bf7e77f3c9ed374edc0f994f358beeac`
+- 审核提交：`f3735efffd823f8c34817f4e8554743ac3276225`（已合并的 Intelligent UI PR #82 合并提交，支持多语言本地化、HTML 转义清洗、新版 Table 数据网格与详细错误回显）
+- `renderer/renderer.js` Git blob：`ebac4a4c2199383458d4e1fa2121be0e6043c5c0`
 
 更换 Renderer 时需一起更新两个工作流中的固定提交和校验值，在发布前完成新的构建回归；此提交已进入上游主分支。未经审核不可改回浮动 branch/tag。
 

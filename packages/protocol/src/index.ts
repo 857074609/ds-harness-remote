@@ -1,6 +1,10 @@
 export * from './loopback.js'
+import { parseWireJson } from './wire-json.js'
 import { z } from 'zod'
 
+export const WEBRTC_RESUME_CAPABILITY = 'transport.webrtc.resume.v1'
+export const RELAY_RESUME_CAPABILITY = 'transport.relay.resume.v1'
+export const WEBRTC_LEASE_MS = 300_000
 export const PROTOCOL_VERSION = 1
 export const MAX_CONTROL_FRAME_BYTES = 64 * 1024
 export const MAX_RELAY_FRAME_BYTES = 1024 * 1024
@@ -24,6 +28,9 @@ export const MAX_DEVICE_NAME_LENGTH = 128
 export const MAX_DEVICE_PLATFORM_LENGTH = 64
 export const MAX_DEVICE_VERSION_LENGTH = 64
 export const MAX_AUTH_TOKEN_LENGTH = 8 * 1024
+/** Maximum entries accepted in capability and workspace type advertisements. */
+export const MAX_REMOTE_CAPABILITY_ENTRIES = 128
+export const MAX_REMOTE_WORKSPACE_TYPE_ENTRIES = 32
 
 // ────────────────────────────────────────────────────────────────────────────
 // §24 Default limits
@@ -105,6 +112,9 @@ export const controlFrameTypes = [
   'signal.answer',
   'signal.ice',
   'transport.selected',
+  'connection.lease.request',
+  'connection.lease.ack',
+  'connection.lease.close',
   'ping',
   'pong',
   'error',
@@ -301,12 +311,22 @@ export interface ControlFrame<TPayload = unknown> {
   payload: TPayload
 }
 
+/** Envelope used by the independent Relay data WebSocket. */
+export interface RelayDataFrame<TPayload extends Record<string, unknown> = Record<string, unknown>> {
+  v: typeof PROTOCOL_VERSION
+  id: string
+  type: string
+  timestamp: number
+  payload: TPayload
+}
+
 export interface ControlFrameByteLimits {
   maxControlFrameBytes?: number
   maxRelayFrameBytes?: number
 }
 
 export interface HelloPayload {
+  recoveryTickets?: string[]
   role: 'host' | 'client'
   deviceId: string
   /**
@@ -358,15 +378,29 @@ export interface ConnectRequestPayload {
 }
 
 export interface ConnectIncomingPayload {
+  relayRecoveryTicket?: string
+  recoveryTicket?: string
   connectionId: string
   clientDeviceId: string
   clientIdentityKey: string
   authorization: 'account'
   preferredTransports: Array<'lan' | 'p2p' | 'turn' | 'relay'>
+  /** Optional independent Relay data-plane assignment. */
+  relayEndpoint?: string
+  relayTicket?: string
+  relayNodeId?: string
+  relayEpoch?: number
 }
 
 export interface ConnectAcceptedPayload {
+  relayRecoveryTicket?: string
+  recoveryTicket?: string
   connectionId: string
+  /** Optional independent Relay data-plane assignment. */
+  relayEndpoint?: string
+  relayTicket?: string
+  relayNodeId?: string
+  relayEpoch?: number
 }
 
 export interface ConnectRejectedPayload {
@@ -511,7 +545,7 @@ export interface RpcRequestPayload<TParams = unknown> {
   params: TParams
 }
 
-export type AcpBackend = 'codex' | 'cursor' | 'antigravity' | 'pi' | 'opencode' | (string & {})
+export type AcpBackend = 'cursor' | 'claude' | 'opencode' | 'pi' | 'hermes' | 'antigravity' | (string & {})
 export interface AcpInitializeParams { protocolVersion: 1; backend?: AcpBackend }
 export interface AcpInitializeResult { protocolVersion: 1; capability: typeof ACP_CAPABILITY; backend: AcpBackend; capabilities: string[]; availableBackends?: AcpBackend[] }
 export interface AcpSessionParams { sessionId?: string; cwd?: string; mode?: string; backend?: AcpBackend }
@@ -857,6 +891,14 @@ const deviceNameSchema = boundedUtf8Schema(1, MAX_DEVICE_NAME_LENGTH)
 const devicePlatformSchema = z.string().min(1).max(MAX_DEVICE_PLATFORM_LENGTH)
   .regex(/^[a-z0-9][a-z0-9._-]*$/u)
 const identityKeySchema = z.string().regex(/^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u)
+const canonicalBase64UrlSchema = z.string().min(1).regex(/^[A-Za-z0-9_-]+$/u).refine(value => {
+  const remainder = value.length % 4
+  if (remainder === 1) return false
+  if (remainder === 0) return true
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  const last = alphabet.indexOf(value.at(-1)!)
+  return remainder === 2 ? (last & 15) === 0 : (last & 3) === 0
+}, 'Value must use canonical Base64URL without padding.')
 const deviceVersionSchema = boundedUtf8Schema(1, MAX_DEVICE_VERSION_LENGTH)
 const authTokenSchema = boundedUtf8Schema(16, MAX_AUTH_TOKEN_LENGTH)
 const expiresAtSchema = z.number().int().positive().safe()
@@ -955,21 +997,44 @@ export const controlFrameSchema = z.object({
   payload: z.unknown(),
 }).strict() as unknown as z.ZodType<ControlFrame>
 
+export const relayDataFrameSchema: z.ZodType<RelayDataFrame> = z.object({
+  v: z.literal(PROTOCOL_VERSION),
+  id: z.string().min(1),
+  type: z.string().min(1),
+  timestamp: z.number().int().positive().safe(),
+  payload: z.record(z.string(), z.unknown()),
+}).strict()
+
 // ────────────────────────────────────────────────────────────────────────────
 // Control frame payload schemas (protocol.md §10-§23)
 // ────────────────────────────────────────────────────────────────────────────
 
 const transportEnum = z.enum(['lan', 'p2p', 'turn', 'relay'])
 const selectedTransportEnum = z.enum(selectedTransports)
+const MAX_PROTOCOL_LIST_ENTRIES = 16
+const MAX_CAPABILITY_ENTRIES = MAX_REMOTE_CAPABILITY_ENTRIES
+const MAX_WORKSPACE_TYPE_ENTRIES = MAX_REMOTE_WORKSPACE_TYPE_ENTRIES
+const MAX_PREFERRED_TRANSPORT_ENTRIES = selectedTransports.length
 
 export const helloPayloadSchema = z.object({
+  recoveryTickets: z.array(z.string().min(1).max(4096)).max(64).optional(),
   role: z.enum(['host', 'client']),
   deviceId: z.string().min(1),
+<<<<<<< HEAD
   accessToken: z.string().min(1).optional(),
   account: z.string().min(1).max(254).optional(),
   password: z.string().min(1).max(4096).optional(),
   protocols: z.array(z.number().int().nonnegative().safe()).min(1).refine(uniqueNumbers),
   capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
+=======
+  accessToken: z.string().min(1),
+  protocols: z.array(z.unknown()).min(1).max(MAX_PROTOCOL_LIST_ENTRIES).pipe(
+    z.array(z.number().int().nonnegative().safe()).refine(uniqueNumbers),
+  ),
+  capabilities: z.array(z.unknown()).max(MAX_CAPABILITY_ENTRIES).pipe(
+    z.array(z.string().min(1)).refine(uniqueStrings),
+  ),
+>>>>>>> upstream-liguobao/main
   clientVersion: z.string().optional(),
   harnessVersion: z.string().optional(),
 })
@@ -978,13 +1043,19 @@ export const helloAckPayloadSchema = z.object({
   protocol: z.literal(PROTOCOL_VERSION),
   serverVersion: z.string().min(1),
   connectionSessionId: z.string().min(1),
+<<<<<<< HEAD
   hostDeviceId: z.string().min(1).optional(),
   heartbeatIntervalMs: z.number().int().positive(),
+=======
+  heartbeatIntervalMs: z.number().int().positive().safe(),
+>>>>>>> upstream-liguobao/main
   maxControlFrameBytes: z.number().int().positive().max(MAX_CONTROL_FRAME_BYTES),
   maxRelayFrameBytes: z.number().int().positive().max(MAX_RELAY_FRAME_BYTES),
-  capabilities: z.array(z.string().min(1)).refine(uniqueStrings).optional(),
+  capabilities: z.array(z.unknown()).max(MAX_CAPABILITY_ENTRIES).pipe(
+    z.array(z.string().min(1)).refine(uniqueStrings),
+  ).optional(),
   webrtcEnabled: z.boolean().optional(),
-  webrtcFallbackTimeoutMs: z.number().int().positive().optional(),
+  webrtcFallbackTimeoutMs: z.number().int().positive().safe().optional(),
 })
 
 export const remoteWorkspaceTypeDescriptionSchema = z.object({
@@ -995,12 +1066,17 @@ export const remoteWorkspaceTypeDescriptionSchema = z.object({
 })
 
 export const harnessTransportDescriptionSchema = z.object({
-  capabilities: z.array(z.string().min(1)).refine(uniqueStrings),
-  workspaceTypes: z.array(remoteWorkspaceTypeDescriptionSchema).optional(),
+  capabilities: z.array(z.unknown()).max(MAX_CAPABILITY_ENTRIES).pipe(
+    z.array(z.string().min(1)).refine(uniqueStrings),
+  ),
+  workspaceTypes: z.array(z.unknown()).max(MAX_WORKSPACE_TYPE_ENTRIES).pipe(
+    z.array(remoteWorkspaceTypeDescriptionSchema),
+  ).optional(),
 })
 
 export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDescription[] {
   if (!Array.isArray(value)) return []
+  if (value.length > MAX_WORKSPACE_TYPE_ENTRIES) return []
   const types: RemoteWorkspaceTypeDescription[] = []
   for (const item of value) {
     const result = remoteWorkspaceTypeDescriptionSchema.safeParse(item)
@@ -1013,19 +1089,35 @@ export function parseRemoteWorkspaceTypes(value: unknown): RemoteWorkspaceTypeDe
 
 export const connectRequestPayloadSchema = z.object({
   hostDeviceId: z.string().min(1),
-  preferredTransports: z.array(transportEnum).min(1),
+  preferredTransports: z.array(z.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(
+    z.array(transportEnum),
+  ),
 })
 
 export const connectIncomingPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
   clientDeviceId: z.string().min(1),
-  clientIdentityKey: z.string().min(1),
+  clientIdentityKey: identityKeySchema,
   authorization: z.literal('account'),
-  preferredTransports: z.array(transportEnum).min(1),
+  preferredTransports: z.array(z.unknown()).min(1).max(MAX_PREFERRED_TRANSPORT_ENTRIES).pipe(
+    z.array(transportEnum),
+  ),
+  relayEndpoint: z.string().url().optional(),
+  relayTicket: z.string().min(1).optional(),
+  relayNodeId: z.string().min(1).optional(),
+  relayEpoch: z.number().int().nonnegative().optional(),
 })
 
 export const connectAcceptedPayloadSchema = z.object({
+  relayRecoveryTicket: z.string().min(1).max(4096).optional(),
+  recoveryTicket: z.string().min(1).max(4096).optional(),
   connectionId: z.string().min(1),
+  relayEndpoint: z.string().url().optional(),
+  relayTicket: z.string().min(1).optional(),
+  relayNodeId: z.string().min(1).optional(),
+  relayEpoch: z.number().int().nonnegative().optional(),
 })
 
 export const connectRejectedPayloadSchema = z.object({
@@ -1037,15 +1129,15 @@ export const connectRejectedPayloadSchema = z.object({
 export const secureHandshakePayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
-  step: z.number().int().positive(),
-  data: z.string().min(1),
+  step: z.union([z.literal(1), z.literal(2)]),
+  data: canonicalBase64UrlSchema,
 })
 
 export const relayPayloadSchema = z.object({
   connectionId: z.string().min(1),
   targetDeviceId: z.string().min(1),
   counter: z.number().int().nonnegative().safe(),
-  ciphertext: z.string().min(1),
+  ciphertext: canonicalBase64UrlSchema,
 })
 
 export const signalPayloadSchema = z.object({
@@ -1082,6 +1174,16 @@ export const controlErrorPayloadSchema = z.object({
   connectionId: z.string().min(1).optional(),
 })
 
+export const connectionLeaseRequestSchema = z.object({
+  connectionId: z.string().min(1).max(128),
+  requestId: z.string().min(1).max(128),
+  ticket: z.string().min(1).max(4096),
+})
+export const connectionLeaseAckSchema = connectionLeaseRequestSchema.extend({
+  leaseMs: z.literal(WEBRTC_LEASE_MS),
+})
+export type ConnectionLeaseAck = z.infer<typeof connectionLeaseAckSchema>
+
 const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'hello': helloPayloadSchema,
   'hello.ack': helloAckPayloadSchema,
@@ -1095,6 +1197,9 @@ const controlFramePayloadSchemas: Record<ControlFrameType, z.ZodType> = {
   'signal.answer': signalPayloadSchema,
   'signal.ice': signalIcePayloadSchema,
   'transport.selected': transportSelectedPayloadSchema,
+  'connection.lease.request': connectionLeaseRequestSchema,
+  'connection.lease.ack': connectionLeaseAckSchema,
+  'connection.lease.close': z.object({ connectionId: z.string().min(1).max(128) }),
   'ping': pingPongPayloadSchema,
   'pong': pingPongPayloadSchema,
   'error': controlErrorPayloadSchema,
@@ -1137,6 +1242,20 @@ export function createControlFrame<TPayload>(
   payload: TPayload,
   id = cryptoRandomId(),
 ): ControlFrame<TPayload> {
+  return {
+    v: PROTOCOL_VERSION,
+    id,
+    type,
+    timestamp: Date.now(),
+    payload,
+  }
+}
+
+export function createRelayDataFrame<TPayload extends Record<string, unknown>>(
+  type: string,
+  payload: TPayload,
+  id = cryptoRandomId(),
+): RelayDataFrame<TPayload> {
   return {
     v: PROTOCOL_VERSION,
     id,
@@ -1202,10 +1321,32 @@ export function encodeControlFrame(frame: ControlFrame, limits: ControlFrameByte
 export function decodeControlFrame(data: Uint8Array | string, limits: ControlFrameByteLimits = {}): ControlFrame {
   const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
   if (encoded.byteLength > MAX_RELAY_FRAME_BYTES) throw new Error('Control frame exceeds the Relay frame limit.')
-  const text = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: true }).decode(data)
-  const frame = parseControlFrame(JSON.parse(text))
+  const frame = parseControlFrame(parseWireJson(data))
   assertControlFrameSize(encoded.byteLength, frame.type, limits)
   return frame
+}
+
+export function encodeRelayDataFrame(
+  frame: RelayDataFrame,
+  limits: ControlFrameByteLimits = {},
+): string {
+  const parsed = relayDataFrameSchema.parse(frame)
+  const encoded = JSON.stringify(parsed)
+  assertControlFrameSize(new TextEncoder().encode(encoded).byteLength, 'relay', limits)
+  return encoded
+}
+
+export function decodeRelayDataFrame(
+  data: Uint8Array | string,
+  limits: ControlFrameByteLimits = {},
+): RelayDataFrame {
+  const encoded = typeof data === 'string' ? new TextEncoder().encode(data) : data
+  assertControlFrameSize(encoded.byteLength, 'relay', limits)
+  try {
+    return relayDataFrameSchema.parse(parseWireJson(data))
+  } catch {
+    throw new Error('Invalid Relay data frame.')
+  }
 }
 
 export function encodeMessage(message: RemoteMessage): Uint8Array {
@@ -1213,8 +1354,7 @@ export function encodeMessage(message: RemoteMessage): Uint8Array {
 }
 
 export function decodeMessage(data: Uint8Array | string): RemoteMessage {
-  const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
-  return parseRemoteMessage(JSON.parse(text))
+  return parseRemoteMessage(parseWireJson(data))
 }
 
 interface FragmentAssembly {

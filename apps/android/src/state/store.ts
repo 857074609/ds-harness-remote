@@ -7,6 +7,7 @@ import { createAccountActions } from './account-actions'
 import { createConnectionActions } from './connection-actions'
 import { createPreferenceActions } from './preference-actions'
 import { createPromptActions } from './prompt-actions'
+import { createScheduleActions } from './schedule-actions'
 import { createSessionActions } from './session-actions'
 import { createSessionEventActions } from './session-event-actions'
 import { SessionRuntime } from './session-runtime'
@@ -23,6 +24,7 @@ const runtime: SessionRuntime = new SessionRuntime({
 export const requireProxy = () => runtime.connection.requireProxy()
 export const requireSessionTools = (sessionId?: string) => runtime.connection.requireSessionTools(sessionId)
 export const requireBotClient = () => runtime.connection.requireBotClient()
+export const requireConnectionRpc = () => (method: string, params: unknown, signal?: AbortSignal) => runtime.connection.rpc(method, params, signal)
 
 export const stopConnectionRecovery = () => runtime.connection.stopRecovery().catch(() => undefined)
 
@@ -33,6 +35,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   ...createSessionEventActions({ set, get, runtime }),
   ...createAccountActions({ set, get }),
   ...createPreferenceActions({ set, get }),
+  ...createScheduleActions({
+    set,
+    get,
+    runtime,
+    getConnectionGeneration: () => runtime.connectionGeneration,
+  }),
   ...createWorkspaceActions({
     set, get, connection: runtime.connection,
     getConnectionGeneration: () => runtime.connectionGeneration,
@@ -48,11 +56,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   piAvailable: false,
   opencodeAvailable: false,
   claudeAvailable: false,
+  hermesAvailable: false,
   workspaceCatalog: undefined,
   workspaces: [],
   favoriteWorkspaces: [],
   recentWorkspaces: [],
   archivedSessionIds: [],
+  pinnedSessionIds: [],
   sessions: [],
   currentWorkSessionIds: [],
   messages: {},
@@ -70,6 +80,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPreviewImageUri(uri?: string) {
     set({ previewImageUri: uri })
   },
+  scheduleTasks: [],
+  scheduleLoading: false,
+  scheduleError: undefined,
   transportPreference: 'auto',
   languagePreference: 'system',
   language: getActiveLanguage(),
@@ -113,7 +126,7 @@ export function sessionChatImageLoader(session: RemoteSession) {
       return runtime.connection.readSessionImageAttachment(sessionId, attachmentId, signal)
     },
     workspace: (path, signal) => {
-      if (session.backend === 'codex' || session.backend === 'claude') throw new Error('Image preview unavailable')
+      if (session.backend === 'codex' || session.backend === 'claude' || session.backend === 'hermes') throw new Error('Image preview unavailable')
       return loadWorkspacePreview(runtime.connection.requireSessionTools(session.sessionId), session.sessionId, path, 'image', signal)
     },
   })

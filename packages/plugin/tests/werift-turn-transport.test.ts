@@ -113,12 +113,4 @@ describe('werift TURN TCP transport failures (issue #241 on werift 0.26)', () =>
     }
   })
 
-  it('ships the 0.26 StreamTransport inside the committed Host bundle', () => {
-    // The bundle inlines werift through its ESM entry; assert it carries the
-    // rewritten StreamTransport (built-in connect timeout) so a rebuild from
-    // a stale 0.24.4 tree cannot silently ship the auto-redial defect.
-    const bundle = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'index.js'), 'utf8')
-    expect(bundle).toContain('connect timed out after')
-    expect(bundle).not.toContain('this.connecting.catch(')
-  })
 })

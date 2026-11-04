@@ -239,6 +239,44 @@ describe('signal.ice payload validation', () => {
 
 })
 
+describe('secure.handshake payload validation', () => {
+  const base = { connectionId: 'conn-1', targetDeviceId: 'host-1', data: 'AQIDBA' }
+
+  it('accepts every flight of the Noise XXpsk3 handshake', async () => {
+    await runScenarios([
+      {
+        name: 'accepts the initiator first flight (step 1)',
+        run: () => {
+          expect(parseControlFrame(makeFrame('secure.handshake', { ...base, step: 1 }))).toBeDefined()
+        },
+      },
+      {
+        name: 'accepts the responder flight (step 2)',
+        run: () => {
+          expect(parseControlFrame(makeFrame('secure.handshake', { ...base, step: 2 }))).toBeDefined()
+        },
+      },
+      {
+        // Noise IK finishes in two flights, but the serverless direct-connect
+        // path negotiates XXpsk3, whose initiator is only complete after
+        // writing message 3. Rejecting step 3 broke every direct connection.
+        name: 'accepts the initiator third flight (step 3)',
+        run: () => {
+          expect(parseControlFrame(makeFrame('secure.handshake', { ...base, step: 3 }))).toBeDefined()
+        },
+      },
+      {
+        name: 'rejects steps outside the handshake',
+        run: () => {
+          for (const step of [0, 4]) {
+            expect(() => parseControlFrame(makeFrame('secure.handshake', { ...base, step }))).toThrow()
+          }
+        },
+      },
+    ])
+  }, 15000)
+})
+
 // ────────────────────────────────────────────────────────────────────────────
 // Payload schema validation - NEGATIVE tests
 // ────────────────────────────────────────────────────────────────────────────

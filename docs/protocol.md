@@ -575,7 +575,14 @@ Noise handshake bytes 通过 Control frame 转发：
 ```
 
 Server 只校验 connection ownership、step 上限和 frame size，不解析 Noise payload。
-`step` 只允许 `1` 或 `2`。`data` 必须是规范的无 padding Base64URL。
+`step` 只允许 `1`、`2` 或 `3`。两条握手模式的差异：
+
+- **Noise IK**（中继 / WebRTC 路径）：两条消息即可完成，`step` 只出现 `1` 和 `2`。
+- **Noise XXpsk3**（直连路径，见 §12.4）：initiator 在收到 responder 的 `step 2` 后
+  还必须发送 `step 3` 才能完成会话，因此 Host 必须接受第三条消息。
+
+把上限收紧到 `2` 会让直连握手在 Host 侧以 `invalid_union` @ `step` 失败。
+`data` 必须是规范的无 padding Base64URL。
 
 ### 12.3 Transport frames
 

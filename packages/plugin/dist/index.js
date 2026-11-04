@@ -33538,7 +33538,11 @@ var connectRejectedPayloadSchema = external_exports.object({
 var secureHandshakePayloadSchema = external_exports.object({
   connectionId: external_exports.string().min(1),
   targetDeviceId: external_exports.string().min(1),
-  step: external_exports.union([external_exports.literal(1), external_exports.literal(2)]),
+  // Noise IK completes in two flights, but the direct-connect path uses
+  // XXpsk3, where the initiator must send a third handshake message before
+  // its session becomes complete. Upstream's `1 | 2` union rejected that
+  // third flight on the Host and surfaced as an `invalid_union` at `step`.
+  step: external_exports.union([external_exports.literal(1), external_exports.literal(2), external_exports.literal(3)]),
   data: canonicalBase64UrlSchema
 });
 var relayPayloadSchema = external_exports.object({

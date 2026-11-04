@@ -16,7 +16,9 @@
           "data": "AQIDBA"
         }
       },
-      "expect": { "accepted": true }
+      "expect": {
+        "accepted": true
+      }
     },
     {
       "name": "accept-second-handshake-step",
@@ -33,10 +35,12 @@
           "data": "AQIDBA"
         }
       },
-      "expect": { "accepted": true }
+      "expect": {
+        "accepted": true
+      }
     },
     {
-      "name": "reject-third-handshake-step",
+      "name": "accept-third-handshake-step",
       "operation": "parseControlFrame",
       "input": {
         "v": 1,
@@ -50,7 +54,9 @@
           "data": "AQIDBA"
         }
       },
-      "expect": { "accepted": false }
+      "expect": {
+        "accepted": true
+      }
     },
     {
       "name": "reject-handshake-data-with-nonzero-unused-bits",
@@ -67,7 +73,28 @@
           "data": "AQIDBB"
         }
       },
-      "expect": { "accepted": false }
+      "expect": {
+        "accepted": false
+      }
+    },
+    {
+      "name": "reject-out-of-range-handshake-step",
+      "operation": "parseControlFrame",
+      "input": {
+        "v": 1,
+        "id": "0198abc4-0005-7abc-8123-123456789abc",
+        "type": "secure.handshake",
+        "timestamp": 1786000000000,
+        "payload": {
+          "connectionId": "0198abc4-1001-7abc-8123-123456789abc",
+          "targetDeviceId": "0198abc4-2001-7abc-8123-123456789abc",
+          "step": 4,
+          "data": "AQIDBA"
+        }
+      },
+      "expect": {
+        "accepted": false
+      }
     }
   ]
 }
